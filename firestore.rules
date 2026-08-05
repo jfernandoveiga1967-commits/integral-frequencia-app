@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    match /students/{studentId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'turma', 'activities'])
+        && isNonEmptyString(request.resource.data.name, 128)
+        && isNonEmptyString(request.resource.data.turma, 64);
+      allow delete: if true;
+    }
+
+    match /attendanceRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'studentId', 'date', 'weekNumber', 'year', 'activity', 'turma', 'status', 'createdAt'])
+        && isNonEmptyString(request.resource.data.studentId, 128)
+        && isNonEmptyString(request.resource.data.date, 10);
+      allow delete: if true;
+    }
+
+    match /turmas/{turmaId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'name'])
+        && isNonEmptyString(request.resource.data.name, 64);
+      allow delete: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

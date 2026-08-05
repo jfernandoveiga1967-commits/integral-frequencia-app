@@ -8,12 +8,28 @@ import { AttendanceSheet } from './components/AttendanceSheet';
 import { StudentManager } from './components/StudentManager';
 import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
+import {
+  subscribeStudents,
+  subscribeRecords,
+  subscribeTurmas,
+  saveStudentToFirestore,
+  deleteStudentFromFirestore,
+  saveRecordToFirestore,
+  saveTurmaToFirestore,
+  deleteTurmaFromFirestore,
+  seedInitialDataToFirestore,
+  testFirestoreConnection,
+  deleteDoc,
+  doc,
+  db,
+} from './firebase';
 
 export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('frequencia');
+  const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
   // Initial week and date setup
   const initialDateObj = new Date();
@@ -27,7 +43,7 @@ export default function App() {
     toISODateString(initialDateObj)
   );
 
-  // Load initial data from localStorage on mount
+  // Load initial local data & sync with Firebase Firestore real-time listeners
   useEffect(() => {
     const loadedStudents = loadStudents();
     const loadedRecords = loadAttendanceRecords();
@@ -35,6 +51,52 @@ export default function App() {
     setStudents(loadedStudents);
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
+
+    // Test Firestore connectivity
+    testFirestoreConnection().then((connected) => {
+      setFirebaseConnected(connected);
+    });
+
+    let isInitialStudentsSync = true;
+    let isInitialRecordsSync = true;
+    let isInitialTurmasSync = true;
+
+    const unsubStudents = subscribeStudents((fsStudents) => {
+      if (fsStudents.length > 0) {
+        setStudents(fsStudents);
+        saveStudents(fsStudents);
+      } else if (isInitialStudentsSync && loadedStudents.length > 0) {
+        // Seed initial local students to Firestore if empty
+        seedInitialDataToFirestore(loadedStudents, [], []);
+      }
+      isInitialStudentsSync = false;
+    });
+
+    const unsubRecords = subscribeRecords((fsRecords) => {
+      if (fsRecords.length > 0) {
+        setRecords(fsRecords);
+        saveAttendanceRecords(fsRecords);
+      } else if (isInitialRecordsSync && loadedRecords.length > 0) {
+        seedInitialDataToFirestore([], loadedRecords, []);
+      }
+      isInitialRecordsSync = false;
+    });
+
+    const unsubTurmas = subscribeTurmas((fsTurmas) => {
+      if (fsTurmas.length > 0) {
+        setTurmas(fsTurmas);
+        saveTurmas(fsTurmas);
+      } else if (isInitialTurmasSync && loadedTurmas.length > 0) {
+        seedInitialDataToFirestore([], [], loadedTurmas);
+      }
+      isInitialTurmasSync = false;
+    });
+
+    return () => {
+      unsubStudents();
+      unsubRecords();
+      unsubTurmas();
+    };
   }, []);
 
   // Event listener for date selection from day pills
@@ -57,6 +119,7 @@ export default function App() {
     const updated = [newStudent, ...students];
     setStudents(updated);
     saveStudents(updated);
+    saveStudentToFirestore(newStudent);
   };
 
   const handleBatchAddStudents = (
@@ -74,35 +137,39 @@ export default function App() {
     const updated = [...newStudentsList, ...students];
     setStudents(updated);
     saveStudents(updated);
+    newStudentsList.forEach((s) => saveStudentToFirestore(s));
   };
 
   const handleUpdateStudent = (updatedStudent: Student) => {
     const updated = students.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
     setStudents(updated);
     saveStudents(updated);
+    saveStudentToFirestore(updatedStudent);
   };
 
   const handleDeleteStudent = (id: string) => {
     const updated = students.filter((s) => s.id !== id);
     setStudents(updated);
     saveStudents(updated);
+    deleteStudentFromFirestore(id);
   };
 
   // Save attendance record modifications
   const handleSaveRecord = (recordData: Omit<AttendanceRecord, 'id' | 'createdAt'>) => {
     const recordId = `${recordData.studentId}_${recordData.activity}_${recordData.date}`;
+    const newRecord: AttendanceRecord = {
+      ...recordData,
+      id: recordId,
+      createdAt: new Date().toISOString(),
+    };
     
     setRecords((prev) => {
       const filtered = prev.filter((r) => r.id !== recordId);
-      const newRecord: AttendanceRecord = {
-        ...recordData,
-        id: recordId,
-        createdAt: new Date().toISOString(),
-      };
       const updated = [newRecord, ...filtered];
       saveAttendanceRecords(updated);
       return updated;
     });
+    saveRecordToFirestore(newRecord);
   };
 
   const handleBatchMarkPresent = (
@@ -110,31 +177,30 @@ export default function App() {
     activity: ActivityType,
     date: string
   ) => {
-    setRecords((prev) => {
-      // Create set of keys to update
-      const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
-      
-      const filtered = prev.filter((r) => !targetKeys.has(r.id));
-      
-      const batchNewRecords: AttendanceRecord[] = studentIds.map((studentId) => {
-        const student = students.find((s) => s.id === studentId);
-        return {
-          id: `${studentId}_${activity}_${date}`,
-          studentId,
-          activity,
-          turma: student ? student.turma : '1º Ano Azul',
-          date,
-          weekNumber: currentWeek.weekNumber,
-          year: currentWeek.year,
-          status: 'presente',
-          createdAt: new Date().toISOString(),
-        };
-      });
+    const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
+    const batchNewRecords: AttendanceRecord[] = studentIds.map((studentId) => {
+      const student = students.find((s) => s.id === studentId);
+      return {
+        id: `${studentId}_${activity}_${date}`,
+        studentId,
+        activity,
+        turma: student ? student.turma : '1º Ano Azul',
+        date,
+        weekNumber: currentWeek.weekNumber,
+        year: currentWeek.year,
+        status: 'presente',
+        createdAt: new Date().toISOString(),
+      };
+    });
 
+    setRecords((prev) => {
+      const filtered = prev.filter((r) => !targetKeys.has(r.id));
       const updated = [...batchNewRecords, ...filtered];
       saveAttendanceRecords(updated);
       return updated;
     });
+
+    batchNewRecords.forEach((r) => saveRecordToFirestore(r));
   };
 
   const handleClearRecords = (
@@ -142,11 +208,17 @@ export default function App() {
     activity: ActivityType,
     date: string
   ) => {
+    const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
     setRecords((prev) => {
-      const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
       const updated = prev.filter((r) => !targetKeys.has(r.id));
       saveAttendanceRecords(updated);
       return updated;
+    });
+
+    targetKeys.forEach((key) => {
+      deleteDoc(doc(db, 'attendanceRecords', key)).catch((err) =>
+        console.error('Error clearing Firestore record:', err)
+      );
     });
   };
 
@@ -157,6 +229,7 @@ export default function App() {
     const updated = [...turmas, name];
     setTurmas(updated);
     saveTurmas(updated);
+    saveTurmaToFirestore(name);
     return true;
   };
 
@@ -164,27 +237,38 @@ export default function App() {
     const updatedTurmas = turmas.filter((t) => t !== turmaName);
     setTurmas(updatedTurmas);
     saveTurmas(updatedTurmas);
+    deleteTurmaFromFirestore(turmaName);
 
     if (deleteStudents) {
       // Remove all students belonging to this turma
-      const studentIdsToRemove = new Set(students.filter((s) => s.turma === turmaName).map((s) => s.id));
+      const studentIdsToRemove = new Set<string>(students.filter((s) => s.turma === turmaName).map((s) => s.id));
       const updatedStudents = students.filter((s) => s.turma !== turmaName);
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
+
+      studentIdsToRemove.forEach((sid) => deleteStudentFromFirestore(sid));
 
       // Clean attendance records for removed students
       const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
+
+      records.filter((r) => studentIdsToRemove.has(r.studentId)).forEach((r) => {
+        deleteDoc(doc(db, 'attendanceRecords', r.id)).catch(() => {});
+      });
     } else if (targetTurmaToReassign) {
       // Reassign students to targetTurmaToReassign
       const updatedStudents = students.map((s) => s.turma === turmaName ? { ...s, turma: targetTurmaToReassign } : s);
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
 
+      updatedStudents.filter((s) => s.turma === targetTurmaToReassign).forEach((s) => saveStudentToFirestore(s));
+
       const updatedRecords = records.map((r) => r.turma === turmaName ? { ...r, turma: targetTurmaToReassign } : r);
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
+
+      updatedRecords.filter((r) => r.turma === targetTurmaToReassign).forEach((r) => saveRecordToFirestore(r));
     }
   };
 

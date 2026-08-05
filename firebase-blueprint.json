@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Information about an enrolled student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "turma": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "activities": {
+          "type": "array",
+          "description": "List of extra activity names assigned to student"
+        }
+      },
+      "required": ["id", "name", "turma", "activities"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Daily activity attendance record for a student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 10 },
+        "weekNumber": { "type": "number" },
+        "year": { "type": "number" },
+        "activity": { "type": "string", "maxLength": 64 },
+        "turma": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["presente", "ausente", "falta_justificada"] },
+        "note": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "studentId", "date", "weekNumber", "year", "activity", "turma", "status", "createdAt"]
+    },
+    "Turma": {
+      "title": "Turma",
+      "description": "Class/Turma name definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["id", "name"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of all students"
+    },
+    "/attendanceRecords/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Collection of attendance records"
+    },
+    "/turmas/{turmaId}": {
+      "schema": "Turma",
+      "description": "Collection of registered turmas"
+    }
+  }
+}
