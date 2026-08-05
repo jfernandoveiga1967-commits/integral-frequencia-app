@@ -11,6 +11,7 @@ import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check,
 interface AttendanceSheetProps {
   students: Student[];
   records: AttendanceRecord[];
+  turmas?: string[];
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
@@ -21,12 +22,14 @@ interface AttendanceSheetProps {
 export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   students,
   records,
+  turmas,
   currentWeek,
   selectedDate,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
 }) => {
+  const turmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('Natação');
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
@@ -249,8 +252,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
               onChange={(e) => setSelectedTurma(e.target.value as TurmaType | 'TODAS')}
               className="w-full px-3 py-2 text-xs md:text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="TODAS">Todas as Turmas ({TURMAS_LIST.length} Turmas)</option>
-              {TURMAS_LIST.map((turma) => (
+              <option value="TODAS">Todas as Turmas ({turmasList.length} Turmas)</option>
+              {turmasList.map((turma) => (
                 <option key={turma} value={turma}>
                   {turma}
                 </option>

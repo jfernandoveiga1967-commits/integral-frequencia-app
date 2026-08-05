@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo } from './types';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, resetAllData } from './utils/storageUtils';
+import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
@@ -12,6 +12,7 @@ import { WeeklyLibrary } from './components/WeeklyLibrary';
 export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [turmas, setTurmas] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('frequencia');
 
   // Initial week and date setup
@@ -30,8 +31,10 @@ export default function App() {
   useEffect(() => {
     const loadedStudents = loadStudents();
     const loadedRecords = loadAttendanceRecords();
+    const loadedTurmas = loadTurmas();
     setStudents(loadedStudents);
     setRecords(loadedRecords);
+    setTurmas(loadedTurmas);
   }, []);
 
   // Event listener for date selection from day pills
@@ -147,12 +150,52 @@ export default function App() {
     });
   };
 
+  // Turma management
+  const handleAddTurma = (newTurmaName: string): boolean => {
+    const name = newTurmaName.trim();
+    if (!name || turmas.includes(name)) return false;
+    const updated = [...turmas, name];
+    setTurmas(updated);
+    saveTurmas(updated);
+    return true;
+  };
+
+  const handleDeleteTurma = (turmaName: string, deleteStudents: boolean = true, targetTurmaToReassign?: string) => {
+    const updatedTurmas = turmas.filter((t) => t !== turmaName);
+    setTurmas(updatedTurmas);
+    saveTurmas(updatedTurmas);
+
+    if (deleteStudents) {
+      // Remove all students belonging to this turma
+      const studentIdsToRemove = new Set(students.filter((s) => s.turma === turmaName).map((s) => s.id));
+      const updatedStudents = students.filter((s) => s.turma !== turmaName);
+      setStudents(updatedStudents);
+      saveStudents(updatedStudents);
+
+      // Clean attendance records for removed students
+      const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
+      setRecords(updatedRecords);
+      saveAttendanceRecords(updatedRecords);
+    } else if (targetTurmaToReassign) {
+      // Reassign students to targetTurmaToReassign
+      const updatedStudents = students.map((s) => s.turma === turmaName ? { ...s, turma: targetTurmaToReassign } : s);
+      setStudents(updatedStudents);
+      saveStudents(updatedStudents);
+
+      const updatedRecords = records.map((r) => r.turma === turmaName ? { ...r, turma: targetTurmaToReassign } : r);
+      setRecords(updatedRecords);
+      saveAttendanceRecords(updatedRecords);
+    }
+  };
+
   const handleResetData = () => {
     resetAllData();
     const loadedStudents = loadStudents();
     const loadedRecords = loadAttendanceRecords();
+    const loadedTurmas = loadTurmas();
     setStudents(loadedStudents);
     setRecords(loadedRecords);
+    setTurmas(loadedTurmas);
   };
 
   const handleGoToCurrentWeek = () => {
@@ -202,6 +245,7 @@ export default function App() {
           <AttendanceSheet
             students={students}
             records={records}
+            turmas={turmas}
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             onSaveRecord={handleSaveRecord}
@@ -215,11 +259,14 @@ export default function App() {
           <StudentManager
             students={students}
             records={records}
+            turmas={turmas}
             currentWeek={currentWeek}
             onAddStudent={handleAddStudent}
             onBatchAddStudents={handleBatchAddStudents}
             onUpdateStudent={handleUpdateStudent}
             onDeleteStudent={handleDeleteStudent}
+            onAddTurma={handleAddTurma}
+            onDeleteTurma={handleDeleteTurma}
           />
         )}
 
@@ -228,7 +275,9 @@ export default function App() {
           <WeeklyReport
             students={students}
             records={records}
+            turmas={turmas}
             currentWeek={currentWeek}
+            onDeleteTurma={handleDeleteTurma}
           />
         )}
 

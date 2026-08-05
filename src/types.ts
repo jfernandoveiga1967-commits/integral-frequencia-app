@@ -7,21 +7,7 @@ export type ActivityType =
   | 'Ginástica'
   | 'Flauta';
 
-export type TurmaType =
-  | 'Mini Maternal Azul'
-  | 'Maternal Azul'
-  | 'Infantil 1 Azul'
-  | 'Infantil 2 Azul'
-  | '1º Ano Azul'
-  | '1º Ano Vermelho'
-  | '2º Ano Azul'
-  | '2º Ano Vermelho'
-  | '3º Ano Azul'
-  | '3º Ano Vermelho'
-  | '4º Ano Azul'
-  | '4º Ano Vermelho'
-  | '5º Ano Azul'
-  | '6º Ano Azul';
+export type TurmaType = string;
 
 export type AttendanceStatus =
   | 'presente'

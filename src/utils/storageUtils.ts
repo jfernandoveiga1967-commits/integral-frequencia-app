@@ -1,9 +1,34 @@
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus } from '../types';
-import { INITIAL_STUDENTS } from '../data/initialData';
+import { INITIAL_STUDENTS, TURMAS_LIST } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
+const TURMAS_KEY = 'integral_frequencia_turmas_v1';
+
+export function loadTurmas(): string[] {
+  try {
+    const data = localStorage.getItem(TURMAS_KEY);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao carregar turmas do LocalStorage:', e);
+  }
+  saveTurmas(TURMAS_LIST);
+  return TURMAS_LIST;
+}
+
+export function saveTurmas(turmas: string[]): void {
+  try {
+    localStorage.setItem(TURMAS_KEY, JSON.stringify(turmas));
+  } catch (e) {
+    console.error('Erro ao salvar turmas:', e);
+  }
+}
 
 export function loadStudents(): Student[] {
   try {
@@ -71,6 +96,7 @@ export function saveAttendanceRecords(records: AttendanceRecord[]): void {
 export function resetAllData(): void {
   localStorage.removeItem(STUDENTS_KEY);
   localStorage.removeItem(RECORDS_KEY);
+  localStorage.removeItem(TURMAS_KEY);
 }
 
 function generateInitialSeedRecords(): AttendanceRecord[] {

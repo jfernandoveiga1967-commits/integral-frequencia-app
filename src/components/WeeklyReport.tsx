@@ -24,16 +24,21 @@ import {
 interface WeeklyReportProps {
   students: Student[];
   records: AttendanceRecord[];
+  turmas?: string[];
   currentWeek: WeekInfo;
+  onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
 
 export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   students,
   records,
+  turmas,
   currentWeek,
+  onDeleteTurma,
 }) => {
+  const turmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(TURMAS_LIST[0]);
+  const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(students[0]?.id || '');
   const [showTurmaModal, setShowTurmaModal] = useState(false);
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -479,7 +484,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 onChange={(e) => setSelectedPdfTurma(e.target.value as TurmaType)}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
               >
-                {TURMAS_LIST.map((t) => (
+                {turmasList.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
