@@ -378,12 +378,36 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-slate-900 text-slate-400 text-xs py-4 border-t border-slate-800 text-center print:hidden">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            <span className="font-bold text-white">Frequência em Atividades Extracurriculares</span> • Sistema de Chamada e Ocorrências
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-left">
+            <div>
+              <span className="font-bold text-white">Frequência em Atividades Extracurriculares</span> • v1.2 (Com Exclusão de Turmas)
+            </div>
+            {firebaseConnected && (
+              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Nuvem Conectada</span>
+              </span>
+            )}
           </div>
-          <div className="text-slate-500">
-            Natação • Balé • Dança • Judô • Futebol • Ginástica • Flauta
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => {
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then((regs) => {
+                    regs.forEach((r) => r.unregister());
+                  });
+                }
+                window.location.reload();
+              }}
+              className="px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-all cursor-pointer"
+              title="Limpar cache do navegador e recarregar os recursos mais recentes"
+            >
+              🔄 Atualizar App no Dispositivo
+            </button>
+            <div className="text-slate-500 text-[11px] hidden md:block">
+              Natação • Balé • Dança • Judô • Futebol • Ginástica • Flauta
+            </div>
           </div>
         </div>
       </footer>
