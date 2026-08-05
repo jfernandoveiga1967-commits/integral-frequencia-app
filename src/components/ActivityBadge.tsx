@@ -1,0 +1,103 @@
+import React from 'react';
+import { ActivityType } from '../types';
+import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2 } from 'lucide-react';
+
+interface ActivityBadgeProps {
+  activity: ActivityType;
+  showIcon?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}
+
+export const activityConfig: Record<
+  ActivityType,
+  { name: string; bg: string; border: string; text: string; badgeBg: string; icon: React.ReactNode; equipmentHint: string }
+> = {
+  Natação: {
+    name: 'Natação',
+    bg: 'bg-blue-50 hover:bg-blue-100',
+    border: 'border-blue-200',
+    text: 'text-blue-700',
+    badgeBg: 'bg-blue-100 text-blue-800 border-blue-300',
+    icon: <Waves className="w-4 h-4" />,
+    equipmentHint: 'Maiô, sunga, touca, óculos ou toalha',
+  },
+  Balé: {
+    name: 'Balé',
+    bg: 'bg-pink-50 hover:bg-pink-100',
+    border: 'border-pink-200',
+    text: 'text-pink-700',
+    badgeBg: 'bg-pink-100 text-pink-800 border-pink-300',
+    icon: <Sparkles className="w-4 h-4" />,
+    equipmentHint: 'Colan, sapatilha, meia-calça ou coque',
+  },
+  Dança: {
+    name: 'Dança',
+    bg: 'bg-purple-50 hover:bg-purple-100',
+    border: 'border-purple-200',
+    text: 'text-purple-700',
+    badgeBg: 'bg-purple-100 text-purple-800 border-purple-300',
+    icon: <Music className="w-4 h-4" />,
+    equipmentHint: 'Uniforme de dança ou calçado apropriado',
+  },
+  Judô: {
+    name: 'Judô',
+    bg: 'bg-amber-50 hover:bg-amber-100',
+    border: 'border-amber-200',
+    text: 'text-amber-800',
+    badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
+    icon: <Award className="w-4 h-4" />,
+    equipmentHint: 'Kimono (vagui/calça) e faixa',
+  },
+  Futebol: {
+    name: 'Futebol',
+    bg: 'bg-emerald-50 hover:bg-emerald-100',
+    border: 'border-emerald-200',
+    text: 'text-emerald-800',
+    badgeBg: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    icon: <Trophy className="w-4 h-4" />,
+    equipmentHint: 'Uniforme de futebol, chuteira/tênis e meião',
+  },
+  Ginástica: {
+    name: 'Ginástica',
+    bg: 'bg-indigo-50 hover:bg-indigo-100',
+    border: 'border-indigo-200',
+    text: 'text-indigo-800',
+    badgeBg: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+    icon: <Activity className="w-4 h-4" />,
+    equipmentHint: 'Uniforme oficial de ginástica',
+  },
+  Flauta: {
+    name: 'Flauta',
+    bg: 'bg-teal-50 hover:bg-teal-100',
+    border: 'border-teal-200',
+    text: 'text-teal-800',
+    badgeBg: 'bg-teal-100 text-teal-900 border-teal-300',
+    icon: <Music2 className="w-4 h-4" />,
+    equipmentHint: 'Flauta Doce e pasta de partituras/músicas',
+  },
+};
+
+export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
+  activity,
+  showIcon = true,
+  size = 'md',
+  className = '',
+}) => {
+  const config = activityConfig[activity] || activityConfig['Natação'];
+
+  const sizeClasses = {
+    sm: 'text-xs px-2 py-0.5 space-x-1',
+    md: 'text-sm px-2.5 py-1 space-x-1.5',
+    lg: 'text-base px-3 py-1.5 space-x-2 font-medium',
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border ${config.badgeBg} ${sizeClasses[size]} ${className}`}
+    >
+      {showIcon && <span>{config.icon}</span>}
+      <span>{activity}</span>
+    </span>
+  );
+};
