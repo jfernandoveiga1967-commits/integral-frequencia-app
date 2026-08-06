@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo } from './types';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData } from './utils/storageUtils';
+import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
@@ -62,21 +62,29 @@ export default function App() {
     let isInitialTurmasSync = true;
 
     const unsubStudents = subscribeStudents((fsStudents) => {
-      if (fsStudents.length > 0) {
-        setStudents(fsStudents);
-        saveStudents(fsStudents);
-      } else if (isInitialStudentsSync && loadedStudents.length > 0) {
-        // Seed initial local students to Firestore if empty
+      // Identify and remove mock/fictional model students from Firestore if present
+      const mockStudentsInFs = fsStudents.filter((s) => isMockStudent(s));
+      if (mockStudentsInFs.length > 0) {
+        mockStudentsInFs.forEach((s) => deleteStudentFromFirestore(s.id));
+      }
+
+      const realStudents = fsStudents.filter((s) => !isMockStudent(s));
+      setStudents(realStudents);
+      saveStudents(realStudents);
+
+      if (isInitialStudentsSync && realStudents.length === 0 && loadedStudents.length > 0) {
         seedInitialDataToFirestore(loadedStudents, [], []);
       }
       isInitialStudentsSync = false;
     });
 
     const unsubRecords = subscribeRecords((fsRecords) => {
-      if (fsRecords.length > 0) {
-        setRecords(fsRecords);
-        saveAttendanceRecords(fsRecords);
-      } else if (isInitialRecordsSync && loadedRecords.length > 0) {
+      // Filter out records created for mock students
+      const realRecords = fsRecords.filter((r) => !isMockStudent({ id: r.studentId }));
+      setRecords(realRecords);
+      saveAttendanceRecords(realRecords);
+      
+      if (isInitialRecordsSync && realRecords.length === 0 && loadedRecords.length > 0) {
         seedInitialDataToFirestore([], loadedRecords, []);
       }
       isInitialRecordsSync = false;

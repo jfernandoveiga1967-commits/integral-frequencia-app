@@ -30,6 +30,12 @@ export function saveTurmas(turmas: string[]): void {
   }
 }
 
+export function isMockStudent(student: { id: string; name?: string }): boolean {
+  if (!student || !student.id) return false;
+  // Fictional model student IDs: st-1 through st-32 (pattern: st- followed by 1 or 2 digits)
+  return /^st-\d{1,2}$/.test(student.id);
+}
+
 export function loadStudents(): Student[] {
   try {
     const data = localStorage.getItem(STUDENTS_KEY);
@@ -44,7 +50,12 @@ export function loadStudents(): Student[] {
         }
         return s;
       });
-      if (migrated) {
+
+      // Filter out any mock/fictional model students
+      const originalLength = parsed.length;
+      parsed = parsed.filter((s) => !isMockStudent(s));
+
+      if (migrated || parsed.length !== originalLength) {
         saveStudents(parsed);
       }
       return parsed;
