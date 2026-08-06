@@ -4,19 +4,31 @@
   "description": "Sistema de Chamada e Controle de Frequência para Atividades Extracurriculares Escolares",
   "icons": [
     {
-      "src": "/pwa-192.png?v=2",
+      "src": "/pwa-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/pwa-512.png?v=2",
+      "src": "/pwa-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/icon.svg?v=2",
+      "src": "/pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
       "type": "image/svg+xml",
       "sizes": "512x512",
       "purpose": "any"

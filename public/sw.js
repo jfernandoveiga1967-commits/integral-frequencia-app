@@ -1,12 +1,12 @@
-const CACHE_NAME = 'integral-frequencia-v1.4';
+const CACHE_NAME = 'integral-frequencia-v1.5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg?v=2',
-  '/pwa-192.png?v=2',
-  '/pwa-512.png?v=2',
-  '/apple-touch-icon.png?v=2'
+  '/icon.svg',
+  '/pwa-192.png',
+  '/pwa-512.png',
+  '/apple-touch-icon.png'
 ];
 
 // Install Event - Pre-cache core shell
