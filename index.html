@@ -32,25 +32,39 @@
 
     <!-- Register PWA Service Worker safely -->
     <script>
+      // Global capture of PWA beforeinstallprompt event
+      window.deferredPwaPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.deferredPwaPrompt = e;
+        window.dispatchEvent(new CustomEvent('pwa-prompt-ready'));
+      });
+
       if ('serviceWorker' in navigator) {
         const isDev = window.location.hostname.includes('ais-dev-') || window.location.hostname === 'localhost';
         if (isDev) {
-          // Unregister any active service worker in preview/dev environment to prevent iframe caching issues
+          // Unregister active service worker in preview/dev environment
           navigator.serviceWorker.getRegistrations().then((registrations) => {
             for (let registration of registrations) {
               registration.unregister();
             }
           });
         } else {
-          window.addEventListener('load', () => {
+          const registerSW = () => {
             navigator.serviceWorker.register('/sw.js')
               .then((reg) => {
-                console.log('PWA ServiceWorker registrado:', reg.scope);
+                console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
               })
               .catch((err) => {
                 console.error('Falha ao registrar ServiceWorker:', err);
               });
-          });
+          };
+
+          if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            registerSW();
+          } else {
+            window.addEventListener('load', registerSW);
+          }
         }
       }
     </script>

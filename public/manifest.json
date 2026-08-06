@@ -7,25 +7,13 @@
       "src": "/pwa-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-192.png",
-      "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     },
     {
       "src": "/pwa-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-512.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     },
     {
       "src": "/icon.svg",
@@ -41,6 +29,7 @@
   "display": "standalone",
   "orientation": "portrait",
   "scope": "/",
+  "prefer_related_applications": false,
   "lang": "pt-BR",
   "categories": ["education", "productivity"]
 }
