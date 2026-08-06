@@ -41,30 +41,20 @@
       });
 
       if ('serviceWorker' in navigator) {
-        const isDev = window.location.hostname.includes('ais-dev-') || window.location.hostname === 'localhost';
-        if (isDev) {
-          // Unregister active service worker in preview/dev environment
-          navigator.serviceWorker.getRegistrations().then((registrations) => {
-            for (let registration of registrations) {
-              registration.unregister();
-            }
-          });
-        } else {
-          const registerSW = () => {
-            navigator.serviceWorker.register('/sw.js')
-              .then((reg) => {
-                console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
-              })
-              .catch((err) => {
-                console.error('Falha ao registrar ServiceWorker:', err);
-              });
-          };
+        const registerSW = () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => {
+              console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
+            })
+            .catch((err) => {
+              console.error('Falha ao registrar ServiceWorker:', err);
+            });
+        };
 
-          if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            registerSW();
-          } else {
-            window.addEventListener('load', registerSW);
-          }
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+          registerSW();
+        } else {
+          window.addEventListener('load', registerSW);
         }
       }
     </script>

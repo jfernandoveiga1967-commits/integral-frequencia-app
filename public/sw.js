@@ -1,4 +1,4 @@
-const CACHE_NAME = 'integral-frequencia-v1.5';
+const CACHE_NAME = 'integral-frequencia-v2.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
