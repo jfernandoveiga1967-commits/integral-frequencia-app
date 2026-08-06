@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Soft Baby Blue Background Gradient -->
+    <linearGradient id="babyBlueBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E0F2FE"/>
+      <stop offset="100%" stop-color="#BAE6FD"/>
+    </linearGradient>
+
+    <!-- Pastel Crest Shield Gradient -->
+    <linearGradient id="crestGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F0F9FF"/>
+    </linearGradient>
+
+    <!-- Pastel Accent Colors -->
+    <linearGradient id="peachGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFEDD5"/>
+      <stop offset="100%" stop-color="#FDBA74"/>
+    </linearGradient>
+    
+    <linearGradient id="mintGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D1FAE5"/>
+      <stop offset="100%" stop-color="#6EE7B7"/>
+    </linearGradient>
+
+    <linearGradient id="lavenderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EDE9FE"/>
+      <stop offset="100%" stop-color="#C4B5FD"/>
+    </linearGradient>
+
+    <linearGradient id="yellowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="100%" stop-color="#FDE047"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0369A1" flood-opacity="0.12" />
+    </filter>
+  </defs>
+
+  <!-- Baby Blue Background Circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#babyBlueBg)"/>
+
+  <!-- Playful Soft Outer Ring -->
+  <circle cx="256" cy="256" r="224" fill="none" stroke="#7DD3FC" stroke-width="4" stroke-dasharray="8 8" opacity="0.6"/>
+
+  <!-- Playful Rounded Crest Shield -->
+  <g filter="url(#softShadow)">
+    <path d="M256 70 C340 70 376 96 376 170 C376 290 310 370 256 418 C202 370 136 290 136 170 C136 96 172 70 256 70 Z" 
+          fill="url(#crestGrad)" 
+          stroke="#38BDF8" 
+          stroke-width="10" 
+          stroke-linejoin="round"/>
+  </g>
+
+  <!-- Inner Crest Grid Divider Lines (Subtle Pastel) -->
+  <path d="M256 95 V385 M152 230 H360" stroke="#E0F2FE" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- 1. Swimming Waves (Top Left - Soft Blue/Mint) -->
+  <g transform="translate(168, 118)">
+    <path d="M0 20 Q10 10 20 20 T40 20 M0 34 Q10 24 20 34 T40 34" fill="none" stroke="#0284C7" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="20" cy="6" r="4" fill="#38BDF8"/>
+  </g>
+
+  <!-- 2. Soccer Ball (Top Right - Pastel Peach) -->
+  <g transform="translate(290, 118)">
+    <circle cx="18" cy="18" r="16" fill="url(#peachGrad)" stroke="#EA580C" stroke-width="3"/>
+    <polygon points="18,10 24,15 22,22 14,22 12,15" fill="#EA580C"/>
+  </g>
+
+  <!-- 3. Ballet Ribbon / Shoe (Middle Left - Lavender) -->
+  <g transform="translate(162, 240)">
+    <path d="M8 8 C18 0, 30 12, 18 24 C10 32, 2 16, 8 8 Z" fill="url(#lavenderGrad)" stroke="#7C3AED" stroke-width="3"/>
+    <path d="M12 10 Q24 20 32 30" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- 4. Music Note (Middle Right - Yellow/Gold) -->
+  <g transform="translate(294, 240)">
+    <circle cx="10" cy="28" r="7" fill="#EAB308"/>
+    <path d="M17 28 V8 L34 3 V20" fill="none" stroke="#EAB308" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="27" cy="20" r="6" fill="#EAB308"/>
+  </g>
+
+  <!-- 5. Judo Belt & Gymnastic Ribbon (Bottom Center Accents) -->
+  <g transform="translate(230, 310)">
+    <!-- Judo Knot -->
+    <rect x="0" y="0" width="52" height="12" rx="6" fill="url(#mintGrad)" stroke="#059669" stroke-width="2.5"/>
+    <path d="M16 12 L8 28 M36 12 L44 28" stroke="#059669" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Central Playful Ribbon Scroll for 'GYM' -->
+  <g filter="url(#softShadow)" transform="translate(0, 5)">
+    <!-- Ribbon Shadow/Back -->
+    <path d="M120 220 L150 205 V245 L120 230 Z M392 220 L362 205 V245 L392 230 Z" fill="#FDBA74"/>
+    <!-- Main Ribbon Body -->
+    <rect x="140" y="200" width="232" height="48" rx="14" fill="url(#yellowGrad)" stroke="#F59E0B" stroke-width="4"/>
+    <!-- Ribbon Ends Fold -->
+    <path d="M140 214 L124 204 V236 L140 226 Z M372 214 L388 204 V236 L372 226 Z" fill="#F59E0B"/>
+    
+    <!-- Bold Playful Rounded Text 'GYM' -->
+    <text x="256" y="235" 
+          font-family="system-ui, -apple-system, 'Comic Sans MS', sans-serif" 
+          font-weight="900" 
+          font-size="32" 
+          fill="#0F172A" 
+          text-anchor="middle" 
+          letter-spacing="4">GYM</text>
+  </g>
+
+  <!-- Cute Decorative Pastel Stars -->
+  <polygon points="125,120 128,127 135,128 130,133 131,140 125,136 119,140 120,133 115,128 122,127" fill="#FDE047"/>
+  <polygon points="385,120 388,127 395,128 390,133 391,140 385,136 379,140 380,133 375,128 382,127" fill="#FDE047"/>
+  <polygon points="256,438 259,445 266,446 261,451 262,458 256,454 250,458 251,451 246,446 253,445" fill="#38BDF8"/>
+</svg>

@@ -1,5 +1,5 @@
-import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Layers, Library } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ClipboardCheck, Users, BarChart3, Layers, Library, Download, Smartphone } from 'lucide-react';
 
 export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca';
 
@@ -16,6 +16,38 @@ export const Header: React.FC<HeaderProps> = ({
   totalStudents,
   totalRecordsThisWeek,
 }) => {
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Check if running in standalone mode (installed as PWA)
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(checkStandalone);
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+      if (choiceResult.outcome === 'accepted') {
+        console.log('Usuário aceitou a instalação do PWA');
+      }
+      setDeferredPrompt(null);
+    } else {
+      alert('Para instalar no iPhone/iPad: Toque no botão Compartilhar 📤 no Safari e selecione "Adicionar à Tela de Início".\n\nNo Android/Chrome: Abra o menu (⋮) e toque em "Instalar aplicativo" ou "Adicionar à tela inicial".');
+    }
+  };
+
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -28,8 +60,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center space-x-2 mb-0.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
-                  Programa Integral
+                  Programa Integral • PWA
                 </span>
+                {isStandalone && (
+                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30 inline-flex items-center space-x-1">
+                    <Smartphone className="w-3 h-3" />
+                    <span>App Nativo</span>
+                  </span>
+                )}
               </div>
               <h1 className="text-lg md:text-xl font-bold tracking-tight text-white">
                 Frequência em Atividades Extracurriculares
@@ -37,8 +75,19 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Header Stats */}
+          {/* Header Stats & PWA Install Button */}
           <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2 md:pt-0">
+            {!isStandalone && (
+              <button
+                onClick={handleInstallClick}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 border border-indigo-400/30 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
+                title="Instalar como aplicativo na tela inicial do dispositivo"
+              >
+                <Download className="w-4 h-4 text-indigo-200" />
+                <span>Instalar App</span>
+              </button>
+            )}
+
             <div className="flex items-center space-x-4 text-xs text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
               <div>
                 <span className="text-slate-400">Total Alunos: </span>
