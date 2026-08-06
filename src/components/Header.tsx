@@ -60,34 +60,41 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between py-3 gap-3">
             {/* Logo & Main Title */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 select-none">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 shrink-0">
                 <Layers className="w-6 h-6" />
               </div>
-              <div>
-                <div className="flex items-center space-x-2 mb-0.5">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center space-x-2 mb-1">
                   <button
                     type="button"
-                    onClick={handleInstallClick}
-                    className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30 flex items-center space-x-1 cursor-pointer transition-all active:scale-95"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleInstallClick();
+                    }}
+                    className="touch-manipulation text-[11px] font-bold uppercase tracking-wider bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/30 flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95"
                     title="Clique para ver instruções de instalação do App no celular"
                   >
-                    <Download className="w-3 h-3 text-indigo-300" />
+                    <Download className="w-3.5 h-3.5 text-indigo-300" />
                     <span>Instalar App • PWA</span>
                   </button>
                 </div>
-                <h1 className="text-lg md:text-xl font-bold tracking-tight text-white">
+                <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-white leading-tight">
                   Frequência em Atividades Extracurriculares
                 </h1>
               </div>
             </div>
 
             {/* Header Stats & PWA Install Button */}
-            <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2 md:pt-0">
+            <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2 md:pt-0 select-none">
               {!isStandalone && (
                 <button
-                  onClick={handleInstallClick}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 border border-indigo-400/30 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5 active:scale-95 shrink-0"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleInstallClick();
+                  }}
+                  className="touch-manipulation px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 border border-indigo-400/30 shadow-md transition-all cursor-pointer flex items-center space-x-2 active:scale-95 shrink-0"
                   title="Instalar como aplicativo na tela inicial do dispositivo"
                 >
                   <Download className="w-4 h-4 text-indigo-200" />
@@ -190,30 +197,36 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Content */}
             <div className="py-4 space-y-4 text-sm text-slate-300">
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start space-x-2 text-amber-200 text-xs">
-                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Atenção:</strong> Escolha a opção <strong>"Instalar aplicativo"</strong> em vez de apenas "Criar atalho". Assim, o aplicativo abrirá em tela cheia com o novo ícone exclusivo.
-                </span>
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 space-y-1.5 text-amber-200 text-xs">
+                <div className="flex items-center space-x-2 font-bold text-amber-300">
+                  <Info className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Passo OBRIGATÓRIO se você já adicionou antes:</span>
+                </div>
+                <p className="pl-6 leading-relaxed">
+                  Se você tem um <strong>atalho antigo do Google/Chrome na tela inicial</strong>, você precisa <strong>REMOVÊ-LO (excluir o atalho antigo)</strong> antes de baixar o App novo. Caso contrário, o Android continuará usando o atalho antigo.
+                </p>
               </div>
 
               {/* Android Section */}
-              <div className="bg-slate-800/80 rounded-xl p-4 border border-slate-700/80 space-y-2">
-                <h4 className="font-bold text-indigo-300 flex items-center space-x-2">
-                  <span>📱 No Android (Google Chrome)</span>
+              <div className="bg-slate-800/80 rounded-xl p-4 border border-slate-700/80 space-y-2.5">
+                <h4 className="font-bold text-indigo-300 flex items-center space-x-2 text-sm">
+                  <span>📱 Passo a Passo no Android (Chrome):</span>
                 </h4>
                 <ol className="list-decimal list-inside space-y-2 text-xs text-slate-300 leading-relaxed">
                   <li>
-                    Abra o menu do Chrome nos <strong>três pontinhos (⋮)</strong> no canto superior direito.
+                    <strong>Remova o atalho antigo:</strong> Vá até a tela inicial do celular, mantenha o dedo pressionado sobre o atalho antigo do Google e toque em <strong>"Remover"</strong> ou <strong>"Lixo"</strong>.
                   </li>
                   <li>
-                    Procure e toque em <strong className="text-emerald-400">"Instalar aplicativo"</strong> (ou "Adicionar à tela inicial").
+                    <strong>Abra o site no Chrome:</strong> Acesse <strong className="text-white">integral-frequencia-app.onrender.com</strong>
                   </li>
                   <li>
-                    Caso apareça a janela de confirmação, toque em <strong className="text-indigo-400">Instalar</strong>.
+                    <strong>Menu do Chrome:</strong> Toque nos <strong>três pontinhos (⋮)</strong> no canto superior direito do Chrome.
                   </li>
                   <li>
-                    O aplicativo será adicionado à sua tela de aplicativos com o ícone oficial.
+                    <strong>Instalar:</strong> Escolha <strong className="text-emerald-400 text-sm">"Instalar aplicativo"</strong> ou <strong className="text-emerald-400 text-sm">"Instalar app"</strong>.
+                  </li>
+                  <li>
+                    Toque em <strong className="text-indigo-400">Instalar</strong> na janela que aparecer. O Android vai criar o aplicativo verdadeiro com o ícone novo!
                   </li>
                 </ol>
               </div>
