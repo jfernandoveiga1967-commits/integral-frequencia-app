@@ -62,12 +62,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
                   Programa Integral • PWA
                 </span>
-                {isStandalone && (
-                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30 inline-flex items-center space-x-1">
-                    <Smartphone className="w-3 h-3" />
-                    <span>App Nativo</span>
-                  </span>
-                )}
               </div>
               <h1 className="text-lg md:text-xl font-bold tracking-tight text-white">
                 Frequência em Atividades Extracurriculares
