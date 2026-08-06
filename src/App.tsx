@@ -61,31 +61,53 @@ export default function App() {
     let isInitialRecordsSync = true;
     let isInitialTurmasSync = true;
 
+    const cleanedMockStudentIds = new Set<string>();
+    const cleanedMockRecordIds = new Set<string>();
+
     const unsubStudents = subscribeStudents((fsStudents) => {
-      // Identify and remove mock/fictional model students from Firestore if present
+      // Safely queue mock student deletions without repeating or looping
       const mockStudentsInFs = fsStudents.filter((s) => isMockStudent(s));
-      if (mockStudentsInFs.length > 0) {
-        mockStudentsInFs.forEach((s) => deleteStudentFromFirestore(s.id));
-      }
+      mockStudentsInFs.forEach((s) => {
+        if (!cleanedMockStudentIds.has(s.id)) {
+          cleanedMockStudentIds.add(s.id);
+          deleteStudentFromFirestore(s.id).catch(() => {});
+        }
+      });
 
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
       setStudents(realStudents);
       saveStudents(realStudents);
 
       if (isInitialStudentsSync && realStudents.length === 0 && loadedStudents.length > 0) {
-        seedInitialDataToFirestore(loadedStudents, [], []);
+        const realLoaded = loadedStudents.filter((s) => !isMockStudent(s));
+        if (realLoaded.length > 0) {
+          seedInitialDataToFirestore(realLoaded, [], []);
+        }
       }
       isInitialStudentsSync = false;
     });
 
     const unsubRecords = subscribeRecords((fsRecords) => {
       // Filter out records created for mock students
+      const mockRecordsInFs = fsRecords.filter(
+        (r) => isMockStudent({ id: r.studentId }) || r.id.startsWith('st-1_') || r.id.startsWith('st-2_') || r.id.startsWith('st-3_')
+      );
+      mockRecordsInFs.forEach((r) => {
+        if (!cleanedMockRecordIds.has(r.id)) {
+          cleanedMockRecordIds.add(r.id);
+          deleteDoc(doc(db, 'attendanceRecords', r.id)).catch(() => {});
+        }
+      });
+
       const realRecords = fsRecords.filter((r) => !isMockStudent({ id: r.studentId }));
       setRecords(realRecords);
       saveAttendanceRecords(realRecords);
-      
+
       if (isInitialRecordsSync && realRecords.length === 0 && loadedRecords.length > 0) {
-        seedInitialDataToFirestore([], loadedRecords, []);
+        const realLoadedRecs = loadedRecords.filter((r) => !isMockStudent({ id: r.studentId }));
+        if (realLoadedRecs.length > 0) {
+          seedInitialDataToFirestore([], realLoadedRecs, []);
+        }
       }
       isInitialRecordsSync = false;
     });

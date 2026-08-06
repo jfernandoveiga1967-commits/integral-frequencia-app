@@ -220,7 +220,10 @@ export function generateTurmaPDFReport(
   });
 
   const turmaStudents = students.filter((s) => s.turma === turma);
-  const turmaRecords = records.filter((r) => r.turma === turma);
+  const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
+  const turmaRecords = records.filter(
+    (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
+  );
 
   const total = turmaRecords.length;
   const pres = turmaRecords.filter((r) => r.status === 'presente').length;

@@ -81,8 +81,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   });
 
   // Stats per turma
-  const turmaStats = TURMAS_LIST.map((turma) => {
-    const turmaRecords = weekRecords.filter((r) => r.turma === turma);
+  const turmaStats = turmasList.map((turma) => {
+    const turmaStudents = students.filter((s) => s.turma === turma);
+    const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
+    const turmaRecords = weekRecords.filter(
+      (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
+    );
     const total = turmaRecords.length;
     const pres = turmaRecords.filter((r) => r.status === 'presente').length;
     const falta = turmaRecords.filter((r) => r.status === 'falta').length;

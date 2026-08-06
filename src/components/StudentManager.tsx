@@ -3,7 +3,7 @@ import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo } from '..
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 
 interface StudentManagerProps {
   students: Student[];
@@ -48,9 +48,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Natação']);
 
-  // Edit & Delete modal state
+  // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
+  const [targetTransferTurma, setTargetTransferTurma] = useState<string>('');
+
+  const handleOpenTransfer = (student: Student) => {
+    setTransferringStudent(student);
+    const otherTurmas = turmasList.filter((t) => t !== student.turma);
+    setTargetTransferTurma(otherTurmas[0] || student.turma);
+  };
+
+  const handleConfirmTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferringStudent || !targetTransferTurma) return;
+    if (targetTransferTurma === transferringStudent.turma) {
+      setTransferringStudent(null);
+      return;
+    }
+    // Update active turma for student while preserving all historical attendance records
+    onUpdateStudent({
+      ...transferringStudent,
+      turma: targetTransferTurma,
+    });
+    setTransferringStudent(null);
+  };
 
   // Turma deletion and management states
   const [turmaToDelete, setTurmaToDelete] = useState<string | null>(null);
@@ -454,6 +477,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </option>
                 ))}
               </select>
+              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+                <div className="flex items-center space-x-1.5 font-bold text-blue-800">
+                  <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Preservação de Histórico ao Transferir:</span>
+                </div>
+                <p className="text-slate-600 leading-relaxed pl-5">
+                  Ao trocar a turma do aluno, todas as chamadas e lançamentos anteriores de frequência, presenças e ocorrências são <strong>mantidos integralmente</strong> associados ao histórico individual dele.
+                </p>
+              </div>
             </div>
 
             <div>
@@ -627,7 +659,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 self-end md:self-center">
+                <div className="flex flex-wrap items-center gap-1.5 self-end md:self-center">
                   <button
                     onClick={() => generateStudentPDFReport(student, currentWeek, records)}
                     className="p-2 rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
@@ -635,6 +667,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   >
                     <Download className="w-3.5 h-3.5 text-blue-600" />
                     <span className="hidden sm:inline">Relatório PDF</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenTransfer(student)}
+                    className="p-2 rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
+                    title="Mudar aluno para outra turma (preserva todo o histórico)"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Mudar Turma</span>
                   </button>
 
                   <button
@@ -661,6 +702,89 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       </div>
 
       {/* Delete Confirmation Modal */}
+      {/* Transfer Student Modal */}
+      {transferringStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-2.5 text-amber-700">
+                <div className="p-2.5 bg-amber-100 rounded-xl">
+                  <ArrowRightLeft className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Mudar Turma do Aluno</h3>
+                  <p className="text-xs text-slate-500">Transferência com preservação integral do histórico</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setTransferringStudent(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmTransfer} className="space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Aluno:</p>
+                <p className="font-bold text-slate-900 text-base">{transferringStudent.name}</p>
+                <div className="flex items-center space-x-2 text-xs text-slate-600 pt-1">
+                  <span>Turma Atual:</span>
+                  <span className="font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                    {transferringStudent.turma}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Selecione a Nova Turma:
+                </label>
+                <select
+                  value={targetTransferTurma}
+                  onChange={(e) => setTargetTransferTurma(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl font-medium text-slate-800 bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                >
+                  {turmasList.map((t) => (
+                    <option key={t} value={t} disabled={t === transferringStudent.turma}>
+                      {t} {t === transferringStudent.turma ? '(Turma Atual)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1">
+                <div className="flex items-center space-x-1.5 font-bold text-emerald-900">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Preservação Automática de Histórico:</span>
+                </div>
+                <p className="text-emerald-800 leading-relaxed pl-5.5">
+                  Ao trocar a turma, todas as chamadas e lançamentos passados do aluno são <strong>mantidos integralmente</strong> no histórico individual dele e nos relatórios anteriores.
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setTransferringStudent(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!targetTransferTurma || targetTransferTurma === transferringStudent.turma}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  <span>Confirmar Troca de Turma</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Delete Student Confirmation Modal */}
       {studentToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
