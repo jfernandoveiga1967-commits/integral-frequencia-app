@@ -65,19 +65,10 @@ export const Header: React.FC<HeaderProps> = ({
                 <Layers className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2 mb-1">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleInstallClick();
-                    }}
-                    className="touch-manipulation text-[11px] font-bold uppercase tracking-wider bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/30 flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95"
-                    title="Clique para ver instruções de instalação do App no celular"
-                  >
-                    <Download className="w-3.5 h-3.5 text-indigo-300" />
-                    <span>Instalar App • PWA</span>
-                  </button>
+                <div className="flex items-center space-x-2 mb-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-red-500/15 text-red-400 px-2.5 py-0.5 rounded-full border border-red-500/30">
+                    Programa Integral • COLÉGIO CRESCER
+                  </span>
                 </div>
                 <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-white leading-tight">
                   Frequência em Atividades Extracurriculares
