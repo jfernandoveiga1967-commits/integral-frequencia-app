@@ -15,8 +15,8 @@ interface AttendanceSheetProps {
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
-  onBatchMarkPresent: (studentIds: string[], activity: ActivityType, date: string) => void;
-  onClearRecords: (studentIds: string[], activity: ActivityType, date: string) => void;
+  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
+  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
 }
 
 export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
@@ -174,25 +174,58 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     setModalState((prev) => ({ ...prev, isOpen: false }));
   };
 
+  const areAllMarkedPresent = useMemo(() => {
+    if (filteredStudents.length === 0) return false;
+    return filteredStudents.every((student) => {
+      const activitiesToCheck = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+      if (activitiesToCheck.length === 0) return false;
+      return activitiesToCheck.every((act) => {
+        const key = `${student.id}_${act}_${selectedDate}`;
+        const rec = recordMap.get(key);
+        return rec?.status === 'presente';
+      });
+    });
+  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
+
   const handleBatchMarkAllPresent = () => {
-    if (selectedActivity === 'TODAS') {
-      alert('Selecione uma atividade específica para realizar a marcação em lote.');
-      return;
-    }
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
-    onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+
+    if (areAllMarkedPresent) {
+      onClearRecords(studentIds, selectedActivity, selectedDate);
+      setObsMap((prev) => {
+        const next = { ...prev };
+        filteredStudents.forEach((student) => {
+          const acts = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+          acts.forEach((act) => {
+            delete next[`${student.id}_${act}_${selectedDate}`];
+          });
+        });
+        return next;
+      });
+    } else {
+      onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+    }
   };
 
   const handleClearSelected = () => {
-    if (selectedActivity === 'TODAS') {
-      alert('Selecione uma atividade específica para limpar as marcações.');
-      return;
-    }
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
-    if (window.confirm('Tem certeza que deseja limpar as marcações desta atividade no dia selecionado?')) {
+    const actLabel = selectedActivity === 'TODAS' ? 'todas as atividades' : `a atividade "${selectedActivity}"`;
+    if (window.confirm(`Tem certeza que deseja limpar as marcações de ${actLabel} no dia selecionado?`)) {
       onClearRecords(studentIds, selectedActivity, selectedDate);
+
+      // Clear local observation state for cleared records
+      setObsMap((prev) => {
+        const next = { ...prev };
+        filteredStudents.forEach((student) => {
+          const acts = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+          acts.forEach((act) => {
+            delete next[`${student.id}_${act}_${selectedDate}`];
+          });
+        });
+        return next;
+      });
     }
   };
 
@@ -353,17 +386,34 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
             <button
               onClick={handleBatchMarkAllPresent}
-              disabled={selectedActivity === 'TODAS' || filteredStudents.length === 0}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs"
-              title="Marcar todos os alunos visíveis como presentes"
+              disabled={filteredStudents.length === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs ${
+                areAllMarkedPresent
+                  ? 'bg-amber-600 hover:bg-amber-700'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={
+                areAllMarkedPresent
+                  ? 'Todos estão marcados como presentes. Clique para desmarcar todos.'
+                  : 'Marcar todos os alunos visíveis como presentes'
+              }
             >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Marcar Todos Presentes</span>
+              {areAllMarkedPresent ? (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  <span>Desmarcar Todos</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Marcar Todos Presentes</span>
+                </>
+              )}
             </button>
 
             <button
               onClick={handleClearSelected}
-              disabled={selectedActivity === 'TODAS' || filteredStudents.length === 0}
+              disabled={filteredStudents.length === 0}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1"
               title="Limpar marcações deste dia"
             >

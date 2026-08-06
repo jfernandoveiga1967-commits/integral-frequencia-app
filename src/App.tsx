@@ -174,23 +174,32 @@ export default function App() {
 
   const handleBatchMarkPresent = (
     studentIds: string[],
-    activity: ActivityType,
+    activity: ActivityType | 'TODAS',
     date: string
   ) => {
-    const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
-    const batchNewRecords: AttendanceRecord[] = studentIds.map((studentId) => {
+    const targetKeys = new Set<string>();
+    const batchNewRecords: AttendanceRecord[] = [];
+
+    studentIds.forEach((studentId) => {
       const student = students.find((s) => s.id === studentId);
-      return {
-        id: `${studentId}_${activity}_${date}`,
-        studentId,
-        activity,
-        turma: student ? student.turma : '1º Ano Azul',
-        date,
-        weekNumber: currentWeek.weekNumber,
-        year: currentWeek.year,
-        status: 'presente',
-        createdAt: new Date().toISOString(),
-      };
+      if (!student) return;
+
+      const activitiesToMark = activity === 'TODAS' ? student.activities : [activity];
+      activitiesToMark.forEach((act) => {
+        const key = `${studentId}_${act}_${date}`;
+        targetKeys.add(key);
+        batchNewRecords.push({
+          id: key,
+          studentId,
+          activity: act,
+          turma: student.turma,
+          date,
+          weekNumber: currentWeek.weekNumber,
+          year: currentWeek.year,
+          status: 'presente',
+          createdAt: new Date().toISOString(),
+        });
+      });
     });
 
     setRecords((prev) => {
@@ -205,12 +214,35 @@ export default function App() {
 
   const handleClearRecords = (
     studentIds: string[],
-    activity: ActivityType,
+    activity: ActivityType | 'TODAS',
     date: string
   ) => {
-    const targetKeys = new Set(studentIds.map((sid) => `${sid}_${activity}_${date}`));
+    const studentIdSet = new Set(studentIds);
+    const targetKeys = new Set<string>();
+
+    studentIds.forEach((studentId) => {
+      const student = students.find((s) => s.id === studentId);
+      if (activity === 'TODAS') {
+        if (student) {
+          student.activities.forEach((act) => {
+            targetKeys.add(`${studentId}_${act}_${date}`);
+          });
+        }
+      } else {
+        targetKeys.add(`${studentId}_${activity}_${date}`);
+      }
+    });
+
     setRecords((prev) => {
-      const updated = prev.filter((r) => !targetKeys.has(r.id));
+      const updated = prev.filter((r) => {
+        if (r.date === date && studentIdSet.has(r.studentId)) {
+          if (activity === 'TODAS' || r.activity === activity) {
+            targetKeys.add(r.id);
+            return false;
+          }
+        }
+        return !targetKeys.has(r.id);
+      });
       saveAttendanceRecords(updated);
       return updated;
     });
