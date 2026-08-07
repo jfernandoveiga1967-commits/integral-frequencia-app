@@ -188,7 +188,7 @@ export function generateStudentPDFReport(
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
     doc.text('Assinatura do Responsável', 55, finalY + 5, { align: 'center' });
-    doc.text('Coordenação de Atividades Extracurriculares', 155, finalY + 5, { align: 'center' });
+    doc.text('Coordenação do Integral', 155, finalY + 5, { align: 'center' });
   }
 
   // Page numbering
@@ -370,7 +370,7 @@ export function generateTurmaPDFReport(
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
     doc.text('Professor(a) / Instrutor(a)', 55, finalY + 5, { align: 'center' });
-    doc.text('Coordenação de Atividades Extracurriculares', 155, finalY + 5, { align: 'center' });
+    doc.text('Coordenação do Integral', 155, finalY + 5, { align: 'center' });
   }
 
   // Footer
