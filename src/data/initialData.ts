@@ -11,10 +11,6 @@ export const ACTIVITIES_LIST: { id: ActivityType; name: string; icon: string; de
 ];
 
 export const TURMAS_LIST: TurmaType[] = [
-  'Mini Maternal Azul',
-  'Maternal Azul',
-  'Infantil 1 Azul',
-  'Infantil 2 Azul',
   '1º Ano Azul',
   '1º Ano Vermelho',
   '2º Ano Azul',
@@ -25,6 +21,10 @@ export const TURMAS_LIST: TurmaType[] = [
   '4º Ano Vermelho',
   '5º Ano Azul',
   '6º Ano Azul',
+  'Infantil 1 Azul',
+  'Infantil 2 Azul',
+  'Maternal Azul',
+  'Mini Maternal Azul',
 ];
 
 export const INITIAL_STUDENTS: Student[] = [];

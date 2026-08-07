@@ -29,7 +29,10 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   onBatchMarkPresent,
   onClearRecords,
 }) => {
-  const turmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+  const turmasList = useMemo(() => {
+    const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  }, [turmas]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('Natação');
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,22 +60,28 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   // Filter students who are enrolled in the selected activity (or all if TODAS) and turma
   const filteredStudents = useMemo(() => {
-    return students.filter((student) => {
-      // Activity filter
-      const matchesActivity =
-        selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
+    return students
+      .filter((student) => {
+        // Activity filter
+        const matchesActivity =
+          selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
 
-      // Turma filter
-      const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
+        // Turma filter
+        const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
 
-      // Search filter
-      const matchesSearch =
-        searchTerm.trim() === '' ||
-        student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.turma.toLowerCase().includes(searchTerm.toLowerCase());
+        // Search filter
+        const matchesSearch =
+          searchTerm.trim() === '' ||
+          student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          student.turma.toLowerCase().includes(searchTerm.toLowerCase());
 
-      return matchesActivity && matchesTurma && matchesSearch;
-    });
+        return matchesActivity && matchesTurma && matchesSearch;
+      })
+      .sort((a, b) => {
+        const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+        if (turmaCompare !== 0) return turmaCompare;
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
   }, [students, selectedActivity, selectedTurma, searchTerm]);
 
   // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`

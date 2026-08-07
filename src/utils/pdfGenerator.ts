@@ -219,7 +219,9 @@ export function generateTurmaPDFReport(
     format: 'a4',
   });
 
-  const turmaStudents = students.filter((s) => s.turma === turma);
+  const turmaStudents = students
+    .filter((s) => s.turma === turma)
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
   const turmaRecords = records.filter(
     (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)

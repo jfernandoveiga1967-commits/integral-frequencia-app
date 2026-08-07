@@ -36,7 +36,18 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   currentWeek,
   onDeleteTurma,
 }) => {
-  const turmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+  const turmasList = React.useMemo(() => {
+    const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  }, [turmas]);
+
+  const sortedStudentsForPdf = React.useMemo(() => {
+    return [...students].sort((a, b) => {
+      const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+      if (turmaCompare !== 0) return turmaCompare;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }, [students]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(students[0]?.id || '');
@@ -553,7 +564,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 onChange={(e) => setSelectedPdfStudentId(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500"
               >
-                {students.map((s) => (
+                {sortedStudentsForPdf.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.turma})
                   </option>

@@ -47,7 +47,7 @@ export default function App() {
   useEffect(() => {
     const loadedStudents = loadStudents();
     const loadedRecords = loadAttendanceRecords();
-    const loadedTurmas = loadTurmas();
+    const loadedTurmas = loadTurmas().sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
     setStudents(loadedStudents);
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
@@ -114,8 +114,9 @@ export default function App() {
 
     const unsubTurmas = subscribeTurmas((fsTurmas) => {
       if (fsTurmas.length > 0) {
-        setTurmas(fsTurmas);
-        saveTurmas(fsTurmas);
+        const sortedTurmas = [...fsTurmas].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+        setTurmas(sortedTurmas);
+        saveTurmas(sortedTurmas);
       } else if (isInitialTurmasSync && loadedTurmas.length > 0) {
         seedInitialDataToFirestore([], [], loadedTurmas);
       }
@@ -288,7 +289,7 @@ export default function App() {
   const handleAddTurma = (newTurmaName: string): boolean => {
     const name = newTurmaName.trim();
     if (!name || turmas.includes(name)) return false;
-    const updated = [...turmas, name];
+    const updated = [...turmas, name].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
     setTurmas(updated);
     saveTurmas(updated);
     saveTurmaToFirestore(name);

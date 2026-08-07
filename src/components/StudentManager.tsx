@@ -30,7 +30,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onAddTurma,
   onDeleteTurma,
 }) => {
-  const turmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+  const turmasList = React.useMemo(() => {
+    const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  }, [turmas]);
 
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
@@ -88,15 +91,23 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [batchFormError, setBatchFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
 
-  const filteredStudents = students.filter((student) => {
-    const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
-    const matchesActivity =
-      selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
-    const matchesSearch =
-      searchTerm.trim() === '' ||
-      student.name.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesTurma && matchesActivity && matchesSearch;
-  });
+  const filteredStudents = React.useMemo(() => {
+    return students
+      .filter((student) => {
+        const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
+        const matchesActivity =
+          selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
+        const matchesSearch =
+          searchTerm.trim() === '' ||
+          student.name.toLowerCase().includes(searchTerm.toLowerCase());
+        return matchesTurma && matchesActivity && matchesSearch;
+      })
+      .sort((a, b) => {
+        const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+        if (turmaCompare !== 0) return turmaCompare;
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+  }, [students, selectedTurma, selectedActivity, searchTerm]);
 
   const handleSingleAdd = (e: React.FormEvent) => {
     e.preventDefault();
