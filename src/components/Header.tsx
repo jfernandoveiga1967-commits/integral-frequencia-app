@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Layers, Library } from 'lucide-react';
+import { ClipboardCheck, Users, BarChart3, Library } from 'lucide-react';
 
 export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca';
 
@@ -22,8 +22,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between py-3 gap-3">
           {/* Logo & Main Title */}
           <div className="flex items-center space-x-3 select-none">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 shrink-0">
-              <Layers className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/30 shrink-0">
+              <img
+                src="/pwa-192.png"
+                alt="Ícone Frequência Integral"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center space-x-2 mb-0.5">
@@ -110,5 +114,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-
-
