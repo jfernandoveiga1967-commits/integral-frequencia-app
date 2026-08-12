@@ -3,8 +3,8 @@ import { UserProfile, UserRole } from '../types';
 export const PRESET_USERS: UserProfile[] = [
   {
     id: 'usr_coord_1',
-    name: 'Profa. Ana Clara',
-    email: 'coordenacao@crescer.edu.br',
+    name: 'Fernando Veiga',
+    email: 'jfernandoveiga1967@gmail.com',
     role: 'coordenador',
     cargoLabel: 'Coordenador (Administrador)',
     avatarColor: 'bg-amber-500',
@@ -46,7 +46,20 @@ export function getStoredUser(): UserProfile | null {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as UserProfile;
+    const user = JSON.parse(raw) as UserProfile;
+    // Migrate Ana Clara to Fernando Veiga if previously logged in
+    if (user.email === 'coordenacao@crescer.edu.br' || user.name.includes('Ana Clara')) {
+      const migratedUser: UserProfile = {
+        ...user,
+        name: 'Fernando Veiga',
+        email: 'jfernandoveiga1967@gmail.com',
+        role: 'coordenador',
+        cargoLabel: 'Coordenador (Administrador)',
+      };
+      saveStoredUser(migratedUser);
+      return migratedUser;
+    }
+    return user;
   } catch (err) {
     console.error('Error loading stored user profile:', err);
     return null;
@@ -69,7 +82,25 @@ export function getLocalUsersList(): UserProfile[] {
   try {
     const raw = localStorage.getItem(ALL_USERS_STORAGE_KEY);
     if (!raw) return PRESET_USERS;
-    const list = JSON.parse(raw) as UserProfile[];
+    let list = JSON.parse(raw) as UserProfile[];
+    // Replace Ana Clara with Fernando Veiga if present in stored user list
+    let updated = false;
+    list = list.map((u) => {
+      if (u.email === 'coordenacao@crescer.edu.br' || u.name.includes('Ana Clara')) {
+        updated = true;
+        return {
+          ...u,
+          name: 'Fernando Veiga',
+          email: 'jfernandoveiga1967@gmail.com',
+          role: 'coordenador',
+          cargoLabel: 'Coordenador (Administrador)',
+        };
+      }
+      return u;
+    });
+    if (updated) {
+      saveLocalUsersList(list);
+    }
     return list.length > 0 ? list : PRESET_USERS;
   } catch (err) {
     console.error('Error loading local users list:', err);

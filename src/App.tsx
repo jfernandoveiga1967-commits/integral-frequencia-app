@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile } from './types';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData, isMockStudent } from './utils/storageUtils';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, ActivityItem } from './types';
+import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
@@ -16,6 +16,7 @@ import {
   subscribeRecords,
   subscribeTurmas,
   subscribeUsers,
+  subscribeActivities,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -23,6 +24,8 @@ import {
   deleteTurmaFromFirestore,
   saveUserToFirestore,
   deleteUserFromFirestore,
+  saveActivityToFirestore,
+  deleteActivityFromFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
   deleteDoc,
@@ -33,6 +36,7 @@ import {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
   const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsersList());
+  const [activitiesList, setActivitiesList] = useState<ActivityItem[]>(() => loadActivities());
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
@@ -163,11 +167,23 @@ export default function App() {
       }
     });
 
+    const unsubActivities = subscribeActivities((fsActivities) => {
+      if (fsActivities.length > 0) {
+        setActivitiesList(fsActivities);
+        saveActivities(fsActivities);
+      } else {
+        // Seed default initial activities to Firestore
+        const defaultActs = loadActivities();
+        defaultActs.forEach((act) => saveActivityToFirestore(act));
+      }
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
       unsubTurmas();
       unsubUsers();
+      unsubActivities();
     };
   }, []);
 
@@ -426,6 +442,27 @@ export default function App() {
     deleteUserFromFirestore(userId);
   };
 
+  const handleSaveActivity = (activityToSave: ActivityItem) => {
+    const existingIdx = activitiesList.findIndex((a) => a.id === activityToSave.id);
+    let updatedActs: ActivityItem[];
+    if (existingIdx >= 0) {
+      updatedActs = [...activitiesList];
+      updatedActs[existingIdx] = activityToSave;
+    } else {
+      updatedActs = [...activitiesList, activityToSave];
+    }
+    setActivitiesList(updatedActs);
+    saveActivities(updatedActs);
+    saveActivityToFirestore(activityToSave);
+  };
+
+  const handleDeleteActivity = (activityId: string) => {
+    const updatedActs = activitiesList.filter((a) => a.id !== activityId);
+    setActivitiesList(updatedActs);
+    saveActivities(updatedActs);
+    deleteActivityFromFirestore(activityId);
+  };
+
   // Records count for the current week
   const weekRecordsCount = useMemo(() => {
     return records.filter(
@@ -468,6 +505,7 @@ export default function App() {
             students={students}
             records={records}
             turmas={turmas}
+            activitiesList={activitiesList}
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
@@ -483,6 +521,7 @@ export default function App() {
             students={students}
             records={records}
             turmas={turmas}
+            activitiesList={activitiesList}
             currentWeek={currentWeek}
             currentUser={currentUser}
             onAddStudent={handleAddStudent}
@@ -500,6 +539,7 @@ export default function App() {
             students={students}
             records={records}
             turmas={turmas}
+            activitiesList={activitiesList}
             currentWeek={currentWeek}
             onDeleteTurma={handleDeleteTurma}
           />
@@ -520,8 +560,11 @@ export default function App() {
           <UserManagement
             currentUser={currentUser}
             users={users}
+            activitiesList={activitiesList}
             onSaveUser={handleSaveUser}
             onDeleteUser={handleDeleteUser}
+            onSaveActivity={handleSaveActivity}
+            onDeleteActivity={handleDeleteActivity}
           />
         )}
       </main>

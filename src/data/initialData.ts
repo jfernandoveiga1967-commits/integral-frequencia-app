@@ -1,6 +1,6 @@
-import { ActivityType, TurmaType, Student } from '../types';
+import { ActivityItem, TurmaType, Student } from '../types';
 
-export const ACTIVITIES_LIST: { id: ActivityType; name: string; icon: string; description: string; defaultEquipment: string }[] = [
+export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Natação', name: 'Natação', icon: 'Waves', description: 'Atividade aquática na piscina do Integral', defaultEquipment: 'Maiô/Sunga, Touca e Óculos' },
   { id: 'Balé', name: 'Balé', icon: 'Sparkles', description: 'Expressão corporal e dança clássica', defaultEquipment: 'Colan, Sapatilha e Coque' },
   { id: 'Dança', name: 'Dança', icon: 'Music', description: 'Ritmos e consciência corporal', defaultEquipment: 'Uniforme de Dança / Tênis' },

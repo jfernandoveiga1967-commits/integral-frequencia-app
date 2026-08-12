@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { UserProfile, UserRole, ActivityType } from '../types';
-import { ACTIVITIES_LIST } from '../data/initialData';
+import { UserProfile, UserRole, ActivityType, ActivityItem } from '../types';
 import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
-import { ActivityBadge } from './ActivityBadge';
+import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import {
   ShieldCheck,
   GraduationCap,
@@ -22,33 +21,70 @@ import {
   Check,
   Info,
   Sparkles,
+  Plus,
+  BookOpen,
+  Cpu,
+  Palette,
+  Dumbbell,
+  Gamepad2,
+  Layers,
+  Award,
+  Trophy,
+  Activity as ActivityIcon,
+  Music,
+  Music2,
+  Waves,
 } from 'lucide-react';
 
 interface UserManagementProps {
   currentUser: UserProfile | null;
   users: UserProfile[];
+  activitiesList: ActivityItem[];
   onSaveUser: (user: UserProfile) => void;
   onDeleteUser: (userId: string) => void;
+  onSaveActivity: (activity: ActivityItem) => void;
+  onDeleteActivity: (activityId: string) => void;
 }
+
+const AVAILABLE_ICONS = [
+  { id: 'Waves', label: 'Natação / Água' },
+  { id: 'Sparkles', label: 'Balé / Brilho' },
+  { id: 'Music', label: 'Dança / Músicas' },
+  { id: 'Award', label: 'Judô / Lutas' },
+  { id: 'Trophy', label: 'Futebol / Esporte' },
+  { id: 'Activity', label: 'Ginástica / Fitness' },
+  { id: 'Music2', label: 'Instrumentos / Flauta' },
+  { id: 'Gamepad2', label: 'Xadrez / Mente' },
+  { id: 'Cpu', label: 'Robótica / Tech' },
+  { id: 'Palette', label: 'Artes / Pintura' },
+  { id: 'BookOpen', label: 'Teatro / Leitura' },
+  { id: 'Dumbbell', label: 'Treino / Atletismo' },
+];
 
 export const UserManagement: React.FC<UserManagementProps> = ({
   currentUser,
   users,
+  activitiesList,
   onSaveUser,
   onDeleteUser,
+  onSaveActivity,
+  onDeleteActivity,
 }) => {
   const isAdmin = isCoordenador(currentUser);
 
-  // Search & Filter state
+  // Sub-tab switcher state
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities'>('users');
+
+  // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
 
-  // Editing state
+  // User Editing state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
 
-  // Form State for Adding / Editing User
+  // User Form State
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('professor');
@@ -57,7 +93,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
 
-  // Success / Error Feedback Toast
+  // Activity Management State
+  const [editingActivity, setEditingActivity] = useState<ActivityItem | null>(null);
+  const [isNewActivityModalOpen, setIsNewActivityModalOpen] = useState(false);
+  const [activityToDelete, setActivityToDelete] = useState<ActivityItem | null>(null);
+
+  // Activity Form State
+  const [actName, setActName] = useState('');
+  const [actIcon, setActIcon] = useState('Sparkles');
+  const [actDescription, setActDescription] = useState('');
+  const [actDefaultEquipment, setActDefaultEquipment] = useState('');
+
+  // Toast Feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -65,7 +112,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
-  // If user is not admin
+  // Restrict access if not admin
   if (!isAdmin) {
     return (
       <div className="max-w-4xl mx-auto my-12 p-8 bg-white border border-slate-200 rounded-3xl shadow-sm text-center">
@@ -74,13 +121,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         </div>
         <h2 className="text-xl font-extrabold text-slate-800">Acesso Restrito ao Coordenador</h2>
         <p className="text-sm text-slate-600 mt-2 max-w-md mx-auto">
-          Apenas usuários com o cargo de <strong>Coordenador (Administrador)</strong> possuem permissão para gerenciar os cadastros, cargos e atribuições de atividades da equipe.
+          Apenas usuários com o cargo de <strong>Coordenador (Administrador)</strong> possuem permissão para gerenciar os cadastros de usuários, permissões e criar novas modalidades de atividades.
         </p>
       </div>
     );
   }
 
-  // Filtered Users List
+  // Filtered Users
   const filteredUsers = users.filter((u) => {
     const matchesSearch =
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -89,18 +136,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     return matchesSearch && matchesRole;
   });
 
-  // Role Statistics
+  // Stats
   const countCoord = users.filter((u) => u.role === 'coordenador').length;
   const countProf = users.filter((u) => u.role === 'professor').length;
   const countAux = users.filter((u) => u.role === 'auxiliar').length;
 
+  // Handlers for User Modal
   const handleOpenEditModal = (user: UserProfile) => {
     setEditingUser(user);
     setFormName(user.name);
     setFormEmail(user.email);
     setFormRole(user.role);
     setFormPin(user.pin || '1234');
-    setFormActivities(user.assignedActivities || ACTIVITIES_LIST.map((a) => a.id));
+    setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
   };
@@ -111,17 +159,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormEmail('');
     setFormRole('professor');
     setFormPin('1234');
-    setFormActivities(['Futebol', 'Natação']); // Default sample
+    setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setIsNewUserModalOpen(true);
   };
 
-  const toggleActivityInForm = (activity: ActivityType) => {
-    if (formActivities.includes(activity)) {
-      setFormActivities(formActivities.filter((a) => a !== activity));
+  const toggleActivityInForm = (activityId: string) => {
+    if (formActivities.includes(activityId)) {
+      setFormActivities(formActivities.filter((a) => a !== activityId));
     } else {
-      setFormActivities([...formActivities, activity]);
+      setFormActivities([...formActivities, activityId]);
     }
   };
 
@@ -161,7 +209,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     onSaveUser(updatedUser);
     setEditingUser(null);
     setIsNewUserModalOpen(false);
-    showToast(`Perfil de ${updatedUser.name} atualizado com sucesso em tempo real!`);
+    showToast(`Perfil de ${updatedUser.name} atualizado com sucesso!`);
   };
 
   const handleQuickRoleChange = (user: UserProfile, newRole: UserRole) => {
@@ -194,8 +242,55 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const confirmDeleteUser = () => {
     if (!userToDelete) return;
     onDeleteUser(userToDelete.id);
-    showToast(`Usuário ${userToDelete.name} removido do sistema.`);
+    showToast(`Usuário ${userToDelete.name} removido.`);
     setUserToDelete(null);
+  };
+
+  // Handlers for Activity Modal
+  const handleOpenNewActivityModal = () => {
+    setEditingActivity(null);
+    setActName('');
+    setActIcon('Sparkles');
+    setActDescription('');
+    setActDefaultEquipment('');
+    setIsNewActivityModalOpen(true);
+  };
+
+  const handleOpenEditActivityModal = (activity: ActivityItem) => {
+    setEditingActivity(activity);
+    setActName(activity.name);
+    setActIcon(activity.icon || 'Sparkles');
+    setActDescription(activity.description || '');
+    setActDefaultEquipment(activity.defaultEquipment || '');
+  };
+
+  const handleSaveActivitySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!actName.trim()) {
+      showToast('Digite o nome da atividade extracurricular.', 'error');
+      return;
+    }
+
+    const activityObj: ActivityItem = {
+      id: editingActivity ? editingActivity.id : actName.trim(),
+      name: actName.trim(),
+      icon: actIcon,
+      description: actDescription.trim() || `Modalidade de ${actName.trim()} no Programa Integral`,
+      defaultEquipment: actDefaultEquipment.trim() || 'Material necessário para a aula',
+      isCustom: true,
+    };
+
+    onSaveActivity(activityObj);
+    setEditingActivity(null);
+    setIsNewActivityModalOpen(false);
+    showToast(`Atividade "${activityObj.name}" salva com sucesso!`);
+  };
+
+  const confirmDeleteActivity = () => {
+    if (!activityToDelete) return;
+    onDeleteActivity(activityToDelete.id);
+    showToast(`Atividade "${activityToDelete.name}" removida.`);
+    setActivityToDelete(null);
   };
 
   return (
@@ -226,213 +321,293 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           <div>
             <div className="inline-flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-full text-amber-300 text-xs font-bold uppercase tracking-wider mb-2">
               <ShieldCheck className="w-4 h-4" />
-              <span>PAINEL DE ADMINISTRADOR • EM TEMPO REAL</span>
+              <span>PAINEL DE ADMINISTRADOR • FERNANDO VEIGA</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-              Gerenciamento de Usuários, E-mails e Permissões
+              Gerenciamento de Usuários e Modalidades
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
-              Altere cargos de e-mails cadastrados, atribua modalidades esportivas/culturais e configure permissões específicas para a equipe de monitores, professores e auxiliares.
+              Gerencie cadastros, e-mails e cargos da equipe, e crie ou personalize novas modalidades de atividades extracurriculares.
             </p>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={handleOpenNewUserModal}
+              className="px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center space-x-2"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Novo Usuário</span>
+            </button>
+
+            <button
+              onClick={handleOpenNewActivityModal}
+              className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Criar Nova Atividade</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Section Navigation Tabs */}
+        <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mt-6 max-w-md">
           <button
-            onClick={handleOpenNewUserModal}
-            className="px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center space-x-2 shrink-0"
+            onClick={() => setActiveSubTab('users')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              activeSubTab === 'users'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
           >
-            <UserPlus className="w-4 h-4" />
-            <span>Cadastrar Novo Usuário</span>
+            <Users className="w-4 h-4" />
+            <span>Usuários e Permissões ({users.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('activities')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              activeSubTab === 'activities'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Modalidades ({activitiesList.length})</span>
           </button>
         </div>
-
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800">
-          <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-              Total Cadastrados
-            </span>
-            <span className="text-xl font-extrabold text-white">{users.length}</span>
-          </div>
-
-          <div className="bg-amber-950/30 p-3 rounded-2xl border border-amber-500/20">
-            <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block">
-              Coordenadores (Admins)
-            </span>
-            <span className="text-xl font-extrabold text-amber-300">{countCoord}</span>
-          </div>
-
-          <div className="bg-indigo-950/30 p-3 rounded-2xl border border-indigo-500/20">
-            <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider block">
-              Monitores / Professores
-            </span>
-            <span className="text-xl font-extrabold text-indigo-300">{countProf}</span>
-          </div>
-
-          <div className="bg-emerald-950/30 p-3 rounded-2xl border border-emerald-500/20">
-            <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
-              Auxiliares
-            </span>
-            <span className="text-xl font-extrabold text-emerald-300">{countAux}</span>
-          </div>
-        </div>
       </div>
 
-      {/* Filters & Search Controls */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-        {/* Search */}
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por nome ou e-mail..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
+      {/* ================= SECTION 1: USERS & PERMISSIONS ================= */}
+      {activeSubTab === 'users' && (
+        <div className="space-y-6">
+          {/* Filters & Search Controls */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por nome ou e-mail..."
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
 
-        {/* Role Category Pills */}
-        <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-          {(['TODOS', 'coordenador', 'professor', 'auxiliar'] as const).map((r) => {
-            const labels: Record<string, string> = {
-              TODOS: 'Todos os Usuários',
-              coordenador: 'Coordenadores',
-              professor: 'Professores / Monitores',
-              auxiliar: 'Auxiliares',
-            };
+            <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+              {(['TODOS', 'coordenador', 'professor', 'auxiliar'] as const).map((r) => {
+                const labels: Record<string, string> = {
+                  TODOS: 'Todos os Usuários',
+                  coordenador: 'Coordenadores',
+                  professor: 'Professores / Monitores',
+                  auxiliar: 'Auxiliares',
+                };
 
-            const isSel = roleFilter === r;
-            return (
-              <button
-                key={r}
-                onClick={() => setRoleFilter(r)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  isSel
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {labels[r]}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Users List Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredUsers.length === 0 ? (
-          <div className="col-span-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
-            Nenhum usuário encontrado para os critérios selecionados.
+                const isSel = roleFilter === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setRoleFilter(r)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      isSel
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {labels[r]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        ) : (
-          filteredUsers.map((user) => {
-            const roleStyle = getRoleBadgeStyle(user.role);
-            const userActivities = user.assignedActivities || ACTIVITIES_LIST.map((a) => a.id);
 
-            return (
-              <div
-                key={user.id}
-                className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow relative flex flex-col justify-between space-y-4"
-              >
-                {/* Header info */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center space-x-3 min-w-0">
-                    <div
-                      className={`w-12 h-12 rounded-2xl ${
-                        user.avatarColor || 'bg-indigo-600'
-                      } flex items-center justify-center text-white font-extrabold text-base shrink-0 shadow-md`}
-                    >
-                      {user.name.charAt(0)}
+          {/* Users List Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredUsers.length === 0 ? (
+              <div className="col-span-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
+                Nenhum usuário encontrado para os critérios selecionados.
+              </div>
+            ) : (
+              filteredUsers.map((user) => {
+                const roleStyle = getRoleBadgeStyle(user.role);
+                const userActivities = user.assignedActivities || activitiesList.map((a) => a.id);
+
+                return (
+                  <div
+                    key={user.id}
+                    className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow relative flex flex-col justify-between space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div
+                          className={`w-12 h-12 rounded-2xl ${
+                            user.avatarColor || 'bg-indigo-600'
+                          } flex items-center justify-center text-white font-extrabold text-base shrink-0 shadow-md`}
+                        >
+                          {user.name.charAt(0)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <h3 className="text-base font-bold text-slate-900 truncate">{user.name}</h3>
+                            {currentUser?.id === user.id && (
+                              <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
+                                Você (Admin)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center text-xs text-slate-500 mt-0.5 truncate">
+                            <Mail className="w-3.5 h-3.5 text-slate-400 mr-1 shrink-0" />
+                            <span className="truncate">{user.email}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        <span
+                          className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-xl border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} inline-flex items-center space-x-1`}
+                        >
+                          {user.role === 'coordenador' && <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
+                          {user.role === 'professor' && <GraduationCap className="w-3.5 h-3.5 mr-1" />}
+                          {user.role === 'auxiliar' && <UserCheck className="w-3.5 h-3.5 mr-1" />}
+                          <span>{roleStyle.label}</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center space-x-2">
-                        <h3 className="text-base font-bold text-slate-900 truncate">{user.name}</h3>
-                        {currentUser?.id === user.id && (
-                          <span className="text-[10px] font-extrabold uppercase bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
-                            Você
-                          </span>
+
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                        <span>Modalidades Atribuídas ({userActivities.length}):</span>
+                        {user.role === 'coordenador' && (
+                          <span className="text-[10px] text-amber-600 font-semibold">(Acesso Total)</span>
                         )}
                       </div>
-                      <div className="flex items-center text-xs text-slate-500 mt-0.5 truncate">
-                        <Mail className="w-3.5 h-3.5 text-slate-400 mr-1 shrink-0" />
-                        <span className="truncate">{user.email}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {userActivities.length === 0 ? (
+                          <span className="text-xs text-slate-400 italic">Nenhuma modalidade atribuída</span>
+                        ) : (
+                          userActivities.map((act) => <ActivityBadge key={act} activity={act} size="sm" />)
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center space-x-2 w-full sm:w-auto">
+                        <span className="font-bold text-slate-500 text-[11px] uppercase">Alterar Cargo:</span>
+                        <select
+                          value={user.role}
+                          onChange={(e) => handleQuickRoleChange(user, e.target.value as UserRole)}
+                          className="bg-slate-100 border border-slate-200 font-bold text-slate-700 text-xs rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                        >
+                          <option value="coordenador">Coordenador (Admin)</option>
+                          <option value="professor">Monitor / Professor</option>
+                          <option value="auxiliar">Auxiliar</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                        <button
+                          onClick={() => handleOpenEditModal(user)}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar Permissões</span>
+                        </button>
+
+                        {currentUser?.id !== user.id && (
+                          <button
+                            onClick={() => setUserToDelete(user)}
+                            className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
+                            title="Remover usuário"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
-                  {/* Role Badge */}
-                  <div className="shrink-0">
-                    <span
-                      className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-xl border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} inline-flex items-center space-x-1`}
-                    >
-                      {user.role === 'coordenador' && <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
-                      {user.role === 'professor' && <GraduationCap className="w-3.5 h-3.5 mr-1" />}
-                      {user.role === 'auxiliar' && <UserCheck className="w-3.5 h-3.5 mr-1" />}
-                      <span>{roleStyle.label}</span>
-                    </span>
-                  </div>
-                </div>
+      {/* ================= SECTION 2: EXTRACURRICULAR ACTIVITIES LAYER ================= */}
+      {activeSubTab === 'activities' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">Camada de Gestão de Modalidades</h3>
+              <p className="text-xs text-slate-500">
+                Cadastre novas atividades para o diário de classe ou edite as especificações e materiais padrão.
+              </p>
+            </div>
+            <button
+              onClick={handleOpenNewActivityModal}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nova Atividade</span>
+            </button>
+          </div>
 
-                {/* Assigned Activities Section */}
-                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                    <span>Modalidades Atribuídas ({userActivities.length}):</span>
-                    {user.role === 'coordenador' && (
-                      <span className="text-[10px] text-amber-600 font-semibold">(Acesso a Todas)</span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {userActivities.length === 0 ? (
-                      <span className="text-xs text-slate-400 italic">Nenhuma modalidade atribuída</span>
-                    ) : (
-                      userActivities.map((act) => <ActivityBadge key={act} activity={act} size="sm" />)
-                    )}
-                  </div>
-                </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activitiesList.map((act) => {
+              const assignedProfs = users.filter((u) => u.assignedActivities?.includes(act.id));
 
-                {/* Permissions & Quick Role Changer */}
-                <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                  {/* Quick Role Dropdown / Selector */}
-                  <div className="flex items-center space-x-2 w-full sm:w-auto">
-                    <span className="font-bold text-slate-500 text-[11px] uppercase">Alterar Cargo:</span>
-                    <select
-                      value={user.role}
-                      onChange={(e) => handleQuickRoleChange(user, e.target.value as UserRole)}
-                      className="bg-slate-100 border border-slate-200 font-bold text-slate-700 text-xs rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                    >
-                      <option value="coordenador">Coordenador (Admin)</option>
-                      <option value="professor">Monitor / Professor</option>
-                      <option value="auxiliar">Auxiliar</option>
-                    </select>
+              return (
+                <div
+                  key={act.id}
+                  className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="lg" />
+                      {act.isCustom && (
+                        <span className="text-[10px] font-extrabold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
+                          Personalizada
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                      {act.description || 'Atividade extracurricular do Integral.'}
+                    </p>
+
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs space-y-1">
+                      <span className="font-bold text-slate-700 block">Equipamento / Material Padrão:</span>
+                      <span className="text-slate-600">{act.defaultEquipment || 'Sem equipamento específico'}</span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+                      <span>Professores Associados:</span>
+                      <span className="font-bold text-indigo-600">{assignedProfs.length} profissional(is)</span>
+                    </div>
                   </div>
 
-                  {/* Edit & Delete Action buttons */}
-                  <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
                     <button
-                      onClick={() => handleOpenEditModal(user)}
+                      onClick={() => handleOpenEditActivityModal(act)}
                       className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
-                      <span>Editar Permissões</span>
+                      <span>Editar</span>
                     </button>
 
-                    {currentUser?.id !== user.id && (
-                      <button
-                        onClick={() => setUserToDelete(user)}
-                        className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
-                        title="Remover usuário"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setActivityToDelete(act)}
+                      className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
+                      title="Excluir modalidade"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* MODAL: ADD / EDIT USER */}
       {(editingUser || isNewUserModalOpen) && (
@@ -459,7 +634,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             </div>
 
             <form onSubmit={handleSaveFormSubmit} className="space-y-4 text-xs">
-              {/* Name & Email */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -490,7 +664,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </div>
               </div>
 
-              {/* Role Selection */}
               <div>
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Cargo / Categoria de Acesso:
@@ -506,7 +679,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </select>
               </div>
 
-              {/* PIN Code */}
               <div>
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                   PIN de Acesso Direto (4 dígitos):
@@ -521,7 +693,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 />
               </div>
 
-              {/* Assign Extracurricular Activities */}
               <div className="pt-2 border-t border-slate-100">
                 <label className="block font-bold text-slate-800 uppercase tracking-wider mb-2">
                   Atribuir Modalidades Extracurriculares ao Usuário:
@@ -531,7 +702,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </p>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {ACTIVITIES_LIST.map((act) => {
+                  {activitiesList.map((act) => {
                     const isChecked = formActivities.includes(act.id);
                     return (
                       <button
@@ -544,7 +715,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
                         }`}
                       >
-                        <ActivityBadge activity={act.id} size="sm" />
+                        <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="sm" />
                         {isChecked && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
                       </button>
                     );
@@ -552,7 +723,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
                 <button
                   type="button"
@@ -570,7 +740,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center space-x-2"
                 >
                   <Save className="w-4 h-4" />
-                  <span>Salvar Permissões</span>
+                  <span>Salvar Usuário</span>
                 </button>
               </div>
             </form>
@@ -578,7 +748,123 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         </div>
       )}
 
-      {/* MODAL: DELETE CONFIRMATION */}
+      {/* MODAL: ADD / EDIT ACTIVITY */}
+      {(editingActivity || isNewActivityModalOpen) && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-fade-in my-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  {editingActivity ? 'Editar Atividade Extracurricular' : 'Criar Nova Atividade Extracurricular'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Adicione modalidades esportivas, artísticas ou culturais ao programa.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingActivity(null);
+                  setIsNewActivityModalOpen(false);
+                }}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveActivitySubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nome da Atividade / Modalidade:
+                </label>
+                <input
+                  type="text"
+                  value={actName}
+                  onChange={(e) => setActName(e.target.value)}
+                  placeholder="Ex: Xadrez, Teatro, Robótica, Karatê..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Ícone Representativo:
+                </label>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {AVAILABLE_ICONS.map((ic) => {
+                    const isSel = actIcon === ic.id;
+                    return (
+                      <button
+                        key={ic.id}
+                        type="button"
+                        onClick={() => setActIcon(ic.id)}
+                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-2 ${
+                          isSel
+                            ? 'bg-indigo-50 border-indigo-400 text-indigo-900 font-bold ring-2 ring-indigo-500/20'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {renderActivityIcon(ic.id)}
+                        <span className="text-[11px] truncate">{ic.label.split('/')[0]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Descrição da Modalidade:
+                </label>
+                <textarea
+                  value={actDescription}
+                  onChange={(e) => setActDescription(e.target.value)}
+                  placeholder="Descreva o objetivo ou dinâmica da aula..."
+                  rows={2}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Equipamento / Material Padrão Exigido:
+                </label>
+                <input
+                  type="text"
+                  value={actDefaultEquipment}
+                  onChange={(e) => setActDefaultEquipment(e.target.value)}
+                  placeholder="Ex: Tabuleiro de Xadrez e Caderno de Anotações"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingActivity(null);
+                    setIsNewActivityModalOpen(false);
+                  }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center space-x-2"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Salvar Atividade</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE USER CONFIRMATION */}
       {userToDelete && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-fade-in text-center">
@@ -587,7 +873,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             </div>
             <h3 className="text-lg font-extrabold text-slate-900">Remover Usuário?</h3>
             <p className="text-xs text-slate-600">
-              Tem certeza que deseja revogar o acesso do usuário <strong>{userToDelete.name}</strong> ({userToDelete.email})? Esta ação sincronizará em tempo real.
+              Tem certeza que deseja revogar o acesso do usuário <strong>{userToDelete.name}</strong> ({userToDelete.email})?
             </p>
 
             <div className="flex items-center justify-center space-x-3 pt-2">
@@ -602,6 +888,36 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer text-xs shadow-md shadow-rose-600/20"
               >
                 Sim, Remover Usuário
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE ACTIVITY CONFIRMATION */}
+      {activityToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-fade-in text-center">
+            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+              <Trash2 className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-extrabold text-slate-900">Excluir Atividade Extracurricular?</h3>
+            <p className="text-xs text-slate-600">
+              Tem certeza que deseja excluir a modalidade <strong>{activityToDelete.name}</strong>?
+            </p>
+
+            <div className="flex items-center justify-center space-x-3 pt-2">
+              <button
+                onClick={() => setActivityToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-100 cursor-pointer text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteActivity}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer text-xs shadow-md shadow-rose-600/20"
+              >
+                Sim, Excluir Modalidade
               </button>
             </div>
           </div>

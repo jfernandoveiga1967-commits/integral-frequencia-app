@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
@@ -10,6 +10,7 @@ interface StudentManagerProps {
   students: Student[];
   records?: AttendanceRecord[];
   turmas?: string[];
+  activitiesList?: ActivityItem[];
   currentWeek?: WeekInfo;
   currentUser?: UserProfile | null;
   onAddStudent: (student: Omit<Student, 'id'>) => void;
@@ -24,6 +25,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   students,
   records = [],
   turmas,
+  activitiesList = ACTIVITIES_LIST,
   currentWeek = { weekNumber: 32, year: 2026, startDate: '2026-08-03', endDate: '2026-08-07', label: 'Semana 32 (03/08 - 07/08)' },
   currentUser = null,
   onAddStudent,
@@ -33,6 +35,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onAddTurma,
   onDeleteTurma,
 }) => {
+  const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
   const isUserAuxiliar = isAuxiliar(currentUser);
   const userCanManageStudents = canManageStudents(currentUser);
   const userCanManageTurmas = canManageTurmas(currentUser);
@@ -317,7 +320,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               Atividades Extracurriculares do Aluno (Marque as aplicáveis):
             </label>
             <div className="flex flex-wrap gap-2">
-              {ACTIVITIES_LIST.map((act) => {
+              {activeActivities.map((act) => {
                 const isSelected = newActivities.includes(act.id);
                 return (
                   <button
@@ -402,7 +405,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 Atividades dessa Turma (Serão atribuídas a todos da lista):
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {ACTIVITIES_LIST.map((act) => {
+                {activeActivities.map((act) => {
                   const isSelected = batchActivities.includes(act.id);
                   return (
                     <button
@@ -527,7 +530,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 Atividades Extracurriculares:
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {ACTIVITIES_LIST.map((act) => {
+                {activeActivities.map((act) => {
                   const isChecked = editingStudent.activities.includes(act.id);
                   return (
                     <button
@@ -621,8 +624,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             onChange={(e) => setSelectedActivity(e.target.value as ActivityType | 'TODAS')}
             className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium"
           >
-            <option value="TODAS">Todas as Atividades</option>
-            {ACTIVITIES_LIST.map((a) => {
+            <option value="TODOS">Todas as Atividades</option>
+            {activeActivities.map((a) => {
               const count = students.filter((s) => s.activities.includes(a.id)).length;
               return (
                 <option key={a.id} value={a.id}>

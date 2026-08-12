@@ -62,6 +62,19 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name", "email", "role"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Extracurricular activity item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "icon": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 256 },
+        "defaultEquipment": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["id", "name"]
     }
   },
   "firestore": {
@@ -80,6 +93,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "Collection of registered users and roles"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Collection of extracurricular activities"
     }
   }
 }

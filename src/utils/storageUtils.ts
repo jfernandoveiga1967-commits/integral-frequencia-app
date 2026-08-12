@@ -1,10 +1,35 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus } from '../types';
-import { INITIAL_STUDENTS, TURMAS_LIST } from '../data/initialData';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem } from '../types';
+import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
 const TURMAS_KEY = 'integral_frequencia_turmas_v1';
+const ACTIVITIES_KEY = 'integral_frequencia_activities_v1';
+
+export function loadActivities(): ActivityItem[] {
+  try {
+    const data = localStorage.getItem(ACTIVITIES_KEY);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao carregar atividades do LocalStorage:', e);
+  }
+  saveActivities(ACTIVITIES_LIST);
+  return ACTIVITIES_LIST;
+}
+
+export function saveActivities(activities: ActivityItem[]): void {
+  try {
+    localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(activities));
+  } catch (e) {
+    console.error('Erro ao salvar atividades:', e);
+  }
+}
 
 export function loadTurmas(): string[] {
   try {

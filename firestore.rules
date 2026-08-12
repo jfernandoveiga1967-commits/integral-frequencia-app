@@ -36,6 +36,13 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    match /activities/{activityId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'name'])
+        && isNonEmptyString(request.resource.data.name, 128);
+      allow delete: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

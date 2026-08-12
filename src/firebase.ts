@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile } from './types';
+import { Student, AttendanceRecord, UserProfile, ActivityItem } from './types';
 
 export { doc, deleteDoc };
 
@@ -212,6 +212,63 @@ export async function saveUserToFirestore(user: UserProfile) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
+  }
+}
+
+export function subscribeActivities(
+  onData: (activities: ActivityItem[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'activities');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const list: ActivityItem[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.name) {
+          list.push({
+            id: data.id || data.name,
+            name: data.name,
+            icon: data.icon || 'Sparkles',
+            description: data.description || '',
+            defaultEquipment: data.defaultEquipment || '',
+            isCustom: data.isCustom !== undefined ? data.isCustom : true,
+          });
+        }
+      });
+      onData(list);
+    },
+    (error) => {
+      console.error('Error subscribing to activities:', error);
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'activities');
+    }
+  );
+}
+
+export async function saveActivityToFirestore(activity: ActivityItem) {
+  try {
+    const docRef = doc(db, 'activities', activity.id);
+    await setDoc(docRef, {
+      id: activity.id,
+      name: activity.name,
+      icon: activity.icon || 'Sparkles',
+      description: activity.description || '',
+      defaultEquipment: activity.defaultEquipment || '',
+      isCustom: activity.isCustom !== undefined ? activity.isCustom : true,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `activities/${activity.id}`);
+  }
+}
+
+export async function deleteActivityFromFirestore(activityId: string) {
+  try {
+    const docRef = doc(db, 'activities', activityId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `activities/${activityId}`);
   }
 }
 

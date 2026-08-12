@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, ActivityItem } from '../types';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
@@ -25,6 +25,7 @@ interface WeeklyReportProps {
   students: Student[];
   records: AttendanceRecord[];
   turmas?: string[];
+  activitiesList?: ActivityItem[];
   currentWeek: WeekInfo;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
@@ -33,9 +34,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   students,
   records,
   turmas,
+  activitiesList = ACTIVITIES_LIST,
   currentWeek,
   onDeleteTurma,
 }) => {
+  const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
   const turmasList = React.useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
@@ -71,7 +74,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const equipmentRecords = weekRecords.filter((r) => r.status === 'sem_equipamento');
 
   // Stats per activity
-  const activityStats = ACTIVITIES_LIST.map((act) => {
+  const activityStats = activeActivities.map((act) => {
     const actRecords = weekRecords.filter((r) => r.activity === act.id);
     const total = actRecords.length;
     const pres = actRecords.filter((r) => r.status === 'presente').length;

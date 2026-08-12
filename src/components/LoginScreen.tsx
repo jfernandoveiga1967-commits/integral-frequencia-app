@@ -95,9 +95,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       const result = await signInWithPopup(auth, provider);
       const googleUser = result.user;
       
-      // Map google email or ask for default role (default to Coordenador if email has coord, or Professor)
+      // Map google email or ask for default role (default to Coordenador if email is jfernandoveiga1967@gmail.com or admin/coord)
       let role: UserRole = 'professor';
-      if (googleUser.email?.includes('coord') || googleUser.email?.includes('admin')) {
+      if (
+        googleUser.email === 'jfernandoveiga1967@gmail.com' ||
+        googleUser.email?.includes('veiga') ||
+        googleUser.email?.includes('coord') ||
+        googleUser.email?.includes('admin')
+      ) {
         role = 'coordenador';
       }
 

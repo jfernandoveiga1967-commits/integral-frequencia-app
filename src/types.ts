@@ -1,11 +1,13 @@
-export type ActivityType = 
-  | 'Natação'
-  | 'Balé'
-  | 'Dança'
-  | 'Judô'
-  | 'Futebol'
-  | 'Ginástica'
-  | 'Flauta';
+export type ActivityType = string;
+
+export interface ActivityItem {
+  id: string; // e.g. 'Natação', 'Xadrez'
+  name: string;
+  icon: string; // Lucide icon identifier name
+  description: string;
+  defaultEquipment: string;
+  isCustom?: boolean;
+}
 
 export type TurmaType = string;
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
@@ -13,6 +13,7 @@ interface AttendanceSheetProps {
   students: Student[];
   records: AttendanceRecord[];
   turmas?: string[];
+  activitiesList?: ActivityItem[];
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
@@ -25,6 +26,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   students,
   records,
   turmas,
+  activitiesList = ACTIVITIES_LIST,
   currentWeek,
   selectedDate,
   currentUser = null,
@@ -33,6 +35,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   onClearRecords,
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
+  const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
 
   const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
@@ -282,7 +285,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
               Todas Atividades
             </button>
 
-            {ACTIVITIES_LIST.map((act) => {
+            {activeActivities.map((act) => {
               const isAssignedToUser = currentUser?.assignedActivities?.includes(act.id);
 
               return (

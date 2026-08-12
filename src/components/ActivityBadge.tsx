@@ -1,16 +1,18 @@
 import React from 'react';
 import { ActivityType } from '../types';
-import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2 } from 'lucide-react';
+import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2, BookOpen, Cpu, Palette, Dumbbell, Gamepad2, Layers } from 'lucide-react';
 
 interface ActivityBadgeProps {
   activity: ActivityType;
   showIcon?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  iconName?: string;
+  customEquipment?: string;
 }
 
 export const activityConfig: Record<
-  ActivityType,
+  string,
   { name: string; bg: string; border: string; text: string; badgeBg: string; icon: React.ReactNode; equipmentHint: string }
 > = {
   Natação: {
@@ -78,13 +80,56 @@ export const activityConfig: Record<
   },
 };
 
+export function renderActivityIcon(iconName?: string) {
+  switch (iconName) {
+    case 'Waves':
+      return <Waves className="w-4 h-4" />;
+    case 'Sparkles':
+      return <Sparkles className="w-4 h-4" />;
+    case 'Music':
+      return <Music className="w-4 h-4" />;
+    case 'Award':
+      return <Award className="w-4 h-4" />;
+    case 'Trophy':
+      return <Trophy className="w-4 h-4" />;
+    case 'Activity':
+      return <Activity className="w-4 h-4" />;
+    case 'Music2':
+      return <Music2 className="w-4 h-4" />;
+    case 'BookOpen':
+      return <BookOpen className="w-4 h-4" />;
+    case 'Cpu':
+      return <Cpu className="w-4 h-4" />;
+    case 'Palette':
+      return <Palette className="w-4 h-4" />;
+    case 'Dumbbell':
+      return <Dumbbell className="w-4 h-4" />;
+    case 'Gamepad2':
+      return <Gamepad2 className="w-4 h-4" />;
+    default:
+      return <Layers className="w-4 h-4" />;
+  }
+}
+
 export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
   activity,
   showIcon = true,
   size = 'md',
   className = '',
+  iconName,
+  customEquipment,
 }) => {
-  const config = activityConfig[activity] || activityConfig['Natação'];
+  const defaultConfig = activityConfig[activity];
+
+  const config = defaultConfig || {
+    name: activity,
+    bg: 'bg-cyan-50 hover:bg-cyan-100',
+    border: 'border-cyan-200',
+    text: 'text-cyan-800',
+    badgeBg: 'bg-cyan-100 text-cyan-900 border-cyan-300',
+    icon: renderActivityIcon(iconName),
+    equipmentHint: customEquipment || 'Material necessário para a atividade',
+  };
 
   const sizeClasses = {
     sm: 'text-xs px-2 py-0.5 space-x-1',
