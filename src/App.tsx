@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, ActivityItem } from './types';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
@@ -147,23 +148,33 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      if (fsUsers.length > 0) {
-        setUsers(fsUsers);
-        saveLocalUsersList(fsUsers);
-
-        // Real-time permission update: if current logged-in user is updated, update currentUser state!
-        if (currentUser) {
-          const updatedSelf = fsUsers.find((u) => u.id === currentUser.id || u.email.toLowerCase() === currentUser.email.toLowerCase());
-          if (updatedSelf) {
-            setCurrentUser(updatedSelf);
-            saveStoredUser(updatedSelf);
-          }
+      // Cleanup Marcos Silva if still present in Firestore
+      fsUsers.forEach((u) => {
+        if (u.id === 'usr_prof_1' || u.name.toLowerCase().includes('marcos silva') || u.email === 'marcos.professor@crescer.edu.br') {
+          deleteUserFromFirestore(u.id);
         }
-      } else {
-        // Seed default preset users to Firestore if collection is empty
-        PRESET_USERS.forEach((pu) => {
-          saveUserToFirestore(pu);
-        });
+      });
+
+      const cleanFsUsers = fsUsers.filter(
+        (u) => u.id !== 'usr_prof_1' && !u.name.toLowerCase().includes('marcos silva') && u.email !== 'marcos.professor@crescer.edu.br'
+      );
+
+      const merged = [...cleanFsUsers];
+      PRESET_USERS.forEach((pu) => {
+        if (!merged.some((u) => u.id === pu.id || (u.email && pu.email && u.email.toLowerCase() === pu.email.toLowerCase()))) {
+          merged.push(pu);
+        }
+      });
+      setUsers(merged);
+      saveLocalUsersList(merged);
+
+      // Real-time permission update: if current logged-in user is updated, update currentUser state!
+      if (currentUser) {
+        const updatedSelf = merged.find((u) => u.id === currentUser.id || (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase()));
+        if (updatedSelf) {
+          setCurrentUser(updatedSelf);
+          saveStoredUser(updatedSelf);
+        }
       }
     });
 
@@ -470,9 +481,9 @@ export default function App() {
     ).length;
   }, [records, currentWeek]);
 
-  // If user is not logged in, render the Login Screen
+  // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLogin} usersList={users} />;
   }
 
   return (

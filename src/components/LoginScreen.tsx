@@ -15,11 +15,29 @@ import {
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
+  usersList?: UserProfile[];
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, usersList = [] }) => {
   const [activeTab, setActiveTab] = useState<'quick' | 'credentials' | 'custom'>('quick');
-  const [selectedPreset, setSelectedPreset] = useState<UserProfile>(PRESET_USERS[0]);
+
+  // Combine provided usersList with PRESET_USERS, deduplicating by ID or email
+  const allRegisteredUsers = React.useMemo(() => {
+    const list = [...usersList];
+    PRESET_USERS.forEach((p) => {
+      if (!list.some((u) => u.id === p.id || (u.email && p.email && u.email.toLowerCase() === p.email.toLowerCase()))) {
+        list.push(p);
+      }
+    });
+    // Ensure Administrator (coordenador) is always placed first
+    return list.sort((a, b) => {
+      if (a.role === 'coordenador') return -1;
+      if (b.role === 'coordenador') return 1;
+      return 0;
+    });
+  }, [usersList]);
+
+  const [selectedPreset, setSelectedPreset] = useState<UserProfile>(allRegisteredUsers[0] || PRESET_USERS[0]);
   const [enteredPin, setEnteredPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
 
@@ -153,90 +171,80 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         {/* TAB 1: QUICK CATEGORY SELECTOR */}
         {activeTab === 'quick' && (
-          <div className="space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Clique em uma categoria para entrar instantaneamente:
-            </p>
-
-            {/* Coordenador / Admin */}
-            <div
-              onClick={() => handleQuickLogin(PRESET_USERS[0])}
-              className="p-4 rounded-2xl bg-slate-950 border border-amber-500/30 hover:border-amber-500/80 transition-all cursor-pointer group flex items-start space-x-4 hover:shadow-lg hover:shadow-amber-500/10"
-            >
-              <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30 group-hover:scale-105 transition-transform">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-white group-hover:text-amber-300 transition-colors">
-                    Coordenador (Administrador)
-                  </h3>
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                    Acesso Total
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Gestão completa de alunos, turmas, relatórios, biblioteca e configurações gerais.
-                </p>
-                <div className="mt-2.5 flex items-center text-xs font-semibold text-amber-400 group-hover:translate-x-1 transition-transform">
-                  <span>Entrar como {PRESET_USERS[0].name}</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                </div>
-              </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Usuários Cadastrados no Sistema ({allRegisteredUsers.length}):
+              </p>
+              <span className="text-[11px] text-slate-500">Clique para entrar/inspecionar</span>
             </div>
 
-            {/* Monitor / Professor */}
-            <div
-              onClick={() => handleQuickLogin(PRESET_USERS[1])}
-              className="p-4 rounded-2xl bg-slate-950 border border-indigo-500/30 hover:border-indigo-500/80 transition-all cursor-pointer group flex items-start space-x-4 hover:shadow-lg hover:shadow-indigo-500/10"
-            >
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-500/30 group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-white group-hover:text-indigo-300 transition-colors">
-                    Monitor / Professor
-                  </h3>
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">
-                    Docente
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Lançamento de chamadas diárias, inclusão de notas/equipamentos e gerenciamento de alunos.
-                </p>
-                <div className="mt-2.5 flex items-center text-xs font-semibold text-indigo-400 group-hover:translate-x-1 transition-transform">
-                  <span>Entrar como {PRESET_USERS[1].name}</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                </div>
-              </div>
-            </div>
+            <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
+              {allRegisteredUsers.map((usr) => {
+                let icon = <GraduationCap className="w-5 h-5" />;
+                let borderStyle = 'border-indigo-500/30 hover:border-indigo-500/80 hover:shadow-indigo-500/10';
+                let iconBg = 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30';
+                let badgeText = usr.cargoLabel || 'Docente';
+                let badgeBg = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+                let btnColor = 'text-indigo-400';
 
-            {/* Auxiliar */}
-            <div
-              onClick={() => handleQuickLogin(PRESET_USERS[2])}
-              className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/30 hover:border-emerald-500/80 transition-all cursor-pointer group flex items-start space-x-4 hover:shadow-lg hover:shadow-emerald-500/10"
-            >
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30 group-hover:scale-105 transition-transform">
-                <UserCheck className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-white group-hover:text-emerald-300 transition-colors">
-                    Auxiliar
-                  </h3>
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
-                    Suporte
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Lançamento de chamadas de frequência de campo e consulta às listagens de alunos.
-                </p>
-                <div className="mt-2.5 flex items-center text-xs font-semibold text-emerald-400 group-hover:translate-x-1 transition-transform">
-                  <span>Entrar como {PRESET_USERS[2].name}</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                </div>
-              </div>
+                if (usr.role === 'coordenador') {
+                  icon = <ShieldCheck className="w-5 h-5" />;
+                  borderStyle = 'border-amber-500/30 hover:border-amber-500/80 hover:shadow-amber-500/10';
+                  iconBg = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+                  badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                  btnColor = 'text-amber-400';
+                } else if (usr.role === 'auxiliar') {
+                  icon = <UserCheck className="w-5 h-5" />;
+                  borderStyle = 'border-emerald-500/30 hover:border-emerald-500/80 hover:shadow-emerald-500/10';
+                  iconBg = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+                  badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                  btnColor = 'text-emerald-400';
+                }
+
+                return (
+                  <div
+                    key={usr.id}
+                    onClick={() => handleQuickLogin(usr)}
+                    className={`p-3.5 rounded-2xl bg-slate-950 border ${borderStyle} transition-all cursor-pointer group flex items-start space-x-3.5 hover:shadow-lg`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center shrink-0 border group-hover:scale-105 transition-transform mt-0.5`}>
+                      {icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors truncate">
+                          {usr.name}
+                        </h3>
+                        <span className={`text-[9px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${badgeBg}`}>
+                          {badgeText}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {usr.email}
+                      </p>
+                      {usr.assignedActivities && usr.assignedActivities.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {usr.assignedActivities.slice(0, 4).map((act, idx) => (
+                            <span key={idx} className="text-[10px] bg-slate-900 border border-slate-800 text-slate-300 px-1.5 py-0.2 rounded-md font-medium">
+                              {act}
+                            </span>
+                          ))}
+                          {usr.assignedActivities.length > 4 && (
+                            <span className="text-[10px] text-slate-500 font-medium self-center">
+                              +{usr.assignedActivities.length - 4}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className={`mt-2 flex items-center text-xs font-semibold ${btnColor} group-hover:translate-x-1 transition-transform`}>
+                        <span>Acessar Diário de Classe como {usr.name.split(' ')[0]}</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -248,8 +256,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">
                 Selecione a Conta ou Perfil Autorizado:
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {PRESET_USERS.map((usr) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[220px] overflow-y-auto pr-1">
+                {allRegisteredUsers.map((usr) => {
                   const isSel = selectedPreset.id === usr.id;
                   return (
                     <button
@@ -265,8 +273,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                           : 'bg-slate-950/50 border-slate-800 text-slate-400 hover:bg-slate-950 hover:text-slate-200'
                       }`}
                     >
-                      <div className="text-xs font-bold text-slate-200">{usr.name}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">{usr.cargoLabel}</div>
+                      <div className="text-xs font-bold text-slate-200 truncate">{usr.name}</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 truncate">{usr.cargoLabel || usr.role}</div>
                     </button>
                   );
                 })}

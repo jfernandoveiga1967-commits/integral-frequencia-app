@@ -14,18 +14,6 @@ export const PRESET_USERS: UserProfile[] = [
     canMarkAttendance: true,
   },
   {
-    id: 'usr_prof_1',
-    name: 'Prof. Marcos Silva',
-    email: 'marcos.professor@crescer.edu.br',
-    role: 'professor',
-    cargoLabel: 'Monitor / Professor',
-    avatarColor: 'bg-indigo-600',
-    pin: '1234',
-    assignedActivities: ['Futebol', 'Judô', 'Natação'],
-    canManageStudents: true,
-    canMarkAttendance: true,
-  },
-  {
     id: 'usr_aux_1',
     name: 'Mariana Santos',
     email: 'mariana.auxiliar@crescer.edu.br',
@@ -47,6 +35,10 @@ export function getStoredUser(): UserProfile | null {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
     const user = JSON.parse(raw) as UserProfile;
+    if (user.id === 'usr_prof_1' || user.name.toLowerCase().includes('marcos silva') || user.email === 'marcos.professor@crescer.edu.br') {
+      saveStoredUser(null);
+      return null;
+    }
     // Migrate Ana Clara to Fernando Veiga if previously logged in
     if (user.email === 'coordenacao@crescer.edu.br' || user.name.includes('Ana Clara')) {
       const migratedUser: UserProfile = {
@@ -83,6 +75,8 @@ export function getLocalUsersList(): UserProfile[] {
     const raw = localStorage.getItem(ALL_USERS_STORAGE_KEY);
     if (!raw) return PRESET_USERS;
     let list = JSON.parse(raw) as UserProfile[];
+    // Remove Prof. Marcos Silva mock user
+    list = list.filter((u) => u.id !== 'usr_prof_1' && !u.name.toLowerCase().includes('marcos silva') && u.email !== 'marcos.professor@crescer.edu.br');
     // Replace Ana Clara with Fernando Veiga if present in stored user list
     let updated = false;
     list = list.map((u) => {
@@ -98,9 +92,7 @@ export function getLocalUsersList(): UserProfile[] {
       }
       return u;
     });
-    if (updated) {
-      saveLocalUsersList(list);
-    }
+    saveLocalUsersList(list);
     return list.length > 0 ? list : PRESET_USERS;
   } catch (err) {
     console.error('Error loading local users list:', err);
