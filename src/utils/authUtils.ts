@@ -9,6 +9,9 @@ export const PRESET_USERS: UserProfile[] = [
     cargoLabel: 'Coordenador (Administrador)',
     avatarColor: 'bg-amber-500',
     pin: '1234',
+    assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
+    canManageStudents: true,
+    canMarkAttendance: true,
   },
   {
     id: 'usr_prof_1',
@@ -18,6 +21,9 @@ export const PRESET_USERS: UserProfile[] = [
     cargoLabel: 'Monitor / Professor',
     avatarColor: 'bg-indigo-600',
     pin: '1234',
+    assignedActivities: ['Futebol', 'Judô', 'Natação'],
+    canManageStudents: true,
+    canMarkAttendance: true,
   },
   {
     id: 'usr_aux_1',
@@ -27,10 +33,14 @@ export const PRESET_USERS: UserProfile[] = [
     cargoLabel: 'Auxiliar',
     avatarColor: 'bg-emerald-600',
     pin: '1234',
+    assignedActivities: ['Balé', 'Dança', 'Ginástica'],
+    canManageStudents: false,
+    canMarkAttendance: true,
   },
 ];
 
 const AUTH_STORAGE_KEY = 'frequencia_integral_active_user';
+const ALL_USERS_STORAGE_KEY = 'frequencia_integral_all_users';
 
 export function getStoredUser(): UserProfile | null {
   try {
@@ -55,6 +65,26 @@ export function saveStoredUser(user: UserProfile | null): void {
   }
 }
 
+export function getLocalUsersList(): UserProfile[] {
+  try {
+    const raw = localStorage.getItem(ALL_USERS_STORAGE_KEY);
+    if (!raw) return PRESET_USERS;
+    const list = JSON.parse(raw) as UserProfile[];
+    return list.length > 0 ? list : PRESET_USERS;
+  } catch (err) {
+    console.error('Error loading local users list:', err);
+    return PRESET_USERS;
+  }
+}
+
+export function saveLocalUsersList(users: UserProfile[]): void {
+  try {
+    localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(users));
+  } catch (err) {
+    console.error('Error saving local users list:', err);
+  }
+}
+
 export function isCoordenador(user: UserProfile | null): boolean {
   return user?.role === 'coordenador';
 }
@@ -69,6 +99,7 @@ export function isAuxiliar(user: UserProfile | null): boolean {
 
 export function canManageStudents(user: UserProfile | null): boolean {
   if (!user) return false;
+  if (user.canManageStudents !== undefined) return user.canManageStudents;
   return user.role === 'coordenador' || user.role === 'professor';
 }
 

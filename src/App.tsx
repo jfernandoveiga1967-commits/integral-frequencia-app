@@ -2,23 +2,27 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile } from './types';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
-import { getStoredUser, saveStoredUser } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { StudentManager } from './components/StudentManager';
 import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
+import { UserManagement } from './components/UserManagement';
 import { LoginScreen } from './components/LoginScreen';
 import {
   subscribeStudents,
   subscribeRecords,
   subscribeTurmas,
+  subscribeUsers,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
   saveTurmaToFirestore,
   deleteTurmaFromFirestore,
+  saveUserToFirestore,
+  deleteUserFromFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
   deleteDoc,
@@ -28,6 +32,7 @@ import {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
+  const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsersList());
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
@@ -137,10 +142,32 @@ export default function App() {
       isInitialTurmasSync = false;
     });
 
+    const unsubUsers = subscribeUsers((fsUsers) => {
+      if (fsUsers.length > 0) {
+        setUsers(fsUsers);
+        saveLocalUsersList(fsUsers);
+
+        // Real-time permission update: if current logged-in user is updated, update currentUser state!
+        if (currentUser) {
+          const updatedSelf = fsUsers.find((u) => u.id === currentUser.id || u.email.toLowerCase() === currentUser.email.toLowerCase());
+          if (updatedSelf) {
+            setCurrentUser(updatedSelf);
+            saveStoredUser(updatedSelf);
+          }
+        }
+      } else {
+        // Seed default preset users to Firestore if collection is empty
+        PRESET_USERS.forEach((pu) => {
+          saveUserToFirestore(pu);
+        });
+      }
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
       unsubTurmas();
+      unsubUsers();
     };
   }, []);
 
@@ -372,6 +399,33 @@ export default function App() {
     setActiveTab(targetTab);
   };
 
+  const handleSaveUser = (userToSave: UserProfile) => {
+    const existingIdx = users.findIndex((u) => u.id === userToSave.id);
+    let updatedUsers: UserProfile[];
+    if (existingIdx >= 0) {
+      updatedUsers = [...users];
+      updatedUsers[existingIdx] = userToSave;
+    } else {
+      updatedUsers = [userToSave, ...users];
+    }
+    setUsers(updatedUsers);
+    saveLocalUsersList(updatedUsers);
+    saveUserToFirestore(userToSave);
+
+    // If currentUser was saved, update state & storage immediately
+    if (currentUser && currentUser.id === userToSave.id) {
+      setCurrentUser(userToSave);
+      saveStoredUser(userToSave);
+    }
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    const updatedUsers = users.filter((u) => u.id !== userId);
+    setUsers(updatedUsers);
+    saveLocalUsersList(updatedUsers);
+    deleteUserFromFirestore(userId);
+  };
+
   // Records count for the current week
   const weekRecordsCount = useMemo(() => {
     return records.filter(
@@ -458,6 +512,16 @@ export default function App() {
             records={records}
             currentWeek={currentWeek}
             onSelectWeek={handleSelectWeekFromLibrary}
+          />
+        )}
+
+        {/* Tab 5: Gerenciamento de Usuários (Apenas Coordenador/Admin) */}
+        {activeTab === 'usuarios' && (
+          <UserManagement
+            currentUser={currentUser}
+            users={users}
+            onSaveUser={handleSaveUser}
+            onDeleteUser={handleDeleteUser}
           />
         )}
       </main>

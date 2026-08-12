@@ -1,9 +1,9 @@
 import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck } from 'lucide-react';
+import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck, UserCog } from 'lucide-react';
 import { UserProfile } from '../types';
-import { getRoleBadgeStyle } from '../utils/authUtils';
+import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
 
-export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca';
+export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -159,6 +159,23 @@ export const Header: React.FC<HeaderProps> = ({
             <Library className="w-4 h-4 text-indigo-400" />
             <span>Biblioteca de Semanas</span>
           </button>
+
+          {isCoordenador(currentUser) && (
+            <button
+              onClick={() => setActiveTab('usuarios')}
+              className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'usuarios'
+                  ? 'bg-slate-800 text-amber-400 border-amber-500'
+                  : 'text-amber-300/80 hover:text-amber-200 hover:bg-slate-800/50 border-transparent'
+              }`}
+            >
+              <UserCog className="w-4 h-4 text-amber-400" />
+              <span>Gerenciamento de Usuários</span>
+              <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Admin
+              </span>
+            </button>
+          )}
         </div>
       </div>
     </header>

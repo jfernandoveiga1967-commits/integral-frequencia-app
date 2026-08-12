@@ -259,9 +259,17 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
         {/* Activity Chips Selector */}
         <div>
-          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-            1. Selecione a Atividade Extracurricular:
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              1. Selecione a Atividade Extracurricular:
+            </label>
+            {currentUser?.assignedActivities && currentUser.assignedActivities.length > 0 && (
+              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                <span>Atividades Atribuídas a Você: {currentUser.assignedActivities.length}</span>
+              </span>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setSelectedActivity('TODAS')}
@@ -273,17 +281,27 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             >
               Todas Atividades
             </button>
-            {ACTIVITIES_LIST.map((act) => (
-              <button
-                key={act.id}
-                onClick={() => setSelectedActivity(act.id)}
-                className={`transition-all cursor-pointer ${
-                  selectedActivity === act.id ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-1' : 'opacity-80 hover:opacity-100'
-                }`}
-              >
-                <ActivityBadge activity={act.id} size="md" />
-              </button>
-            ))}
+
+            {ACTIVITIES_LIST.map((act) => {
+              const isAssignedToUser = currentUser?.assignedActivities?.includes(act.id);
+
+              return (
+                <button
+                  key={act.id}
+                  onClick={() => setSelectedActivity(act.id)}
+                  className={`transition-all cursor-pointer relative ${
+                    selectedActivity === act.id
+                      ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-1'
+                      : 'opacity-80 hover:opacity-100'
+                  }`}
+                >
+                  <ActivityBadge activity={act.id} size="md" />
+                  {isAssignedToUser && (
+                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 border-2 border-white rounded-full shadow-xs" title="Modalidade atribuída a você" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 

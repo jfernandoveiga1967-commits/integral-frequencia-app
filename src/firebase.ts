@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord } from './types';
+import { Student, AttendanceRecord, UserProfile } from './types';
 
 export { doc, deleteDoc };
 
@@ -153,6 +153,75 @@ export function subscribeTurmas(
       if (onError) onError(error);
     }
   );
+}
+
+export function subscribeUsers(
+  onData: (users: UserProfile[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'users');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.id) {
+          list.push({
+            id: data.id,
+            name: data.name || '',
+            email: data.email || '',
+            role: data.role || 'professor',
+            cargoLabel: data.cargoLabel || 'Monitor / Professor',
+            avatarColor: data.avatarColor || 'bg-indigo-600',
+            pin: data.pin || '1234',
+            assignedActivities: Array.isArray(data.assignedActivities) ? data.assignedActivities : [],
+            assignedTurmas: Array.isArray(data.assignedTurmas) ? data.assignedTurmas : [],
+            canManageStudents: data.canManageStudents !== undefined ? data.canManageStudents : true,
+            canMarkAttendance: data.canMarkAttendance !== undefined ? data.canMarkAttendance : true,
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          });
+        }
+      });
+      onData(list);
+    },
+    (error) => {
+      console.error('Error subscribing to users:', error);
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'users');
+    }
+  );
+}
+
+export async function saveUserToFirestore(user: UserProfile) {
+  try {
+    const docRef = doc(db, 'users', user.id);
+    await setDoc(docRef, {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      cargoLabel: user.cargoLabel,
+      avatarColor: user.avatarColor || 'bg-indigo-600',
+      pin: user.pin || '1234',
+      assignedActivities: user.assignedActivities || [],
+      assignedTurmas: user.assignedTurmas || [],
+      canManageStudents: user.canManageStudents !== undefined ? user.canManageStudents : true,
+      canMarkAttendance: user.canMarkAttendance !== undefined ? user.canMarkAttendance : true,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
+  }
+}
+
+export async function deleteUserFromFirestore(userId: string) {
+  try {
+    const docRef = doc(db, 'users', userId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+  }
 }
 
 export async function saveStudentToFirestore(student: Student) {

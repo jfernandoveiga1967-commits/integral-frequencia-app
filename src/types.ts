@@ -55,4 +55,9 @@ export interface UserProfile {
   cargoLabel: string;
   avatarColor?: string;
   pin?: string;
+  assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user
+  assignedTurmas?: string[]; // Turmas assigned to this user (optional)
+  canManageStudents?: boolean;
+  canMarkAttendance?: boolean;
+  updatedAt?: string;
 }

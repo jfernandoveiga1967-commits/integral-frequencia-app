@@ -42,6 +42,26 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 64 }
       },
       "required": ["id", "name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile with role and activity assignments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 64 },
+        "cargoLabel": { "type": "string", "maxLength": 128 },
+        "avatarColor": { "type": "string", "maxLength": 64 },
+        "pin": { "type": "string", "maxLength": 16 },
+        "assignedActivities": { "type": "array" },
+        "assignedTurmas": { "type": "array" },
+        "canManageStudents": { "type": "boolean" },
+        "canMarkAttendance": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "email", "role"]
     }
   },
   "firestore": {
@@ -56,6 +76,10 @@
     "/turmas/{turmaId}": {
       "schema": "Turma",
       "description": "Collection of registered turmas"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of registered users and roles"
     }
   }
 }
