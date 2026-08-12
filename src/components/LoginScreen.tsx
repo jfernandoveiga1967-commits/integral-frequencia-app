@@ -7,14 +7,11 @@ import {
   UserCheck,
   KeyRound,
   LogIn,
-  School,
   ArrowRight,
   UserPlus,
   Lock,
   CheckCircle2,
 } from 'lucide-react';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { auth } from '../firebase';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -31,10 +28,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [customEmail, setCustomEmail] = useState('');
   const [customRole, setCustomRole] = useState<UserRole>('professor');
   const [customError, setCustomError] = useState<string | null>(null);
-
-  // Firebase auth state
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const handleQuickLogin = (user: UserProfile) => {
     onLogin(user);
@@ -87,49 +80,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     onLogin(newUser);
   };
 
-  const handleGoogleSignIn = async () => {
-    setIsGoogleLoading(true);
-    setGoogleError(null);
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const googleUser = result.user;
-      
-      // Map google email or ask for default role (default to Coordenador if email is jfernandoveiga1967@gmail.com or admin/coord)
-      let role: UserRole = 'professor';
-      if (
-        googleUser.email === 'jfernandoveiga1967@gmail.com' ||
-        googleUser.email?.includes('veiga') ||
-        googleUser.email?.includes('coord') ||
-        googleUser.email?.includes('admin')
-      ) {
-        role = 'coordenador';
-      }
-
-      const roleLabels: Record<UserRole, string> = {
-        coordenador: 'Coordenador (Administrador)',
-        professor: 'Monitor / Professor',
-        auxiliar: 'Auxiliar',
-      };
-
-      const userProfile: UserProfile = {
-        id: googleUser.uid,
-        name: googleUser.displayName || 'Usuário Google',
-        email: googleUser.email || '',
-        role: role,
-        cargoLabel: roleLabels[role],
-        avatarColor: 'bg-blue-600',
-      };
-
-      onLogin(userProfile);
-    } catch (err: any) {
-      console.warn('Google sign-in error:', err);
-      setGoogleError('Não foi possível autenticar com o Google no momento. Use o acesso direto por perfil.');
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden font-sans">
       {/* Subtle Background Glow */}
@@ -141,13 +91,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         
         {/* Header Branding */}
         <div className="text-center mb-8 select-none">
-          <div className="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full text-indigo-400 text-xs font-bold uppercase tracking-wider mb-3">
-            <School className="w-4 h-4 text-indigo-400" />
+          <div className="inline-flex items-center space-x-2 bg-red-500/10 border border-red-500/30 px-3.5 py-1 rounded-full text-red-500 text-xs font-extrabold uppercase tracking-wider mb-3">
             <span>COLÉGIO CRESCER • PROGRAMA INTEGRAL</span>
           </div>
           
           <div className="flex justify-center mb-3">
-            <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-xl shadow-indigo-500/20 ring-4 ring-slate-800">
+            <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-xl shadow-red-500/10 ring-4 ring-slate-800">
               <img src="/pwa-192.png" alt="Logo" className="w-full h-full object-cover" />
             </div>
           </div>
@@ -156,7 +105,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             Frequência Extracurricular
           </h1>
           <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
-            Identifique-se com sua categoria para acessar o diário de classe e relatórios.
+            Identifique-se para acessar o diário de classe.
           </p>
         </div>
 
@@ -297,7 +246,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           <form onSubmit={handlePinSubmit} className="space-y-5">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">
-                Selecione a Conta / Perfil:
+                Selecione a Conta ou Perfil Autorizado:
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {PRESET_USERS.map((usr) => {
@@ -326,7 +275,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
-                Senha / PIN de Acesso (4 dígitos):
+                Senha / PIN fornecido pelo Administrador:
               </label>
               <div className="relative">
                 <Lock className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -335,12 +284,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   maxLength={6}
                   value={enteredPin}
                   onChange={(e) => setEnteredPin(e.target.value)}
-                  placeholder="Digite ex: 1234"
+                  placeholder="Digite sua senha ou PIN"
                   className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-mono tracking-widest"
                 />
               </div>
               <p className="text-[11px] text-slate-500 mt-1">
-                Dica para teste rápido: use o PIN <span className="font-mono text-indigo-400">1234</span>
+                Insira o login e senha/PIN de acesso fornecidos pela coordenação. (Dica de teste: <span className="font-mono text-indigo-400">1234</span>)
               </p>
             </div>
 
@@ -355,7 +304,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2"
             >
               <LogIn className="w-5 h-5" />
-              <span>Confirmar e Entrar</span>
+              <span>Confirmar Credenciais e Entrar</span>
             </button>
           </form>
         )}
@@ -398,9 +347,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 onChange={(e) => setCustomRole(e.target.value as UserRole)}
                 className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold"
               >
-                <option value="coordenador">Coordenador (Administrador)</option>
                 <option value="professor">Monitor / Professor</option>
                 <option value="auxiliar">Auxiliar</option>
+                <option value="coordenador">Coordenador (Administrador)</option>
               </select>
             </div>
 
@@ -420,43 +369,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* Optional Google Login Option */}
-        <div className="mt-8 pt-6 border-t border-slate-800 flex flex-col items-center">
-          <p className="text-xs text-slate-500 mb-3 font-medium">Ou autentique-se via conta institucional Google:</p>
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isGoogleLoading}
-            className="w-full sm:w-auto px-6 py-2.5 bg-slate-950 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs sm:text-sm font-semibold text-slate-200 transition-all cursor-pointer flex items-center justify-center space-x-2.5"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path
-                fill="#EA4335"
-                d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.2 9 5 12 5z"
-              />
-              <path
-                fill="#4285F4"
-                d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9c-.2-.8-.4-1.6-.4-2.3z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.2-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
-              />
-            </svg>
-            <span>{isGoogleLoading ? 'Conectando ao Google...' : 'Entrar com Conta Google'}</span>
-          </button>
-
-          {googleError && (
-            <p className="text-[11px] text-amber-400/90 mt-2 text-center">{googleError}</p>
-          )}
-        </div>
-
         {/* Footer info */}
-        <div className="mt-6 text-center text-[11px] text-slate-500">
+        <div className="mt-8 pt-6 border-t border-slate-800 text-center text-[11px] text-slate-500">
           Colégio Crescer • Sistema de Controle de Frequência Extracurricular v2.5
         </div>
       </div>
