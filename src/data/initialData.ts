@@ -1,6 +1,7 @@
 import { ActivityItem, TurmaType, Student } from '../types';
 
 export const ACTIVITIES_LIST: ActivityItem[] = [
+  { id: 'Rotina', name: 'Rotina', icon: 'Clock', description: 'Rotina diária e acompanhamento obrigatório de todos os alunos do Integral', defaultEquipment: 'Agenda escolar / Material de uso diário' },
   { id: 'Natação', name: 'Natação', icon: 'Waves', description: 'Atividade aquática na piscina do Integral', defaultEquipment: 'Maiô/Sunga, Touca e Óculos' },
   { id: 'Balé', name: 'Balé', icon: 'Sparkles', description: 'Expressão corporal e dança clássica', defaultEquipment: 'Colan, Sapatilha e Coque' },
   { id: 'Dança', name: 'Dança', icon: 'Music', description: 'Ritmos e consciência corporal', defaultEquipment: 'Uniforme de Dança / Tênis' },

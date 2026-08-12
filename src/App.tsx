@@ -483,7 +483,7 @@ export default function App() {
 
   // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} usersList={users} />;
+    return <LoginScreen onLogin={handleLogin} onSaveUser={handleSaveUser} usersList={users} />;
   }
 
   return (

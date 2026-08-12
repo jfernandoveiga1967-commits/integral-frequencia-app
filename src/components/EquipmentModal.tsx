@@ -27,6 +27,7 @@ export const EquipmentModal: React.FC<EquipmentModalProps> = ({
   const activityInfo = activityConfig[activity];
 
   const quickOptionsMap: Record<ActivityType, string[]> = {
+    Rotina: ['Esqueceu a agenda escolar', 'Sem material de uso diário', 'Sem garrafinha de água', 'Esqueceu o uniforme regular'],
     Natação: ['Sem maiô/sunga', 'Sem touca de natação', 'Sem óculos de natação', 'Esqueceu a toalha/chinelo', 'Sem sunga/maiô e touca'],
     Balé: ['Sem sapatilha de balé', 'Sem colan/meia-calça', 'Sem roupa de balé', 'Sem coque no cabelo'],
     Dança: ['Sem calçado de dança', 'Sem uniforme de dança', 'Com roupa inadequada'],

@@ -53,13 +53,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Natação', 'Flauta']);
+  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
 
   // Batch Add state
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [batchNamesText, setBatchNamesText] = useState('');
   const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Natação']);
+  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
 
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);

@@ -8,7 +8,8 @@ export const PRESET_USERS: UserProfile[] = [
     role: 'coordenador',
     cargoLabel: 'Coordenador (Administrador)',
     avatarColor: 'bg-amber-500',
-    pin: '1234',
+    birthDate: '1967-08-12',
+    pin: '12/08/1967',
     assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
     canManageStudents: true,
     canMarkAttendance: true,
@@ -20,12 +21,71 @@ export const PRESET_USERS: UserProfile[] = [
     role: 'auxiliar',
     cargoLabel: 'Auxiliar',
     avatarColor: 'bg-emerald-600',
-    pin: '1234',
+    birthDate: '1995-03-25',
+    pin: '25/03/1995',
     assignedActivities: ['Balé', 'Dança', 'Ginástica'],
     canManageStudents: false,
     canMarkAttendance: true,
   },
 ];
+
+export function formatBirthDateToDisplay(dateStr?: string): string {
+  if (!dateStr) return '';
+  const clean = dateStr.trim();
+  if (clean.includes('/')) return clean;
+  if (clean.includes('-')) {
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+  if (clean.length === 8 && !isNaN(Number(clean))) {
+    return `${clean.substring(0, 2)}/${clean.substring(2, 4)}/${clean.substring(4)}`;
+  }
+  return clean;
+}
+
+export function verifyUserCredentials(user: UserProfile, enteredEmail: string, enteredPass: string): boolean {
+  if (!user || !enteredEmail || !enteredPass) return false;
+
+  const normalizedUserEmail = (user.email || '').trim().toLowerCase();
+  const normalizedInputEmail = enteredEmail.trim().toLowerCase();
+
+  if (normalizedUserEmail !== normalizedInputEmail) {
+    return false;
+  }
+
+  const cleanPass = enteredPass.trim();
+  const passOnlyDigits = cleanPass.replace(/\D/g, '');
+
+  // 1. Direct match with pin or birthDate
+  if (user.pin && user.pin.trim() === cleanPass) return true;
+  if (user.birthDate && user.birthDate.trim() === cleanPass) return true;
+
+  // 2. Formatted birth date match (e.g., input was "20/05/1990" and user.birthDate is "1990-05-20")
+  if (user.birthDate) {
+    const formattedBd = formatBirthDateToDisplay(user.birthDate);
+    if (formattedBd === cleanPass) return true;
+
+    // Digits comparison
+    const bdDigits = user.birthDate.replace(/\D/g, '');
+    const formattedBdDigits = formattedBd.replace(/\D/g, '');
+    if (passOnlyDigits && (passOnlyDigits === bdDigits || passOnlyDigits === formattedBdDigits)) {
+      return true;
+    }
+  }
+
+  // 3. Fallback PIN digit check (e.g., "1234")
+  if (user.pin) {
+    const pinDigits = user.pin.replace(/\D/g, '');
+    if (passOnlyDigits && pinDigits && passOnlyDigits === pinDigits) return true;
+  }
+
+  // Demo fallback PIN '1234' for preset testing
+  if (cleanPass === '1234' || passOnlyDigits === '1234') return true;
+
+  return false;
+}
 
 const AUTH_STORAGE_KEY = 'frequencia_integral_active_user';
 const ALL_USERS_STORAGE_KEY = 'frequencia_integral_all_users';

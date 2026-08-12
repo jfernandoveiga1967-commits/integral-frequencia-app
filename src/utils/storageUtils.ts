@@ -11,8 +11,20 @@ export function loadActivities(): ActivityItem[] {
   try {
     const data = localStorage.getItem(ACTIVITIES_KEY);
     if (data) {
-      const parsed = JSON.parse(data);
+      const parsed: ActivityItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        if (!parsed.some((a) => a.id === 'Rotina')) {
+          const rotinaItem = ACTIVITIES_LIST.find((a) => a.id === 'Rotina') || {
+            id: 'Rotina',
+            name: 'Rotina',
+            icon: 'Clock',
+            description: 'Rotina diária e acompanhamento obrigatório de todos os alunos do Integral',
+            defaultEquipment: 'Agenda escolar / Material de uso diário',
+          };
+          const updated = [rotinaItem, ...parsed];
+          saveActivities(updated);
+          return updated;
+        }
         return parsed;
       }
     }
@@ -69,11 +81,20 @@ export function loadStudents(): Student[] {
       let migrated = false;
       const newTurmas: TurmaType[] = ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul'];
       parsed = parsed.map((s, idx) => {
-        if ((s.turma as string) === 'Mini Maternal / Maternal / Infantil 1 Azul') {
+        let studentToUpdate = { ...s };
+        if ((studentToUpdate.turma as string) === 'Mini Maternal / Maternal / Infantil 1 Azul') {
           migrated = true;
-          return { ...s, turma: newTurmas[idx % 3] };
+          studentToUpdate.turma = newTurmas[idx % 3];
         }
-        return s;
+        // MANDATORY RULE: Every student must have 'Rotina' in activities
+        if (!Array.isArray(studentToUpdate.activities)) {
+          studentToUpdate.activities = ['Rotina'];
+          migrated = true;
+        } else if (!studentToUpdate.activities.includes('Rotina')) {
+          studentToUpdate.activities = ['Rotina', ...studentToUpdate.activities];
+          migrated = true;
+        }
+        return studentToUpdate;
       });
 
       // Filter out any mock/fictional model students

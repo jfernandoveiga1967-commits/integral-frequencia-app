@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityType } from '../types';
-import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2, BookOpen, Cpu, Palette, Dumbbell, Gamepad2, Layers } from 'lucide-react';
+import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2, BookOpen, Cpu, Palette, Dumbbell, Gamepad2, Layers, Clock } from 'lucide-react';
 
 interface ActivityBadgeProps {
   activity: ActivityType;
@@ -15,6 +15,15 @@ export const activityConfig: Record<
   string,
   { name: string; bg: string; border: string; text: string; badgeBg: string; icon: React.ReactNode; equipmentHint: string }
 > = {
+  Rotina: {
+    name: 'Rotina',
+    bg: 'bg-rose-50 hover:bg-rose-100',
+    border: 'border-rose-200',
+    text: 'text-rose-800',
+    badgeBg: 'bg-rose-100 text-rose-900 border-rose-300',
+    icon: <Clock className="w-4 h-4" />,
+    equipmentHint: 'Agenda escolar, uniforme regular e material de uso diário',
+  },
   Natação: {
     name: 'Natação',
     bg: 'bg-blue-50 hover:bg-blue-100',
@@ -82,6 +91,8 @@ export const activityConfig: Record<
 
 export function renderActivityIcon(iconName?: string) {
   switch (iconName) {
+    case 'Clock':
+      return <Clock className="w-4 h-4" />;
     case 'Waves':
       return <Waves className="w-4 h-4" />;
     case 'Sparkles':

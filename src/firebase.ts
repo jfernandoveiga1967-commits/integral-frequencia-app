@@ -81,11 +81,13 @@ export function subscribeStudents(
       const list: Student[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        const rawActivities = Array.isArray(data.activities) ? data.activities : [];
+        const activities = rawActivities.includes('Rotina') ? rawActivities : ['Rotina', ...rawActivities];
         list.push({
           id: docSnap.id,
           name: data.name || '',
           turma: data.turma || '',
-          activities: Array.isArray(data.activities) ? data.activities : [],
+          activities,
         });
       });
       onData(list);
@@ -174,6 +176,7 @@ export function subscribeUsers(
             role: data.role || 'professor',
             cargoLabel: data.cargoLabel || 'Monitor / Professor',
             avatarColor: data.avatarColor || 'bg-indigo-600',
+            birthDate: data.birthDate || '',
             pin: data.pin || '1234',
             assignedActivities: Array.isArray(data.assignedActivities) ? data.assignedActivities : [],
             assignedTurmas: Array.isArray(data.assignedTurmas) ? data.assignedTurmas : [],
@@ -203,6 +206,7 @@ export async function saveUserToFirestore(user: UserProfile) {
       role: user.role,
       cargoLabel: user.cargoLabel,
       avatarColor: user.avatarColor || 'bg-indigo-600',
+      birthDate: user.birthDate || '',
       pin: user.pin || '1234',
       assignedActivities: user.assignedActivities || [],
       assignedTurmas: user.assignedTurmas || [],
@@ -283,12 +287,14 @@ export async function deleteUserFromFirestore(userId: string) {
 
 export async function saveStudentToFirestore(student: Student) {
   try {
+    const acts = Array.isArray(student.activities) ? student.activities : [];
+    const activities = acts.includes('Rotina') ? acts : ['Rotina', ...acts];
     const docRef = doc(db, 'students', student.id);
     await setDoc(docRef, {
       id: student.id,
       name: student.name,
       turma: student.turma,
-      activities: student.activities,
+      activities,
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `students/${student.id}`);

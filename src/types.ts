@@ -56,6 +56,7 @@ export interface UserProfile {
   role: UserRole;
   cargoLabel: string;
   avatarColor?: string;
+  birthDate?: string; // YYYY-MM-DD or DD/MM/YYYY
   pin?: string;
   assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user
   assignedTurmas?: string[]; // Turmas assigned to this user (optional)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole, ActivityType, ActivityItem } from '../types';
-import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
+import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay } from '../utils/authUtils';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import {
   ShieldCheck,
@@ -87,6 +87,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // User Form State
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formBirthDate, setFormBirthDate] = useState('1990-01-01');
   const [formRole, setFormRole] = useState<UserRole>('professor');
   const [formPin, setFormPin] = useState('1234');
   const [formActivities, setFormActivities] = useState<ActivityType[]>([]);
@@ -146,6 +147,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingUser(user);
     setFormName(user.name);
     setFormEmail(user.email);
+    setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
     setFormPin(user.pin || '1234');
     setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
@@ -157,6 +159,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingUser(null);
     setFormName('');
     setFormEmail('');
+    setFormBirthDate('1995-05-20');
     setFormRole('professor');
     setFormPin('1234');
     setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
@@ -179,6 +182,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       showToast('Preencha o nome e o e-mail do usuário.', 'error');
       return;
     }
+    if (!formBirthDate) {
+      showToast('Informe a data de nascimento do usuário.', 'error');
+      return;
+    }
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -192,6 +199,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       auxiliar: 'bg-emerald-600',
     };
 
+    const formattedPass = formatBirthDateToDisplay(formBirthDate);
+
     const updatedUser: UserProfile = {
       id: editingUser ? editingUser.id : 'usr_' + Date.now(),
       name: formName.trim(),
@@ -199,7 +208,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       role: formRole,
       cargoLabel: roleLabels[formRole],
       avatarColor: roleColors[formRole],
-      pin: formPin.trim() || '1234',
+      birthDate: formBirthDate,
+      pin: formattedPass || formBirthDate,
       assignedActivities: formActivities,
       canManageStudents: formRole === 'auxiliar' ? formCanManageStudents : true,
       canMarkAttendance: formCanMarkAttendance,
@@ -459,6 +469,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <Mail className="w-3.5 h-3.5 text-slate-400 mr-1 shrink-0" />
                             <span className="truncate">{user.email}</span>
                           </div>
+                          <div className="flex items-center text-[11px] text-amber-700 font-semibold mt-1">
+                            <KeyRound className="w-3 h-3 text-amber-600 mr-1 shrink-0" />
+                            <span>Senha (Data Nasc.): <strong className="font-mono text-slate-900">{formatBirthDateToDisplay(user.birthDate) || user.pin || 'Não cadastrada'}</strong></span>
+                          </div>
                         </div>
                       </div>
 
@@ -510,7 +524,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
-                          <span>Editar Permissões</span>
+                          <span>Editar Dados</span>
                         </button>
 
                         {currentUser?.id !== user.id && (
@@ -679,18 +693,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  PIN de Acesso Direto (4 dígitos):
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-1.5">
+                <label className="block font-extrabold text-amber-900 uppercase tracking-wider text-[11px] flex items-center space-x-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Data de Nascimento (Senha de Acesso):</span>
                 </label>
                 <input
-                  type="password"
-                  maxLength={6}
-                  value={formPin}
-                  onChange={(e) => setFormPin(e.target.value)}
-                  placeholder="Ex: 1234"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  type="date"
+                  value={formBirthDate}
+                  onChange={(e) => setFormBirthDate(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-white border border-amber-300 rounded-xl text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
+                  required
                 />
+                <p className="text-[11px] text-amber-800 font-medium leading-relaxed pt-0.5">
+                  🔑 <strong>Regra do Sistema:</strong> A data de nascimento será automaticamente a senha de acesso do usuário no app (Senha definida: <span className="font-mono font-bold text-amber-900">{formatBirthDateToDisplay(formBirthDate) || 'DD/MM/AAAA'}</span>).
+                </p>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
