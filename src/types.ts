@@ -44,3 +44,15 @@ export interface WeekInfo {
   endDate: string; // YYYY-MM-DD
   label: string; // e.g., "Semana 32 (03/08/2026 a 07/08/2026)"
 }
+
+export type UserRole = 'coordenador' | 'professor' | 'auxiliar';
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  cargoLabel: string;
+  avatarColor?: string;
+  pin?: string;
+}

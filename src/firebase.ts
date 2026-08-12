@@ -52,18 +52,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn('Firestore notice (offline or sync delay):', JSON.stringify(errInfo));
 }
 
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(db, '_connection_test', 'ping'));
+    const pingPromise = getDocFromServer(doc(db, '_connection_test', 'ping'));
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Connection timeout')), 3500)
+    );
+    await Promise.race([pingPromise, timeoutPromise]);
     return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is offline or database ping timed out.');
-    }
+  } catch {
     return false;
   }
 }

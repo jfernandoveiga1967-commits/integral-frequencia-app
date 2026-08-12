@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile } from './types';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
+import { getStoredUser, saveStoredUser } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { StudentManager } from './components/StudentManager';
 import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
+import { LoginScreen } from './components/LoginScreen';
 import {
   subscribeStudents,
   subscribeRecords,
@@ -25,11 +27,23 @@ import {
 } from './firebase';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('frequencia');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
+
+  const handleLogin = (user: UserProfile) => {
+    setCurrentUser(user);
+    saveStoredUser(user);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    saveStoredUser(null);
+  };
+
 
   // Initial week and date setup
   const initialDateObj = new Date();
@@ -365,6 +379,11 @@ export default function App() {
     ).length;
   }, [records, currentWeek]);
 
+  // If user is not logged in, render the Login Screen
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans antialiased flex flex-col">
       {/* Top Header */}
@@ -373,6 +392,8 @@ export default function App() {
         setActiveTab={setActiveTab}
         totalStudents={students.length}
         totalRecordsThisWeek={weekRecordsCount}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Main Container */}
@@ -395,6 +416,7 @@ export default function App() {
             turmas={turmas}
             currentWeek={currentWeek}
             selectedDate={selectedDate}
+            currentUser={currentUser}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}
@@ -408,6 +430,7 @@ export default function App() {
             records={records}
             turmas={turmas}
             currentWeek={currentWeek}
+            currentUser={currentUser}
             onAddStudent={handleAddStudent}
             onBatchAddStudents={handleBatchAddStudents}
             onUpdateStudent={handleUpdateStudent}

@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { getWeekDays } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap } from 'lucide-react';
+import { getRoleBadgeStyle } from '../utils/authUtils';
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -14,6 +15,7 @@ interface AttendanceSheetProps {
   turmas?: string[];
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
+  currentUser?: UserProfile | null;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
@@ -25,10 +27,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   turmas,
   currentWeek,
   selectedDate,
+  currentUser = null,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
 }) => {
+  const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
+
   const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));

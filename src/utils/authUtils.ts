@@ -1,0 +1,109 @@
+import { UserProfile, UserRole } from '../types';
+
+export const PRESET_USERS: UserProfile[] = [
+  {
+    id: 'usr_coord_1',
+    name: 'Profa. Ana Clara',
+    email: 'coordenacao@crescer.edu.br',
+    role: 'coordenador',
+    cargoLabel: 'Coordenador (Administrador)',
+    avatarColor: 'bg-amber-500',
+    pin: '1234',
+  },
+  {
+    id: 'usr_prof_1',
+    name: 'Prof. Marcos Silva',
+    email: 'marcos.professor@crescer.edu.br',
+    role: 'professor',
+    cargoLabel: 'Monitor / Professor',
+    avatarColor: 'bg-indigo-600',
+    pin: '1234',
+  },
+  {
+    id: 'usr_aux_1',
+    name: 'Mariana Santos',
+    email: 'mariana.auxiliar@crescer.edu.br',
+    role: 'auxiliar',
+    cargoLabel: 'Auxiliar',
+    avatarColor: 'bg-emerald-600',
+    pin: '1234',
+  },
+];
+
+const AUTH_STORAGE_KEY = 'frequencia_integral_active_user';
+
+export function getStoredUser(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as UserProfile;
+  } catch (err) {
+    console.error('Error loading stored user profile:', err);
+    return null;
+  }
+}
+
+export function saveStoredUser(user: UserProfile | null): void {
+  try {
+    if (!user) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    } else {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    }
+  } catch (err) {
+    console.error('Error saving active user profile:', err);
+  }
+}
+
+export function isCoordenador(user: UserProfile | null): boolean {
+  return user?.role === 'coordenador';
+}
+
+export function isProfessor(user: UserProfile | null): boolean {
+  return user?.role === 'professor';
+}
+
+export function isAuxiliar(user: UserProfile | null): boolean {
+  return user?.role === 'auxiliar';
+}
+
+export function canManageStudents(user: UserProfile | null): boolean {
+  if (!user) return false;
+  return user.role === 'coordenador' || user.role === 'professor';
+}
+
+export function canManageTurmas(user: UserProfile | null): boolean {
+  if (!user) return false;
+  return user.role === 'coordenador';
+}
+
+export function canResetSystem(user: UserProfile | null): boolean {
+  if (!user) return false;
+  return user.role === 'coordenador';
+}
+
+export function getRoleBadgeStyle(role: UserRole): { bg: string; text: string; border: string; label: string } {
+  switch (role) {
+    case 'coordenador':
+      return {
+        bg: 'bg-amber-500/15',
+        text: 'text-amber-300',
+        border: 'border-amber-500/30',
+        label: 'Coordenador (Admin)',
+      };
+    case 'professor':
+      return {
+        bg: 'bg-indigo-500/15',
+        text: 'text-indigo-300',
+        border: 'border-indigo-500/30',
+        label: 'Monitor / Professor',
+      };
+    case 'auxiliar':
+      return {
+        bg: 'bg-emerald-500/15',
+        text: 'text-emerald-300',
+        border: 'border-emerald-500/30',
+        label: 'Auxiliar',
+      };
+  }
+}

@@ -1,5 +1,7 @@
 import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Library } from 'lucide-react';
+import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck } from 'lucide-react';
+import { UserProfile } from '../types';
+import { getRoleBadgeStyle } from '../utils/authUtils';
 
 export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca';
 
@@ -8,6 +10,8 @@ interface HeaderProps {
   setActiveTab: (tab: TabType) => void;
   totalStudents: number;
   totalRecordsThisWeek: number;
+  currentUser: UserProfile | null;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,11 +19,27 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   totalStudents,
   totalRecordsThisWeek,
+  currentUser,
+  onLogout,
 }) => {
+  const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
+
+  const renderRoleIcon = () => {
+    if (!currentUser) return null;
+    switch (currentUser.role) {
+      case 'coordenador':
+        return <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />;
+      case 'professor':
+        return <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />;
+      case 'auxiliar':
+        return <UserCheck className="w-3.5 h-3.5 text-emerald-400" />;
+    }
+  };
+
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between py-3 gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between py-3 gap-3">
           {/* Logo & Main Title */}
           <div className="flex items-center space-x-3 select-none">
             <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/30 shrink-0">
@@ -35,15 +55,45 @@ export const Header: React.FC<HeaderProps> = ({
                   Programa Integral • COLÉGIO CRESCER
                 </span>
               </div>
-              <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-white leading-tight">
+              <h1 className="text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
                 Frequência em Atividades Extracurriculares
               </h1>
             </div>
           </div>
 
-          {/* Header Stats */}
-          <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2 md:pt-0 select-none">
-            <div className="flex items-center space-x-4 text-xs text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+          {/* User Badge & Header Stats */}
+          <div className="flex flex-wrap items-center justify-between lg:justify-end gap-3 border-t lg:border-t-0 border-slate-800 pt-2 lg:pt-0 select-none">
+            {/* Active User Card */}
+            {currentUser && roleStyle && (
+              <div className="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm">
+                <div className={`w-7 h-7 rounded-lg ${currentUser.avatarColor || 'bg-indigo-600'} flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-inner`}>
+                  {currentUser.name.charAt(0)}
+                </div>
+                <div className="min-w-0 text-left">
+                  <div className="text-xs font-bold text-white truncate max-w-[140px] sm:max-w-[180px] leading-tight">
+                    {currentUser.name}
+                  </div>
+                  <div className="flex items-center space-x-1 mt-0.5">
+                    {renderRoleIcon()}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
+                      {roleStyle.label}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  title="Trocar Perfil / Sair"
+                  className="ml-2 p-1.5 rounded-lg bg-slate-700/60 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 transition-colors cursor-pointer border border-slate-600/50"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Stats Counter */}
+            <div className="flex items-center space-x-3 text-xs text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
               <div>
                 <span className="text-slate-400">Total Alunos: </span>
                 <span className="font-bold text-indigo-300">{totalStudents}</span>
