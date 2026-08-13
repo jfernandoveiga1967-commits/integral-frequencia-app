@@ -19,6 +19,7 @@ import {
   FileText,
   UserCheck,
   Users,
+  Clock,
 } from 'lucide-react';
 
 interface WeeklyReportProps {
@@ -64,11 +65,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   const totalRecords = weekRecords.length;
   const presenteCount = weekRecords.filter((r) => r.status === 'presente').length;
+  const saidaAntecipadaCount = weekRecords.filter((r) => r.status === 'saida_antecipada').length;
   const faltaCount = weekRecords.filter((r) => r.status === 'falta').length;
   const saudeCount = weekRecords.filter((r) => r.status === 'saude').length;
   const semEquipamentoCount = weekRecords.filter((r) => r.status === 'sem_equipamento').length;
 
-  const presenceRate = totalRecords > 0 ? Math.round((presenteCount / totalRecords) * 100) : 0;
+  // Saída antecipada counts as valid presence for rate percentage
+  const validPresences = presenteCount + saidaAntecipadaCount;
+  const presenceRate = totalRecords > 0 ? Math.round((validPresences / totalRecords) * 100) : 0;
 
   // Equipment missing records
   const equipmentRecords = weekRecords.filter((r) => r.status === 'sem_equipamento');
@@ -78,15 +82,17 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     const actRecords = weekRecords.filter((r) => r.activity === act.id);
     const total = actRecords.length;
     const pres = actRecords.filter((r) => r.status === 'presente').length;
+    const saidaAnt = actRecords.filter((r) => r.status === 'saida_antecipada').length;
     const falta = actRecords.filter((r) => r.status === 'falta').length;
     const saude = actRecords.filter((r) => r.status === 'saude').length;
     const semEquip = actRecords.filter((r) => r.status === 'sem_equipamento').length;
-    const rate = total > 0 ? Math.round((pres / total) * 100) : 0;
+    const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
 
     return {
       activity: act.id,
       total,
       pres,
+      saidaAnt,
       falta,
       saude,
       semEquip,
@@ -103,15 +109,17 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     );
     const total = turmaRecords.length;
     const pres = turmaRecords.filter((r) => r.status === 'presente').length;
+    const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
     const falta = turmaRecords.filter((r) => r.status === 'falta').length;
     const saude = turmaRecords.filter((r) => r.status === 'saude').length;
     const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
-    const rate = total > 0 ? Math.round((pres / total) * 100) : 0;
+    const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
 
     return {
       turma,
       total,
       pres,
+      saidaAnt,
       falta,
       saude,
       semEquip,
@@ -134,6 +142,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       const statusLabel =
         r.status === 'presente'
           ? 'Presente'
+          : r.status === 'saida_antecipada'
+          ? `Saida Antecipada (${r.exitTime || 'Sem horario'})`
           : r.status === 'falta'
           ? 'Falta'
           : r.status === 'saude'
@@ -221,7 +231,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       </div>
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Card 1: Presença Geral */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
@@ -235,13 +245,30 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-slate-900">{presenceRate}%</span>
             <span className="text-xs text-emerald-700 font-semibold">
-              ({presenteCount} presenças)
+              ({validPresences} presenças)
             </span>
           </div>
           <p className="text-[11px] text-slate-400 mt-1">Total de chamadas: {totalRecords}</p>
         </div>
 
-        {/* Card 2: Falta de Equipamento / Flauta */}
+        {/* Card 2: Saída Antecipada */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+              Saída Antecipada
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+              <Clock className="w-5 h-5 text-amber-700" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline space-x-2">
+            <span className="text-3xl font-extrabold text-amber-900">{saidaAntecipadaCount}</span>
+            <span className="text-xs text-amber-800 font-semibold">ocorrências</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Horário de saída registrado</p>
+        </div>
+
+        {/* Card 3: Falta de Equipamento / Flauta */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
@@ -260,7 +287,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           </p>
         </div>
 
-        {/* Card 3: Ausência por Saúde */}
+        {/* Card 4: Ausência por Saúde */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
@@ -277,7 +304,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           <p className="text-[11px] text-slate-400 mt-1">Atestados e indisposição médica</p>
         </div>
 
-        {/* Card 4: Faltas Gerais */}
+        {/* Card 5: Faltas Gerais */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
@@ -392,6 +419,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 <th className="px-4 py-3">Atividade</th>
                 <th className="px-4 py-3 text-center">Registros</th>
                 <th className="px-4 py-3 text-center text-emerald-700">Presenças (%)</th>
+                <th className="px-4 py-3 text-center text-amber-800">Saída Antecipada</th>
                 <th className="px-4 py-3 text-center text-orange-800">Sem Equipamento</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saúde</th>
                 <th className="px-4 py-3 text-center text-rose-700">Faltas</th>
@@ -406,6 +434,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <td className="px-4 py-3 text-center font-medium">{stat.total}</td>
                   <td className="px-4 py-3 text-center font-bold text-emerald-700">
                     {stat.pres} ({stat.rate}%)
+                  </td>
+                  <td className="px-4 py-3 text-center font-bold text-amber-800">
+                    {stat.saidaAnt}
                   </td>
                   <td className="px-4 py-3 text-center font-bold text-orange-800">
                     {stat.semEquip}
@@ -439,6 +470,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 <th className="px-4 py-3">Turma</th>
                 <th className="px-4 py-3 text-center">Registros</th>
                 <th className="px-4 py-3 text-center text-emerald-700">Presenças (%)</th>
+                <th className="px-4 py-3 text-center text-amber-800">Saída Antecipada</th>
                 <th className="px-4 py-3 text-center text-orange-800">Sem Equipamento</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saúde</th>
                 <th className="px-4 py-3 text-center text-rose-700">Faltas</th>
@@ -452,6 +484,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <td className="px-4 py-3 text-center font-medium">{stat.total}</td>
                   <td className="px-4 py-3 text-center font-bold text-emerald-700">
                     {stat.pres} ({stat.rate}%)
+                  </td>
+                  <td className="px-4 py-3 text-center font-bold text-amber-800">
+                    {stat.saidaAnt}
                   </td>
                   <td className="px-4 py-3 text-center font-bold text-orange-800">
                     {stat.semEquip}

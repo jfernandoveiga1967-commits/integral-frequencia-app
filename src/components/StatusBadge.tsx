@@ -1,10 +1,11 @@
 import React from 'react';
 import { AttendanceStatus } from '../types';
-import { CheckCircle2, XCircle, Stethoscope, Shirt } from 'lucide-react';
+import { CheckCircle2, XCircle, Stethoscope, Shirt, Clock } from 'lucide-react';
 
 interface StatusBadgeProps {
   status: AttendanceStatus;
   equipmentDetails?: string;
+  exitTime?: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
@@ -21,6 +22,15 @@ export const statusConfig: Record<
     border: 'border-emerald-300',
     activeBg: 'bg-emerald-600 text-white border-emerald-700',
     icon: <CheckCircle2 className="w-4 h-4" />,
+  },
+  saida_antecipada: {
+    label: 'Saída Antecipada',
+    shortLabel: 'Saída Antecipada',
+    bg: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+    text: 'text-amber-800',
+    border: 'border-amber-400',
+    activeBg: 'bg-amber-600 text-white border-amber-700',
+    icon: <Clock className="w-4 h-4 text-amber-700" />,
   },
   falta: {
     label: 'Ausência por Falta',
@@ -54,6 +64,7 @@ export const statusConfig: Record<
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   status,
   equipmentDetails,
+  exitTime,
   size = 'md',
   className = '',
 }) => {
@@ -65,13 +76,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     lg: 'text-sm md:text-base px-3 py-1.5 space-x-2 font-medium',
   };
 
+  const displayLabel = status === 'saida_antecipada' && exitTime
+    ? `Saída Antecipada - ${exitTime}`
+    : config.shortLabel;
+
   return (
     <div className="inline-flex flex-col">
       <span
         className={`inline-flex items-center rounded-md border font-medium ${config.bg} ${sizeClasses[size]} ${className}`}
       >
         <span>{config.icon}</span>
-        <span>{config.shortLabel}</span>
+        <span>{displayLabel}</span>
       </span>
       {status === 'sem_equipamento' && equipmentDetails && (
         <span className="text-[11px] text-orange-800 font-medium mt-0.5 italic max-w-xs truncate">

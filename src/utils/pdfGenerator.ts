@@ -17,6 +17,8 @@ function getStatusText(status: string): string {
   switch (status) {
     case 'presente':
       return 'Presente';
+    case 'saida_antecipada':
+      return 'Saída Antecipada';
     case 'falta':
       return 'Falta';
     case 'saude':
@@ -45,10 +47,11 @@ export function generateStudentPDFReport(
   const studentRecords = records.filter((r) => r.studentId === student.id);
   const total = studentRecords.length;
   const pres = studentRecords.filter((r) => r.status === 'presente').length;
+  const saidaAnt = studentRecords.filter((r) => r.status === 'saida_antecipada').length;
   const falta = studentRecords.filter((r) => r.status === 'falta').length;
   const saude = studentRecords.filter((r) => r.status === 'saude').length;
   const semEquip = studentRecords.filter((r) => r.status === 'sem_equipamento').length;
-  const rate = total > 0 ? Math.round((pres / total) * 100) : 100;
+  const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
   // Header Banner
   doc.setFillColor(30, 41, 59); // slate-800
@@ -85,7 +88,6 @@ export function generateStudentPDFReport(
   doc.text(`Atividades Matriculadas: ${student.activities.join(', ')}`, 18, 60);
 
   // Performance Badge
-  doc.setFillColor(rate >= 85 ? 240 : rate >= 70 ? 254 : 254, rate >= 85 ? 253 : rate >= 70 ? 243 : 226, rate >= 85 ? 244 : rate >= 70 ? 199 : 226);
   doc.setFillColor(238, 242, 255);
   doc.roundedRect(138, 42, 52, 22, 2, 2, 'FD');
 
@@ -106,25 +108,26 @@ export function generateStudentPDFReport(
   startY += 4;
   const metrics = [
     { label: 'Presenças', val: pres, color: [16, 185, 129] },
+    { label: 'Saída Ant.', val: saidaAnt, color: [217, 119, 6] },
     { label: 'Faltas', val: falta, color: [239, 68, 68] },
-    { label: 'Ausência Saúde', val: saude, color: [217, 119, 6] },
-    { label: 'Sem Equipamento', val: semEquip, color: [234, 88, 12] },
+    { label: 'Saúde', val: saude, color: [217, 119, 6] },
+    { label: 'Sem Equip.', val: semEquip, color: [234, 88, 12] },
   ];
 
   metrics.forEach((m, idx) => {
-    const x = 14 + idx * 46;
+    const x = 14 + idx * 37;
     doc.setFillColor(241, 245, 249);
-    doc.roundedRect(x, startY, 43, 14, 2, 2, 'FD');
+    doc.roundedRect(x, startY, 34, 14, 2, 2, 'FD');
 
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(100, 116, 139);
-    doc.text(m.label.toUpperCase(), x + 4, startY + 5);
+    doc.text(m.label.toUpperCase(), x + 3, startY + 5);
 
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(m.color[0], m.color[1], m.color[2]);
-    doc.text(String(m.val), x + 4, startY + 11);
+    doc.text(String(m.val), x + 3, startY + 11);
   });
 
   // Table of Records
@@ -133,7 +136,9 @@ export function generateStudentPDFReport(
   const tableData = studentRecords.map((r) => [
     formatDate(r.date),
     r.activity,
-    getStatusText(r.status),
+    r.status === 'saida_antecipada'
+      ? `Saída Antecipada (${r.exitTime || 'S/ hor.'})`
+      : getStatusText(r.status),
     r.equipmentMissingDetails || r.observation || '-',
   ]);
 
@@ -158,7 +163,7 @@ export function generateStudentPDFReport(
     columnStyles: {
       0: { cellWidth: 28 },
       1: { cellWidth: 32 },
-      2: { cellWidth: 38, fontStyle: 'bold' },
+      2: { cellWidth: 42, fontStyle: 'bold' },
       3: { cellWidth: 'auto' },
     },
     didParseCell: (data) => {
@@ -166,6 +171,8 @@ export function generateStudentPDFReport(
         const val = data.cell.raw as string;
         if (val === 'Presente') {
           data.cell.styles.textColor = [16, 185, 129];
+        } else if (val.startsWith('Saída Antecipada')) {
+          data.cell.styles.textColor = [217, 119, 6];
         } else if (val === 'Falta') {
           data.cell.styles.textColor = [239, 68, 68];
         } else if (val === 'Sem Equipamento') {
@@ -229,10 +236,11 @@ export function generateTurmaPDFReport(
 
   const total = turmaRecords.length;
   const pres = turmaRecords.filter((r) => r.status === 'presente').length;
+  const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
   const falta = turmaRecords.filter((r) => r.status === 'falta').length;
   const saude = turmaRecords.filter((r) => r.status === 'saude').length;
   const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
-  const rate = total > 0 ? Math.round((pres / total) * 100) : 100;
+  const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
   // Header Banner
   doc.setFillColor(30, 41, 59); // slate-800
@@ -282,25 +290,26 @@ export function generateTurmaPDFReport(
   let startY = 72;
   const metrics = [
     { label: 'Presenças', val: pres, color: [16, 185, 129] },
+    { label: 'Saída Ant.', val: saidaAnt, color: [217, 119, 6] },
     { label: 'Faltas', val: falta, color: [239, 68, 68] },
-    { label: 'Ausência Saúde', val: saude, color: [217, 119, 6] },
-    { label: 'Sem Equipamento', val: semEquip, color: [234, 88, 12] },
+    { label: 'Saúde', val: saude, color: [217, 119, 6] },
+    { label: 'Sem Equip.', val: semEquip, color: [234, 88, 12] },
   ];
 
   metrics.forEach((m, idx) => {
-    const x = 14 + idx * 46;
+    const x = 14 + idx * 37;
     doc.setFillColor(241, 245, 249);
-    doc.roundedRect(x, startY, 43, 13, 2, 2, 'FD');
+    doc.roundedRect(x, startY, 34, 13, 2, 2, 'FD');
 
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(100, 116, 139);
-    doc.text(m.label.toUpperCase(), x + 4, startY + 5);
+    doc.text(m.label.toUpperCase(), x + 3, startY + 5);
 
     doc.setFontSize(10.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(m.color[0], m.color[1], m.color[2]);
-    doc.text(String(m.val), x + 4, startY + 10.5);
+    doc.text(String(m.val), x + 3, startY + 10.5);
   });
 
   // Table of Students & Summary
@@ -310,22 +319,29 @@ export function generateTurmaPDFReport(
     const stRecords = turmaRecords.filter((r) => r.studentId === st.id);
     const stTotal = stRecords.length;
     const stPres = stRecords.filter((r) => r.status === 'presente').length;
+    const stSaidaAnt = stRecords.filter((r) => r.status === 'saida_antecipada').length;
     const stFalta = stRecords.filter((r) => r.status === 'falta').length;
     const stSaude = stRecords.filter((r) => r.status === 'saude').length;
     const stEquip = stRecords.filter((r) => r.status === 'sem_equipamento').length;
-    const stRate = stTotal > 0 ? Math.round((stPres / stTotal) * 100) : '-';
+    const stRate = stTotal > 0 ? Math.round(((stPres + stSaidaAnt) / stTotal) * 100) : '-';
 
     // Equipment or observation notes
     const occurrences = stRecords
       .filter((r) => r.status !== 'presente')
-      .map((r) => `${r.activity}: ${getStatusText(r.status)}${r.equipmentMissingDetails ? ` (${r.equipmentMissingDetails})` : ''}`)
+      .map((r) => {
+        const text = r.status === 'saida_antecipada'
+          ? `Saída Antecipada às ${r.exitTime || 'não inf.'}`
+          : getStatusText(r.status);
+        return `${r.activity}: ${text}${r.equipmentMissingDetails ? ` (${r.equipmentMissingDetails})` : ''}`;
+      })
       .join('; ');
 
     return [
       st.name,
       st.activities.join(', '),
-      stTotal > 0 ? `${stPres}/${stTotal}` : '0',
+      stTotal > 0 ? `${stPres + stSaidaAnt}/${stTotal}` : '0',
       stRate === '-' ? '100%' : `${stRate}%`,
+      stSaidaAnt > 0 ? String(stSaidaAnt) : '0',
       stEquip > 0 ? String(stEquip) : '0',
       stFalta > 0 ? String(stFalta) : '0',
       occurrences || 'Sem ocorrências',
@@ -334,30 +350,31 @@ export function generateTurmaPDFReport(
 
   autoTable(doc, {
     startY: startY,
-    head: [['Aluno(a)', 'Atividades', 'Presença', 'Taxa', 'Sem Equip.', 'Faltas', 'Ocorrências da Semana']],
-    body: tableData.length > 0 ? tableData : [['Sem alunos nesta turma', '-', '-', '-', '-', '-', '-']],
+    head: [['Aluno(a)', 'Atividades', 'Presença', 'Taxa', 'Saída Ant.', 'Sem Equip.', 'Faltas', 'Ocorrências da Semana']],
+    body: tableData.length > 0 ? tableData : [['Sem alunos nesta turma', '-', '-', '-', '-', '-', '-', '-']],
     theme: 'grid',
     headStyles: {
       fillColor: [30, 41, 59],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8.5,
+      fontSize: 8,
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: [51, 65, 85],
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 38, fontStyle: 'bold' },
-      1: { cellWidth: 34 },
-      2: { cellWidth: 18, halign: 'center' },
-      3: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-      4: { cellWidth: 18, halign: 'center' },
+      0: { cellWidth: 36, fontStyle: 'bold' },
+      1: { cellWidth: 30 },
+      2: { cellWidth: 16, halign: 'center' },
+      3: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+      4: { cellWidth: 16, halign: 'center' },
       5: { cellWidth: 16, halign: 'center' },
-      6: { cellWidth: 'auto' },
+      6: { cellWidth: 14, halign: 'center' },
+      7: { cellWidth: 'auto' },
     },
   });
 

@@ -6,7 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { getWeekDays } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 
 interface AttendanceSheetProps {
@@ -132,9 +132,17 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     return map;
   }, [records, currentWeek]);
 
+function getCurrentHHMM(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
   // Calculate status statistics for current filter and date
   const stats = useMemo(() => {
     let presente = 0;
+    let saidaAntecipada = 0;
     let falta = 0;
     let saude = 0;
     let semEquipamento = 0;
@@ -153,6 +161,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
           pendente++;
         } else if (rec.status === 'presente') {
           presente++;
+        } else if (rec.status === 'saida_antecipada') {
+          saidaAntecipada++;
         } else if (rec.status === 'falta') {
           falta++;
         } else if (rec.status === 'saude') {
@@ -163,8 +173,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       });
     });
 
-    const total = presente + falta + saude + semEquipamento + pendente;
-    return { presente, falta, saude, semEquipamento, pendente, total };
+    const total = presente + saidaAntecipada + falta + saude + semEquipamento + pendente;
+    return { presente, saidaAntecipada, falta, saude, semEquipamento, pendente, total };
   }, [filteredStudents, selectedActivity, selectedDate, recordMap, allowedActivityIds]);
 
   // Handlers for status click
@@ -174,7 +184,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     date: string,
     status: AttendanceStatus,
     equipmentDetails?: string,
-    obs?: string
+    obs?: string,
+    exitTimeParam?: string
   ) => {
     if (status === 'sem_equipamento' && !equipmentDetails) {
       // Open modal to specify equipment
@@ -192,7 +203,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     }
 
     const key = `${student.id}_${activity}_${date}`;
-    const currentObs = obs !== undefined ? obs : obsMap[key] || recordMap.get(key)?.observation || '';
+    const existingRec = recordMap.get(key);
+    const currentObs = obs !== undefined ? obs : obsMap[key] || existingRec?.observation || '';
+
+    let exitTime = exitTimeParam;
+    if (status === 'saida_antecipada' && !exitTime) {
+      exitTime = existingRec?.exitTime || getCurrentHHMM();
+    }
 
     onSaveRecord({
       studentId: student.id,
@@ -202,6 +219,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       weekNumber: currentWeek.weekNumber,
       year: currentWeek.year,
       status,
+      exitTime: status === 'saida_antecipada' ? exitTime : undefined,
       equipmentMissingDetails: equipmentDetails,
       observation: currentObs || undefined,
     });
@@ -614,6 +632,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                           className={`p-3 rounded-xl border transition-all ${
                             currentStatus === 'presente'
                               ? 'bg-emerald-50/60 border-emerald-200'
+                              : currentStatus === 'saida_antecipada'
+                              ? 'bg-amber-50/90 border-amber-200'
                               : currentStatus === 'sem_equipamento'
                               ? 'bg-orange-50/80 border-orange-200'
                               : currentStatus === 'saude'
@@ -626,16 +646,23 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                             <div className="flex items-center space-x-2">
                               <ActivityBadge activity={act} size="sm" />
-                              {rec && <StatusBadge status={rec.status} equipmentDetails={rec.equipmentMissingDetails} size="sm" />}
+                              {rec && (
+                                <StatusBadge
+                                  status={rec.status}
+                                  equipmentDetails={rec.equipmentMissingDetails}
+                                  exitTime={rec.exitTime}
+                                  size="sm"
+                                />
+                              )}
                             </div>
 
                             {/* Attendance Status Action Buttons */}
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full lg:w-auto">
+                            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 w-full lg:w-auto">
                               {/* 1. PRESENTE */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusClick(student, act, selectedDate, 'presente')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border ${
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
                                   currentStatus === 'presente'
                                     ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
                                     : 'bg-white hover:bg-emerald-50 text-emerald-800 border-slate-200 hover:border-emerald-300'
@@ -645,11 +672,26 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                                 <span>Presente</span>
                               </button>
 
-                              {/* 2. SEM EQUIPAMENTO (Uniforme / Flauta) */}
+                              {/* 2. SAÍDA ANTECIPADA */}
+                              <button
+                                type="button"
+                                onClick={() => handleStatusClick(student, act, selectedDate, 'saida_antecipada')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
+                                  currentStatus === 'saida_antecipada'
+                                    ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                                    : 'bg-white hover:bg-amber-50 text-amber-900 border-slate-200 hover:border-amber-300'
+                                }`}
+                                title="Registrar saída antecipada com horário de saída"
+                              >
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>Saída Ant.</span>
+                              </button>
+
+                              {/* 3. SEM EQUIPAMENTO (Uniforme / Flauta) */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusClick(student, act, selectedDate, 'sem_equipamento')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border ${
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
                                   currentStatus === 'sem_equipamento'
                                     ? 'bg-orange-600 text-white border-orange-700 shadow-xs'
                                     : 'bg-white hover:bg-orange-50 text-orange-900 border-slate-200 hover:border-orange-300'
@@ -660,11 +702,11 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                                 <span>Sem Equip.</span>
                               </button>
 
-                              {/* 3. SAÚDE */}
+                              {/* 4. SAÚDE */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusClick(student, act, selectedDate, 'saude')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border ${
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
                                   currentStatus === 'saude'
                                     ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
                                     : 'bg-white hover:bg-amber-50 text-amber-900 border-slate-200 hover:border-amber-300'
@@ -675,11 +717,11 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                                 <span>Saúde</span>
                               </button>
 
-                              {/* 4. FALTA */}
+                              {/* 5. FALTA */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusClick(student, act, selectedDate, 'falta')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border ${
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
                                   currentStatus === 'falta'
                                     ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
                                     : 'bg-white hover:bg-rose-50 text-rose-800 border-slate-200 hover:border-rose-300'
@@ -691,6 +733,33 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                               </button>
                             </div>
                           </div>
+
+                          {/* Inline Time Picker for Saída Antecipada */}
+                          {currentStatus === 'saida_antecipada' && (
+                            <div className="mt-2.5 pt-2 border-t border-amber-200 flex items-center space-x-2 bg-amber-50/90 px-3 py-1.5 rounded-lg border border-amber-200">
+                              <Clock className="w-4 h-4 text-amber-700 shrink-0" />
+                              <span className="text-xs font-bold text-amber-900">Horário da Saída:</span>
+                              <input
+                                type="time"
+                                value={rec?.exitTime || getCurrentHHMM()}
+                                onChange={(e) => {
+                                  handleStatusClick(
+                                    student,
+                                    act,
+                                    selectedDate,
+                                    'saida_antecipada',
+                                    rec?.equipmentMissingDetails,
+                                    rec?.observation,
+                                    e.target.value
+                                  );
+                                }}
+                                className="text-xs font-bold px-2 py-0.5 border border-amber-300 rounded bg-white text-amber-950 focus:ring-2 focus:ring-amber-500 outline-none"
+                              />
+                              <span className="text-[11px] text-amber-800 font-medium hidden sm:inline">
+                                (Alteração de horário em tempo real)
+                              </span>
+                            </div>
+                          )}
 
                           {/* Optional Observation input */}
                           <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center space-x-2">

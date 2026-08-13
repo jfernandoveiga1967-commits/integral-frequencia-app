@@ -15,7 +15,8 @@ export type AttendanceStatus =
   | 'presente'
   | 'falta'
   | 'saude'
-  | 'sem_equipamento';
+  | 'sem_equipamento'
+  | 'saida_antecipada';
 
 export interface Student {
   id: string;
@@ -34,6 +35,7 @@ export interface AttendanceRecord {
   weekNumber: number;
   year: number;
   status: AttendanceStatus;
+  exitTime?: string; // e.g., "15:30" for saida_antecipada
   equipmentMissingDetails?: string; // e.g., "Sem maiô/sunga", "Esqueceu a flauta", "Sem kimono"
   observation?: string; // General notes e.g., "Atestado de 2 dias"
   createdAt: string;
