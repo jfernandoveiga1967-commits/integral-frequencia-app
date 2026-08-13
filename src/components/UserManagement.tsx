@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { UserProfile, UserRole, ActivityType, ActivityItem } from '../types';
+import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import {
@@ -41,6 +42,7 @@ interface UserManagementProps {
   currentUser: UserProfile | null;
   users: UserProfile[];
   activitiesList: ActivityItem[];
+  turmas?: string[];
   onSaveUser: (user: UserProfile) => void;
   onDeleteUser: (userId: string) => void;
   onSaveActivity: (activity: ActivityItem) => void;
@@ -66,12 +68,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   currentUser,
   users,
   activitiesList,
+  turmas,
   onSaveUser,
   onDeleteUser,
   onSaveActivity,
   onDeleteActivity,
 }) => {
   const isAdmin = isCoordenador(currentUser);
+
+  const availableTurmas = useMemo(() => {
+    const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  }, [turmas]);
 
   // Sub-tab switcher state
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities'>('users');
@@ -92,6 +100,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formRole, setFormRole] = useState<UserRole>('professor');
   const [formPin, setFormPin] = useState('1234');
   const [formActivities, setFormActivities] = useState<ActivityType[]>([]);
+  const [formTurmas, setFormTurmas] = useState<string[]>([]);
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
 
@@ -151,6 +160,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormRole(user.role);
     setFormPin(user.pin || '1234');
     setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
+    setFormTurmas(user.allowedClassIds || user.assignedTurmas || availableTurmas);
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
   };
@@ -163,6 +173,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormRole('professor');
     setFormPin('1234');
     setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
+    setFormTurmas(availableTurmas);
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setIsNewUserModalOpen(true);
@@ -173,6 +184,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setFormActivities(formActivities.filter((a) => a !== activityId));
     } else {
       setFormActivities([...formActivities, activityId]);
+    }
+  };
+
+  const toggleTurmaInForm = (turmaName: string) => {
+    if (formTurmas.includes(turmaName)) {
+      setFormTurmas(formTurmas.filter((t) => t !== turmaName));
+    } else {
+      setFormTurmas([...formTurmas, turmaName]);
     }
   };
 
@@ -209,6 +228,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       birthDate: formBirthDate,
       pin: formattedPass || formBirthDate,
       assignedActivities: formActivities,
+      assignedTurmas: formTurmas,
+      allowedClassIds: formTurmas,
       canManageStudents: formCanManageStudents,
       canMarkAttendance: formCanMarkAttendance,
       updatedAt: new Date().toISOString(),
@@ -300,6 +321,43 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     };
     onSaveUser(updated);
     showToast(`Modalidades de ${user.name} foram limpas.`);
+  };
+
+  const handleToggleUserTurma = (user: UserProfile, turmaName: string) => {
+    const currentList = user.allowedClassIds || user.assignedTurmas || availableTurmas;
+    const exists = currentList.includes(turmaName);
+    const newList = exists ? currentList.filter((t) => t !== turmaName) : [...currentList, turmaName];
+
+    const updated: UserProfile = {
+      ...user,
+      assignedTurmas: newList,
+      allowedClassIds: newList,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Turma ${turmaName} ${!exists ? 'liberada para' : 'revogada de'} ${user.name}`);
+  };
+
+  const handleAssignAllTurmas = (user: UserProfile) => {
+    const updated: UserProfile = {
+      ...user,
+      assignedTurmas: availableTurmas,
+      allowedClassIds: availableTurmas,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Todas as turmas foram liberadas para ${user.name}!`);
+  };
+
+  const handleClearAllTurmas = (user: UserProfile) => {
+    const updated: UserProfile = {
+      ...user,
+      assignedTurmas: [],
+      allowedClassIds: [],
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Turmas de ${user.name} foram limpas.`);
   };
 
   const confirmDeleteUser = () => {
@@ -493,6 +551,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               filteredUsers.map((user) => {
                 const roleStyle = getRoleBadgeStyle(user.role);
                 const userActivities = user.assignedActivities || activitiesList.map((a) => a.id);
+                const userTurmas = user.allowedClassIds || user.assignedTurmas || availableTurmas;
 
                 return (
                   <div
@@ -638,6 +697,52 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               >
                                 <span>{isAssigned ? '✓' : '+'}</span>
                                 <span>{act.id}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Turmas / Anos Escolares Liberados */}
+                      <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-700">
+                          <span>Turmas Liberadas ({user.role === 'coordenador' ? 'Todas (Admin)' : `${userTurmas.length} de ${availableTurmas.length}`}):</span>
+                          <div className="flex items-center space-x-2 text-[10px]">
+                            <button
+                              type="button"
+                              onClick={() => handleAssignAllTurmas(user)}
+                              className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
+                            >
+                              Todas
+                            </button>
+                            <span className="text-slate-300">•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleClearAllTurmas(user)}
+                              className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                            >
+                              Limpar
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableTurmas.map((t) => {
+                            const isAssigned = user.role === 'coordenador' || userTurmas.includes(t);
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => handleToggleUserTurma(user, t)}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
+                                  isAssigned
+                                    ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                }`}
+                                title={isAssigned ? `Clique para revogar ${t}` : `Clique para liberar ${t}`}
+                              >
+                                <span>{isAssigned ? '✓' : '+'}</span>
+                                <span>{t}</span>
                               </button>
                             );
                           })}
@@ -870,6 +975,56 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       >
                         <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="sm" />
                         {isChecked && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Atribuir Turmas Liberadas ao Usuário */}
+              <div className="pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-800 uppercase tracking-wider text-xs">
+                    Atribuir Turmas Liberadas ao Usuário:
+                  </label>
+                  <div className="flex items-center space-x-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setFormTurmas(availableTurmas)}
+                      className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
+                    >
+                      Todas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setFormTurmas([])}
+                      className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  Selecione os anos escolares e turmas para liberação de acesso:
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
+                  {availableTurmas.map((t) => {
+                    const isChecked = formRole === 'coordenador' || formTurmas.includes(t);
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => toggleTurmaInForm(t)}
+                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                          isChecked
+                            ? 'bg-blue-50 border-blue-300 text-blue-900 font-bold'
+                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="text-xs truncate">{t}</span>
+                        {isChecked && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
                       </button>
                     );
                   })}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, ActivityItem } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, ActivityItem, UserProfile } from '../types';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
@@ -28,6 +28,7 @@ interface WeeklyReportProps {
   turmas?: string[];
   activitiesList?: ActivityItem[];
   currentWeek: WeekInfo;
+  currentUser?: UserProfile | null;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
 
@@ -37,31 +38,53 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   turmas,
   activitiesList = ACTIVITIES_LIST,
   currentWeek,
+  currentUser,
   onDeleteTurma,
 }) => {
-  const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+  const isCoordenador = currentUser?.role === 'coordenador';
+  const userAssignedTurmas = React.useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
+  const userAssignedActivities = React.useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
+
   const turmasList = React.useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-  }, [turmas]);
+    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    if (isCoordenador || !currentUser) return sorted;
+    return sorted.filter((t) => userAssignedTurmas.includes(t));
+  }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
+
+  const activeActivities = React.useMemo(() => {
+    const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    if (isCoordenador || !currentUser) return active;
+    return active.filter((act) => userAssignedActivities.includes(act.id));
+  }, [activitiesList, isCoordenador, currentUser, userAssignedActivities]);
+
+  const allowedActivityIds = React.useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);
 
   const sortedStudentsForPdf = React.useMemo(() => {
-    return [...students].sort((a, b) => {
+    const list = (isCoordenador || !currentUser) ? students : students.filter((s) => turmasList.includes(s.turma));
+    return [...list].sort((a, b) => {
       const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
       if (turmaCompare !== 0) return turmaCompare;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [students]);
+  }, [students, isCoordenador, currentUser, turmasList]);
+
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(students[0]?.id || '');
+  const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(sortedStudentsForPdf[0]?.id || '');
   const [showTurmaModal, setShowTurmaModal] = useState(false);
   const [showStudentModal, setShowStudentModal] = useState(false);
 
-  // Filter records for the current selected week
-  const weekRecords = records.filter(
-    (r) => r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year
-  );
+  // Filter records for the current selected week and allowed turmas/activities
+  const weekRecords = records.filter((r) => {
+    const isThisWeek = r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year;
+    if (!isThisWeek) return false;
+    if (!isCoordenador && currentUser) {
+      if (!turmasList.includes(r.turma)) return false;
+      if (!allowedActivityIds.includes(r.activity as ActivityType)) return false;
+    }
+    return true;
+  });
 
   const totalRecords = weekRecords.length;
   const presenteCount = weekRecords.filter((r) => r.status === 'presente').length;

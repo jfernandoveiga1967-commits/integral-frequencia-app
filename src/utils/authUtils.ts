@@ -11,6 +11,8 @@ export const PRESET_USERS: UserProfile[] = [
     birthDate: '1967-08-12',
     pin: '12/08/1967',
     assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
+    assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+    allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
     canManageStudents: true,
     canMarkAttendance: true,
   },

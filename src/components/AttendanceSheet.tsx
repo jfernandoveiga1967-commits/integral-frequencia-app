@@ -40,6 +40,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const isCoordenador = currentUser?.role === 'coordenador';
   const userAssignedActivities = useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
+  const userAssignedTurmas = useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
 
   // For Monitor/Professor: ONLY display their assigned modalities. For Coordenador: display all active activities.
   const allowedActivities = useMemo(() => {
@@ -49,10 +50,14 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const allowedActivityIds = useMemo(() => allowedActivities.map((a) => a.id), [allowedActivities]);
 
-  const turmasList = useMemo(() => {
+  const allowedTurmas = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-  }, [turmas]);
+    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    if (isCoordenador) return sorted;
+    return sorted.filter((t) => userAssignedTurmas.includes(t));
+  }, [turmas, isCoordenador, userAssignedTurmas]);
+
+  const turmasList = allowedTurmas;
 
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
@@ -92,10 +97,15 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const weekDays = useMemo(() => getWeekDays(currentWeek.startDate), [currentWeek.startDate]);
 
-  // Filter students who are enrolled in the allowed activities
+  // Filter students who are enrolled in the allowed activities and allowed turmas
   const filteredStudents = useMemo(() => {
     return students
       .filter((student) => {
+        // Turma permission filter for professors/monitors
+        if (!isCoordenador && !allowedTurmas.includes(student.turma)) {
+          return false;
+        }
+
         // Activity filter - MUST match allowedActivityIds
         const matchesActivity =
           selectedActivity === 'TODAS'
@@ -118,7 +128,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return a.name.localeCompare(b.name, 'pt-BR');
       });
-  }, [students, selectedActivity, selectedTurma, searchTerm, allowedActivityIds]);
+  }, [students, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
 
   // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`
   const recordMap = useMemo(() => {
@@ -361,6 +371,14 @@ function getCurrentHHMM(): string {
               <span>
                 Nenhuma modalidade atribuída ao seu usuário.
                 Solicite à Coordenação a liberação das suas modalidades no painel de <strong>Gerenciamento de Usuários</strong>.
+              </span>
+            </div>
+          ) : !isCoordenador && allowedTurmas.length === 0 ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Nenhuma turma atribuída ao seu usuário.
+                Solicite à Coordenação a liberação das suas turmas no painel de <strong>Gerenciamento de Usuários</strong>.
               </span>
             </div>
           ) : (

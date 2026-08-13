@@ -567,6 +567,7 @@ export default function App() {
             turmas={turmas}
             activitiesList={activitiesList}
             currentWeek={currentWeek}
+            currentUser={currentUser}
             onDeleteTurma={handleDeleteTurma}
           />
         )}
@@ -587,6 +588,7 @@ export default function App() {
             currentUser={currentUser}
             users={users}
             activitiesList={activitiesList}
+            turmas={turmas}
             onSaveUser={handleSaveUser}
             onDeleteUser={handleDeleteUser}
             onSaveActivity={handleSaveActivity}

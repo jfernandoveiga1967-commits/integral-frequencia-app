@@ -62,6 +62,7 @@ export interface UserProfile {
   pin?: string;
   assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user
   assignedTurmas?: string[]; // Turmas assigned to this user (optional)
+  allowedClassIds?: string[]; // List of class IDs/names allowed for this teacher/monitor
   canManageStudents?: boolean;
   canMarkAttendance?: boolean;
   updatedAt?: string;
