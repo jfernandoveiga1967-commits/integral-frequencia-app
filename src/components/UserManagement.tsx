@@ -141,7 +141,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Stats
   const countCoord = users.filter((u) => u.role === 'coordenador').length;
   const countProf = users.filter((u) => u.role === 'professor').length;
-  const countAux = users.filter((u) => u.role === 'auxiliar').length;
 
   // Handlers for User Modal
   const handleOpenEditModal = (user: UserProfile) => {
@@ -191,13 +190,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
-      auxiliar: 'Auxiliar',
     };
 
     const roleColors: Record<UserRole, string> = {
       coordenador: 'bg-amber-500',
       professor: 'bg-indigo-600',
-      auxiliar: 'bg-emerald-600',
     };
 
     const formattedPass = formatBirthDateToDisplay(formBirthDate);
@@ -212,7 +209,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       birthDate: formBirthDate,
       pin: formattedPass || formBirthDate,
       assignedActivities: formActivities,
-      canManageStudents: formRole === 'auxiliar' ? formCanManageStudents : true,
+      canManageStudents: formCanManageStudents,
       canMarkAttendance: formCanMarkAttendance,
       updatedAt: new Date().toISOString(),
     };
@@ -229,13 +226,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
-      auxiliar: 'Auxiliar',
     };
 
     const roleColors: Record<UserRole, string> = {
       coordenador: 'bg-amber-500',
       professor: 'bg-indigo-600',
-      auxiliar: 'bg-emerald-600',
     };
 
     const updated: UserProfile = {
@@ -463,12 +458,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             </div>
 
             <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-              {(['TODOS', 'coordenador', 'professor', 'auxiliar'] as const).map((r) => {
+              {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
                 const labels: Record<string, string> = {
                   TODOS: 'Todos os Usuários',
                   coordenador: 'Coordenadores',
                   professor: 'Professores / Monitores',
-                  auxiliar: 'Auxiliares',
                 };
 
                 const isSel = roleFilter === r;
@@ -540,7 +534,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                         >
                           {user.role === 'coordenador' && <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
                           {user.role === 'professor' && <GraduationCap className="w-3.5 h-3.5 mr-1" />}
-                          {user.role === 'auxiliar' && <UserCheck className="w-3.5 h-3.5 mr-1" />}
                           <span>{roleStyle.label}</span>
                         </span>
                       </div>
@@ -662,7 +655,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                         >
                           <option value="coordenador">Coordenador (Admin)</option>
                           <option value="professor">Monitor / Professor</option>
-                          <option value="auxiliar">Auxiliar</option>
                         </select>
                       </div>
 
@@ -837,7 +829,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 >
                   <option value="coordenador">Coordenador (Administrador - Acesso Total)</option>
                   <option value="professor">Monitor / Professor (Diário de Classe + Alunos)</option>
-                  <option value="auxiliar">Auxiliar (Lançamento de Frequência de Campo)</option>
                 </select>
               </div>
 

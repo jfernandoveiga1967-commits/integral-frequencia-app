@@ -93,13 +93,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
-      auxiliar: 'Auxiliar',
     };
 
     const roleColors: Record<UserRole, string> = {
       coordenador: 'bg-amber-500',
       professor: 'bg-indigo-600',
-      auxiliar: 'bg-emerald-600',
     };
 
     const formattedPass = formatBirthDateToDisplay(customBirthDate);
@@ -281,7 +279,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
                 className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold"
               >
                 <option value="professor">Monitor / Professor</option>
-                <option value="auxiliar">Auxiliar</option>
                 <option value="coordenador">Coordenador (Administrador)</option>
               </select>
             </div>

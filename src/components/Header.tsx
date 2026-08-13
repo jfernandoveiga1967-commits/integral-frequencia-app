@@ -30,9 +30,8 @@ export const Header: React.FC<HeaderProps> = ({
       case 'coordenador':
         return <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />;
       case 'professor':
+      default:
         return <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />;
-      case 'auxiliar':
-        return <UserCheck className="w-3.5 h-3.5 text-emerald-400" />;
     }
   };
 

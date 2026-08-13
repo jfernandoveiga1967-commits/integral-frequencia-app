@@ -47,7 +47,7 @@ export interface WeekInfo {
   label: string; // e.g., "Semana 32 (03/08/2026 a 07/08/2026)"
 }
 
-export type UserRole = 'coordenador' | 'professor' | 'auxiliar';
+export type UserRole = 'coordenador' | 'professor';
 
 export interface UserProfile {
   id: string;

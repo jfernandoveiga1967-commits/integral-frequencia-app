@@ -172,8 +172,8 @@ export function isProfessor(user: UserProfile | null): boolean {
   return user?.role === 'professor';
 }
 
-export function isAuxiliar(user: UserProfile | null): boolean {
-  return user?.role === 'auxiliar';
+export function isAuxiliar(_user: UserProfile | null): boolean {
+  return false;
 }
 
 export function canManageStudents(user: UserProfile | null): boolean {
@@ -208,18 +208,12 @@ export function getRoleBadgeStyle(role: UserRole): { bg: string; text: string; b
         label: 'Coordenador (Admin)',
       };
     case 'professor':
+    default:
       return {
         bg: 'bg-indigo-500/15',
         text: 'text-indigo-300',
         border: 'border-indigo-500/30',
         label: 'Monitor / Professor',
-      };
-    case 'auxiliar':
-      return {
-        bg: 'bg-emerald-500/15',
-        text: 'text-emerald-300',
-        border: 'border-emerald-500/30',
-        label: 'Auxiliar',
       };
   }
 }

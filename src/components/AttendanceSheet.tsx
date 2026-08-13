@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
@@ -38,14 +38,39 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const userCanMarkAttendance = canMarkAttendance(currentUser);
   const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
 
+  const isCoordenador = currentUser?.role === 'coordenador';
+  const userAssignedActivities = useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
+
+  // For Monitor/Professor: ONLY display their assigned modalities. For Coordenador: display all active activities.
+  const allowedActivities = useMemo(() => {
+    if (isCoordenador) return activeActivities;
+    return activeActivities.filter((act) => userAssignedActivities.includes(act.id));
+  }, [activeActivities, isCoordenador, userAssignedActivities]);
+
+  const allowedActivityIds = useMemo(() => allowedActivities.map((a) => a.id), [allowedActivities]);
+
   const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
   }, [turmas]);
-  const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('Natação');
+
+  const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
-  
+
+  // Keep selectedActivity aligned with allowed activities for non-coordenador
+  useEffect(() => {
+    if (!isCoordenador) {
+      if (allowedActivities.length === 1) {
+        setSelectedActivity(allowedActivities[0].id as ActivityType);
+      } else if (allowedActivities.length > 1 && selectedActivity !== 'TODAS' && !allowedActivityIds.includes(selectedActivity)) {
+        setSelectedActivity(allowedActivities[0].id as ActivityType);
+      } else if (allowedActivities.length === 0) {
+        setSelectedActivity('TODAS');
+      }
+    }
+  }, [isCoordenador, allowedActivities, allowedActivityIds, selectedActivity]);
+
   // Equipment modal state
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
@@ -67,13 +92,15 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const weekDays = useMemo(() => getWeekDays(currentWeek.startDate), [currentWeek.startDate]);
 
-  // Filter students who are enrolled in the selected activity (or all if TODAS) and turma
+  // Filter students who are enrolled in the allowed activities
   const filteredStudents = useMemo(() => {
     return students
       .filter((student) => {
-        // Activity filter
+        // Activity filter - MUST match allowedActivityIds
         const matchesActivity =
-          selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
+          selectedActivity === 'TODAS'
+            ? student.activities.some((act) => allowedActivityIds.includes(act as ActivityType))
+            : student.activities.includes(selectedActivity) && allowedActivityIds.includes(selectedActivity as ActivityType);
 
         // Turma filter
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
@@ -91,7 +118,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return a.name.localeCompare(b.name, 'pt-BR');
       });
-  }, [students, selectedActivity, selectedTurma, searchTerm]);
+  }, [students, selectedActivity, selectedTurma, searchTerm, allowedActivityIds]);
 
   // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`
   const recordMap = useMemo(() => {
@@ -115,7 +142,9 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
     filteredStudents.forEach((student) => {
       const activitiesToCount =
-        selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+        selectedActivity === 'TODAS'
+          ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+          : [selectedActivity];
 
       activitiesToCount.forEach((act) => {
         const key = `${student.id}_${act}_${selectedDate}`;
@@ -136,7 +165,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
     const total = presente + falta + saude + semEquipamento + pendente;
     return { presente, falta, saude, semEquipamento, pendente, total };
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
+  }, [filteredStudents, selectedActivity, selectedDate, recordMap, allowedActivityIds]);
 
   // Handlers for status click
   const handleStatusClick = (
@@ -195,7 +224,10 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const areAllMarkedPresent = useMemo(() => {
     if (filteredStudents.length === 0) return false;
     return filteredStudents.every((student) => {
-      const activitiesToCheck = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+      const activitiesToCheck =
+        selectedActivity === 'TODAS'
+          ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+          : [selectedActivity];
       if (activitiesToCheck.length === 0) return false;
       return activitiesToCheck.every((act) => {
         const key = `${student.id}_${act}_${selectedDate}`;
@@ -203,18 +235,27 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         return rec?.status === 'presente';
       });
     });
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
+  }, [filteredStudents, selectedActivity, selectedDate, recordMap, allowedActivityIds]);
 
   const handleBatchMarkAllPresent = () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
 
     if (areAllMarkedPresent) {
-      onClearRecords(studentIds, selectedActivity, selectedDate);
+      if (selectedActivity === 'TODAS') {
+        allowedActivityIds.forEach((act) => {
+          onClearRecords(studentIds, act, selectedDate);
+        });
+      } else {
+        onClearRecords(studentIds, selectedActivity, selectedDate);
+      }
       setObsMap((prev) => {
         const next = { ...prev };
         filteredStudents.forEach((student) => {
-          const acts = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+          const acts =
+            selectedActivity === 'TODAS'
+              ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+              : [selectedActivity];
           acts.forEach((act) => {
             delete next[`${student.id}_${act}_${selectedDate}`];
           });
@@ -222,22 +263,37 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         return next;
       });
     } else {
-      onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+      if (selectedActivity === 'TODAS') {
+        allowedActivityIds.forEach((act) => {
+          onBatchMarkPresent(studentIds, act, selectedDate);
+        });
+      } else {
+        onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+      }
     }
   };
 
   const handleClearSelected = () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
-    const actLabel = selectedActivity === 'TODAS' ? 'todas as atividades' : `a atividade "${selectedActivity}"`;
+    const actLabel = selectedActivity === 'TODAS' ? 'suas modalidades liberadas' : `a atividade "${selectedActivity}"`;
     if (window.confirm(`Tem certeza que deseja limpar as marcações de ${actLabel} no dia selecionado?`)) {
-      onClearRecords(studentIds, selectedActivity, selectedDate);
+      if (selectedActivity === 'TODAS') {
+        allowedActivityIds.forEach((act) => {
+          onClearRecords(studentIds, act, selectedDate);
+        });
+      } else {
+        onClearRecords(studentIds, selectedActivity, selectedDate);
+      }
 
       // Clear local observation state for cleared records
       setObsMap((prev) => {
         const next = { ...prev };
         filteredStudents.forEach((student) => {
-          const acts = selectedActivity === 'TODAS' ? student.activities : [selectedActivity];
+          const acts =
+            selectedActivity === 'TODAS'
+              ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+              : [selectedActivity];
           acts.forEach((act) => {
             delete next[`${student.id}_${act}_${selectedDate}`];
           });
@@ -274,46 +330,53 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
               1. Selecione a Atividade Extracurricular:
             </label>
-            {currentUser?.assignedActivities && currentUser.assignedActivities.length > 0 && (
-              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center space-x-1">
-                <span>Atividades Atribuídas a Você: {currentUser.assignedActivities.length}</span>
+            {!isCoordenador && (
+              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                <span>Atividades Liberadas para Você: {allowedActivities.length}</span>
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedActivity('TODAS')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                selectedActivity === 'TODAS'
-                  ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-              }`}
-            >
-              Todas Atividades
-            </button>
-
-            {activeActivities.map((act) => {
-              const isAssignedToUser = currentUser?.assignedActivities?.includes(act.id);
-
-              return (
+          {allowedActivities.length === 0 ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Nenhuma modalidade atribuída ao seu usuário.
+                Solicite à Coordenação a liberação das suas modalidades no painel de <strong>Gerenciamento de Usuários</strong>.
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {(isCoordenador || allowedActivities.length > 1) && (
                 <button
-                  key={act.id}
-                  onClick={() => setSelectedActivity(act.id)}
-                  className={`transition-all cursor-pointer relative ${
-                    selectedActivity === act.id
-                      ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-1'
-                      : 'opacity-80 hover:opacity-100'
+                  onClick={() => setSelectedActivity('TODAS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                    selectedActivity === 'TODAS'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
                   }`}
                 >
-                  <ActivityBadge activity={act.id} size="md" />
-                  {isAssignedToUser && (
-                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 border-2 border-white rounded-full shadow-xs" title="Modalidade atribuída a você" />
-                  )}
+                  {isCoordenador ? 'Todas Atividades' : 'Todas Minhas Modalidades'}
                 </button>
-              );
-            })}
-          </div>
+              )}
+
+              {allowedActivities.map((act) => {
+                return (
+                  <button
+                    key={act.id}
+                    onClick={() => setSelectedActivity(act.id)}
+                    className={`transition-all cursor-pointer relative ${
+                      selectedActivity === act.id
+                        ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-1'
+                        : 'opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    <ActivityBadge activity={act.id} size="md" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Filters Grid (Turma, Day of week, Search) */}
@@ -495,11 +558,12 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
           <div className="divide-y divide-slate-100">
             {filteredStudents.map((student) => {
-              // Determine activities to display for this student
-              const activitiesToDisplay =
-                selectedActivity === 'TODAS'
-                  ? student.activities
-                  : student.activities.filter((a) => a === selectedActivity);
+              // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
+              const activitiesToDisplay = student.activities.filter(
+                (a) =>
+                  allowedActivityIds.includes(a as ActivityType) &&
+                  (selectedActivity === 'TODAS' || a === selectedActivity)
+              );
 
               return (
                 <div key={student.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
@@ -525,11 +589,15 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
                     {/* Extracurricular Activities badges for this student */}
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {student.activities.map((act) => (
-                        <span key={act} className="opacity-80">
-                          <ActivityBadge activity={act} size="sm" />
-                        </span>
-                      ))}
+                      {student.activities.map((act) => {
+                        const isAllowed = allowedActivityIds.includes(act as ActivityType);
+                        if (!isCoordenador && !isAllowed) return null; // Hide non-assigned activities for Monitor/Professor
+                        return (
+                          <span key={act} className="opacity-90">
+                            <ActivityBadge activity={act} size="sm" />
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
 

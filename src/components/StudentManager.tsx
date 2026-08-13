@@ -3,7 +3,7 @@ import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfi
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { canManageStudents, canManageTurmas, isAuxiliar } from '../utils/authUtils';
+import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert } from 'lucide-react';
 
 interface StudentManagerProps {
@@ -36,7 +36,6 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onDeleteTurma,
 }) => {
   const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
-  const isUserAuxiliar = isAuxiliar(currentUser);
   const userCanManageStudents = canManageStudents(currentUser);
   const userCanManageTurmas = canManageTurmas(currentUser);
 
@@ -191,16 +190,6 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Auxiliar read-only banner */}
-      {isUserAuxiliar && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center space-x-3 text-xs text-amber-800 shadow-xs">
-          <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0" />
-          <div>
-            <strong>Modo Visualização (Auxiliar):</strong> O cadastro e a modificação de alunos e turmas são restritos às categorias <strong>Monitor / Professor</strong> e <strong>Coordenador (Administrador)</strong>.
-          </div>
-        </div>
-      )}
-
       {/* Top Banner and Quick Add Buttons */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
