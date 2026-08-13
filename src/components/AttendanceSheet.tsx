@@ -7,7 +7,7 @@ import { EquipmentModal } from './EquipmentModal';
 import { getWeekDays } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap } from 'lucide-react';
-import { getRoleBadgeStyle } from '../utils/authUtils';
+import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -35,6 +35,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   onClearRecords,
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
+  const userCanMarkAttendance = canMarkAttendance(currentUser);
   const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
 
   const turmasList = useMemo(() => {
@@ -248,6 +249,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   return (
     <div className="space-y-6">
+      {!userCanMarkAttendance && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-amber-900 text-xs font-bold flex items-center space-x-2.5 shadow-xs">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+          <span>Seu usuário está configurado no modo <strong>Somente Leitura</strong>. O lançamento de presença e marcação de ocorrências está desabilitado pela coordenação.</span>
+        </div>
+      )}
+
       {/* Equipment Modal */}
       <EquipmentModal
         isOpen={modalState.isOpen}

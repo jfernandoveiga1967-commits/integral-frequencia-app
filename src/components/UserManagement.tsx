@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole, ActivityType, ActivityItem } from '../types';
-import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay } from '../utils/authUtils';
+import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import {
   ShieldCheck,
@@ -250,6 +250,63 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     showToast(`Cargo de ${user.name} alterado para ${roleLabels[newRole]}!`);
   };
 
+  const handleToggleCanManageStudents = (user: UserProfile) => {
+    const currentVal = canManageStudents(user);
+    const updated: UserProfile = {
+      ...user,
+      canManageStudents: !currentVal,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Permissão de cadastro de alunos para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`);
+  };
+
+  const handleToggleCanMarkAttendance = (user: UserProfile) => {
+    const currentVal = canMarkAttendance(user);
+    const updated: UserProfile = {
+      ...user,
+      canMarkAttendance: !currentVal,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Permissão de lançamento de chamada para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`);
+  };
+
+  const handleToggleUserActivity = (user: UserProfile, activityId: ActivityType) => {
+    const currentList = user.assignedActivities || activitiesList.map((a) => a.id);
+    const exists = currentList.includes(activityId);
+    const newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
+
+    const updated: UserProfile = {
+      ...user,
+      assignedActivities: newList,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Modalidade ${activityId} ${!exists ? 'atribuída a' : 'removida de'} ${user.name}`);
+  };
+
+  const handleAssignAllActivities = (user: UserProfile) => {
+    const allIds = activitiesList.map((a) => a.id);
+    const updated: UserProfile = {
+      ...user,
+      assignedActivities: allIds,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Todas as modalidades foram liberadas para ${user.name}!`);
+  };
+
+  const handleClearAllActivities = (user: UserProfile) => {
+    const updated: UserProfile = {
+      ...user,
+      assignedActivities: [],
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveUser(updated);
+    showToast(`Modalidades de ${user.name} foram limpas.`);
+  };
+
   const confirmDeleteUser = () => {
     if (!userToDelete) return;
     onDeleteUser(userToDelete.id);
@@ -489,19 +546,109 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                        <span>Modalidades Atribuídas ({userActivities.length}):</span>
-                        {user.role === 'coordenador' && (
-                          <span className="text-[10px] text-amber-600 font-semibold">(Acesso Total)</span>
-                        )}
+                    {/* Painel de Permissões e Acessos */}
+                    <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
+                      <div className="flex items-center justify-between text-xs font-extrabold text-slate-800 border-b border-slate-200/60 pb-2">
+                        <span className="flex items-center space-x-1.5">
+                          <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                          <span>Painel de Permissões & Acessos</span>
+                        </span>
+                        <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100/60 px-2 py-0.5 rounded-full border border-indigo-200">
+                          Controle Direto
+                        </span>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {userActivities.length === 0 ? (
-                          <span className="text-xs text-slate-400 italic">Nenhuma modalidade atribuída</span>
-                        ) : (
-                          userActivities.map((act) => <ActivityBadge key={act} activity={act} size="sm" />)
-                        )}
+
+                      {/* Toggles de Permissões Principais */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        {/* Toggle: Cadastrar/Editar Alunos */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleCanManageStudents(user)}
+                          className={`p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                            canManageStudents(user)
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 font-bold shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2 min-w-0">
+                            <Users className={`w-4 h-4 shrink-0 ${canManageStudents(user) ? 'text-emerald-600' : 'text-slate-400'}`} />
+                            <div className="truncate">
+                              <p className="text-[11px] font-extrabold leading-tight">Cadastrar/Editar Alunos</p>
+                              <p className="text-[10px] opacity-80">{canManageStudents(user) ? 'Liberado' : 'Bloqueado'}</p>
+                            </div>
+                          </div>
+                          <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canManageStudents(user) ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                            <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                          </div>
+                        </button>
+
+                        {/* Toggle: Lançar Chamada & Presença */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleCanMarkAttendance(user)}
+                          className={`p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                            canMarkAttendance(user)
+                              ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-900 font-bold shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2 min-w-0">
+                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${canMarkAttendance(user) ? 'text-indigo-600' : 'text-slate-400'}`} />
+                            <div className="truncate">
+                              <p className="text-[11px] font-extrabold leading-tight">Lançar Chamada & Presença</p>
+                              <p className="text-[10px] opacity-80">{canMarkAttendance(user) ? 'Liberado' : 'Bloqueado'}</p>
+                            </div>
+                          </div>
+                          <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canMarkAttendance(user) ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                            <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Modalidades / Atividades Liberadas */}
+                      <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-700">
+                          <span>Modalidades Liberadas ({userActivities.length}):</span>
+                          <div className="flex items-center space-x-2 text-[10px]">
+                            <button
+                              type="button"
+                              onClick={() => handleAssignAllActivities(user)}
+                              className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                            >
+                              Todas
+                            </button>
+                            <span className="text-slate-300">•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleClearAllActivities(user)}
+                              className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                            >
+                              Limpar
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {activitiesList.map((act) => {
+                            const isAssigned = userActivities.includes(act.id);
+                            return (
+                              <button
+                                key={act.id}
+                                type="button"
+                                onClick={() => handleToggleUserActivity(user, act.id)}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
+                                  isAssigned
+                                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                }`}
+                                title={isAssigned ? `Clique para revogar ${act.id}` : `Clique para liberar ${act.id}`}
+                              >
+                                <span>{isAssigned ? '✓' : '+'}</span>
+                                <span>{act.id}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 

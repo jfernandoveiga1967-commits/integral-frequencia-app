@@ -186,6 +186,12 @@ export function canManageStudents(user: UserProfile | null): boolean {
   return user.role === 'coordenador' || user.role === 'professor';
 }
 
+export function canMarkAttendance(user: UserProfile | null): boolean {
+  if (!user) return false;
+  if (user.canMarkAttendance !== undefined) return user.canMarkAttendance;
+  return true;
+}
+
 export function canManageTurmas(user: UserProfile | null): boolean {
   if (!user) return false;
   return user.role === 'coordenador';
