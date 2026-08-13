@@ -247,7 +247,7 @@ export function generateTurmaPDFReport(
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(191, 219, 254);
-  doc.text('Frequência em Atividades Extracurriculares', 14, 22);
+  doc.text('Frequência Extracurricular', 14, 22);
 
   doc.setTextColor(226, 232, 240);
   doc.text(`Período: ${week.label}`, 196, 22, { align: 'right' });

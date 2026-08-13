@@ -600,7 +600,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex flex-col sm:flex-row items-center gap-2 text-left">
             <div>
-              <span className="font-bold text-white">Frequência em Atividades Extracurriculares</span> • v1.2
+              <span className="font-bold text-white">Frequência Extracurricular</span> • v1.2
             </div>
             {firebaseConnected && (
               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">

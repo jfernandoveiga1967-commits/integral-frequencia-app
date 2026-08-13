@@ -55,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <h1 className="text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
-                Frequência em Atividades Extracurriculares
+                Frequência Extracurricular
               </h1>
             </div>
           </div>
