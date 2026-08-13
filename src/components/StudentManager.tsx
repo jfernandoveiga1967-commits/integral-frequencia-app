@@ -39,14 +39,39 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const userCanManageStudents = canManageStudents(currentUser);
   const userCanManageTurmas = canManageTurmas(currentUser);
 
-  const turmasList = React.useMemo(() => {
+  const isCoordenador = currentUser?.role === 'coordenador';
+  const userAssignedTurmas = React.useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
+
+  const allowedTurmas = React.useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-  }, [turmas]);
+    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    if (isCoordenador || !currentUser) return sorted;
+    const userTurmaSet = new Set(userAssignedTurmas);
+    return sorted.filter((t) => userTurmaSet.has(t));
+  }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
+
+  const turmasList = allowedTurmas;
 
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Keep selectedTurma aligned with allowed turmas for non-coordenador
+  React.useEffect(() => {
+    if (!isCoordenador && currentUser) {
+      if (allowedTurmas.length === 1) {
+        setSelectedTurma(allowedTurmas[0] as TurmaType);
+      } else if (
+        allowedTurmas.length > 1 &&
+        selectedTurma !== 'TODAS' &&
+        !allowedTurmas.includes(selectedTurma)
+      ) {
+        setSelectedTurma(allowedTurmas[0] as TurmaType);
+      } else if (allowedTurmas.length === 0) {
+        setSelectedTurma('TODAS');
+      }
+    }
+  }, [isCoordenador, currentUser, allowedTurmas, selectedTurma]);
 
   // Single Add form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -103,6 +128,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const filteredStudents = React.useMemo(() => {
     return students
       .filter((student) => {
+        if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
+          return false;
+        }
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
         const matchesActivity =
           selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
@@ -116,7 +144,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return a.name.localeCompare(b.name, 'pt-BR');
       });
-  }, [students, selectedTurma, selectedActivity, searchTerm]);
+  }, [students, selectedTurma, selectedActivity, searchTerm, isCoordenador, currentUser, allowedTurmas]);
 
   const handleSingleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -582,7 +610,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             onChange={(e) => setSelectedTurma(e.target.value as TurmaType | 'TODAS')}
             className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium"
           >
-            <option value="TODAS">Todas as Turmas ({students.length} Alunos)</option>
+            {(isCoordenador || turmasList.length > 1) && (
+              <option value="TODAS">
+                {isCoordenador
+                  ? `Todas as Turmas (${students.length} Alunos)`
+                  : `Todas Minhas Turmas (${filteredStudents.length} Alunos)`}
+              </option>
+            )}
             {turmasList.map((t) => {
               const count = students.filter((s) => s.turma === t).length;
               return (

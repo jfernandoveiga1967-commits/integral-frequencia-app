@@ -49,7 +49,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
     if (isCoordenador || !currentUser) return sorted;
-    return sorted.filter((t) => userAssignedTurmas.includes(t));
+    const userTurmaSet = new Set(userAssignedTurmas);
+    return sorted.filter((t) => userTurmaSet.has(t));
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
   const activeActivities = React.useMemo(() => {

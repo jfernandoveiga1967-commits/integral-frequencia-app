@@ -160,7 +160,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormRole(user.role);
     setFormPin(user.pin || '1234');
     setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
-    setFormTurmas(user.allowedClassIds || user.assignedTurmas || availableTurmas);
+    setFormTurmas(
+      Array.isArray(user.allowedClassIds)
+        ? user.allowedClassIds
+        : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas)
+    );
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
   };
@@ -324,7 +328,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleToggleUserTurma = (user: UserProfile, turmaName: string) => {
-    const currentList = user.allowedClassIds || user.assignedTurmas || availableTurmas;
+    const currentList = Array.isArray(user.allowedClassIds)
+      ? user.allowedClassIds
+      : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas);
     const exists = currentList.includes(turmaName);
     const newList = exists ? currentList.filter((t) => t !== turmaName) : [...currentList, turmaName];
 
@@ -551,7 +557,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               filteredUsers.map((user) => {
                 const roleStyle = getRoleBadgeStyle(user.role);
                 const userActivities = user.assignedActivities || activitiesList.map((a) => a.id);
-                const userTurmas = user.allowedClassIds || user.assignedTurmas || availableTurmas;
+                const userTurmas = Array.isArray(user.allowedClassIds)
+                  ? user.allowedClassIds
+                  : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas);
 
                 return (
                   <div

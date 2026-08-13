@@ -213,6 +213,29 @@ export default function App() {
     };
   }, []);
 
+  // Keep currentUser state in sync with real-time updates from users list
+  useEffect(() => {
+    if (!currentUser) return;
+    const freshSelf = users.find(
+      (u) =>
+        u.id === currentUser.id ||
+        (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
+    );
+    if (freshSelf) {
+      const isDifferent =
+        JSON.stringify(freshSelf.allowedClassIds) !== JSON.stringify(currentUser.allowedClassIds) ||
+        JSON.stringify(freshSelf.assignedTurmas) !== JSON.stringify(currentUser.assignedTurmas) ||
+        JSON.stringify(freshSelf.assignedActivities) !== JSON.stringify(currentUser.assignedActivities) ||
+        freshSelf.role !== currentUser.role ||
+        freshSelf.name !== currentUser.name;
+
+      if (isDifferent) {
+        setCurrentUser(freshSelf);
+        saveStoredUser(freshSelf);
+      }
+    }
+  }, [users, currentUser]);
+
   // Event listener for date selection from day pills
   useEffect(() => {
     const handleSelectDate = (e: CustomEvent<string>) => {

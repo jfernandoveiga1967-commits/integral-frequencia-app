@@ -53,9 +53,10 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const allowedTurmas = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-    if (isCoordenador) return sorted;
-    return sorted.filter((t) => userAssignedTurmas.includes(t));
-  }, [turmas, isCoordenador, userAssignedTurmas]);
+    if (isCoordenador || !currentUser) return sorted;
+    const userTurmaSet = new Set(userAssignedTurmas);
+    return sorted.filter((t) => userTurmaSet.has(t));
+  }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
   const turmasList = allowedTurmas;
 
@@ -75,6 +76,19 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       }
     }
   }, [isCoordenador, allowedActivities, allowedActivityIds, selectedActivity]);
+
+  // Keep selectedTurma aligned with allowed turmas for non-coordenador
+  useEffect(() => {
+    if (!isCoordenador) {
+      if (allowedTurmas.length === 1) {
+        setSelectedTurma(allowedTurmas[0] as TurmaType);
+      } else if (allowedTurmas.length > 1 && selectedTurma !== 'TODAS' && !allowedTurmas.includes(selectedTurma)) {
+        setSelectedTurma(allowedTurmas[0] as TurmaType);
+      } else if (allowedTurmas.length === 0) {
+        setSelectedTurma('TODAS');
+      }
+    }
+  }, [isCoordenador, allowedTurmas, selectedTurma]);
 
   // Equipment modal state
   const [modalState, setModalState] = useState<{
@@ -427,7 +441,11 @@ function getCurrentHHMM(): string {
               onChange={(e) => setSelectedTurma(e.target.value as TurmaType | 'TODAS')}
               className="w-full px-3 py-2 text-xs md:text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="TODAS">Todas as Turmas ({turmasList.length} Turmas)</option>
+              {(isCoordenador || turmasList.length > 1) && (
+                <option value="TODAS">
+                  {isCoordenador ? `Todas as Turmas (${turmasList.length})` : `Todas Minhas Turmas (${turmasList.length})`}
+                </option>
+              )}
               {turmasList.map((turma) => (
                 <option key={turma} value={turma}>
                   {turma}
