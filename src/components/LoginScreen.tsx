@@ -130,9 +130,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
 
       {/* Main Card Container */}
       <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 z-10 my-auto">
-        
+
         {/* Header Branding */}
         <div className="text-center mb-6 select-none">
+          {/* School Logo (white card for contrast against dark background) */}
+          <div className="flex justify-center mb-4">
+            <div className="bg-white rounded-2xl px-5 py-3 shadow-lg inline-block">
+              <img
+                src="/logo-web.png"
+                alt="Instituto Educacional Crescer"
+                className="h-12 sm:h-14 w-auto object-contain"
+              />
+            </div>
+          </div>
+
           <div className="inline-flex items-center space-x-2 bg-red-500/10 border border-red-500/30 px-3.5 py-1 rounded-full text-red-500 text-xs font-extrabold uppercase tracking-wider mb-3">
             <span>COLÉGIO CRESCER • PROGRAMA INTEGRAL</span>
           </div>
