@@ -14,19 +14,6 @@ export const PRESET_USERS: UserProfile[] = [
     canManageStudents: true,
     canMarkAttendance: true,
   },
-  {
-    id: 'usr_aux_1',
-    name: 'Mariana Santos',
-    email: 'mariana.auxiliar@crescer.edu.br',
-    role: 'auxiliar',
-    cargoLabel: 'Auxiliar',
-    avatarColor: 'bg-emerald-600',
-    birthDate: '1995-03-25',
-    pin: '25/03/1995',
-    assignedActivities: ['Balé', 'Dança', 'Ginástica'],
-    canManageStudents: false,
-    canMarkAttendance: true,
-  },
 ];
 
 export function formatBirthDateToDisplay(dateStr?: string): string {
@@ -135,8 +122,17 @@ export function getLocalUsersList(): UserProfile[] {
     const raw = localStorage.getItem(ALL_USERS_STORAGE_KEY);
     if (!raw) return PRESET_USERS;
     let list = JSON.parse(raw) as UserProfile[];
-    // Remove Prof. Marcos Silva mock user
-    list = list.filter((u) => u.id !== 'usr_prof_1' && !u.name.toLowerCase().includes('marcos silva') && u.email !== 'marcos.professor@crescer.edu.br');
+    // Remove Prof. Marcos Silva & Mariana/Marina Santos mock users
+    list = list.filter(
+      (u) =>
+        u.id !== 'usr_prof_1' &&
+        u.id !== 'usr_aux_1' &&
+        !u.name.toLowerCase().includes('marcos silva') &&
+        !u.name.toLowerCase().includes('mariana santos') &&
+        !u.name.toLowerCase().includes('marina santos') &&
+        u.email !== 'marcos.professor@crescer.edu.br' &&
+        u.email !== 'mariana.auxiliar@crescer.edu.br'
+    );
     // Replace Ana Clara with Fernando Veiga if present in stored user list
     let updated = false;
     list = list.map((u) => {

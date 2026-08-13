@@ -148,15 +148,30 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup Marcos Silva if still present in Firestore
+      // Cleanup Marcos Silva and Mariana/Marina Santos if still present in Firestore
       fsUsers.forEach((u) => {
-        if (u.id === 'usr_prof_1' || u.name.toLowerCase().includes('marcos silva') || u.email === 'marcos.professor@crescer.edu.br') {
+        if (
+          u.id === 'usr_prof_1' ||
+          u.id === 'usr_aux_1' ||
+          u.name.toLowerCase().includes('marcos silva') ||
+          u.name.toLowerCase().includes('mariana santos') ||
+          u.name.toLowerCase().includes('marina santos') ||
+          u.email === 'marcos.professor@crescer.edu.br' ||
+          u.email === 'mariana.auxiliar@crescer.edu.br'
+        ) {
           deleteUserFromFirestore(u.id);
         }
       });
 
       const cleanFsUsers = fsUsers.filter(
-        (u) => u.id !== 'usr_prof_1' && !u.name.toLowerCase().includes('marcos silva') && u.email !== 'marcos.professor@crescer.edu.br'
+        (u) =>
+          u.id !== 'usr_prof_1' &&
+          u.id !== 'usr_aux_1' &&
+          !u.name.toLowerCase().includes('marcos silva') &&
+          !u.name.toLowerCase().includes('mariana santos') &&
+          !u.name.toLowerCase().includes('marina santos') &&
+          u.email !== 'marcos.professor@crescer.edu.br' &&
+          u.email !== 'mariana.auxiliar@crescer.edu.br'
       );
 
       const merged = [...cleanFsUsers];
