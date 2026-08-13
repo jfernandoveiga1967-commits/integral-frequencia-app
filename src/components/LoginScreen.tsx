@@ -48,12 +48,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     setLoginError(null);
 
     if (!loginEmail.trim()) {
-      setLoginError('Por favor, informe seu e-mail institucional.');
+      setLoginError('Por favor, informe seu e-mail.');
       return;
     }
 
     if (!loginPassword.trim()) {
-      setLoginError('Por favor, informe sua senha (data de nascimento).');
+      setLoginError('Por favor, informe sua senha.');
       return;
     }
 
@@ -66,7 +66,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
       onLogin(matchedUser);
     } else {
       setLoginError(
-        'E-mail ou senha (data de nascimento) incorretos. Verifique suas credenciais com a coordenação.'
+        'E-mail ou senha incorretos. Verifique suas credenciais com a coordenação.'
       );
     }
   };
@@ -81,12 +81,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     }
 
     if (!customEmail.trim()) {
-      setCustomError('Por favor, informe o e-mail institucional.');
+      setCustomError('Por favor, informe o e-mail.');
       return;
     }
 
     if (!customBirthDate) {
-      setCustomError('Por favor, selecione a data de nascimento (sua senha de acesso).');
+      setCustomError('Por favor, selecione a data de nascimento.');
       return;
     }
 
@@ -147,7 +147,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
             Frequência Extracurricular
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md mx-auto">
-            Acesse o diário de classe informando seu e-mail e senha (data de nascimento).
+            Acesse o diário de classe informando seu e-mail e senha.
           </p>
         </div>
 
@@ -186,7 +186,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 flex items-center space-x-1.5">
                 <Mail className="w-4 h-4 text-indigo-400" />
-                <span>E-mail Institucional:</span>
+                <span>E-mail:</span>
               </label>
               <input
                 type="email"
@@ -201,20 +201,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 flex items-center space-x-1.5">
                 <Lock className="w-4 h-4 text-amber-400" />
-                <span>Senha (Data de Nascimento):</span>
+                <span>Senha:</span>
               </label>
               <input
                 type="password"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="Digite sua data de nascimento (ex: 12/08/1967)"
+                placeholder="Digite sua senha"
                 className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-mono tracking-wide"
                 required
               />
-              <p className="text-[11px] text-slate-400 mt-1.5 flex items-center space-x-1">
-                <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>A senha do usuário é a sua data de nascimento informada no cadastro (ex: 12/08/1967).</span>
-              </p>
             </div>
 
             {loginError && (
@@ -252,7 +248,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
-                E-mail Institucional:
+                E-mail:
               </label>
               <input
                 type="email"
@@ -279,21 +275,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
               </select>
             </div>
 
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center space-x-1.5">
-                <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Data de Nascimento (Sua Senha de Acesso):</span>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 flex items-center space-x-1.5">
+                <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span>Data de Nascimento:</span>
               </label>
               <input
                 type="date"
                 value={customBirthDate}
                 onChange={(e) => setCustomBirthDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-950 border border-amber-500/40 rounded-xl text-white font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
+                className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 required
               />
-              <p className="text-[11px] text-amber-200/80 leading-relaxed">
-                🔑 <strong>Senha de Acesso:</strong> Ao criar sua conta, sua data de nascimento (ex: <span className="font-mono text-amber-300 font-bold">{formatBirthDateToDisplay(customBirthDate) || 'DD/MM/AAAA'}</span>) será registrada como sua senha de login.
-              </p>
             </div>
 
             {customError && (

@@ -22,6 +22,7 @@ import {
   Info,
   Sparkles,
   Plus,
+  Calendar,
   BookOpen,
   Cpu,
   Palette,
@@ -665,7 +666,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    E-mail Institucional:
+                    E-mail:
                   </label>
                   <input
                     type="email"
@@ -693,21 +694,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </select>
               </div>
 
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-1.5">
-                <label className="block font-extrabold text-amber-900 uppercase tracking-wider text-[11px] flex items-center space-x-1.5">
-                  <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>Data de Nascimento (Senha de Acesso):</span>
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Data de Nascimento:</span>
                 </label>
                 <input
                   type="date"
                   value={formBirthDate}
                   onChange={(e) => setFormBirthDate(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-white border border-amber-300 rounded-xl text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   required
                 />
-                <p className="text-[11px] text-amber-800 font-medium leading-relaxed pt-0.5">
-                  🔑 <strong>Regra do Sistema:</strong> A data de nascimento será automaticamente a senha de acesso do usuário no app (Senha definida: <span className="font-mono font-bold text-amber-900">{formatBirthDateToDisplay(formBirthDate) || 'DD/MM/AAAA'}</span>).
-                </p>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
