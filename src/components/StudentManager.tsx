@@ -126,14 +126,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setSingleFormError('Por favor, digite o nome do aluno.');
       return;
     }
-    if (newActivities.length === 0) {
-      setSingleFormError('Selecione pelo menos uma atividade para o aluno.');
-      return;
-    }
+    const finalActivities = newActivities.includes('Rotina') ? newActivities : ['Rotina', ...newActivities];
     onAddStudent({
       name: newName.trim(),
       turma: newTurma,
-      activities: newActivities,
+      activities: finalActivities,
     });
     setNewName('');
     setShowAddForm(false);
@@ -151,12 +148,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setBatchFormError('Insira pelo menos um nome para cadastrar.');
       return;
     }
-    if (batchActivities.length === 0) {
-      setBatchFormError('Selecione pelo menos uma atividade para esta turma.');
-      return;
-    }
+    const finalActivities = batchActivities.includes('Rotina') ? batchActivities : ['Rotina', ...batchActivities];
 
-    onBatchAddStudents(names, batchTurma, batchActivities);
+    onBatchAddStudents(names, batchTurma, finalActivities);
     setBatchNamesText('');
     setShowBatchForm(false);
   };
@@ -169,11 +163,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setEditFormError('O nome do aluno não pode ficar em branco.');
       return;
     }
-    if (editingStudent.activities.length === 0) {
-      setEditFormError('Selecione pelo menos uma atividade.');
-      return;
-    }
-    onUpdateStudent(editingStudent);
+    const finalActivities = editingStudent.activities.includes('Rotina')
+      ? editingStudent.activities
+      : ['Rotina', ...editingStudent.activities];
+
+    onUpdateStudent({
+      ...editingStudent,
+      activities: finalActivities,
+    });
     setEditingStudent(null);
   };
 
@@ -181,6 +178,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     currentList: ActivityType[],
     activity: ActivityType
   ): ActivityType[] => {
+    if (activity === 'Rotina') {
+      // Rotina is mandatory for all students and cannot be removed
+      return currentList.includes('Rotina') ? currentList : ['Rotina', ...currentList];
+    }
     if (currentList.includes(activity)) {
       return currentList.filter((a) => a !== activity);
     } else {
@@ -322,6 +323,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="flex flex-wrap gap-2">
               {activeActivities.map((act) => {
                 const isSelected = newActivities.includes(act.id);
+                const isRotina = act.id === 'Rotina';
                 return (
                   <button
                     type="button"
@@ -329,14 +331,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     onClick={() =>
                       setNewActivities(toggleActivityInList(newActivities, act.id))
                     }
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center space-x-1.5 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border flex items-center space-x-1.5 ${
                       isSelected
                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
+                    } ${isRotina ? 'ring-2 ring-rose-400' : ''}`}
                   >
                     <span>{isSelected ? '✓' : '+'}</span>
-                    <span>{act.id}</span>
+                    <span>{act.id} {isRotina ? '(Obrigatória)' : ''}</span>
                   </button>
                 );
               })}
@@ -532,6 +534,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 {activeActivities.map((act) => {
                   const isChecked = editingStudent.activities.includes(act.id);
+                  const isRotina = act.id === 'Rotina';
                   return (
                     <button
                       type="button"
@@ -542,14 +545,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           activities: toggleActivityInList(editingStudent.activities, act.id),
                         })
                       }
-                      className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between cursor-pointer transition-all ${
+                      className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all ${
                         isChecked
                           ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold'
                           : 'bg-slate-50 text-slate-600 border-slate-200'
-                      }`}
+                      } ${isRotina ? 'border-rose-300 bg-rose-50/50' : ''}`}
                     >
                       <div className="flex items-center space-x-1.5">
                         <ActivityBadge activity={act.id} size="sm" />
+                        {isRotina && <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded-full font-bold">Obrigatória</span>}
                       </div>
                       <span className="text-indigo-600">{isChecked ? '✓' : ''}</span>
                     </button>
