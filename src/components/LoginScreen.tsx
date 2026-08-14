@@ -63,7 +63,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     );
 
     if (matchedUser) {
-      onLogin(matchedUser);
+      const isMasterAdmin =
+        (matchedUser.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+        matchedUser.id === 'usr_coord_1';
+      const resolvedUser: UserProfile = isMasterAdmin
+        ? {
+            ...matchedUser,
+            name: 'Fernando Veiga',
+            email: 'jfernandoveiga1967@gmail.com',
+            role: 'coordenador',
+            cargoLabel: 'Coordenador (Administrador)',
+            avatarColor: 'bg-amber-500',
+            canManageStudents: true,
+            canMarkAttendance: true,
+          }
+        : matchedUser;
+      onLogin(resolvedUser);
     } else {
       setLoginError(
         'E-mail ou senha incorretos. Verifique suas credenciais com a coordenação.'
@@ -90,6 +105,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
       return;
     }
 
+    const isMasterAdmin = customEmail.trim().toLowerCase() === 'jfernandoveiga1967@gmail.com';
+    const effectiveRole: UserRole = isMasterAdmin ? 'coordenador' : customRole;
+
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
@@ -103,14 +121,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     const formattedPass = formatBirthDateToDisplay(customBirthDate);
 
     const newUser: UserProfile = {
-      id: 'usr_' + Date.now(),
-      name: customName.trim(),
+      id: isMasterAdmin ? 'usr_coord_1' : 'usr_' + Date.now(),
+      name: isMasterAdmin ? 'Fernando Veiga' : customName.trim(),
       email: customEmail.trim().toLowerCase(),
-      role: customRole,
-      cargoLabel: roleLabels[customRole],
-      avatarColor: roleColors[customRole],
+      role: effectiveRole,
+      cargoLabel: roleLabels[effectiveRole],
+      avatarColor: roleColors[effectiveRole],
       birthDate: customBirthDate,
       pin: formattedPass || customBirthDate,
+      canManageStudents: true,
+      canMarkAttendance: true,
     };
 
     if (onSaveUser) {

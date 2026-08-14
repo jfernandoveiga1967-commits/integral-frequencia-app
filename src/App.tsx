@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, ActivityItem } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem } from './types';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
@@ -45,8 +45,23 @@ export default function App() {
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
   const handleLogin = (user: UserProfile) => {
-    setCurrentUser(user);
-    saveStoredUser(user);
+    const isMasterAdmin =
+      (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+      user.id === 'usr_coord_1';
+    const finalUser = isMasterAdmin
+      ? {
+          ...user,
+          name: 'Fernando Veiga',
+          email: 'jfernandoveiga1967@gmail.com',
+          role: 'coordenador' as UserRole,
+          cargoLabel: 'Coordenador (Administrador)',
+          avatarColor: 'bg-amber-500',
+          canManageStudents: true,
+          canMarkAttendance: true,
+        }
+      : user;
+    setCurrentUser(finalUser);
+    saveStoredUser(finalUser);
   };
 
   const handleLogout = () => {
@@ -163,16 +178,63 @@ export default function App() {
         }
       });
 
-      const cleanFsUsers = fsUsers.filter(
+      // Self-heal Fernando Veiga in Firestore if missing or if marked as professor
+      const adminUsersInFs = fsUsers.filter(
         (u) =>
-          u.id !== 'usr_prof_1' &&
-          u.id !== 'usr_aux_1' &&
-          !u.name.toLowerCase().includes('marcos silva') &&
-          !u.name.toLowerCase().includes('mariana santos') &&
-          !u.name.toLowerCase().includes('marina santos') &&
-          u.email !== 'marcos.professor@crescer.edu.br' &&
-          u.email !== 'mariana.auxiliar@crescer.edu.br'
+          (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+          u.id === 'usr_coord_1' ||
+          u.name.toLowerCase().includes('fernando veiga')
       );
+
+      if (adminUsersInFs.length === 0) {
+        saveUserToFirestore(PRESET_USERS[0]);
+      } else {
+        adminUsersInFs.forEach((adm) => {
+          if (adm.role !== 'coordenador' || adm.cargoLabel !== 'Coordenador (Administrador)' || !adm.canManageStudents || !adm.canMarkAttendance) {
+            saveUserToFirestore({
+              ...adm,
+              name: 'Fernando Veiga',
+              email: 'jfernandoveiga1967@gmail.com',
+              role: 'coordenador',
+              cargoLabel: 'Coordenador (Administrador)',
+              avatarColor: 'bg-amber-500',
+              canManageStudents: true,
+              canMarkAttendance: true,
+            });
+          }
+        });
+      }
+
+      const cleanFsUsers = fsUsers
+        .filter(
+          (u) =>
+            u.id !== 'usr_prof_1' &&
+            u.id !== 'usr_aux_1' &&
+            !u.name.toLowerCase().includes('marcos silva') &&
+            !u.name.toLowerCase().includes('mariana santos') &&
+            !u.name.toLowerCase().includes('marina santos') &&
+            u.email !== 'marcos.professor@crescer.edu.br' &&
+            u.email !== 'mariana.auxiliar@crescer.edu.br'
+        )
+        .map((u) => {
+          if (
+            (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+            u.id === 'usr_coord_1' ||
+            u.name.toLowerCase().includes('fernando veiga')
+          ) {
+            return {
+              ...u,
+              name: 'Fernando Veiga',
+              email: 'jfernandoveiga1967@gmail.com',
+              role: 'coordenador' as UserRole,
+              cargoLabel: 'Coordenador (Administrador)',
+              avatarColor: 'bg-amber-500',
+              canManageStudents: true,
+              canMarkAttendance: true,
+            };
+          }
+          return u;
+        });
 
       const merged = [...cleanFsUsers];
       PRESET_USERS.forEach((pu) => {
@@ -187,8 +249,22 @@ export default function App() {
       if (currentUser) {
         const updatedSelf = merged.find((u) => u.id === currentUser.id || (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase()));
         if (updatedSelf) {
-          setCurrentUser(updatedSelf);
-          saveStoredUser(updatedSelf);
+          const enforcedSelf =
+            (updatedSelf.email && updatedSelf.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+            updatedSelf.id === 'usr_coord_1'
+              ? {
+                  ...updatedSelf,
+                  name: 'Fernando Veiga',
+                  email: 'jfernandoveiga1967@gmail.com',
+                  role: 'coordenador' as UserRole,
+                  cargoLabel: 'Coordenador (Administrador)',
+                  avatarColor: 'bg-amber-500',
+                  canManageStudents: true,
+                  canMarkAttendance: true,
+                }
+              : updatedSelf;
+          setCurrentUser(enforcedSelf);
+          saveStoredUser(enforcedSelf);
         }
       }
     });
@@ -222,16 +298,34 @@ export default function App() {
         (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
     );
     if (freshSelf) {
+      const isMasterAdmin =
+        (freshSelf.email && freshSelf.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+        freshSelf.id === 'usr_coord_1' ||
+        (currentUser.email && currentUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com');
+
+      const resolvedFresh = isMasterAdmin
+        ? {
+            ...freshSelf,
+            name: 'Fernando Veiga',
+            email: 'jfernandoveiga1967@gmail.com',
+            role: 'coordenador' as UserRole,
+            cargoLabel: 'Coordenador (Administrador)',
+            avatarColor: 'bg-amber-500',
+            canManageStudents: true,
+            canMarkAttendance: true,
+          }
+        : freshSelf;
+
       const isDifferent =
-        JSON.stringify(freshSelf.allowedClassIds) !== JSON.stringify(currentUser.allowedClassIds) ||
-        JSON.stringify(freshSelf.assignedTurmas) !== JSON.stringify(currentUser.assignedTurmas) ||
-        JSON.stringify(freshSelf.assignedActivities) !== JSON.stringify(currentUser.assignedActivities) ||
-        freshSelf.role !== currentUser.role ||
-        freshSelf.name !== currentUser.name;
+        JSON.stringify(resolvedFresh.allowedClassIds) !== JSON.stringify(currentUser.allowedClassIds) ||
+        JSON.stringify(resolvedFresh.assignedTurmas) !== JSON.stringify(currentUser.assignedTurmas) ||
+        JSON.stringify(resolvedFresh.assignedActivities) !== JSON.stringify(currentUser.assignedActivities) ||
+        resolvedFresh.role !== currentUser.role ||
+        resolvedFresh.name !== currentUser.name;
 
       if (isDifferent) {
-        setCurrentUser(freshSelf);
-        saveStoredUser(freshSelf);
+        setCurrentUser(resolvedFresh);
+        saveStoredUser(resolvedFresh);
       }
     }
   }, [users, currentUser]);

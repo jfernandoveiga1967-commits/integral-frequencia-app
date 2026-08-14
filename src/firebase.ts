@@ -170,20 +170,28 @@ export function subscribeUsers(
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         if (data && data.id) {
+          const isMasterAdmin =
+            (data.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+            data.id === 'usr_coord_1' ||
+            (data.name && data.name.toLowerCase().includes('fernando veiga'));
+          const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
+          const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
+          const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
+
           list.push({
             id: data.id,
-            name: data.name || '',
-            email: data.email || '',
-            role: data.role || 'professor',
-            cargoLabel: data.cargoLabel || 'Monitor / Professor',
-            avatarColor: data.avatarColor || 'bg-indigo-600',
-            birthDate: data.birthDate || '',
-            pin: data.pin || '1234',
+            name: data.name || (isMasterAdmin ? 'Fernando Veiga' : ''),
+            email: data.email || (isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : ''),
+            role,
+            cargoLabel,
+            avatarColor,
+            birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
+            pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
             assignedActivities: Array.isArray(data.assignedActivities) ? data.assignedActivities : [],
             assignedTurmas: Array.isArray(data.allowedClassIds) ? data.allowedClassIds : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined),
             allowedClassIds: Array.isArray(data.allowedClassIds) ? data.allowedClassIds : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined),
-            canManageStudents: data.canManageStudents !== undefined ? data.canManageStudents : true,
-            canMarkAttendance: data.canMarkAttendance !== undefined ? data.canMarkAttendance : true,
+            canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
+            canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             updatedAt: data.updatedAt || new Date().toISOString(),
           });
         }
@@ -200,21 +208,29 @@ export function subscribeUsers(
 
 export async function saveUserToFirestore(user: UserProfile) {
   try {
+    const isMasterAdmin =
+      (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+      user.id === 'usr_coord_1' ||
+      (user.name && user.name.toLowerCase().includes('fernando veiga'));
+    const role = isMasterAdmin ? 'coordenador' : user.role;
+    const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : user.cargoLabel;
+    const avatarColor = isMasterAdmin ? 'bg-amber-500' : (user.avatarColor || 'bg-indigo-600');
+
     const docRef = doc(db, 'users', user.id);
     await setDoc(docRef, {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      cargoLabel: user.cargoLabel,
-      avatarColor: user.avatarColor || 'bg-indigo-600',
-      birthDate: user.birthDate || '',
-      pin: user.pin || '1234',
+      role,
+      cargoLabel,
+      avatarColor,
+      birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
+      pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
       assignedActivities: user.assignedActivities || [],
       assignedTurmas: user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []),
       allowedClassIds: user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []),
-      canManageStudents: user.canManageStudents !== undefined ? user.canManageStudents : true,
-      canMarkAttendance: user.canMarkAttendance !== undefined ? user.canMarkAttendance : true,
+      canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
+      canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {

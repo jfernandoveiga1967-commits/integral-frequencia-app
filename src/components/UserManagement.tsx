@@ -222,20 +222,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     const formattedPass = formatBirthDateToDisplay(formBirthDate);
 
+    const isMasterAdmin =
+      (formEmail || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+      (editingUser && editingUser.id === 'usr_coord_1');
+    const effectiveRole = isMasterAdmin ? 'coordenador' : formRole;
+
     const updatedUser: UserProfile = {
-      id: editingUser ? editingUser.id : 'usr_' + Date.now(),
-      name: formName.trim(),
+      id: editingUser ? editingUser.id : (isMasterAdmin ? 'usr_coord_1' : 'usr_' + Date.now()),
+      name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
       email: formEmail.trim().toLowerCase(),
-      role: formRole,
-      cargoLabel: roleLabels[formRole],
-      avatarColor: roleColors[formRole],
+      role: effectiveRole,
+      cargoLabel: roleLabels[effectiveRole],
+      avatarColor: roleColors[effectiveRole],
       birthDate: formBirthDate,
       pin: formattedPass || formBirthDate,
       assignedActivities: formActivities,
       assignedTurmas: formTurmas,
       allowedClassIds: formTurmas,
-      canManageStudents: formCanManageStudents,
-      canMarkAttendance: formCanMarkAttendance,
+      canManageStudents: isMasterAdmin ? true : formCanManageStudents,
+      canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       updatedAt: new Date().toISOString(),
     };
 
@@ -247,6 +252,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const handleQuickRoleChange = (user: UserProfile, newRole: UserRole) => {
     if (user.role === newRole) return;
+    if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
+      showToast('O perfil do Coordenador Geral não pode ser alterado para Monitor/Professor.', 'error');
+      return;
+    }
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -368,6 +377,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const confirmDeleteUser = () => {
     if (!userToDelete) return;
+    if (userToDelete.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || userToDelete.id === 'usr_coord_1') {
+      showToast('O perfil do Coordenador Geral não pode ser excluído.', 'error');
+      setUserToDelete(null);
+      return;
+    }
     onDeleteUser(userToDelete.id);
     showToast(`Usuário ${userToDelete.name} removido.`);
     setUserToDelete(null);

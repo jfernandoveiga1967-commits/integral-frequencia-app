@@ -1,5 +1,7 @@
 import { UserProfile, UserRole } from '../types';
 
+export const ADMIN_EMAIL = 'jfernandoveiga1967@gmail.com';
+
 export const PRESET_USERS: UserProfile[] = [
   {
     id: 'usr_coord_1',
@@ -88,17 +90,26 @@ export function getStoredUser(): UserProfile | null {
       saveStoredUser(null);
       return null;
     }
-    // Migrate Ana Clara to Fernando Veiga if previously logged in
-    if (user.email === 'coordenacao@crescer.edu.br' || user.name.includes('Ana Clara')) {
-      const migratedUser: UserProfile = {
+    // Enforce Fernando Veiga as Coordenador (Administrador)
+    if (
+      (user.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
+      user.email === 'coordenacao@crescer.edu.br' ||
+      user.name.includes('Ana Clara') ||
+      user.id === 'usr_coord_1'
+    ) {
+      const coordUser: UserProfile = {
         ...user,
+        id: user.id || 'usr_coord_1',
         name: 'Fernando Veiga',
-        email: 'jfernandoveiga1967@gmail.com',
+        email: ADMIN_EMAIL,
         role: 'coordenador',
         cargoLabel: 'Coordenador (Administrador)',
+        avatarColor: 'bg-amber-500',
+        canManageStudents: true,
+        canMarkAttendance: true,
       };
-      saveStoredUser(migratedUser);
-      return migratedUser;
+      saveStoredUser(coordUser);
+      return coordUser;
     }
     return user;
   } catch (err) {
@@ -112,7 +123,18 @@ export function saveStoredUser(user: UserProfile | null): void {
     if (!user) {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     } else {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+      const normalizedUser =
+        user.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+          ? {
+              ...user,
+              role: 'coordenador' as UserRole,
+              cargoLabel: 'Coordenador (Administrador)',
+              avatarColor: 'bg-amber-500',
+              canManageStudents: true,
+              canMarkAttendance: true,
+            }
+          : user;
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedUser));
     }
   } catch (err) {
     console.error('Error saving active user profile:', err);
@@ -135,21 +157,35 @@ export function getLocalUsersList(): UserProfile[] {
         u.email !== 'marcos.professor@crescer.edu.br' &&
         u.email !== 'mariana.auxiliar@crescer.edu.br'
     );
-    // Replace Ana Clara with Fernando Veiga if present in stored user list
-    let updated = false;
+    // Ensure Fernando Veiga is strictly Coordenador in stored user list
+    let hasAdmin = false;
     list = list.map((u) => {
-      if (u.email === 'coordenacao@crescer.edu.br' || u.name.includes('Ana Clara')) {
-        updated = true;
+      if (
+        (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
+        u.email === 'coordenacao@crescer.edu.br' ||
+        u.name.includes('Ana Clara') ||
+        u.id === 'usr_coord_1'
+      ) {
+        hasAdmin = true;
         return {
           ...u,
+          id: u.id || 'usr_coord_1',
           name: 'Fernando Veiga',
-          email: 'jfernandoveiga1967@gmail.com',
-          role: 'coordenador',
+          email: ADMIN_EMAIL,
+          role: 'coordenador' as UserRole,
           cargoLabel: 'Coordenador (Administrador)',
+          avatarColor: 'bg-amber-500',
+          canManageStudents: true,
+          canMarkAttendance: true,
         };
       }
       return u;
     });
+
+    if (!hasAdmin) {
+      list = [PRESET_USERS[0], ...list];
+    }
+
     saveLocalUsersList(list);
     return list.length > 0 ? list : PRESET_USERS;
   } catch (err) {
@@ -160,18 +196,39 @@ export function getLocalUsersList(): UserProfile[] {
 
 export function saveLocalUsersList(users: UserProfile[]): void {
   try {
-    localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(users));
+    const normalizedList = users.map((u) => {
+      if (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        return {
+          ...u,
+          role: 'coordenador' as UserRole,
+          cargoLabel: 'Coordenador (Administrador)',
+          avatarColor: 'bg-amber-500',
+          canManageStudents: true,
+          canMarkAttendance: true,
+        };
+      }
+      return u;
+    });
+    localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(normalizedList));
   } catch (err) {
     console.error('Error saving local users list:', err);
   }
 }
 
 export function isCoordenador(user: UserProfile | null): boolean {
-  return user?.role === 'coordenador';
+  if (!user) return false;
+  if (user.email && user.email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    return true;
+  }
+  return user.role === 'coordenador';
 }
 
 export function isProfessor(user: UserProfile | null): boolean {
-  return user?.role === 'professor';
+  if (!user) return false;
+  if (user.email && user.email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    return false;
+  }
+  return user.role === 'professor';
 }
 
 export function isAuxiliar(_user: UserProfile | null): boolean {
@@ -180,24 +237,26 @@ export function isAuxiliar(_user: UserProfile | null): boolean {
 
 export function canManageStudents(user: UserProfile | null): boolean {
   if (!user) return false;
+  if (isCoordenador(user)) return true;
   if (user.canManageStudents !== undefined) return user.canManageStudents;
   return user.role === 'coordenador' || user.role === 'professor';
 }
 
 export function canMarkAttendance(user: UserProfile | null): boolean {
   if (!user) return false;
+  if (isCoordenador(user)) return true;
   if (user.canMarkAttendance !== undefined) return user.canMarkAttendance;
   return true;
 }
 
 export function canManageTurmas(user: UserProfile | null): boolean {
   if (!user) return false;
-  return user.role === 'coordenador';
+  return isCoordenador(user);
 }
 
 export function canResetSystem(user: UserProfile | null): boolean {
   if (!user) return false;
-  return user.role === 'coordenador';
+  return isCoordenador(user);
 }
 
 export function getRoleBadgeStyle(role: UserRole): { bg: string; text: string; border: string; label: string } {
