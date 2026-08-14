@@ -105,8 +105,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
       return;
     }
 
-    const isMasterAdmin = customEmail.trim().toLowerCase() === 'jfernandoveiga1967@gmail.com';
+    const normalizedEmail = customEmail.trim().toLowerCase();
+    const isMasterAdmin = normalizedEmail === 'jfernandoveiga1967@gmail.com';
     const effectiveRole: UserRole = isMasterAdmin ? 'coordenador' : customRole;
+
+    const existingUser = allRegisteredUsers.find(
+      (u) => (u.email || '').trim().toLowerCase() === normalizedEmail
+    );
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -121,14 +126,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     const formattedPass = formatBirthDateToDisplay(customBirthDate);
 
     const newUser: UserProfile = {
-      id: isMasterAdmin ? 'usr_coord_1' : 'usr_' + Date.now(),
+      id: isMasterAdmin ? 'usr_coord_1' : (existingUser ? existingUser.id : 'usr_' + Date.now()),
       name: isMasterAdmin ? 'Fernando Veiga' : customName.trim(),
-      email: customEmail.trim().toLowerCase(),
+      email: normalizedEmail,
       role: effectiveRole,
       cargoLabel: roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
       birthDate: customBirthDate,
       pin: formattedPass || customBirthDate,
+      assignedActivities: isMasterAdmin
+        ? ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta']
+        : (existingUser?.assignedActivities || []),
+      assignedTurmas: isMasterAdmin
+        ? ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano']
+        : existingUser?.assignedTurmas,
+      allowedClassIds: isMasterAdmin
+        ? ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano']
+        : existingUser?.allowedClassIds,
       canManageStudents: true,
       canMarkAttendance: true,
     };

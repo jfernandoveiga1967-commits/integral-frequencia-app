@@ -159,15 +159,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     );
   }
 
-  // Filtered Users
-  const filteredUsers = (users || []).filter((u) => {
-    if (!u) return false;
-    const matchesSearch =
-      (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (u.email || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
-    return matchesSearch && matchesRole;
-  });
+  // Filtered & Sorted Users (Admin always pinned on top + alphabetical A-Z for others)
+  const filteredUsers = (users || [])
+    .filter((u) => {
+      if (!u) return false;
+      const matchesSearch =
+        (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (u.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
+      return matchesSearch && matchesRole;
+    })
+    .sort((a, b) => {
+      // 1. Coordenador/Admin fica sempre no topo
+      if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
+      if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;
+
+      // 2. Demais usuários ordenados por nome (A-Z)
+      return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
+    });
 
   // Stats
   const countCoord = (users || []).filter((u) => u && u.role === 'coordenador').length;
@@ -249,16 +258,29 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       (editingUser && editingUser.id === 'usr_coord_1');
     const effectiveRole = isMasterAdmin ? 'coordenador' : formRole;
 
+    const normalizedEmail = formEmail.trim().toLowerCase();
+    const existingUserWithEmail = (users || []).find(
+      (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail
+    );
+
+    const targetId = isMasterAdmin
+      ? 'usr_coord_1'
+      : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
+
+    const effectiveActivities = isMasterAdmin
+      ? (formActivities && formActivities.length >= 7 ? formActivities : ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
+      : formActivities;
+
     const updatedUser: UserProfile = {
-      id: editingUser ? editingUser.id : (isMasterAdmin ? 'usr_coord_1' : 'usr_' + Date.now()),
+      id: targetId,
       name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
-      email: formEmail.trim().toLowerCase(),
+      email: normalizedEmail,
       role: effectiveRole,
       cargoLabel: roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
       birthDate: formBirthDate,
       pin: formattedPass || formBirthDate,
-      assignedActivities: formActivities,
+      assignedActivities: effectiveActivities,
       assignedTurmas: formTurmas,
       allowedClassIds: formTurmas,
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,

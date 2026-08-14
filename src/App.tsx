@@ -194,15 +194,29 @@ export default function App() {
       if (adminUsersInFs.length === 0) {
         saveUserToFirestore(PRESET_USERS[0]);
       } else {
+        // If there are duplicate admin documents in Firestore (e.g. non usr_coord_1 or with incomplete activities), delete duplicates
         adminUsersInFs.forEach((adm) => {
-          if (adm.role !== 'coordenador' || adm.cargoLabel !== 'Coordenador (Administrador)' || !adm.canManageStudents || !adm.canMarkAttendance) {
+          if (adm.id !== 'usr_coord_1') {
+            deleteUserFromFirestore(adm.id);
+          } else if (
+            adm.role !== 'coordenador' ||
+            adm.cargoLabel !== 'Coordenador (Administrador)' ||
+            !adm.canManageStudents ||
+            !adm.canMarkAttendance ||
+            !adm.assignedActivities ||
+            adm.assignedActivities.length < 7
+          ) {
             saveUserToFirestore({
               ...adm,
+              id: 'usr_coord_1',
               name: 'Fernando Veiga',
               email: 'jfernandoveiga1967@gmail.com',
               role: 'coordenador',
               cargoLabel: 'Coordenador (Administrador)',
               avatarColor: 'bg-amber-500',
+              assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
+              assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+              allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
               canManageStudents: true,
               canMarkAttendance: true,
             });
@@ -229,11 +243,15 @@ export default function App() {
           ) {
             return {
               ...u,
+              id: 'usr_coord_1',
               name: 'Fernando Veiga',
               email: 'jfernandoveiga1967@gmail.com',
               role: 'coordenador' as UserRole,
               cargoLabel: 'Coordenador (Administrador)',
               avatarColor: 'bg-amber-500',
+              assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
+              assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+              allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
               canManageStudents: true,
               canMarkAttendance: true,
             };
@@ -241,12 +259,23 @@ export default function App() {
           return u;
         });
 
-      const merged = [...cleanFsUsers];
-      PRESET_USERS.forEach((pu) => {
-        if (!merged.some((u) => u.id === pu.id || (u.email && pu.email && u.email.toLowerCase() === pu.email.toLowerCase()))) {
-          merged.push(pu);
+      // Strictly deduplicate by email
+      const dedupMap = new Map<string, UserProfile>();
+      cleanFsUsers.forEach((u) => {
+        const key = (u.email || '').trim().toLowerCase() || u.id;
+        if (!dedupMap.has(key)) {
+          dedupMap.set(key, u);
         }
       });
+
+      PRESET_USERS.forEach((pu) => {
+        const key = (pu.email || '').trim().toLowerCase() || pu.id;
+        if (!dedupMap.has(key)) {
+          dedupMap.set(key, pu);
+        }
+      });
+
+      const merged = Array.from(dedupMap.values());
       setUsers(merged);
       saveLocalUsersList(merged);
 

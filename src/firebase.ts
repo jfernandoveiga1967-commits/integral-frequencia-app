@@ -163,6 +163,9 @@ export function subscribeTurmas(
   );
 }
 
+export const MASTER_ADMIN_ACTIVITIES = ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'];
+export const MASTER_ADMIN_TURMAS = ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'];
+
 export function subscribeUsers(
   onData: (users: UserProfile[]) => void,
   onError?: (err: Error) => void
@@ -171,37 +174,83 @@ export function subscribeUsers(
   return onSnapshot(
     colRef,
     (snapshot) => {
-      const list: UserProfile[] = [];
+      const rawList: { docId: string; user: UserProfile }[] = [];
+
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data && data.id) {
+        if (data) {
+          const docId = docSnap.id;
+          const userEmail = (data.email || '').trim().toLowerCase();
+          const userName = (data.name || '').trim().toLowerCase();
           const isMasterAdmin =
-            (data.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+            userEmail === 'jfernandoveiga1967@gmail.com' ||
+            docId === 'usr_coord_1' ||
             data.id === 'usr_coord_1' ||
-            (data.name && data.name.toLowerCase().includes('fernando veiga'));
+            userName.includes('fernando veiga');
+
+          // If this is a duplicate or secondary document for Fernando Veiga, delete it from Firestore
+          if (isMasterAdmin && docId !== 'usr_coord_1') {
+            deleteDoc(doc(db, 'users', docId)).catch(() => {});
+            return;
+          }
+
           const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
           const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
           const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
 
-          list.push({
-            id: data.id,
-            name: data.name || (isMasterAdmin ? 'Fernando Veiga' : ''),
-            email: data.email || (isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : ''),
+          let assignedActivities = Array.isArray(data.assignedActivities) ? data.assignedActivities : [];
+          if (isMasterAdmin) {
+            // Master Admin must strictly have all 7 modalities
+            assignedActivities = MASTER_ADMIN_ACTIVITIES;
+          }
+
+          let assignedTurmas = Array.isArray(data.allowedClassIds)
+            ? data.allowedClassIds
+            : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined);
+          if (isMasterAdmin && (!assignedTurmas || assignedTurmas.length === 0)) {
+            assignedTurmas = MASTER_ADMIN_TURMAS;
+          }
+
+          const profile: UserProfile = {
+            id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
+            name: isMasterAdmin ? 'Fernando Veiga' : (data.name || ''),
+            email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (data.email || ''),
             role,
             cargoLabel,
             avatarColor,
             birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
             pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-            assignedActivities: Array.isArray(data.assignedActivities) ? data.assignedActivities : [],
-            assignedTurmas: Array.isArray(data.allowedClassIds) ? data.allowedClassIds : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined),
-            allowedClassIds: Array.isArray(data.allowedClassIds) ? data.allowedClassIds : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined),
+            assignedActivities,
+            assignedTurmas,
+            allowedClassIds: assignedTurmas,
             canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             updatedAt: data.updatedAt || new Date().toISOString(),
-          });
+          };
+
+          rawList.push({ docId, user: profile });
         }
       });
-      onData(list);
+
+      // Deduplicate by normalized email to guarantee single card per user
+      const emailMap = new Map<string, { docId: string; user: UserProfile }>();
+      const finalUsers: UserProfile[] = [];
+
+      rawList.forEach(({ docId, user }) => {
+        const key = user.email.toLowerCase().trim() || user.id;
+        if (!emailMap.has(key)) {
+          emailMap.set(key, { docId, user });
+          finalUsers.push(user);
+        } else {
+          // If we encountered a duplicate doc with the same email, delete the duplicate from Firestore
+          const existing = emailMap.get(key)!;
+          if (existing.docId !== docId) {
+            deleteDoc(doc(db, 'users', docId)).catch(() => {});
+          }
+        }
+      });
+
+      onData(finalUsers);
     },
     (error) => {
       if (onError) onError(error);
@@ -216,23 +265,39 @@ export async function saveUserToFirestore(user: UserProfile) {
       (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
       user.id === 'usr_coord_1' ||
       (user.name && user.name.toLowerCase().includes('fernando veiga'));
+
+    const canonicalId = isMasterAdmin ? 'usr_coord_1' : user.id;
+
+    // If previously saved under a different ID, clean up old doc
+    if (user.id && user.id !== canonicalId) {
+      try {
+        await deleteDoc(doc(db, 'users', user.id));
+      } catch {
+        // Ignore if didn't exist
+      }
+    }
+
     const role = isMasterAdmin ? 'coordenador' : user.role;
     const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : user.cargoLabel;
     const avatarColor = isMasterAdmin ? 'bg-amber-500' : (user.avatarColor || 'bg-indigo-600');
+    const assignedActivities = isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : (user.assignedActivities || []);
+    const assignedTurmas = isMasterAdmin
+      ? (user.allowedClassIds && user.allowedClassIds.length > 0 ? user.allowedClassIds : MASTER_ADMIN_TURMAS)
+      : (user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []));
 
-    const docRef = doc(db, 'users', user.id);
+    const docRef = doc(db, 'users', canonicalId);
     await setDoc(docRef, {
-      id: user.id,
-      name: user.name,
-      email: user.email,
+      id: canonicalId,
+      name: isMasterAdmin ? 'Fernando Veiga' : user.name,
+      email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (user.email || '').trim().toLowerCase(),
       role,
       cargoLabel,
       avatarColor,
       birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
       pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-      assignedActivities: user.assignedActivities || [],
-      assignedTurmas: user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []),
-      allowedClassIds: user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []),
+      assignedActivities,
+      assignedTurmas,
+      allowedClassIds: assignedTurmas,
       canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
       canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
       updatedAt: new Date().toISOString(),
