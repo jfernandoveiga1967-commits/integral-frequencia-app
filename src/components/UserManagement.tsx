@@ -36,6 +36,10 @@ import {
   Music,
   Music2,
   Waves,
+  ChevronDown,
+  ChevronUp,
+  ChevronsDown,
+  ChevronsUp,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -117,6 +121,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // Toast Feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Accordion Expand/Collapse State
+  const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
+
+  const toggleUserExpand = (userId: string) => {
+    setExpandedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const expandAllUsers = () => {
+    setExpandedUserIds(filteredUsers.map((u) => u.id));
+  };
+
+  const collapseAllUsers = () => {
+    setExpandedUserIds([]);
+  };
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg({ text, type });
@@ -523,46 +544,82 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       {/* ================= SECTION 1: USERS & PERMISSIONS ================= */}
       {activeSubTab === 'users' && (
         <div className="space-y-6">
-          {/* Filters & Search Controls */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome ou e-mail..."
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+          {/* Filters, Search & Expand/Collapse Controls */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Buscar por nome ou e-mail..."
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
+                  const labels: Record<string, string> = {
+                    TODOS: 'Todos os Usuários',
+                    coordenador: 'Coordenadores',
+                    professor: 'Professores / Monitores',
+                  };
+
+                  const isSel = roleFilter === r;
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => setRoleFilter(r)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        isSel
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {labels[r]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-              {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
-                const labels: Record<string, string> = {
-                  TODOS: 'Todos os Usuários',
-                  coordenador: 'Coordenadores',
-                  professor: 'Professores / Monitores',
-                };
+            {/* Quick Accordion Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+              <div className="flex items-center space-x-2 text-slate-500 font-medium">
+                <span>Total: <strong className="text-slate-800 font-bold">{filteredUsers.length}</strong> usuário(s)</span>
+                {expandedUserIds.length > 0 && (
+                  <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold text-[11px] border border-indigo-200">
+                    {expandedUserIds.length} expandido(s)
+                  </span>
+                )}
+              </div>
 
-                const isSel = roleFilter === r;
-                return (
-                  <button
-                    key={r}
-                    onClick={() => setRoleFilter(r)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                      isSel
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {labels[r]}
-                  </button>
-                );
-              })}
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={expandAllUsers}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
+                  title="Expandir todos os cartões de usuário"
+                >
+                  <ChevronsDown className="w-3.5 h-3.5" />
+                  <span>Expandir Todos</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={collapseAllUsers}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
+                  title="Recolher todos os cartões de usuário"
+                >
+                  <ChevronsUp className="w-3.5 h-3.5" />
+                  <span>Recolher Todos</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Users List Cards - Full-width stacked / cascade layout */}
+          {/* Users List Cards - Accordion Layout */}
           <div className="flex flex-col space-y-4 w-full">
             {filteredUsers.length === 0 ? (
               <div className="w-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
@@ -579,15 +636,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   user.role === 'coordenador' ||
                   (user.email && user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
                   user.id === 'usr_coord_1';
+                const isExpanded = expandedUserIds.includes(user.id);
 
                 return (
                   <div
                     key={user.id}
-                    className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm hover:shadow-md transition-all w-full flex flex-col space-y-4"
+                    className={`bg-white border rounded-3xl transition-all w-full overflow-hidden shadow-sm hover:shadow-md ${
+                      isExpanded ? 'border-indigo-300 ring-2 ring-indigo-500/10' : 'border-slate-200'
+                    }`}
                   >
-                    {/* Top row: Identity, Badges and Actions */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                      <div className="flex items-start sm:items-center space-x-3.5 min-w-0">
+                    {/* Header (Visível sempre) - Clickable to expand/collapse */}
+                    <div
+                      onClick={() => toggleUserExpand(user.id)}
+                      className={`p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer transition-colors ${
+                        isExpanded ? 'bg-slate-50/70 border-b border-slate-100' : 'hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start sm:items-center space-x-3.5 min-w-0 flex-1">
                         <div
                           className={`w-12 h-12 rounded-2xl ${
                             user.avatarColor || (isMasterCoord ? 'bg-amber-500' : 'bg-indigo-600')
@@ -596,7 +661,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                         </div>
 
-                        <div className="min-w-0 space-y-1">
+                        <div className="min-w-0 space-y-1 flex-1">
                           <div className="flex items-center flex-wrap gap-2">
                             <h3 className="text-base font-extrabold text-slate-900 truncate">{user.name}</h3>
                             {currentUser?.id === user.id && (
@@ -621,26 +686,36 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               <Mail className="w-3.5 h-3.5 text-slate-400 mr-1.5 shrink-0" />
                               <span className="truncate">{user.email}</span>
                             </span>
-                            <span className="flex items-center text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                              <KeyRound className="w-3 h-3 text-amber-600 mr-1.5 shrink-0" />
-                              <span>Senha (Data Nasc.): <strong className="font-mono text-slate-900">{formatBirthDateToDisplay(user.birthDate) || user.pin || 'Não cadastrada'}</strong></span>
+
+                            {/* Compact Badges shown in header */}
+                            <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                              <BookOpen className="w-3 h-3 text-blue-600" />
+                              <span>{isMasterCoord ? 'Todas as Turmas' : `${userTurmas.length} turmas`}</span>
+                            </span>
+
+                            <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                              <Sparkles className="w-3 h-3 text-indigo-600" />
+                              <span>{userActivities.length} modalidades</span>
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Top Action Buttons */}
-                      <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                      {/* Header Action Buttons & Expand Toggle */}
+                      <div className="flex items-center space-x-2 shrink-0 self-end md:self-center" onClick={(e) => e.stopPropagation()}>
                         <button
+                          type="button"
                           onClick={() => handleOpenEditModal(user)}
                           className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs"
+                          title="Editar cadastro deste usuário"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
-                          <span>Editar Dados</span>
+                          <span>Editar</span>
                         </button>
 
                         {!isMasterCoord && currentUser?.id !== user.id && (
                           <button
+                            type="button"
                             onClick={() => setUserToDelete(user)}
                             className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
                             title="Remover usuário"
@@ -648,169 +723,209 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <Trash2 className="w-4 h-4" />
                           </button>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={() => toggleUserExpand(user.id)}
+                          className={`px-3 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center space-x-1.5 ${
+                            isExpanded
+                              ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/20'
+                          }`}
+                          title={isExpanded ? 'Recolher detalhes' : 'Expandir detalhes e permissões'}
+                        >
+                          <span>{isExpanded ? 'Recolher' : 'Ver Detalhes'}</span>
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 
-                    {/* Bottom distributed row: Permissões, Turmas e Modalidades */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 text-xs">
-                      {/* Permissões Rápidas: 3 cols on xl */}
-                      <div className="xl:col-span-3 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5">
-                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70">
-                          <span className="font-extrabold text-slate-800 flex items-center space-x-1.5">
-                            <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                            <span>Permissões de Ação</span>
-                          </span>
-                          <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100/60 px-2 py-0.5 rounded-full border border-indigo-200">
-                            Acesso Direto
-                          </span>
-                        </div>
-
-                        <div className="space-y-2">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleCanManageStudents(user)}
-                            className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
-                              canManageStudents(user)
-                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 font-bold shadow-xs'
-                                : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-2 min-w-0">
-                              <Users className={`w-4 h-4 shrink-0 ${canManageStudents(user) ? 'text-emerald-600' : 'text-slate-400'}`} />
-                              <div className="truncate">
-                                <p className="text-[11px] font-extrabold leading-tight">Cadastrar/Editar Alunos</p>
-                                <p className="text-[10px] opacity-80">{canManageStudents(user) ? 'Liberado' : 'Bloqueado'}</p>
-                              </div>
-                            </div>
-                            <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canManageStudents(user) ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'}`}>
-                              <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
-                            </div>
-                          </button>
+                    {/* Accordion Expanded Body */}
+                    {isExpanded && (
+                      <div className="p-5 sm:p-6 space-y-4 bg-white animate-fade-in border-t border-slate-100">
+                        {/* Quick User Details Bar: Password / BirthDate & Direct Edit */}
+                        <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center space-x-2 text-amber-900">
+                            <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>
+                              Senha de Acesso (Data de Nascimento):{' '}
+                              <strong className="font-mono text-slate-900 bg-white px-2 py-0.5 rounded border border-amber-300 text-xs">
+                                {formatBirthDateToDisplay(user.birthDate) || user.pin || 'Não cadastrada'}
+                              </strong>
+                            </span>
+                          </div>
 
                           <button
                             type="button"
-                            onClick={() => handleToggleCanMarkAttendance(user)}
-                            className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
-                              canMarkAttendance(user)
-                                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-900 font-bold shadow-xs'
-                                : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
-                            }`}
+                            onClick={() => handleOpenEditModal(user)}
+                            className="text-amber-800 hover:text-amber-950 font-bold underline cursor-pointer shrink-0"
                           >
-                            <div className="flex items-center space-x-2 min-w-0">
-                              <CheckCircle2 className={`w-4 h-4 shrink-0 ${canMarkAttendance(user) ? 'text-indigo-600' : 'text-slate-400'}`} />
-                              <div className="truncate">
-                                <p className="text-[11px] font-extrabold leading-tight">Lançar Chamada & Presença</p>
-                                <p className="text-[10px] opacity-80">{canMarkAttendance(user) ? 'Liberado' : 'Bloqueado'}</p>
-                              </div>
-                            </div>
-                            <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canMarkAttendance(user) ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}>
-                              <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
-                            </div>
+                            Alterar dados ou senha completa
                           </button>
                         </div>
-                      </div>
 
-                      {/* Turmas Liberadas: 4 cols on xl */}
-                      <div className="xl:col-span-4 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
-                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
-                          <span className="flex items-center space-x-1.5 truncate">
-                            <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
-                            <span className="truncate">Turmas ({isMasterCoord ? 'Todas (Admin)' : `${userTurmas.length} de ${availableTurmas.length}`})</span>
-                          </span>
-                          {!isMasterCoord && (
-                            <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                        {/* Permissões, Turmas e Modalidades */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 text-xs">
+                          {/* Permissões Rápidas: 3 cols on xl */}
+                          <div className="xl:col-span-3 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5">
+                            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70">
+                              <span className="font-extrabold text-slate-800 flex items-center space-x-1.5">
+                                <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                                <span>Permissões de Ação</span>
+                              </span>
+                              <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100/60 px-2 py-0.5 rounded-full border border-indigo-200">
+                                Acesso Direto
+                              </span>
+                            </div>
+
+                            <div className="space-y-2">
                               <button
                                 type="button"
-                                onClick={() => handleAssignAllTurmas(user)}
-                                className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
+                                onClick={() => handleToggleCanManageStudents(user)}
+                                className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                                  canManageStudents(user)
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 font-bold shadow-xs'
+                                    : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                                }`}
                               >
-                                Todas
+                                <div className="flex items-center space-x-2 min-w-0">
+                                  <Users className={`w-4 h-4 shrink-0 ${canManageStudents(user) ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                  <div className="truncate">
+                                    <p className="text-[11px] font-extrabold leading-tight">Cadastrar/Editar Alunos</p>
+                                    <p className="text-[10px] opacity-80">{canManageStudents(user) ? 'Liberado' : 'Bloqueado'}</p>
+                                  </div>
+                                </div>
+                                <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canManageStudents(user) ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                                  <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                                </div>
                               </button>
-                              <span className="text-slate-300">•</span>
+
                               <button
                                 type="button"
-                                onClick={() => handleClearAllTurmas(user)}
-                                className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                                onClick={() => handleToggleCanMarkAttendance(user)}
+                                className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                                  canMarkAttendance(user)
+                                    ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-900 font-bold shadow-xs'
+                                    : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                                }`}
                               >
-                                Limpar
+                                <div className="flex items-center space-x-2 min-w-0">
+                                  <CheckCircle2 className={`w-4 h-4 shrink-0 ${canMarkAttendance(user) ? 'text-indigo-600' : 'text-slate-400'}`} />
+                                  <div className="truncate">
+                                    <p className="text-[11px] font-extrabold leading-tight">Lançar Chamada & Presença</p>
+                                    <p className="text-[10px] opacity-80">{canMarkAttendance(user) ? 'Liberado' : 'Bloqueado'}</p>
+                                  </div>
+                                </div>
+                                <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canMarkAttendance(user) ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                                  <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                                </div>
                               </button>
                             </div>
-                          )}
-                        </div>
+                          </div>
 
-                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
-                          {availableTurmas.map((t) => {
-                            const isAssigned = isMasterCoord || userTurmas.includes(t);
-                            return (
-                              <button
-                                key={t}
-                                type="button"
-                                disabled={isMasterCoord}
-                                onClick={() => handleToggleUserTurma(user, t)}
-                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
-                                  isAssigned
-                                    ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
-                                } ${isMasterCoord ? 'cursor-default' : ''}`}
-                                title={isAssigned ? `Clique para revogar ${t}` : `Clique para liberar ${t}`}
-                              >
-                                <span>{isAssigned ? '✓' : '+'}</span>
-                                <span>{t}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                          {/* Turmas Liberadas: 4 cols on xl */}
+                          <div className="xl:col-span-4 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
+                            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
+                              <span className="flex items-center space-x-1.5 truncate">
+                                <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
+                                <span className="truncate">Turmas ({isMasterCoord ? 'Todas (Admin)' : `${userTurmas.length} de ${availableTurmas.length}`})</span>
+                              </span>
+                              {!isMasterCoord && (
+                                <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAssignAllTurmas(user)}
+                                    className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
+                                  >
+                                    Todas
+                                  </button>
+                                  <span className="text-slate-300">•</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleClearAllTurmas(user)}
+                                    className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                                  >
+                                    Limpar
+                                  </button>
+                                </div>
+                              )}
+                            </div>
 
-                      {/* Modalidades Liberadas: 5 cols on xl */}
-                      <div className="md:col-span-2 xl:col-span-5 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
-                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
-                          <span className="flex items-center space-x-1.5 truncate">
-                            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
-                            <span className="truncate">Modalidades Liberadas ({userActivities.length})</span>
-                          </span>
-                          <div className="flex items-center space-x-2 text-[10px] shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleAssignAllActivities(user)}
-                              className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
-                            >
-                              Todas
-                            </button>
-                            <span className="text-slate-300">•</span>
-                            <button
-                              type="button"
-                              onClick={() => handleClearAllActivities(user)}
-                              className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
-                            >
-                              Limpar
-                            </button>
+                            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
+                              {availableTurmas.map((t) => {
+                                const isAssigned = isMasterCoord || userTurmas.includes(t);
+                                return (
+                                  <button
+                                    key={t}
+                                    type="button"
+                                    disabled={isMasterCoord}
+                                    onClick={() => handleToggleUserTurma(user, t)}
+                                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
+                                      isAssigned
+                                        ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                    } ${isMasterCoord ? 'cursor-default' : ''}`}
+                                    title={isAssigned ? `Clique para revogar ${t}` : `Clique para liberar ${t}`}
+                                  >
+                                    <span>{isAssigned ? '✓' : '+'}</span>
+                                    <span>{t}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Modalidades Liberadas: 5 cols on xl */}
+                          <div className="md:col-span-2 xl:col-span-5 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
+                            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
+                              <span className="flex items-center space-x-1.5 truncate">
+                                <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <span className="truncate">Modalidades Liberadas ({userActivities.length})</span>
+                              </span>
+                              <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssignAllActivities(user)}
+                                  className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                                >
+                                  Todas
+                                </button>
+                                <span className="text-slate-300">•</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleClearAllActivities(user)}
+                                  className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                                >
+                                  Limpar
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
+                              {activitiesList.map((act) => {
+                                const isAssigned = userActivities.includes(act.id);
+                                return (
+                                  <button
+                                    key={act.id}
+                                    type="button"
+                                    onClick={() => handleToggleUserActivity(user, act.id)}
+                                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
+                                      isAssigned
+                                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                    }`}
+                                    title={isAssigned ? `Clique para revogar ${act.id}` : `Clique para liberar ${act.id}`}
+                                  >
+                                    <span>{isAssigned ? '✓' : '+'}</span>
+                                    <span>{act.id}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-
-                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
-                          {activitiesList.map((act) => {
-                            const isAssigned = userActivities.includes(act.id);
-                            return (
-                              <button
-                                key={act.id}
-                                type="button"
-                                onClick={() => handleToggleUserActivity(user, act.id)}
-                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
-                                  isAssigned
-                                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
-                                }`}
-                                title={isAssigned ? `Clique para revogar ${act.id}` : `Clique para liberar ${act.id}`}
-                              >
-                                <span>{isAssigned ? '✓' : '+'}</span>
-                                <span>{act.id}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })
