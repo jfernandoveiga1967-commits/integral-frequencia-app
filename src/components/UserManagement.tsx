@@ -561,10 +561,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             </div>
           </div>
 
-          {/* Users List Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Users List Cards - Full-width stacked / cascade layout */}
+          <div className="flex flex-col space-y-4 w-full">
             {filteredUsers.length === 0 ? (
-              <div className="col-span-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
+              <div className="w-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
                 Nenhum usuário encontrado para os critérios selecionados.
               </div>
             ) : (
@@ -574,116 +574,201 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 const userTurmas = Array.isArray(user.allowedClassIds)
                   ? user.allowedClassIds
                   : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas);
+                const isMasterCoord =
+                  user.role === 'coordenador' ||
+                  (user.email && user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+                  user.id === 'usr_coord_1';
 
                 return (
                   <div
                     key={user.id}
-                    className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow relative flex flex-col justify-between space-y-4"
+                    className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm hover:shadow-md transition-all w-full flex flex-col space-y-4"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center space-x-3 min-w-0">
+                    {/* Top row: Identity, Badges and Actions */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div className="flex items-start sm:items-center space-x-3.5 min-w-0">
                         <div
                           className={`w-12 h-12 rounded-2xl ${
-                            user.avatarColor || 'bg-indigo-600'
-                          } flex items-center justify-center text-white font-extrabold text-base shrink-0 shadow-md`}
+                            user.avatarColor || (isMasterCoord ? 'bg-amber-500' : 'bg-indigo-600')
+                          } flex items-center justify-center text-white font-extrabold text-lg shrink-0 shadow-md`}
                         >
-                          {user.name.charAt(0)}
+                          {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                         </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center space-x-2">
-                            <h3 className="text-base font-bold text-slate-900 truncate">{user.name}</h3>
+
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <h3 className="text-base font-extrabold text-slate-900 truncate">{user.name}</h3>
                             {currentUser?.id === user.id && (
-                              <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
+                              <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
                                 Você (Admin)
                               </span>
                             )}
+                            <span
+                              className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-lg border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} inline-flex items-center space-x-1`}
+                            >
+                              {user.role === 'coordenador' ? (
+                                <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+                              ) : (
+                                <GraduationCap className="w-3.5 h-3.5 mr-1" />
+                              )}
+                              <span>{roleStyle.label}</span>
+                            </span>
                           </div>
-                          <div className="flex items-center text-xs text-slate-500 mt-0.5 truncate">
-                            <Mail className="w-3.5 h-3.5 text-slate-400 mr-1 shrink-0" />
-                            <span className="truncate">{user.email}</span>
-                          </div>
-                          <div className="flex items-center text-[11px] text-amber-700 font-semibold mt-1">
-                            <KeyRound className="w-3 h-3 text-amber-600 mr-1 shrink-0" />
-                            <span>Senha (Data Nasc.): <strong className="font-mono text-slate-900">{formatBirthDateToDisplay(user.birthDate) || user.pin || 'Não cadastrada'}</strong></span>
+
+                          <div className="flex items-center flex-wrap gap-y-1.5 gap-x-4 text-xs text-slate-500">
+                            <span className="flex items-center text-slate-600 font-medium">
+                              <Mail className="w-3.5 h-3.5 text-slate-400 mr-1.5 shrink-0" />
+                              <span className="truncate">{user.email}</span>
+                            </span>
+                            <span className="flex items-center text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                              <KeyRound className="w-3 h-3 text-amber-600 mr-1.5 shrink-0" />
+                              <span>Senha (Data Nasc.): <strong className="font-mono text-slate-900">{formatBirthDateToDisplay(user.birthDate) || user.pin || 'Não cadastrada'}</strong></span>
+                            </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="shrink-0">
-                        <span
-                          className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-xl border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} inline-flex items-center space-x-1`}
+                      {/* Top Action Buttons */}
+                      <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                        <button
+                          onClick={() => handleOpenEditModal(user)}
+                          className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs"
                         >
-                          {user.role === 'coordenador' && <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
-                          {user.role === 'professor' && <GraduationCap className="w-3.5 h-3.5 mr-1" />}
-                          <span>{roleStyle.label}</span>
-                        </span>
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar Dados</span>
+                        </button>
+
+                        {!isMasterCoord && currentUser?.id !== user.id && (
+                          <button
+                            onClick={() => setUserToDelete(user)}
+                            className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
+                            title="Remover usuário"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* Painel de Permissões e Acessos */}
-                    <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
-                      <div className="flex items-center justify-between text-xs font-extrabold text-slate-800 border-b border-slate-200/60 pb-2">
-                        <span className="flex items-center space-x-1.5">
-                          <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                          <span>Painel de Permissões & Acessos</span>
-                        </span>
-                        <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100/60 px-2 py-0.5 rounded-full border border-indigo-200">
-                          Controle Direto
-                        </span>
+                    {/* Bottom distributed row: Permissões, Turmas e Modalidades */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 text-xs">
+                      {/* Permissões Rápidas: 3 cols on xl */}
+                      <div className="xl:col-span-3 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70">
+                          <span className="font-extrabold text-slate-800 flex items-center space-x-1.5">
+                            <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                            <span>Permissões de Ação</span>
+                          </span>
+                          <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100/60 px-2 py-0.5 rounded-full border border-indigo-200">
+                            Acesso Direto
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCanManageStudents(user)}
+                            className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                              canManageStudents(user)
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 font-bold shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <Users className={`w-4 h-4 shrink-0 ${canManageStudents(user) ? 'text-emerald-600' : 'text-slate-400'}`} />
+                              <div className="truncate">
+                                <p className="text-[11px] font-extrabold leading-tight">Cadastrar/Editar Alunos</p>
+                                <p className="text-[10px] opacity-80">{canManageStudents(user) ? 'Liberado' : 'Bloqueado'}</p>
+                              </div>
+                            </div>
+                            <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canManageStudents(user) ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                              <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCanMarkAttendance(user)}
+                            className={`w-full p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
+                              canMarkAttendance(user)
+                                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-900 font-bold shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <CheckCircle2 className={`w-4 h-4 shrink-0 ${canMarkAttendance(user) ? 'text-indigo-600' : 'text-slate-400'}`} />
+                              <div className="truncate">
+                                <p className="text-[11px] font-extrabold leading-tight">Lançar Chamada & Presença</p>
+                                <p className="text-[10px] opacity-80">{canMarkAttendance(user) ? 'Liberado' : 'Bloqueado'}</p>
+                              </div>
+                            </div>
+                            <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canMarkAttendance(user) ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}>
+                              <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
+                            </div>
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Toggles de Permissões Principais */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {/* Toggle: Cadastrar/Editar Alunos */}
-                        <button
-                          type="button"
-                          onClick={() => handleToggleCanManageStudents(user)}
-                          className={`p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
-                            canManageStudents(user)
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 font-bold shadow-xs'
-                              : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-2 min-w-0">
-                            <Users className={`w-4 h-4 shrink-0 ${canManageStudents(user) ? 'text-emerald-600' : 'text-slate-400'}`} />
-                            <div className="truncate">
-                              <p className="text-[11px] font-extrabold leading-tight">Cadastrar/Editar Alunos</p>
-                              <p className="text-[10px] opacity-80">{canManageStudents(user) ? 'Liberado' : 'Bloqueado'}</p>
+                      {/* Turmas Liberadas: 4 cols on xl */}
+                      <div className="xl:col-span-4 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
+                          <span className="flex items-center space-x-1.5 truncate">
+                            <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
+                            <span className="truncate">Turmas ({isMasterCoord ? 'Todas (Admin)' : `${userTurmas.length} de ${availableTurmas.length}`})</span>
+                          </span>
+                          {!isMasterCoord && (
+                            <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleAssignAllTurmas(user)}
+                                className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
+                              >
+                                Todas
+                              </button>
+                              <span className="text-slate-300">•</span>
+                              <button
+                                type="button"
+                                onClick={() => handleClearAllTurmas(user)}
+                                className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                              >
+                                Limpar
+                              </button>
                             </div>
-                          </div>
-                          <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canManageStudents(user) ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'}`}>
-                            <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
-                          </div>
-                        </button>
+                          )}
+                        </div>
 
-                        {/* Toggle: Lançar Chamada & Presença */}
-                        <button
-                          type="button"
-                          onClick={() => handleToggleCanMarkAttendance(user)}
-                          className={`p-2.5 rounded-xl border transition-all text-left flex items-center justify-between cursor-pointer ${
-                            canMarkAttendance(user)
-                              ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-900 font-bold shadow-xs'
-                              : 'bg-white border-slate-200 text-slate-500 font-medium hover:bg-slate-100'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-2 min-w-0">
-                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${canMarkAttendance(user) ? 'text-indigo-600' : 'text-slate-400'}`} />
-                            <div className="truncate">
-                              <p className="text-[11px] font-extrabold leading-tight">Lançar Chamada & Presença</p>
-                              <p className="text-[10px] opacity-80">{canMarkAttendance(user) ? 'Liberado' : 'Bloqueado'}</p>
-                            </div>
-                          </div>
-                          <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${canMarkAttendance(user) ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}>
-                            <div className="w-3 h-3 rounded-full bg-white shadow-xs" />
-                          </div>
-                        </button>
+                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
+                          {availableTurmas.map((t) => {
+                            const isAssigned = isMasterCoord || userTurmas.includes(t);
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                disabled={isMasterCoord}
+                                onClick={() => handleToggleUserTurma(user, t)}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
+                                  isAssigned
+                                    ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                } ${isMasterCoord ? 'cursor-default' : ''}`}
+                                title={isAssigned ? `Clique para revogar ${t}` : `Clique para liberar ${t}`}
+                              >
+                                <span>{isAssigned ? '✓' : '+'}</span>
+                                <span>{t}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      {/* Modalidades / Atividades Liberadas */}
-                      <div className="pt-2 border-t border-slate-200/60 space-y-2">
-                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-700">
-                          <span>Modalidades Liberadas ({userActivities.length}):</span>
-                          <div className="flex items-center space-x-2 text-[10px]">
+                      {/* Modalidades Liberadas: 5 cols on xl */}
+                      <div className="md:col-span-2 xl:col-span-5 bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
+                          <span className="flex items-center space-x-1.5 truncate">
+                            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                            <span className="truncate">Modalidades Liberadas ({userActivities.length})</span>
+                          </span>
+                          <div className="flex items-center space-x-2 text-[10px] shrink-0">
                             <button
                               type="button"
                               onClick={() => handleAssignAllActivities(user)}
@@ -702,7 +787,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
                           {activitiesList.map((act) => {
                             const isAssigned = userActivities.includes(act.id);
                             return (
@@ -723,86 +808,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             );
                           })}
                         </div>
-                      </div>
-
-                      {/* Turmas / Anos Escolares Liberados */}
-                      <div className="pt-2 border-t border-slate-200/60 space-y-2">
-                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-700">
-                          <span>Turmas Liberadas ({user.role === 'coordenador' ? 'Todas (Admin)' : `${userTurmas.length} de ${availableTurmas.length}`}):</span>
-                          <div className="flex items-center space-x-2 text-[10px]">
-                            <button
-                              type="button"
-                              onClick={() => handleAssignAllTurmas(user)}
-                              className="text-blue-600 hover:text-blue-800 font-extrabold cursor-pointer hover:underline"
-                            >
-                              Todas
-                            </button>
-                            <span className="text-slate-300">•</span>
-                            <button
-                              type="button"
-                              onClick={() => handleClearAllTurmas(user)}
-                              className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
-                            >
-                              Limpar
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5">
-                          {availableTurmas.map((t) => {
-                            const isAssigned = user.role === 'coordenador' || userTurmas.includes(t);
-                            return (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => handleToggleUserTurma(user, t)}
-                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center space-x-1 ${
-                                  isAssigned
-                                    ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
-                                }`}
-                                title={isAssigned ? `Clique para revogar ${t}` : `Clique para liberar ${t}`}
-                              >
-                                <span>{isAssigned ? '✓' : '+'}</span>
-                                <span>{t}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                      <div className="flex items-center space-x-2 w-full sm:w-auto">
-                        <span className="font-bold text-slate-500 text-[11px] uppercase">Alterar Cargo:</span>
-                        <select
-                          value={user.role}
-                          onChange={(e) => handleQuickRoleChange(user, e.target.value as UserRole)}
-                          className="bg-slate-100 border border-slate-200 font-bold text-slate-700 text-xs rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                        >
-                          <option value="coordenador">Coordenador (Admin)</option>
-                          <option value="professor">Monitor / Professor</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
-                        <button
-                          onClick={() => handleOpenEditModal(user)}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Editar Dados</span>
-                        </button>
-
-                        {currentUser?.id !== user.id && (
-                          <button
-                            onClick={() => setUserToDelete(user)}
-                            className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
-                            title="Remover usuário"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -949,14 +954,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Cargo / Categoria de Acesso:
                 </label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as UserRole)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                >
-                  <option value="coordenador">Coordenador (Administrador - Acesso Total)</option>
-                  <option value="professor">Monitor / Professor (Diário de Classe + Alunos)</option>
-                </select>
+                {editingUser && (editingUser.role === 'coordenador' || editingUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || editingUser.id === 'usr_coord_1') ? (
+                  <div className="w-full px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 font-bold text-xs flex items-center justify-between shadow-xs">
+                    <span className="flex items-center space-x-1.5">
+                      <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Coordenador (Administrador - Acesso Total)</span>
+                    </span>
+                    <span className="text-[10px] uppercase font-extrabold bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
+                      Perfil Principal Protegido
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <select
+                      value="professor"
+                      disabled
+                      className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-800 font-bold focus:outline-none cursor-not-allowed text-xs"
+                    >
+                      <option value="professor">Monitor / Professor (Diário de Classe + Alunos)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      🔒 O cadastro e a edição de membros da equipe são exclusivos para o perfil de <strong>Monitor / Professor</strong>.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>

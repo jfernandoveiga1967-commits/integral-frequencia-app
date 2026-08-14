@@ -294,13 +294,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
                 Categoria de Acesso / Cargo:
               </label>
               <select
-                value={customRole}
-                onChange={(e) => setCustomRole(e.target.value as UserRole)}
-                className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold"
+                value="professor"
+                disabled
+                className="w-full px-4 py-3 bg-slate-900/80 border border-slate-800 rounded-xl text-slate-300 focus:outline-none text-sm font-semibold cursor-not-allowed"
               >
                 <option value="professor">Monitor / Professor</option>
-                <option value="coordenador">Coordenador (Administrador)</option>
               </select>
+              <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                🔒 Novos cadastros são criados exclusivamente com a função de Monitor / Professor.
+              </p>
             </div>
 
             <div>
