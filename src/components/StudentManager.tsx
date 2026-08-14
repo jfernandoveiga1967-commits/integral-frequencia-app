@@ -56,7 +56,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Keep selectedTurma aligned with allowed turmas for non-coordenador
+  // Single Add form state
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
+  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+
+  // Batch Add state
+  const [showBatchForm, setShowBatchForm] = useState(false);
+  const [batchNamesText, setBatchNamesText] = useState('');
+  const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
+  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
+
+  // Keep selectedTurma and form turmas aligned with allowed turmas for non-coordenador
   React.useEffect(() => {
     if (!isCoordenador && currentUser) {
       if (allowedTurmas.length === 1) {
@@ -73,17 +85,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
   }, [isCoordenador, currentUser, allowedTurmas, selectedTurma]);
 
-  // Single Add form state
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
-
-  // Batch Add state
-  const [showBatchForm, setShowBatchForm] = useState(false);
-  const [batchNamesText, setBatchNamesText] = useState('');
-  const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
+  // Keep form turmas aligned with allowed turmas
+  React.useEffect(() => {
+    if (allowedTurmas.length > 0) {
+      if (!allowedTurmas.includes(newTurma)) {
+        setNewTurma(allowedTurmas[0] as TurmaType);
+      }
+      if (!allowedTurmas.includes(batchTurma)) {
+        setBatchTurma(allowedTurmas[0] as TurmaType);
+      }
+    }
+  }, [allowedTurmas, newTurma, batchTurma]);
 
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -91,15 +103,35 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
   const [targetTransferTurma, setTargetTransferTurma] = useState<string>('');
 
+  const handleOpenEdit = (student: Student) => {
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
+      return;
+    }
+    setEditingStudent(student);
+  };
+
+  const handleOpenDelete = (student: Student) => {
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
+      return;
+    }
+    setStudentToDelete(student);
+  };
+
   const handleOpenTransfer = (student: Student) => {
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
+      return;
+    }
     setTransferringStudent(student);
-    const otherTurmas = turmasList.filter((t) => t !== student.turma);
+    const otherTurmas = allowedTurmas.filter((t) => t !== student.turma);
     setTargetTransferTurma(otherTurmas[0] || student.turma);
   };
 
   const handleConfirmTransfer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!transferringStudent || !targetTransferTurma) return;
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(targetTransferTurma)) {
+      return;
+    }
     if (targetTransferTurma === transferringStudent.turma) {
       setTransferringStudent(null);
       return;
@@ -153,6 +185,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setSingleFormError('Por favor, digite o nome do aluno.');
       return;
     }
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(newTurma)) {
+      setSingleFormError('Você só tem permissão para cadastrar alunos nas suas turmas vinculadas.');
+      return;
+    }
     const finalActivities = newActivities.includes('Rotina') ? newActivities : ['Rotina', ...newActivities];
     onAddStudent({
       name: newName.trim(),
@@ -175,6 +211,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setBatchFormError('Insira pelo menos um nome para cadastrar.');
       return;
     }
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(batchTurma)) {
+      setBatchFormError('Você só tem permissão para importar alunos nas suas turmas vinculadas.');
+      return;
+    }
     const finalActivities = batchActivities.includes('Rotina') ? batchActivities : ['Rotina', ...batchActivities];
 
     onBatchAddStudents(names, batchTurma, finalActivities);
@@ -188,6 +228,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     if (!editingStudent) return;
     if (!editingStudent.name.trim()) {
       setEditFormError('O nome do aluno não pode ficar em branco.');
+      return;
+    }
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(editingStudent.turma)) {
+      setEditFormError('Você só tem permissão para vincular alunos às suas turmas liberadas.');
       return;
     }
     const finalActivities = editingStudent.activities.includes('Rotina')
@@ -322,7 +366,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <select
                 value={newTurma}
                 onChange={(e) => setNewTurma(e.target.value as TurmaType)}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
+                disabled={!isCoordenador && allowedTurmas.length === 1}
+                className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 ${
+                  !isCoordenador && allowedTurmas.length === 1
+                    ? 'bg-slate-100 cursor-not-allowed text-slate-600'
+                    : 'bg-white text-slate-800'
+                }`}
               >
                 {turmasList.map((t) => (
                   <option key={t} value={t}>
@@ -330,6 +379,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </option>
                 ))}
               </select>
+              {!isCoordenador && allowedTurmas.length === 1 && (
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                  🔒 Turma fixada conforme suas permissões de acesso.
+                </p>
+              )}
             </div>
           </div>
 
@@ -401,6 +455,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </button>
           </div>
 
+          {batchFormError && (
+            <div className="p-3 text-xs bg-rose-900/50 border border-rose-700 text-rose-200 rounded-xl font-semibold">
+              ⚠️ {batchFormError}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -409,7 +469,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <select
                 value={batchTurma}
                 onChange={(e) => setBatchTurma(e.target.value as TurmaType)}
-                className="w-full px-3 py-2 text-sm border border-slate-700 bg-slate-800 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 font-medium"
+                disabled={!isCoordenador && allowedTurmas.length === 1}
+                className={`w-full px-3 py-2 text-sm border border-slate-700 bg-slate-800 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 font-medium ${
+                  !isCoordenador && allowedTurmas.length === 1 ? 'opacity-75 cursor-not-allowed' : ''
+                }`}
               >
                 {turmasList.map((t) => (
                   <option key={t} value={t}>
@@ -417,6 +480,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </option>
                 ))}
               </select>
+              {!isCoordenador && allowedTurmas.length === 1 && (
+                <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                  🔒 Turma fixada conforme suas permissões de acesso.
+                </p>
+              )}
             </div>
 
             <div>
@@ -501,6 +569,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </button>
             </div>
 
+            {editFormError && (
+              <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-semibold">
+                ⚠️ {editFormError}
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Nome do Aluno:
@@ -525,7 +599,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 onChange={(e) =>
                   setEditingStudent({ ...editingStudent, turma: e.target.value as TurmaType })
                 }
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium text-slate-800"
+                disabled={!isCoordenador && allowedTurmas.length === 1}
+                className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
+                  !isCoordenador && allowedTurmas.length === 1
+                    ? 'bg-slate-100 cursor-not-allowed text-slate-600'
+                    : 'text-slate-800 bg-white'
+                }`}
               >
                 {turmasList.map((t) => (
                   <option key={t} value={t}>
@@ -533,6 +612,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </option>
                 ))}
               </select>
+              {!isCoordenador && allowedTurmas.length === 1 && (
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                  🔒 Turma fixada conforme suas permissões de acesso.
+                </p>
+              )}
               <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
                 <div className="flex items-center space-x-1.5 font-bold text-blue-800">
                   <Info className="w-4 h-4 text-blue-600 shrink-0" />
@@ -745,7 +829,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       </button>
 
                       <button
-                        onClick={() => setEditingStudent(student)}
+                        onClick={() => handleOpenEdit(student)}
                         className="p-2 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
                         title="Editar aluno e atividades"
                       >
@@ -754,7 +838,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       </button>
 
                       <button
-                        onClick={() => setStudentToDelete(student)}
+                        onClick={() => handleOpenDelete(student)}
                         className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition-all cursor-pointer"
                         title="Excluir aluno"
                       >
@@ -819,6 +903,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     </option>
                   ))}
                 </select>
+                {!isCoordenador && allowedTurmas.filter((t) => t !== transferringStudent.turma).length === 0 && (
+                  <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200 font-semibold mt-2">
+                    ⚠️ Você possui apenas uma turma vinculada ao seu perfil ({transferringStudent.turma}). Não há outras turmas liberadas para você realizar transferências.
+                  </p>
+                )}
               </div>
 
               <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1">
@@ -890,6 +979,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (!studentToDelete) return;
+                  if (!isCoordenador && currentUser && !allowedTurmas.includes(studentToDelete.turma)) {
+                    setStudentToDelete(null);
+                    return;
+                  }
                   onDeleteStudent(studentToDelete.id);
                   setStudentToDelete(null);
                 }}
