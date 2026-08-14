@@ -52,7 +52,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.warn('Firestore notice (offline or sync delay):', JSON.stringify(errInfo));
+  // Graceful warning for offline sync or delayed connection
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('Firestore sync notice:', errInfo.error);
+  }
 }
 
 export async function testFirestoreConnection(): Promise<boolean> {
@@ -81,6 +84,7 @@ export function subscribeStudents(
       const list: Student[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        if (!data) return;
         const rawActivities = Array.isArray(data.activities) ? data.activities : [];
         const activities = rawActivities.includes('Rotina') ? rawActivities : ['Rotina', ...rawActivities];
         list.push({
@@ -93,8 +97,8 @@ export function subscribeStudents(
       onData(list);
     },
     (error) => {
-      console.error('Error subscribing to students:', error);
       if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'students');
     }
   );
 }
@@ -110,6 +114,7 @@ export function subscribeRecords(
       const list: AttendanceRecord[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        if (!data) return;
         list.push({
           id: docSnap.id,
           studentId: data.studentId || '',
@@ -128,8 +133,8 @@ export function subscribeRecords(
       onData(list);
     },
     (error) => {
-      console.error('Error subscribing to attendanceRecords:', error);
       if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'attendanceRecords');
     }
   );
 }
@@ -152,8 +157,8 @@ export function subscribeTurmas(
       onData(list);
     },
     (error) => {
-      console.error('Error subscribing to turmas:', error);
       if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'turmas');
     }
   );
 }
@@ -199,7 +204,6 @@ export function subscribeUsers(
       onData(list);
     },
     (error) => {
-      console.error('Error subscribing to users:', error);
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.GET, 'users');
     }
@@ -263,7 +267,6 @@ export function subscribeActivities(
       onData(list);
     },
     (error) => {
-      console.error('Error subscribing to activities:', error);
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.GET, 'activities');
     }

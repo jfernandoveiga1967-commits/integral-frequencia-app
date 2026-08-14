@@ -62,11 +62,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const allowedActivityIds = React.useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);
 
   const sortedStudentsForPdf = React.useMemo(() => {
-    const list = (isCoordenador || !currentUser) ? students : students.filter((s) => turmasList.includes(s.turma));
+    const rawStudents = students || [];
+    const list = (isCoordenador || !currentUser) ? rawStudents : rawStudents.filter((s) => s && turmasList.includes(s.turma));
     return [...list].sort((a, b) => {
-      const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+      const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
       if (turmaCompare !== 0) return turmaCompare;
-      return a.name.localeCompare(b.name, 'pt-BR');
+      return (a.name || '').localeCompare(b.name || '', 'pt-BR');
     });
   }, [students, isCoordenador, currentUser, turmasList]);
 

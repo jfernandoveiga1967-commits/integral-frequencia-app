@@ -158,23 +158,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [editFormError, setEditFormError] = useState<string | null>(null);
 
   const filteredStudents = React.useMemo(() => {
-    return students
+    return (students || [])
       .filter((student) => {
+        if (!student) return false;
         if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
           return false;
         }
+        const studentActs = Array.isArray(student.activities) ? student.activities : [];
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
         const matchesActivity =
-          selectedActivity === 'TODAS' || student.activities.includes(selectedActivity);
+          selectedActivity === 'TODAS' || studentActs.includes(selectedActivity);
         const matchesSearch =
           searchTerm.trim() === '' ||
-          student.name.toLowerCase().includes(searchTerm.toLowerCase());
+          (student.name || '').toLowerCase().includes(searchTerm.toLowerCase());
         return matchesTurma && matchesActivity && matchesSearch;
       })
       .sort((a, b) => {
-        const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+        const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
         if (turmaCompare !== 0) return turmaCompare;
-        return a.name.localeCompare(b.name, 'pt-BR');
+        return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
   }, [students, selectedTurma, selectedActivity, searchTerm, isCoordenador, currentUser, allowedTurmas]);
 

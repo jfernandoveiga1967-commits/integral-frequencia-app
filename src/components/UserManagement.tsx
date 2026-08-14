@@ -139,17 +139,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   }
 
   // Filtered Users
-  const filteredUsers = users.filter((u) => {
+  const filteredUsers = (users || []).filter((u) => {
+    if (!u) return false;
     const matchesSearch =
-      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchTerm.toLowerCase());
+      (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.email || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
     return matchesSearch && matchesRole;
   });
 
   // Stats
-  const countCoord = users.filter((u) => u.role === 'coordenador').length;
-  const countProf = users.filter((u) => u.role === 'professor').length;
+  const countCoord = (users || []).filter((u) => u && u.role === 'coordenador').length;
+  const countProf = (users || []).filter((u) => u && u.role === 'professor').length;
 
   // Handlers for User Modal
   const handleOpenEditModal = (user: UserProfile) => {

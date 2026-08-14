@@ -113,18 +113,21 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   // Filter students who are enrolled in the allowed activities and allowed turmas
   const filteredStudents = useMemo(() => {
-    return students
+    return (students || [])
       .filter((student) => {
+        if (!student) return false;
         // Turma permission filter for professors/monitors
         if (!isCoordenador && !allowedTurmas.includes(student.turma)) {
           return false;
         }
 
+        const studentActs = Array.isArray(student.activities) ? student.activities : [];
+
         // Activity filter - MUST match allowedActivityIds
         const matchesActivity =
           selectedActivity === 'TODAS'
-            ? student.activities.some((act) => allowedActivityIds.includes(act as ActivityType))
-            : student.activities.includes(selectedActivity) && allowedActivityIds.includes(selectedActivity as ActivityType);
+            ? studentActs.some((act) => allowedActivityIds.includes(act as ActivityType))
+            : studentActs.includes(selectedActivity) && allowedActivityIds.includes(selectedActivity as ActivityType);
 
         // Turma filter
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
@@ -132,23 +135,23 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         // Search filter
         const matchesSearch =
           searchTerm.trim() === '' ||
-          student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          student.turma.toLowerCase().includes(searchTerm.toLowerCase());
+          (student.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (student.turma || '').toLowerCase().includes(searchTerm.toLowerCase());
 
         return matchesActivity && matchesTurma && matchesSearch;
       })
       .sort((a, b) => {
-        const turmaCompare = a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true });
+        const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
         if (turmaCompare !== 0) return turmaCompare;
-        return a.name.localeCompare(b.name, 'pt-BR');
+        return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
   }, [students, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
 
   // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`
   const recordMap = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
-    records.forEach((rec) => {
-      if (rec.weekNumber === currentWeek.weekNumber && rec.year === currentWeek.year) {
+    (records || []).forEach((rec) => {
+      if (rec && rec.weekNumber === currentWeek.weekNumber && rec.year === currentWeek.year) {
         const key = `${rec.studentId}_${rec.activity}_${rec.date}`;
         map.set(key, rec);
       }
@@ -173,9 +176,10 @@ function getCurrentHHMM(): string {
     let pendente = 0;
 
     filteredStudents.forEach((student) => {
+      const studentActs = Array.isArray(student.activities) ? student.activities : [];
       const activitiesToCount =
         selectedActivity === 'TODAS'
-          ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+          ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
           : [selectedActivity];
 
       activitiesToCount.forEach((act) => {
@@ -266,9 +270,10 @@ function getCurrentHHMM(): string {
   const areAllMarkedPresent = useMemo(() => {
     if (filteredStudents.length === 0) return false;
     return filteredStudents.every((student) => {
+      const studentActs = Array.isArray(student.activities) ? student.activities : [];
       const activitiesToCheck =
         selectedActivity === 'TODAS'
-          ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+          ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
           : [selectedActivity];
       if (activitiesToCheck.length === 0) return false;
       return activitiesToCheck.every((act) => {
@@ -294,9 +299,10 @@ function getCurrentHHMM(): string {
       setObsMap((prev) => {
         const next = { ...prev };
         filteredStudents.forEach((student) => {
+          const studentActs = Array.isArray(student.activities) ? student.activities : [];
           const acts =
             selectedActivity === 'TODAS'
-              ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+              ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
               : [selectedActivity];
           acts.forEach((act) => {
             delete next[`${student.id}_${act}_${selectedDate}`];
@@ -332,9 +338,10 @@ function getCurrentHHMM(): string {
       setObsMap((prev) => {
         const next = { ...prev };
         filteredStudents.forEach((student) => {
+          const studentActs = Array.isArray(student.activities) ? student.activities : [];
           const acts =
             selectedActivity === 'TODAS'
-              ? student.activities.filter((act) => allowedActivityIds.includes(act as ActivityType))
+              ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
               : [selectedActivity];
           acts.forEach((act) => {
             delete next[`${student.id}_${act}_${selectedDate}`];

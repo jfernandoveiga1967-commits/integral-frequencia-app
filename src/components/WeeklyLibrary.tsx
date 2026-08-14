@@ -74,8 +74,8 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
   >();
 
   // Aggregate records by week
-  records.forEach((r) => {
-    if (r.year === selectedYear) {
+  (records || []).forEach((r) => {
+    if (r && r.year === selectedYear) {
       const existing = weekStatsMap.get(r.weekNumber) || {
         total: 0,
         presente: 0,
@@ -86,7 +86,7 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
       };
 
       existing.total += 1;
-      if (r.status === 'presente') existing.presente += 1;
+      if (r.status === 'presente' || r.status === 'saida_antecipada') existing.presente += 1;
       else if (r.status === 'falta') existing.falta += 1;
       else if (r.status === 'sem_equipamento') existing.sem_equipamento += 1;
       else if (r.status === 'saude') existing.saude += 1;

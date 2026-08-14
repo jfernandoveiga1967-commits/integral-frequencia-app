@@ -44,6 +44,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('frequencia');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
+  // Keep a stable ref of currentUser for real-time listener updates
+  const currentUserRef = React.useRef<UserProfile | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
   const handleLogin = (user: UserProfile) => {
     const isMasterAdmin =
       (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
@@ -68,7 +74,6 @@ export default function App() {
     setCurrentUser(null);
     saveStoredUser(null);
   };
-
 
   // Initial week and date setup
   const initialDateObj = new Date();
@@ -163,7 +168,7 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup Marcos Silva and Mariana/Marina Santos if still present in Firestore
+      // Cleanup any unwanted mock profiles
       fsUsers.forEach((u) => {
         if (
           u.id === 'usr_prof_1' ||
@@ -178,7 +183,7 @@ export default function App() {
         }
       });
 
-      // Self-heal Fernando Veiga in Firestore if missing or if marked as professor
+      // Self-heal Fernando Veiga in Firestore if missing or if marked with wrong role
       const adminUsersInFs = fsUsers.filter(
         (u) =>
           (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
@@ -245,26 +250,42 @@ export default function App() {
       setUsers(merged);
       saveLocalUsersList(merged);
 
-      // Real-time permission update: if current logged-in user is updated, update currentUser state!
-      if (currentUser) {
-        const updatedSelf = merged.find((u) => u.id === currentUser.id || (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase()));
+      // Real-time permission sync for current active session
+      const activeSelf = currentUserRef.current;
+      if (activeSelf) {
+        const updatedSelf = merged.find(
+          (u) => u.id === activeSelf.id || (u.email && activeSelf.email && u.email.toLowerCase() === activeSelf.email.toLowerCase())
+        );
         if (updatedSelf) {
-          const enforcedSelf =
+          const isMasterAdmin =
             (updatedSelf.email && updatedSelf.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
-            updatedSelf.id === 'usr_coord_1'
-              ? {
-                  ...updatedSelf,
-                  name: 'Fernando Veiga',
-                  email: 'jfernandoveiga1967@gmail.com',
-                  role: 'coordenador' as UserRole,
-                  cargoLabel: 'Coordenador (Administrador)',
-                  avatarColor: 'bg-amber-500',
-                  canManageStudents: true,
-                  canMarkAttendance: true,
-                }
-              : updatedSelf;
-          setCurrentUser(enforcedSelf);
-          saveStoredUser(enforcedSelf);
+            updatedSelf.id === 'usr_coord_1';
+          const enforcedSelf: UserProfile = isMasterAdmin
+            ? {
+                ...updatedSelf,
+                name: 'Fernando Veiga',
+                email: 'jfernandoveiga1967@gmail.com',
+                role: 'coordenador' as UserRole,
+                cargoLabel: 'Coordenador (Administrador)',
+                avatarColor: 'bg-amber-500',
+                canManageStudents: true,
+                canMarkAttendance: true,
+              }
+            : updatedSelf;
+
+          const isDifferent =
+            JSON.stringify(enforcedSelf.allowedClassIds) !== JSON.stringify(activeSelf.allowedClassIds) ||
+            JSON.stringify(enforcedSelf.assignedTurmas) !== JSON.stringify(activeSelf.assignedTurmas) ||
+            JSON.stringify(enforcedSelf.assignedActivities) !== JSON.stringify(activeSelf.assignedActivities) ||
+            enforcedSelf.role !== activeSelf.role ||
+            enforcedSelf.name !== activeSelf.name ||
+            enforcedSelf.canManageStudents !== activeSelf.canManageStudents ||
+            enforcedSelf.canMarkAttendance !== activeSelf.canMarkAttendance;
+
+          if (isDifferent) {
+            setCurrentUser(enforcedSelf);
+            saveStoredUser(enforcedSelf);
+          }
         }
       }
     });
@@ -289,51 +310,12 @@ export default function App() {
     };
   }, []);
 
-  // Keep currentUser state in sync with real-time updates from users list
-  useEffect(() => {
-    if (!currentUser) return;
-    const freshSelf = users.find(
-      (u) =>
-        u.id === currentUser.id ||
-        (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
-    );
-    if (freshSelf) {
-      const isMasterAdmin =
-        (freshSelf.email && freshSelf.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
-        freshSelf.id === 'usr_coord_1' ||
-        (currentUser.email && currentUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com');
-
-      const resolvedFresh = isMasterAdmin
-        ? {
-            ...freshSelf,
-            name: 'Fernando Veiga',
-            email: 'jfernandoveiga1967@gmail.com',
-            role: 'coordenador' as UserRole,
-            cargoLabel: 'Coordenador (Administrador)',
-            avatarColor: 'bg-amber-500',
-            canManageStudents: true,
-            canMarkAttendance: true,
-          }
-        : freshSelf;
-
-      const isDifferent =
-        JSON.stringify(resolvedFresh.allowedClassIds) !== JSON.stringify(currentUser.allowedClassIds) ||
-        JSON.stringify(resolvedFresh.assignedTurmas) !== JSON.stringify(currentUser.assignedTurmas) ||
-        JSON.stringify(resolvedFresh.assignedActivities) !== JSON.stringify(currentUser.assignedActivities) ||
-        resolvedFresh.role !== currentUser.role ||
-        resolvedFresh.name !== currentUser.name;
-
-      if (isDifferent) {
-        setCurrentUser(resolvedFresh);
-        saveStoredUser(resolvedFresh);
-      }
-    }
-  }, [users, currentUser]);
-
   // Event listener for date selection from day pills
   useEffect(() => {
     const handleSelectDate = (e: CustomEvent<string>) => {
-      setSelectedDate(e.detail);
+      if (e && e.detail) {
+        setSelectedDate(e.detail);
+      }
     };
     window.addEventListener('app_select_date', handleSelectDate as EventListener);
     return () => {
