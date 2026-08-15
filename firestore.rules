@@ -43,6 +43,16 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    match /schedules/{scheduleId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'turma', 'dayOfWeek', 'startTime', 'endTime', 'activityId'])
+        && isNonEmptyString(request.resource.data.turma, 64)
+        && isNonEmptyString(request.resource.data.activityId, 128)
+        && isNonEmptyString(request.resource.data.startTime, 10)
+        && isNonEmptyString(request.resource.data.endTime, 10);
+      allow delete: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

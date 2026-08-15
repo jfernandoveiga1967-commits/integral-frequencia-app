@@ -50,6 +50,21 @@ export interface WeekInfo {
   label: string; // e.g., "Semana 32 (03/08/2026 a 07/08/2026)"
 }
 
+export type DayOfWeek = 'segunda' | 'terca' | 'quarta' | 'quinta' | 'sexta';
+
+export interface ScheduleBlock {
+  id: string;
+  turma: TurmaType;
+  dayOfWeek: DayOfWeek;
+  startTime: string; // e.g. "13:30"
+  endTime: string;   // e.g. "14:20"
+  activityId: ActivityType; // Refers to an ActivityItem (e.g. "Rotina", "Natação", "Almoço", etc.)
+  location?: string; // e.g. "Piscina", "Refeitório", "Sala de Leitura"
+  guidelines?: string; // Orientações para a Monitora/Professor
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type UserRole = 'coordenador' | 'professor';
 
 export interface UserProfile {

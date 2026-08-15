@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem } from './types';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, resetAllData, isMockStudent } from './utils/storageUtils';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock } from './types';
+import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
@@ -18,6 +18,7 @@ import {
   subscribeTurmas,
   subscribeUsers,
   subscribeActivities,
+  subscribeToSchedules,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -27,6 +28,9 @@ import {
   deleteUserFromFirestore,
   saveActivityToFirestore,
   deleteActivityFromFirestore,
+  saveScheduleBlockToFirestore,
+  deleteScheduleBlockFromFirestore,
+  saveAllSchedulesToFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
   deleteDoc,
@@ -38,6 +42,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
   const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsersList());
   const [activitiesList, setActivitiesList] = useState<ActivityItem[]>(() => loadActivities());
+  const [schedules, setSchedules] = useState<ScheduleBlock[]>(() => loadSchedules());
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
@@ -330,12 +335,18 @@ export default function App() {
       }
     });
 
+    const unsubSchedules = subscribeToSchedules((fsSchedules) => {
+      setSchedules(fsSchedules);
+      saveSchedules(fsSchedules);
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
       unsubTurmas();
       unsubUsers();
       unsubActivities();
+      unsubSchedules();
     };
   }, []);
 
@@ -617,6 +628,34 @@ export default function App() {
     deleteActivityFromFirestore(activityId);
   };
 
+  // Schedule Management Handlers
+  const handleSaveScheduleBlock = (block: ScheduleBlock) => {
+    const existingIdx = schedules.findIndex((s) => s.id === block.id);
+    let updated: ScheduleBlock[];
+    if (existingIdx >= 0) {
+      updated = [...schedules];
+      updated[existingIdx] = block;
+    } else {
+      updated = [...schedules, block];
+    }
+    setSchedules(updated);
+    saveSchedules(updated);
+    saveScheduleBlockToFirestore(block);
+  };
+
+  const handleDeleteScheduleBlock = (id: string) => {
+    const updated = schedules.filter((s) => s.id !== id);
+    setSchedules(updated);
+    saveSchedules(updated);
+    deleteScheduleBlockFromFirestore(id);
+  };
+
+  const handleBatchSaveSchedules = (blocks: ScheduleBlock[]) => {
+    setSchedules(blocks);
+    saveSchedules(blocks);
+    saveAllSchedulesToFirestore(blocks);
+  };
+
   // Records count for the current week
   const weekRecordsCount = useMemo(() => {
     return records.filter(
@@ -717,10 +756,14 @@ export default function App() {
             users={users}
             activitiesList={activitiesList}
             turmas={turmas}
+            schedules={schedules}
             onSaveUser={handleSaveUser}
             onDeleteUser={handleDeleteUser}
             onSaveActivity={handleSaveActivity}
             onDeleteActivity={handleDeleteActivity}
+            onSaveScheduleBlock={handleSaveScheduleBlock}
+            onDeleteScheduleBlock={handleDeleteScheduleBlock}
+            onBatchSaveSchedules={handleBatchSaveSchedules}
           />
         )}
       </main>

@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, ActivityItem } from './types';
+import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock } from './types';
 
 export { doc, deleteDoc };
 
@@ -484,3 +484,88 @@ export async function seedInitialDataToFirestore(
     console.error('Error seeding initial data to Firestore:', error);
   }
 }
+
+export function subscribeToSchedules(callback: (schedules: ScheduleBlock[]) => void) {
+  const collectionRef = collection(db, 'schedules');
+  return onSnapshot(
+    collectionRef,
+    (snapshot) => {
+      const schedulesList: ScheduleBlock[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.id && data.turma && data.dayOfWeek && data.startTime && data.endTime && data.activityId) {
+          schedulesList.push({
+            id: data.id,
+            turma: data.turma,
+            dayOfWeek: data.dayOfWeek,
+            startTime: data.startTime,
+            endTime: data.endTime,
+            activityId: data.activityId,
+            location: data.location || '',
+            guidelines: data.guidelines || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          });
+        }
+      });
+      callback(schedulesList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'schedules');
+    }
+  );
+}
+
+export async function saveScheduleBlockToFirestore(schedule: ScheduleBlock) {
+  try {
+    const docRef = doc(db, 'schedules', schedule.id);
+    await setDoc(docRef, {
+      id: schedule.id,
+      turma: schedule.turma,
+      dayOfWeek: schedule.dayOfWeek,
+      startTime: schedule.startTime,
+      endTime: schedule.endTime,
+      activityId: schedule.activityId,
+      location: schedule.location || '',
+      guidelines: schedule.guidelines || '',
+      createdAt: schedule.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `schedules/${schedule.id}`);
+  }
+}
+
+export async function deleteScheduleBlockFromFirestore(scheduleId: string) {
+  try {
+    const docRef = doc(db, 'schedules', scheduleId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `schedules/${scheduleId}`);
+  }
+}
+
+export async function saveAllSchedulesToFirestore(schedules: ScheduleBlock[]) {
+  try {
+    const batch = writeBatch(db);
+    for (const item of schedules) {
+      const docRef = doc(db, 'schedules', item.id);
+      batch.set(docRef, {
+        id: item.id,
+        turma: item.turma,
+        dayOfWeek: item.dayOfWeek,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        activityId: item.activityId,
+        location: item.location || '',
+        guidelines: item.guidelines || '',
+        createdAt: item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || new Date().toISOString(),
+      });
+    }
+    await batch.commit();
+  } catch (error) {
+    console.error('Error saving all schedules to Firestore:', error);
+  }
+}
+

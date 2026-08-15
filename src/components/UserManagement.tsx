@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, UserRole, ActivityType, ActivityItem } from '../types';
+import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
+import { ScheduleManager } from './ScheduleManager';
 import {
   ShieldCheck,
   GraduationCap,
@@ -24,6 +25,7 @@ import {
   Sparkles,
   Plus,
   Calendar,
+  CalendarDays,
   BookOpen,
   Cpu,
   Palette,
@@ -48,10 +50,14 @@ interface UserManagementProps {
   users: UserProfile[];
   activitiesList: ActivityItem[];
   turmas?: string[];
+  schedules?: ScheduleBlock[];
   onSaveUser: (user: UserProfile) => void;
   onDeleteUser: (userId: string) => void;
   onSaveActivity: (activity: ActivityItem) => void;
   onDeleteActivity: (activityId: string) => void;
+  onSaveScheduleBlock?: (block: ScheduleBlock) => void;
+  onDeleteScheduleBlock?: (id: string) => void;
+  onBatchSaveSchedules?: (blocks: ScheduleBlock[]) => void;
 }
 
 const AVAILABLE_ICONS = [
@@ -80,10 +86,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   users,
   activitiesList,
   turmas,
+  schedules = [],
   onSaveUser,
   onDeleteUser,
   onSaveActivity,
   onDeleteActivity,
+  onSaveScheduleBlock,
+  onDeleteScheduleBlock,
+  onBatchSaveSchedules,
 }) => {
   const isAdmin = isCoordenador(currentUser);
 
@@ -93,7 +103,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   }, [turmas]);
 
   // Sub-tab switcher state
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities' | 'schedules'>('users');
 
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
@@ -547,7 +557,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         </div>
 
         {/* Section Navigation Tabs */}
-        <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mt-6 max-w-md">
+        <div className="flex flex-wrap sm:flex-nowrap bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mt-6 max-w-2xl gap-1">
           <button
             onClick={() => setActiveSubTab('users')}
             className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
@@ -570,6 +580,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           >
             <Sparkles className="w-4 h-4" />
             <span>Modalidades ({activitiesList.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('schedules')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              activeSubTab === 'schedules'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>Grade Horária ({schedules.length})</span>
           </button>
         </div>
       </div>
@@ -1055,6 +1077,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {/* ================= SECTION 3: GRADE HORÁRIA / SCHEDULES ================= */}
+      {activeSubTab === 'schedules' && (
+        <ScheduleManager
+          turmas={availableTurmas}
+          activitiesList={activitiesList}
+          schedules={schedules}
+          onSaveScheduleBlock={onSaveScheduleBlock || (() => {})}
+          onDeleteScheduleBlock={onDeleteScheduleBlock || (() => {})}
+          onBatchSaveSchedules={onBatchSaveSchedules}
+        />
       )}
 
       {/* MODAL: ADD / EDIT USER */}

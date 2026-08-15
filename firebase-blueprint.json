@@ -72,9 +72,28 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 128 },
         "icon": { "type": "string", "maxLength": 64 },
         "description": { "type": "string", "maxLength": 256 },
-        "defaultEquipment": { "type": "string", "maxLength": 256 }
+        "defaultEquipment": { "type": "string", "maxLength": 256 },
+        "requiresRollCall": { "type": "boolean" }
       },
       "required": ["id", "name"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Weekly timetable block for a turma",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "turma": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dayOfWeek": { "type": "string", "enum": ["segunda", "terca", "quarta", "quinta", "sexta"] },
+        "startTime": { "type": "string", "maxLength": 10 },
+        "endTime": { "type": "string", "maxLength": 10 },
+        "activityId": { "type": "string", "maxLength": 128 },
+        "location": { "type": "string", "maxLength": 128 },
+        "guidelines": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "turma", "dayOfWeek", "startTime", "endTime", "activityId"]
     }
   },
   "firestore": {
@@ -97,6 +116,10 @@
     "/activities/{activityId}": {
       "schema": "Activity",
       "description": "Collection of extracurricular activities"
+    },
+    "/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "Collection of weekly schedule blocks"
     }
   }
 }

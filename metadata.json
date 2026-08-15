@@ -1,6 +1,6 @@
 {
   "name": "Integral - Frequência Extracurricular",
-  "description": "Assistente para gestão e chamada de frequência semanal das atividades extracurriculares do Integral (Natação, Balé, Dança, Judô, Futebol, Ginástica e Flauta) com registros de presença e justificativas de ausência por saúde ou falta de equipamento.",
+  "description": "Assistente para gestão de chamada de frequência semanal e grade horária das atividades do Integral (Natação, Balé, Dança, Judô, Futebol, Ginástica, Flauta e rotinas), com suporte a atividades com e sem chamada, gestão de turmas e persistência em tempo real no Firestore.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
