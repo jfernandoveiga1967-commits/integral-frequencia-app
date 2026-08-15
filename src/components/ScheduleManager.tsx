@@ -32,7 +32,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType } from '../types';
-import { ActivityBadge } from './ActivityBadge';
+import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateWeeklySchedulePDF, generateDailyRoutinePDF } from '../utils/pdfGenerator';
 
@@ -300,7 +300,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     );
   };
 
-  // Calculate unique registered time slots in the selected formTurma
+  // Calculate unique registered time slots with activity details in the selected formTurma
   const registeredTurmaTimeSlots = useMemo(() => {
     if (!formTurma) return [];
     const turmaBlocks = schedules.filter((s) => s.turma === formTurma);
@@ -309,33 +309,45 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       {
         startTime: string;
         endTime: string;
+        activityId: string;
+        activityName: string;
+        iconName?: string;
+        location?: string;
+        guidelines?: string;
         days: Set<DayOfWeek>;
-        activityNames: Set<string>;
       }
     >();
 
     turmaBlocks.forEach((b) => {
       if (b.startTime && b.endTime) {
-        const key = `${b.startTime} - ${b.endTime}`;
-        const actName = activitiesList.find((a) => a.id === b.activityId)?.name || b.activityId;
+        const key = `${b.startTime}_${b.endTime}_${b.activityId}`;
+        const act = activitiesList.find((a) => a.id === b.activityId);
+        const actName = act?.name || b.activityId;
         if (!slotMap.has(key)) {
           slotMap.set(key, {
             startTime: b.startTime,
             endTime: b.endTime,
+            activityId: b.activityId,
+            activityName: actName,
+            iconName: act?.icon,
+            location: b.location,
+            guidelines: b.guidelines,
             days: new Set([b.dayOfWeek]),
-            activityNames: new Set([actName]),
           });
         } else {
           const item = slotMap.get(key)!;
           item.days.add(b.dayOfWeek);
-          item.activityNames.add(actName);
+          if (!item.location && b.location) item.location = b.location;
+          if (!item.guidelines && b.guidelines) item.guidelines = b.guidelines;
         }
       }
     });
 
-    return Array.from(slotMap.values()).sort((a, b) =>
-      a.startTime.localeCompare(b.startTime)
-    );
+    return Array.from(slotMap.values()).sort((a, b) => {
+      const timeCmp = a.startTime.localeCompare(b.startTime);
+      if (timeCmp !== 0) return timeCmp;
+      return a.activityName.localeCompare(b.activityName, 'pt-BR');
+    });
   }, [schedules, formTurma, activitiesList]);
 
   // Calculate effective targets for form replication
@@ -1623,14 +1635,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   </div>
 
                   {registeredTurmaTimeSlots.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto pr-1">
                       {registeredTurmaTimeSlots.map((slot, idx) => {
                         const isCurrentActive =
-                          formStartTime === slot.startTime && formEndTime === slot.endTime;
+                          formStartTime === slot.startTime &&
+                          formEndTime === slot.endTime &&
+                          formActivityId === slot.activityId;
                         const daysLabels = Array.from(slot.days)
                           .map((d) => DAYS_OF_WEEK.find((dw) => dw.id === d)?.short || d)
                           .join(', ');
-                        const actsSample = Array.from(slot.activityNames).slice(0, 2).join(', ');
 
                         return (
                           <button
@@ -1639,18 +1652,31 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                             onClick={() => {
                               setFormStartTime(slot.startTime);
                               setFormEndTime(slot.endTime);
+                              setFormActivityId(slot.activityId);
+                              if (slot.location && !formLocation) {
+                                setFormLocation(slot.location);
+                              }
+                              if (slot.guidelines && !formGuidelines) {
+                                setFormGuidelines(slot.guidelines);
+                              }
                               setFormError(null);
                             }}
-                            className={`text-xs font-bold px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center space-x-1.5 ${
+                            className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 ${
                               isCurrentActive
                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
-                                : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-800 border-slate-200 hover:border-indigo-300'
+                                : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-900 border-slate-200 hover:border-indigo-300'
                             }`}
-                            title={`Preencher ${slot.startTime} - ${slot.endTime} (${actsSample} • ${daysLabels})`}
+                            title={`Clique para preencher: ${slot.startTime} - ${slot.endTime} • ${slot.activityName} (${daysLabels})`}
                           >
-                            <Clock className={`w-3.5 h-3.5 ${isCurrentActive ? 'text-white' : 'text-indigo-600'}`} />
+                            <span className={isCurrentActive ? 'text-white' : 'text-indigo-600'}>
+                              {renderActivityIcon(slot.iconName, 'w-3.5 h-3.5')}
+                            </span>
                             <span>{slot.startTime} - {slot.endTime}</span>
-                            {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5" />}
+                            <span className={isCurrentActive ? 'text-indigo-200' : 'text-slate-300'}>•</span>
+                            <span className={`truncate max-w-[140px] ${isCurrentActive ? 'text-white font-extrabold' : 'text-slate-800'}`}>
+                              {slot.activityName}
+                            </span>
+                            {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5 shrink-0" />}
                           </button>
                         );
                       })}

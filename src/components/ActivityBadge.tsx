@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityType } from '../types';
+import { ActivityType, ActivityItem } from '../types';
 import {
   Waves,
   Sparkles,
@@ -23,6 +23,21 @@ import {
   HeartHandshake,
   HandHeart,
   Heart,
+  Globe,
+  Camera,
+  Feather,
+  GraduationCap,
+  ShieldCheck,
+  Zap,
+  Rocket,
+  Scissors,
+  Compass,
+  Lightbulb,
+  Languages,
+  HeartPulse,
+  Flame,
+  Flag,
+  Bike,
 } from 'lucide-react';
 
 interface ActivityBadgeProps {
@@ -148,6 +163,138 @@ export const activityConfig: Record<
   },
 };
 
+export const BASE_AVAILABLE_ICONS = [
+  { id: 'HeartHandshake', label: 'Acolhimento / Integração' },
+  { id: 'HandHeart', label: 'Cuidado / Afeto' },
+  { id: 'Heart', label: 'Socioemocional / Carinho' },
+  { id: 'Waves', label: 'Natação / Piscina / Água' },
+  { id: 'Sparkles', label: 'Balé / Brilho / Criativo' },
+  { id: 'Music', label: 'Dança / Músicas / Ritmo' },
+  { id: 'Award', label: 'Judô / Lutas / Artes Marciais' },
+  { id: 'Trophy', label: 'Futebol / Esportes / Torneios' },
+  { id: 'Activity', label: 'Ginástica / Fitness / Movimento' },
+  { id: 'Music2', label: 'Instrumentos / Flauta / Canto' },
+  { id: 'Gamepad2', label: 'Xadrez / Mente / Estratégia' },
+  { id: 'Cpu', label: 'Robótica / Tech / Programação' },
+  { id: 'Palette', label: 'Artes / Pintura / Ateliê' },
+  { id: 'BookOpen', label: 'Teatro / Leitura / Literatura' },
+  { id: 'Dumbbell', label: 'Treino / Atletismo / Esportes' },
+  { id: 'Globe', label: 'Idiomas / Inglês / Bilinguismo' },
+  { id: 'Languages', label: 'Comunicação / Línguas' },
+  { id: 'Lightbulb', label: 'Inovação / Criatividade' },
+  { id: 'Rocket', label: 'Ciências / Espaço / STEM' },
+  { id: 'Camera', label: 'Fotografia / Cinema / Audiovisual' },
+  { id: 'Scissors', label: 'Artesanato / Costura / Modelagem' },
+  { id: 'Feather', label: 'Yoga / Meditação / Mindfulness' },
+  { id: 'Compass', label: 'Orientação / Aventura / Natureza' },
+  { id: 'Zap', label: 'Gincana / Agilidade / Jogos' },
+  { id: 'ShieldCheck', label: 'Capoeira / Defesa Pessoal' },
+  { id: 'Clock', label: 'Rotina / Horários / Transição' },
+  { id: 'Utensils', label: 'Almoço / Refeição / Culinária' },
+  { id: 'Coffee', label: 'Lanche / Intervalo / Hidratação' },
+  { id: 'BookMarked', label: 'Lição de Casa / Apoio Escolar' },
+  { id: 'Sun', label: 'Parquinho / Pátio / Ar Livre' },
+  { id: 'Smile', label: 'Recreação / Brincadeiras' },
+  { id: 'Bike', label: 'Bicicleta / Patins / Rodas' },
+  { id: 'Flame', label: 'Circo / Mágica / Expressão' },
+  { id: 'HeartPulse', label: 'Saúde / Psicomotricidade' },
+  { id: 'GraduationCap', label: 'Oficinas Pedagógicas' },
+  { id: 'Layers', label: 'Multidisciplinar / Geral' },
+];
+
+// Helper to intelligently detect/assign a representative icon name based on activity title
+export function detectIconFromActivityName(name: string): string {
+  if (!name) return 'Sparkles';
+  const clean = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (clean.includes('natac') || clean.includes('piscina') || clean.includes('aqua') || clean.includes('hidro')) {
+    return 'Waves';
+  }
+  if (clean.includes('bale') || clean.includes('ballet')) {
+    return 'Sparkles';
+  }
+  if (clean.includes('danc') || clean.includes('ritmo') || clean.includes('zumba') || clean.includes('coreo')) {
+    return 'Music';
+  }
+  if (clean.includes('flaut') || clean.includes('violao') || clean.includes('teclado') || clean.includes('piano') || clean.includes('canto') || clean.includes('coral') || clean.includes('musica') || clean.includes('banda')) {
+    return 'Music2';
+  }
+  if (clean.includes('judo') || clean.includes('karate') || clean.includes('capoeira') || clean.includes('taekwondo') || clean.includes('luta') || clean.includes('artes marciais') || clean.includes('jiu')) {
+    return 'Award';
+  }
+  if (clean.includes('futebol') || clean.includes('futsal') || clean.includes('gol') || clean.includes('society') || clean.includes('torneio')) {
+    return 'Trophy';
+  }
+  if (clean.includes('basquete') || clean.includes('volei') || clean.includes('handebol') || clean.includes('atletismo') || clean.includes('esporte') || clean.includes('treino')) {
+    return 'Dumbbell';
+  }
+  if (clean.includes('ginast') || clean.includes('fitness') || clean.includes('along') || clean.includes('movimento') || clean.includes('acrobac')) {
+    return 'Activity';
+  }
+  if (clean.includes('xadrez') || clean.includes('dama') || clean.includes('tabuleiro') || clean.includes('racioc') || clean.includes('game') || clean.includes('jogos de')) {
+    return 'Gamepad2';
+  }
+  if (clean.includes('robot') || clean.includes('maker') || clean.includes('tech') || clean.includes('program') || clean.includes('stem') || clean.includes('comput') || clean.includes('lego')) {
+    return 'Cpu';
+  }
+  if (clean.includes('arte') || clean.includes('pint') || clean.includes('desenh') || clean.includes('escul') || clean.includes('argila') || clean.includes('aquarela') || clean.includes('atelie')) {
+    return 'Palette';
+  }
+  if (clean.includes('teatro') || clean.includes('dramatiz') || clean.includes('leitur') || clean.includes('livro') || clean.includes('contac') || clean.includes('literat')) {
+    return 'BookOpen';
+  }
+  if (clean.includes('licao') || clean.includes('taref') || clean.includes('dever') || clean.includes('estudo') || clean.includes('reforco') || clean.includes('pedagog')) {
+    return 'BookMarked';
+  }
+  if (clean.includes('almoc') || clean.includes('refeic') || clean.includes('culinar') || clean.includes('nutric') || clean.includes('comida')) {
+    return 'Utensils';
+  }
+  if (clean.includes('lanche') || clean.includes('merend') || clean.includes('cafe') || clean.includes('hidrat')) {
+    return 'Coffee';
+  }
+  if (clean.includes('acolh') || clean.includes('recepc') || clean.includes('integrac') || clean.includes('boas vindas')) {
+    return 'HeartHandshake';
+  }
+  if (clean.includes('cuid') || clean.includes('afeto') || clean.includes('emocion') || clean.includes('socioemoc')) {
+    return 'HandHeart';
+  }
+  if (clean.includes('parquinh') || clean.includes('patio') || clean.includes('ar livre') || clean.includes('horta') || clean.includes('naturez')) {
+    return 'Sun';
+  }
+  if (clean.includes('recreac') || clean.includes('brincad') || clean.includes('gincan') || clean.includes('divers')) {
+    return 'Smile';
+  }
+  if (clean.includes('ingles') || clean.includes('espanhol') || clean.includes('idiom') || clean.includes('biling') || clean.includes('english')) {
+    return 'Globe';
+  }
+  if (clean.includes('foto') || clean.includes('cinema') || clean.includes('video') || clean.includes('audiovisual')) {
+    return 'Camera';
+  }
+  if (clean.includes('yoga') || clean.includes('medit') || clean.includes('mindful') || clean.includes('zen') || clean.includes('respir')) {
+    return 'Feather';
+  }
+  if (clean.includes('cienc') || clean.includes('laborat') || clean.includes('experim') || clean.includes('espaco') || clean.includes('astro')) {
+    return 'Rocket';
+  }
+  if (clean.includes('costur') || clean.includes('artesan') || clean.includes('modelag')) {
+    return 'Scissors';
+  }
+  if (clean.includes('criativ') || clean.includes('inovac') || clean.includes('ideia')) {
+    return 'Lightbulb';
+  }
+  if (clean.includes('patin') || clean.includes('bike') || clean.includes('biciclet') || clean.includes('skate')) {
+    return 'Bike';
+  }
+  if (clean.includes('circo') || clean.includes('magic') || clean.includes('malabar')) {
+    return 'Flame';
+  }
+
+  return 'Sparkles';
+}
+
 export function renderActivityIcon(iconName?: string, className: string = 'w-4 h-4') {
   switch (iconName) {
     case 'HeartHandshake':
@@ -192,6 +339,36 @@ export function renderActivityIcon(iconName?: string, className: string = 'w-4 h
       return <Dumbbell className={className} />;
     case 'Gamepad2':
       return <Gamepad2 className={className} />;
+    case 'Globe':
+      return <Globe className={className} />;
+    case 'Languages':
+      return <Languages className={className} />;
+    case 'Lightbulb':
+      return <Lightbulb className={className} />;
+    case 'Rocket':
+      return <Rocket className={className} />;
+    case 'Camera':
+      return <Camera className={className} />;
+    case 'Scissors':
+      return <Scissors className={className} />;
+    case 'Feather':
+      return <Feather className={className} />;
+    case 'Compass':
+      return <Compass className={className} />;
+    case 'Zap':
+      return <Zap className={className} />;
+    case 'ShieldCheck':
+      return <ShieldCheck className={className} />;
+    case 'Bike':
+      return <Bike className={className} />;
+    case 'Flame':
+      return <Flame className={className} />;
+    case 'HeartPulse':
+      return <HeartPulse className={className} />;
+    case 'GraduationCap':
+      return <GraduationCap className={className} />;
+    case 'Flag':
+      return <Flag className={className} />;
     default:
       return <Layers className={className} />;
   }
@@ -213,7 +390,7 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
     border: 'border-cyan-200',
     text: 'text-cyan-800',
     badgeBg: 'bg-cyan-100 text-cyan-900 border-cyan-300',
-    icon: renderActivityIcon(iconName),
+    icon: renderActivityIcon(iconName || detectIconFromActivityName(activity)),
     equipmentHint: customEquipment || 'Material necessário para a atividade',
   };
 
