@@ -79,3 +79,50 @@ export function getWeekDays(startDateStr: string): { dateStr: string; dayName: s
   }
   return days;
 }
+
+export function getDayOfWeekFromDate(date: Date | string): 'segunda' | 'terca' | 'quarta' | 'quinta' | 'sexta' | null {
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
+
+  const day = d.getDay(); // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sáb
+  switch (day) {
+    case 1:
+      return 'segunda';
+    case 2:
+      return 'terca';
+    case 3:
+      return 'quarta';
+    case 4:
+      return 'quinta';
+    case 5:
+      return 'sexta';
+    default:
+      return null;
+  }
+}
+
+export function getDayOfWeekLabel(day: 'segunda' | 'terca' | 'quarta' | 'quinta' | 'sexta' | string): string {
+  switch (day) {
+    case 'segunda':
+      return 'Segunda-feira';
+    case 'terca':
+      return 'Terça-feira';
+    case 'quarta':
+      return 'Quarta-feira';
+    case 'quinta':
+      return 'Quinta-feira';
+    case 'sexta':
+      return 'Sexta-feira';
+    default:
+      return day;
+  }
+}

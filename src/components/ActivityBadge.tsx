@@ -136,46 +136,46 @@ export const activityConfig: Record<
   },
 };
 
-export function renderActivityIcon(iconName?: string) {
+export function renderActivityIcon(iconName?: string, className: string = 'w-4 h-4') {
   switch (iconName) {
     case 'Clock':
-      return <Clock className="w-4 h-4" />;
+      return <Clock className={className} />;
     case 'Waves':
-      return <Waves className="w-4 h-4" />;
+      return <Waves className={className} />;
     case 'Sparkles':
-      return <Sparkles className="w-4 h-4" />;
+      return <Sparkles className={className} />;
     case 'Music':
-      return <Music className="w-4 h-4" />;
+      return <Music className={className} />;
     case 'Award':
-      return <Award className="w-4 h-4" />;
+      return <Award className={className} />;
     case 'Trophy':
-      return <Trophy className="w-4 h-4" />;
+      return <Trophy className={className} />;
     case 'Activity':
-      return <Activity className="w-4 h-4" />;
+      return <Activity className={className} />;
     case 'Music2':
-      return <Music2 className="w-4 h-4" />;
+      return <Music2 className={className} />;
     case 'BookOpen':
-      return <BookOpen className="w-4 h-4" />;
+      return <BookOpen className={className} />;
     case 'BookMarked':
-      return <BookMarked className="w-4 h-4" />;
+      return <BookMarked className={className} />;
     case 'Utensils':
-      return <Utensils className="w-4 h-4" />;
+      return <Utensils className={className} />;
     case 'Coffee':
-      return <Coffee className="w-4 h-4" />;
+      return <Coffee className={className} />;
     case 'Sun':
-      return <Sun className="w-4 h-4" />;
+      return <Sun className={className} />;
     case 'Smile':
-      return <Smile className="w-4 h-4" />;
+      return <Smile className={className} />;
     case 'Cpu':
-      return <Cpu className="w-4 h-4" />;
+      return <Cpu className={className} />;
     case 'Palette':
-      return <Palette className="w-4 h-4" />;
+      return <Palette className={className} />;
     case 'Dumbbell':
-      return <Dumbbell className="w-4 h-4" />;
+      return <Dumbbell className={className} />;
     case 'Gamepad2':
-      return <Gamepad2 className="w-4 h-4" />;
+      return <Gamepad2 className={className} />;
     default:
-      return <Layers className="w-4 h-4" />;
+      return <Layers className={className} />;
   }
 }
 

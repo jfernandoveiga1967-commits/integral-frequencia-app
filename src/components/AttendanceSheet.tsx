@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
+import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock } from 'lucide-react';
@@ -14,6 +15,7 @@ interface AttendanceSheetProps {
   records: AttendanceRecord[];
   turmas?: string[];
   activitiesList?: ActivityItem[];
+  schedules?: ScheduleBlock[];
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
@@ -27,6 +29,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   records,
   turmas,
   activitiesList = ACTIVITIES_LIST,
+  schedules = [],
   currentWeek,
   selectedDate,
   currentUser = null,
@@ -365,6 +368,19 @@ function getCurrentHHMM(): string {
           <span>Seu usuário está configurado no modo <strong>Somente Leitura</strong>. O lançamento de presença e marcação de ocorrências está desabilitado pela coordenação.</span>
         </div>
       )}
+
+      {/* Routine & Monitor Guidance Banner (Atividade do Momento, Atalho de Chamada, Orientações e Cronograma) */}
+      <RoutineMonitorBanner
+        schedules={schedules}
+        activitiesList={activitiesList}
+        selectedTurma={selectedTurma}
+        selectedDate={selectedDate}
+        turmasList={turmasList}
+        onSelectActivityAndTurma={(act, turma) => {
+          if (act) setSelectedActivity(act);
+          if (turma) setSelectedTurma(turma);
+        }}
+      />
 
       {/* Equipment Modal */}
       <EquipmentModal

@@ -699,6 +699,7 @@ export default function App() {
             records={records}
             turmas={turmas}
             activitiesList={activitiesList}
+            schedules={schedules}
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
