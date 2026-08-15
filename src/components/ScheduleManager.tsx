@@ -70,15 +70,6 @@ const COMMON_LOCATIONS = [
   'Ateliê de Artes',
 ];
 
-const TIME_PRESETS = [
-  { label: 'Almoço (11:30 - 12:30)', start: '11:30', end: '12:30' },
-  { label: '1º Horário (13:30 - 14:20)', start: '13:30', end: '14:20' },
-  { label: '2º Horário (14:30 - 15:20)', start: '14:30', end: '15:20' },
-  { label: 'Lanche da Tarde (15:30 - 16:00)', start: '15:30', end: '16:00' },
-  { label: '3º Horário (16:00 - 17:00)', start: '16:00', end: '17:00' },
-  { label: 'Lição / Acolhida (17:00 - 17:45)', start: '17:00', end: '17:45' },
-];
-
 export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   turmas,
   activitiesList,
@@ -112,8 +103,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   // Form State
   const [formTurma, setFormTurma] = useState<TurmaType>(() => sortedTurmas[0] || '');
   const [formDayOfWeek, setFormDayOfWeek] = useState<DayOfWeek>('segunda');
-  const [formStartTime, setFormStartTime] = useState('13:30');
-  const [formEndTime, setFormEndTime] = useState('14:20');
+  const [formStartTime, setFormStartTime] = useState('');
+  const [formEndTime, setFormEndTime] = useState('');
   const [formActivityId, setFormActivityId] = useState<ActivityType>(activitiesList[0]?.id || 'Rotina');
   const [formLocation, setFormLocation] = useState('');
   const [formGuidelines, setFormGuidelines] = useState('');
@@ -231,8 +222,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     setEditingBlock(null);
     setFormTurma(selectedTurma);
     setFormDayOfWeek(targetDay);
-    setFormStartTime('13:30');
-    setFormEndTime('14:20');
+    setFormStartTime('');
+    setFormEndTime('');
     setFormActivityId(activitiesList[0]?.id || 'Rotina');
     setFormLocation('');
     setFormGuidelines('');
@@ -308,6 +299,44 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       sortedTurmas.filter((t) => t.includes('Ano'))
     );
   };
+
+  // Calculate unique registered time slots in the selected formTurma
+  const registeredTurmaTimeSlots = useMemo(() => {
+    if (!formTurma) return [];
+    const turmaBlocks = schedules.filter((s) => s.turma === formTurma);
+    const slotMap = new Map<
+      string,
+      {
+        startTime: string;
+        endTime: string;
+        days: Set<DayOfWeek>;
+        activityNames: Set<string>;
+      }
+    >();
+
+    turmaBlocks.forEach((b) => {
+      if (b.startTime && b.endTime) {
+        const key = `${b.startTime} - ${b.endTime}`;
+        const actName = activitiesList.find((a) => a.id === b.activityId)?.name || b.activityId;
+        if (!slotMap.has(key)) {
+          slotMap.set(key, {
+            startTime: b.startTime,
+            endTime: b.endTime,
+            days: new Set([b.dayOfWeek]),
+            activityNames: new Set([actName]),
+          });
+        } else {
+          const item = slotMap.get(key)!;
+          item.days.add(b.dayOfWeek);
+          item.activityNames.add(actName);
+        }
+      }
+    });
+
+    return Array.from(slotMap.values()).sort((a, b) =>
+      a.startTime.localeCompare(b.startTime)
+    );
+  }, [schedules, formTurma, activitiesList]);
 
   // Calculate effective targets for form replication
   const effectiveFormTargetDays = useMemo(() => {
@@ -1579,26 +1608,58 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   </div>
                 </div>
 
-                {/* Quick Preset Buttons */}
-                <div className="mt-2">
-                  <span className="text-[10px] text-slate-400 font-bold block mb-1">
-                    Horários Comuns (Clique para preencher):
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {TIME_PRESETS.map((preset, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setFormStartTime(preset.start);
-                          setFormEndTime(preset.end);
-                        }}
-                        className="text-[10px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 px-2 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer"
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
+                {/* Dynamic Chips: Horários Lançados na Turma */}
+                <div className="mt-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Horários Lançados na Turma:</span>
+                    </span>
+                    {registeredTurmaTimeSlots.length > 0 && (
+                      <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                        {registeredTurmaTimeSlots.length} salvo{registeredTurmaTimeSlots.length > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
+
+                  {registeredTurmaTimeSlots.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {registeredTurmaTimeSlots.map((slot, idx) => {
+                        const isCurrentActive =
+                          formStartTime === slot.startTime && formEndTime === slot.endTime;
+                        const daysLabels = Array.from(slot.days)
+                          .map((d) => DAYS_OF_WEEK.find((dw) => dw.id === d)?.short || d)
+                          .join(', ');
+                        const actsSample = Array.from(slot.activityNames).slice(0, 2).join(', ');
+
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setFormStartTime(slot.startTime);
+                              setFormEndTime(slot.endTime);
+                              setFormError(null);
+                            }}
+                            className={`text-xs font-bold px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center space-x-1.5 ${
+                              isCurrentActive
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
+                                : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-800 border-slate-200 hover:border-indigo-300'
+                            }`}
+                            title={`Preencher ${slot.startTime} - ${slot.endTime} (${actsSample} • ${daysLabels})`}
+                          >
+                            <Clock className={`w-3.5 h-3.5 ${isCurrentActive ? 'text-white' : 'text-indigo-600'}`} />
+                            <span>{slot.startTime} - {slot.endTime}</span>
+                            {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 rounded-xl p-2 text-center">
+                      Nenhum horário cadastrado nesta turma ainda. Digite o início e término acima.
+                    </p>
+                  )}
                 </div>
               </div>
 
