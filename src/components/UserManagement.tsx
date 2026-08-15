@@ -60,7 +60,11 @@ interface UserManagementProps {
   onDeleteActivity: (activityId: string) => void;
   onSaveScheduleBlock?: (block: ScheduleBlock) => void;
   onDeleteScheduleBlock?: (id: string) => void;
-  onBatchSaveSchedules?: (blocks: ScheduleBlock[]) => void;
+  onBatchSaveSchedules?: (
+    blocks: ScheduleBlock[],
+    deletedIds?: string[],
+    newOrUpdatedOnly?: ScheduleBlock[]
+  ) => void;
 }
 
 const AVAILABLE_ICONS = [

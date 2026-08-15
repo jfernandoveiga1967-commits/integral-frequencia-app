@@ -31,6 +31,7 @@ import {
   saveScheduleBlockToFirestore,
   deleteScheduleBlockFromFirestore,
   saveAllSchedulesToFirestore,
+  batchSyncSchedulesToFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
   deleteDoc,
@@ -650,10 +651,18 @@ export default function App() {
     deleteScheduleBlockFromFirestore(id);
   };
 
-  const handleBatchSaveSchedules = (blocks: ScheduleBlock[]) => {
+  const handleBatchSaveSchedules = (
+    blocks: ScheduleBlock[],
+    deletedIds: string[] = [],
+    newOrUpdatedOnly?: ScheduleBlock[]
+  ) => {
     setSchedules(blocks);
     saveSchedules(blocks);
-    saveAllSchedulesToFirestore(blocks);
+    if (deletedIds.length > 0) {
+      batchSyncSchedulesToFirestore(newOrUpdatedOnly || blocks, deletedIds);
+    } else {
+      saveAllSchedulesToFirestore(newOrUpdatedOnly || blocks);
+    }
   };
 
   // Records count for the current week

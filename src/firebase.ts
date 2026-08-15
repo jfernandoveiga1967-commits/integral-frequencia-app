@@ -545,6 +545,42 @@ export async function deleteScheduleBlockFromFirestore(scheduleId: string) {
   }
 }
 
+export async function batchSyncSchedulesToFirestore(
+  newOrUpdatedBlocks: ScheduleBlock[],
+  deletedIds: string[] = []
+) {
+  try {
+    const batch = writeBatch(db);
+    
+    // Process deletions
+    for (const id of deletedIds) {
+      const docRef = doc(db, 'schedules', id);
+      batch.delete(docRef);
+    }
+
+    // Process sets
+    for (const item of newOrUpdatedBlocks) {
+      const docRef = doc(db, 'schedules', item.id);
+      batch.set(docRef, {
+        id: item.id,
+        turma: item.turma,
+        dayOfWeek: item.dayOfWeek,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        activityId: item.activityId,
+        location: item.location || '',
+        guidelines: item.guidelines || '',
+        createdAt: item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || new Date().toISOString(),
+      });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error batch syncing schedules to Firestore:', error);
+  }
+}
+
 export async function saveAllSchedulesToFirestore(schedules: ScheduleBlock[]) {
   try {
     const batch = writeBatch(db);

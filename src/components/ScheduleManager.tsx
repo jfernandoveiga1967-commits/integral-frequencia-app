@@ -21,6 +21,12 @@ import {
   Waves,
   X,
   Calendar,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  RefreshCw,
+  SlidersHorizontal,
+  HelpCircle,
 } from 'lucide-react';
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType } from '../types';
 import { ActivityBadge } from './ActivityBadge';
@@ -31,7 +37,11 @@ interface ScheduleManagerProps {
   schedules: ScheduleBlock[];
   onSaveScheduleBlock: (block: ScheduleBlock) => void;
   onDeleteScheduleBlock: (id: string) => void;
-  onBatchSaveSchedules?: (blocks: ScheduleBlock[]) => void;
+  onBatchSaveSchedules?: (
+    blocks: ScheduleBlock[],
+    deletedIds?: string[],
+    newOrUpdatedOnly?: ScheduleBlock[]
+  ) => void;
 }
 
 const DAYS_OF_WEEK: { id: DayOfWeek; label: string; short: string }[] = [
@@ -73,9 +83,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   onBatchSaveSchedules,
 }) => {
   const [selectedTurma, setSelectedTurma] = useState<TurmaType>(turmas[0] || '1º Ano A');
-  const [selectedDayFilter, setSelectedDayFilter] = useState<'ALL' | DayOfWeek>('ALL');
 
-  // Modal State
+  // Modal State for New/Edit Block
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [blockToDelete, setBlockToDelete] = useState<ScheduleBlock | null>(null);
@@ -90,12 +99,28 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [formGuidelines, setFormGuidelines] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
+  // --- REPLICATION MODAL 1: Replicar Rotina Completa (Entre Turmas) ---
+  const [isFullRoutineModalOpen, setIsFullRoutineModalOpen] = useState(false);
+  const [fullRoutineTargetTurmas, setFullRoutineTargetTurmas] = useState<string[]>([]);
+  const [fullRoutineOverwrite, setFullRoutineOverwrite] = useState(true);
+
+  // --- REPLICATION MODAL 2: Replicar Dia Específico ---
+  const [dayReplicateModal, setDayReplicateModal] = useState<{
+    isOpen: boolean;
+    sourceDay: DayOfWeek;
+    sourceTurma: TurmaType;
+  } | null>(null);
+  const [dayReplicateMode, setDayReplicateMode] = useState<'same_turma_other_days' | 'other_turmas_same_day' | 'custom'>('same_turma_other_days');
+  const [dayReplicateTargetDays, setDayReplicateTargetDays] = useState<DayOfWeek[]>([]);
+  const [dayReplicateTargetTurmas, setDayReplicateTargetTurmas] = useState<string[]>([]);
+  const [dayReplicateOverwrite, setDayReplicateOverwrite] = useState(true);
+
   // Toast feedback
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 3000);
+    setTimeout(() => setToastMsg(null), 4000);
   };
 
   // Filter schedules for the selected turma
@@ -204,6 +229,253 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     showToast('Bloco de horário removido da grade.', 'success');
   };
 
+  // --- REPLICATION 1: OPEN FULL ROUTINE MODAL ---
+  const handleOpenFullRoutineModal = () => {
+    if (currentTurmaSchedules.length === 0) {
+      showToast(`A turma ${selectedTurma} não possui nenhum horário cadastrado para replicar.`, 'error');
+      return;
+    }
+    const otherTurmas = turmas.filter((t) => t !== selectedTurma);
+    setFullRoutineTargetTurmas(otherTurmas); // default to all other turmas
+    setFullRoutineOverwrite(true);
+    setIsFullRoutineModalOpen(true);
+  };
+
+  // Toggle selection for target turma in full replication
+  const handleToggleFullRoutineTurma = (t: string) => {
+    if (fullRoutineTargetTurmas.includes(t)) {
+      setFullRoutineTargetTurmas(fullRoutineTargetTurmas.filter((item) => item !== t));
+    } else {
+      setFullRoutineTargetTurmas([...fullRoutineTargetTurmas, t]);
+    }
+  };
+
+  const handleSelectAllFullRoutineTurmas = () => {
+    const otherTurmas = turmas.filter((t) => t !== selectedTurma);
+    setFullRoutineTargetTurmas(otherTurmas);
+  };
+
+  const handleDeselectAllFullRoutineTurmas = () => {
+    setFullRoutineTargetTurmas([]);
+  };
+
+  // EXECUTE FULL ROUTINE REPLICATION
+  const handleExecuteFullRoutineReplication = () => {
+    if (fullRoutineTargetTurmas.length === 0) {
+      showToast('Selecione pelo menos uma turma de destino.', 'error');
+      return;
+    }
+
+    const sourceBlocks = currentTurmaSchedules;
+    if (sourceBlocks.length === 0) {
+      showToast('Nenhum horário cadastrado na turma de origem.', 'error');
+      return;
+    }
+
+    const newBlocks: ScheduleBlock[] = [];
+    const deletedIds: string[] = [];
+    const targetTurmasSet = new Set(fullRoutineTargetTurmas);
+
+    // If overwrite mode is chosen, find all existing blocks in the target turmas to delete
+    if (fullRoutineOverwrite) {
+      schedules.forEach((s) => {
+        if (targetTurmasSet.has(s.turma)) {
+          deletedIds.push(s.id);
+        }
+      });
+    }
+
+    // Generate new duplicated blocks for each target turma
+    fullRoutineTargetTurmas.forEach((targetTurma) => {
+      sourceBlocks.forEach((src) => {
+        const duplicated: ScheduleBlock = {
+          id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          turma: targetTurma,
+          dayOfWeek: src.dayOfWeek,
+          startTime: src.startTime,
+          endTime: src.endTime,
+          activityId: src.activityId,
+          location: src.location || '',
+          guidelines: src.guidelines || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        newBlocks.push(duplicated);
+      });
+    });
+
+    // Compute updated total schedules list
+    let updatedTotalSchedules: ScheduleBlock[];
+    if (fullRoutineOverwrite) {
+      const deletedIdSet = new Set(deletedIds);
+      const preserved = schedules.filter((s) => !deletedIdSet.has(s.id));
+      updatedTotalSchedules = [...preserved, ...newBlocks];
+    } else {
+      updatedTotalSchedules = [...schedules, ...newBlocks];
+    }
+
+    if (onBatchSaveSchedules) {
+      onBatchSaveSchedules(updatedTotalSchedules, deletedIds, newBlocks);
+    } else {
+      deletedIds.forEach((id) => onDeleteScheduleBlock(id));
+      newBlocks.forEach((b) => onSaveScheduleBlock(b));
+    }
+
+    setIsFullRoutineModalOpen(false);
+    showToast(
+      `✓ Rotina completa de ${selectedTurma} (${sourceBlocks.length} horários) replicada para ${fullRoutineTargetTurmas.length} turma(s)!`,
+      'success'
+    );
+  };
+
+  // --- REPLICATION 2: OPEN DAY REPLICATION MODAL ---
+  const handleOpenDayReplicateModal = (day: DayOfWeek) => {
+    const dayBlocks = schedulesByDay[day];
+    if (dayBlocks.length === 0) {
+      showToast(`Não há horários cadastrados em ${DAYS_OF_WEEK.find((d) => d.id === day)?.label} para replicar.`, 'error');
+      return;
+    }
+
+    setDayReplicateModal({
+      isOpen: true,
+      sourceDay: day,
+      sourceTurma: selectedTurma,
+    });
+    setDayReplicateMode('same_turma_other_days');
+    // Default target days to other 4 days of the week
+    setDayReplicateTargetDays(DAYS_OF_WEEK.filter((d) => d.id !== day).map((d) => d.id));
+    // Default target turmas to current turma
+    setDayReplicateTargetTurmas([selectedTurma]);
+    setDayReplicateOverwrite(true);
+  };
+
+  // Quick switch modes for Day Replication
+  const handleSetDayReplicateMode = (mode: 'same_turma_other_days' | 'other_turmas_same_day' | 'custom') => {
+    if (!dayReplicateModal) return;
+    setDayReplicateMode(mode);
+    if (mode === 'same_turma_other_days') {
+      setDayReplicateTargetDays(DAYS_OF_WEEK.filter((d) => d.id !== dayReplicateModal.sourceDay).map((d) => d.id));
+      setDayReplicateTargetTurmas([dayReplicateModal.sourceTurma]);
+    } else if (mode === 'other_turmas_same_day') {
+      setDayReplicateTargetDays([dayReplicateModal.sourceDay]);
+      setDayReplicateTargetTurmas(turmas.filter((t) => t !== dayReplicateModal.sourceTurma));
+    } else {
+      // Custom
+      setDayReplicateTargetDays(DAYS_OF_WEEK.map((d) => d.id));
+      setDayReplicateTargetTurmas(turmas);
+    }
+  };
+
+  const handleToggleDayTargetDay = (day: DayOfWeek) => {
+    if (dayReplicateTargetDays.includes(day)) {
+      setDayReplicateTargetDays(dayReplicateTargetDays.filter((d) => d !== day));
+    } else {
+      setDayReplicateTargetDays([...dayReplicateTargetDays, day]);
+    }
+  };
+
+  const handleToggleDayTargetTurma = (t: string) => {
+    if (dayReplicateTargetTurmas.includes(t)) {
+      setDayReplicateTargetTurmas(dayReplicateTargetTurmas.filter((item) => item !== t));
+    } else {
+      setDayReplicateTargetTurmas([...dayReplicateTargetTurmas, t]);
+    }
+  };
+
+  // EXECUTE DAY REPLICATION
+  const handleExecuteDayReplication = () => {
+    if (!dayReplicateModal) return;
+    const { sourceDay, sourceTurma } = dayReplicateModal;
+
+    if (dayReplicateTargetTurmas.length === 0) {
+      showToast('Selecione pelo menos uma turma de destino.', 'error');
+      return;
+    }
+    if (dayReplicateTargetDays.length === 0) {
+      showToast('Selecione pelo menos um dia da semana de destino.', 'error');
+      return;
+    }
+
+    const sourceBlocks = schedules.filter((s) => s.turma === sourceTurma && s.dayOfWeek === sourceDay);
+    if (sourceBlocks.length === 0) {
+      showToast('Nenhum horário cadastrado no dia de origem.', 'error');
+      return;
+    }
+
+    const newBlocks: ScheduleBlock[] = [];
+    const deletedIds: string[] = [];
+
+    // Targets to populate
+    const targetPairs: { turma: string; day: DayOfWeek }[] = [];
+    dayReplicateTargetTurmas.forEach((turma) => {
+      dayReplicateTargetDays.forEach((day) => {
+        // Avoid duplicating onto exactly the same source origin unless in custom mode
+        if (turma === sourceTurma && day === sourceDay) {
+          return;
+        }
+        targetPairs.push({ turma, day });
+      });
+    });
+
+    if (targetPairs.length === 0) {
+      showToast('Selecione um destino diferente do dia de origem.', 'error');
+      return;
+    }
+
+    // If overwrite mode is chosen, find all existing blocks on each target (turma + day) to delete
+    if (dayReplicateOverwrite) {
+      targetPairs.forEach((pair) => {
+        schedules.forEach((s) => {
+          if (s.turma === pair.turma && s.dayOfWeek === pair.day) {
+            deletedIds.push(s.id);
+          }
+        });
+      });
+    }
+
+    // Generate new duplicated blocks for each target pair
+    targetPairs.forEach((pair) => {
+      sourceBlocks.forEach((src) => {
+        const duplicated: ScheduleBlock = {
+          id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          turma: pair.turma,
+          dayOfWeek: pair.day,
+          startTime: src.startTime,
+          endTime: src.endTime,
+          activityId: src.activityId,
+          location: src.location || '',
+          guidelines: src.guidelines || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        newBlocks.push(duplicated);
+      });
+    });
+
+    // Compute updated total schedules list
+    let updatedTotalSchedules: ScheduleBlock[];
+    if (dayReplicateOverwrite) {
+      const deletedIdSet = new Set(deletedIds);
+      const preserved = schedules.filter((s) => !deletedIdSet.has(s.id));
+      updatedTotalSchedules = [...preserved, ...newBlocks];
+    } else {
+      updatedTotalSchedules = [...schedules, ...newBlocks];
+    }
+
+    if (onBatchSaveSchedules) {
+      onBatchSaveSchedules(updatedTotalSchedules, deletedIds, newBlocks);
+    } else {
+      deletedIds.forEach((id) => onDeleteScheduleBlock(id));
+      newBlocks.forEach((b) => onSaveScheduleBlock(b));
+    }
+
+    setDayReplicateModal(null);
+    showToast(
+      `✓ Horários de ${DAYS_OF_WEEK.find((d) => d.id === sourceDay)?.label} replicados com sucesso (${newBlocks.length} novos horários em ${targetPairs.length} destino(s))!`,
+      'success'
+    );
+  };
+
   // Find Activity Details
   const getActivityDetails = (actId: string) => {
     return activitiesList.find((a) => a.id === actId);
@@ -259,7 +531,18 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             </div>
           </div>
 
+          {/* Top Actions: Replicar Rotina & Adicionar Horário */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleOpenFullRoutineModal}
+              title="Copiar toda a grade de Segunda a Sexta desta turma para outras turmas"
+              className="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-indigo-200 shadow-xs transition-all cursor-pointer flex items-center space-x-2"
+            >
+              <Copy className="w-4 h-4 text-indigo-600" />
+              <span>Replicar Rotina para Outras Turmas</span>
+            </button>
+
             <button
               onClick={() => handleOpenNewBlock()}
               className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-md shadow-indigo-500/20 transition-all cursor-pointer flex items-center space-x-2"
@@ -320,7 +603,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
               key={day.id}
               className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm flex flex-col min-h-[420px] transition-all hover:border-indigo-200"
             >
-              {/* Day Header */}
+              {/* Day Header with [📋 Replicar Dia] and [+] */}
               <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
                 <div className="flex items-center space-x-2">
                   <div className="w-7 h-7 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold text-xs flex items-center justify-center border border-indigo-100">
@@ -336,14 +619,31 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenNewBlock(day.id)}
-                  title={`Adicionar horário em ${day.label}`}
-                  className="w-7 h-7 rounded-xl bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center space-x-1">
+                  {/* [ 📋 Replicar Dia ] Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDayReplicateModal(day.id)}
+                    title={`Replicar horários de ${day.label} (${selectedTurma}) para outros dias ou turmas`}
+                    className={`w-7 h-7 rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
+                      dayBlocks.length > 0
+                        ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 hover:border-indigo-300'
+                        : 'bg-slate-50 text-slate-300 border-slate-100 hover:bg-slate-100 hover:text-slate-400'
+                    }`}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Add block button */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenNewBlock(day.id)}
+                    title={`Adicionar horário em ${day.label}`}
+                    className="w-7 h-7 rounded-xl bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 flex items-center justify-center transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Schedule Blocks for this Day */}
@@ -354,13 +654,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     <p className="text-[11px] font-bold text-slate-400">
                       Nenhum horário cadastrado
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenNewBlock(day.id)}
-                      className="mt-2 text-[10px] font-extrabold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                    >
-                      + Cadastrar
-                    </button>
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenNewBlock(day.id)}
+                        className="text-[10px] font-extrabold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
+                      >
+                        + Cadastrar
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   dayBlocks.map((block) => {
@@ -449,7 +751,515 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         })}
       </div>
 
-      {/* Modal: Cadastro / Edição de Bloco */}
+      {/* ========================================================================= */}
+      {/* MODAL 1: REPLICAR ROTINA COMPLETA (ENTRE TURMAS) */}
+      {/* ========================================================================= */}
+      {isFullRoutineModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/30">
+                  <Copy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">
+                    Replicar Rotina Completa da Turma
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Copiar toda a grade semanal (Segunda a Sexta) de <strong className="text-white underline">{selectedTurma}</strong> para outras turmas.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsFullRoutineModalOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Origin Overview Box */}
+              <div className="bg-indigo-50/80 border border-indigo-100 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase text-indigo-800 tracking-wider block">
+                    Turma de Origem:
+                  </span>
+                  <span className="text-sm font-black text-slate-900">
+                    {selectedTurma}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-extrabold uppercase text-indigo-800 tracking-wider block">
+                    Total de Horários:
+                  </span>
+                  <span className="text-sm font-black text-indigo-600">
+                    {currentTurmaSchedules.length} blocos na semana
+                  </span>
+                </div>
+              </div>
+
+              {/* Target Turmas Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                    Selecione as Turmas de Destino:
+                  </label>
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFullRoutineTurmas}
+                      className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                    >
+                      Marcar Todas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllFullRoutineTurmas}
+                      className="text-slate-500 hover:text-slate-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Desmarcar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto p-1">
+                  {turmas
+                    .filter((t) => t !== selectedTurma)
+                    .map((t) => {
+                      const isChecked = fullRoutineTargetTurmas.includes(t);
+                      const existingCount = totalBlocksForTurma(t);
+                      return (
+                        <div
+                          key={t}
+                          onClick={() => handleToggleFullRoutineTurma(t)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                            isChecked
+                              ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs'
+                              : 'bg-slate-50 border-slate-200 hover:bg-slate-100/70'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2.5">
+                            {isChecked ? (
+                              <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                            )}
+                            <span className="text-xs font-bold text-slate-800">{t}</span>
+                          </div>
+                          <span className="text-[10px] font-semibold text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-100">
+                            {existingCount} {existingCount === 1 ? 'horário' : 'horários'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Overwrite vs Keep Existing Mode */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block">
+                  Modo de Gravação / Substituição:
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <label
+                    onClick={() => setFullRoutineOverwrite(true)}
+                    className={`p-3.5 rounded-2xl border cursor-pointer flex items-start space-x-3 transition-all ${
+                      fullRoutineOverwrite
+                        ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="full_overwrite_mode"
+                      checked={fullRoutineOverwrite}
+                      onChange={() => setFullRoutineOverwrite(true)}
+                      className="mt-0.5 text-indigo-600"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-slate-800 block">
+                        Sobrescrever grade existente
+                      </span>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                        Substitui completamente os horários das turmas selecionadas pelos horários de {selectedTurma}.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    onClick={() => setFullRoutineOverwrite(false)}
+                    className={`p-3.5 rounded-2xl border cursor-pointer flex items-start space-x-3 transition-all ${
+                      !fullRoutineOverwrite
+                        ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="full_overwrite_mode"
+                      checked={!fullRoutineOverwrite}
+                      onChange={() => setFullRoutineOverwrite(false)}
+                      className="mt-0.5 text-indigo-600"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-slate-800 block">
+                        Manter existentes e adicionar
+                      </span>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                        Preserva o que as turmas de destino já possuem e acrescenta novos blocos.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Summary Box */}
+              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Serão criados{' '}
+                    <strong className="text-emerald-400">
+                      {currentTurmaSchedules.length * fullRoutineTargetTurmas.length}
+                    </strong>{' '}
+                    novos blocos de horário para{' '}
+                    <strong className="text-indigo-300">
+                      {fullRoutineTargetTurmas.length}
+                    </strong>{' '}
+                    turma(s).
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setIsFullRoutineModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-200 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={fullRoutineTargetTurmas.length === 0}
+                onClick={handleExecuteFullRoutineReplication}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center space-x-2"
+              >
+                <Copy className="w-4 h-4" />
+                <span>Replicar Rotina Completa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: REPLICAR DIA ESPECÍFICO (MESMA TURMA OU OUTRAS TURMAS) */}
+      {/* ========================================================================= */}
+      {dayReplicateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/30">
+                  <Copy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">
+                    Replicar Horários de {DAYS_OF_WEEK.find((d) => d.id === dayReplicateModal.sourceDay)?.label}
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Origem: <strong className="text-white">{dayReplicateModal.sourceTurma}</strong> ({schedulesByDay[dayReplicateModal.sourceDay].length} horários cadastrados).
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDayReplicateModal(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Quick Strategy Preset Switcher */}
+              <div>
+                <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block mb-2">
+                  Escolha o Objetivo da Replicação:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSetDayReplicateMode('same_turma_other_days')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      dayReplicateMode === 'same_turma_other_days'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-900 shadow-xs ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block">1. Outros Dias</span>
+                    <span className="text-[10px] text-slate-500 mt-1">
+                      Copiar {DAYS_OF_WEEK.find((d) => d.id === dayReplicateModal.sourceDay)?.short} para outros dias de {dayReplicateModal.sourceTurma}.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSetDayReplicateMode('other_turmas_same_day')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      dayReplicateMode === 'other_turmas_same_day'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-900 shadow-xs ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block">2. Outras Turmas</span>
+                    <span className="text-[10px] text-slate-500 mt-1">
+                      Copiar {DAYS_OF_WEEK.find((d) => d.id === dayReplicateModal.sourceDay)?.short} para outras turmas no mesmo dia.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSetDayReplicateMode('custom')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      dayReplicateMode === 'custom'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-900 shadow-xs ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block">3. Personalizado</span>
+                    <span className="text-[10px] text-slate-500 mt-1">
+                      Escolher livremente turmas e dias de destino.
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 1. Target Days Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                    Dias da Semana de Destino:
+                  </label>
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setDayReplicateTargetDays(DAYS_OF_WEEK.map((d) => d.id))}
+                      className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                    >
+                      Todos os Dias
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5">
+                  {DAYS_OF_WEEK.map((d) => {
+                    const isSource = d.id === dayReplicateModal.sourceDay;
+                    const isChecked = dayReplicateTargetDays.includes(d.id);
+                    return (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => handleToggleDayTargetDay(d.id)}
+                        className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center ${
+                          isChecked
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="text-[10px] font-extrabold uppercase">{d.short}</span>
+                        <span className="text-[11px] truncate">{d.label.split('-')[0]}</span>
+                        {isSource && (
+                          <span
+                            className={`text-[8px] font-extrabold px-1 rounded-sm mt-0.5 ${
+                              isChecked ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            Origem
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Target Turmas Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                    Turmas de Destino:
+                  </label>
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setDayReplicateTargetTurmas(turmas)}
+                      className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                    >
+                      Todas as Turmas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setDayReplicateTargetTurmas([dayReplicateModal.sourceTurma])}
+                      className="text-slate-500 hover:text-slate-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Apenas {dayReplicateModal.sourceTurma}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1">
+                  {turmas.map((t) => {
+                    const isChecked = dayReplicateTargetTurmas.includes(t);
+                    const isSourceTurma = t === dayReplicateModal.sourceTurma;
+                    return (
+                      <div
+                        key={t}
+                        onClick={() => handleToggleDayTargetTurma(t)}
+                        className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                          isChecked
+                            ? 'bg-indigo-50/80 border-indigo-300 shadow-2xs'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2 min-w-0">
+                          {isChecked ? (
+                            <CheckSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                          )}
+                          <span className="text-xs font-bold text-slate-800 truncate">{t}</span>
+                        </div>
+                        {isSourceTurma && (
+                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded-md shrink-0">
+                            Origem
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Overwrite vs Keep Existing Mode */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block">
+                  Modo de Gravação nos Destinos:
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <label
+                    onClick={() => setDayReplicateOverwrite(true)}
+                    className={`p-3.5 rounded-2xl border cursor-pointer flex items-start space-x-3 transition-all ${
+                      dayReplicateOverwrite
+                        ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="day_overwrite_mode"
+                      checked={dayReplicateOverwrite}
+                      onChange={() => setDayReplicateOverwrite(true)}
+                      className="mt-0.5 text-indigo-600"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-slate-800 block">
+                        Sobrescrever horários existentes
+                      </span>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                        Substitui os horários já existentes nos dias e turmas destino.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    onClick={() => setDayReplicateOverwrite(false)}
+                    className={`p-3.5 rounded-2xl border cursor-pointer flex items-start space-x-3 transition-all ${
+                      !dayReplicateOverwrite
+                        ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="day_overwrite_mode"
+                      checked={!dayReplicateOverwrite}
+                      onChange={() => setDayReplicateOverwrite(false)}
+                      className="mt-0.5 text-indigo-600"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-slate-800 block">
+                        Manter existentes e adicionar
+                      </span>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                        Acrescenta os horários sem apagar os blocos atuais do destino.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Summary Box */}
+              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Serão gerados horários em{' '}
+                    <strong className="text-emerald-400">
+                      {dayReplicateTargetDays.length} dia(s)
+                    </strong>{' '}
+                    ×{' '}
+                    <strong className="text-indigo-300">
+                      {dayReplicateTargetTurmas.length} turma(s)
+                    </strong>
+                    .
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setDayReplicateModal(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-200 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={dayReplicateTargetTurmas.length === 0 || dayReplicateTargetDays.length === 0}
+                onClick={handleExecuteDayReplication}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center space-x-2"
+              >
+                <Copy className="w-4 h-4" />
+                <span>Replicar Horários do Dia</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: CADASTRO / EDIÇÃO DE BLOCO INDIVIDUAL */}
+      {/* ========================================================================= */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
