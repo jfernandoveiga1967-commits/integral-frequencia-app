@@ -20,6 +20,9 @@ import {
   BookMarked,
   Sun,
   Smile,
+  HeartHandshake,
+  HandHeart,
+  Heart,
 } from 'lucide-react';
 
 interface ActivityBadgeProps {
@@ -134,10 +137,25 @@ export const activityConfig: Record<
     icon: <Music2 className="w-4 h-4" />,
     equipmentHint: 'Flauta Doce e pasta de partituras/músicas',
   },
+  Acolhimento: {
+    name: 'Acolhimento',
+    bg: 'bg-rose-50 hover:bg-rose-100',
+    border: 'border-rose-200',
+    text: 'text-rose-800',
+    badgeBg: 'bg-rose-100 text-rose-900 border-rose-300',
+    icon: <HeartHandshake className="w-4 h-4" />,
+    equipmentHint: 'Recepção, acolhida e integração dos alunos',
+  },
 };
 
 export function renderActivityIcon(iconName?: string, className: string = 'w-4 h-4') {
   switch (iconName) {
+    case 'HeartHandshake':
+      return <HeartHandshake className={className} />;
+    case 'HandHeart':
+      return <HandHeart className={className} />;
+    case 'Heart':
+      return <Heart className={className} />;
     case 'Clock':
       return <Clock className={className} />;
     case 'Waves':

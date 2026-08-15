@@ -39,6 +39,9 @@ import {
   Music2,
   Waves,
   Clock,
+  HeartHandshake,
+  HandHeart,
+  Heart,
   ChevronDown,
   ChevronUp,
   ChevronsDown,
@@ -61,6 +64,8 @@ interface UserManagementProps {
 }
 
 const AVAILABLE_ICONS = [
+  { id: 'HeartHandshake', label: 'Acolhimento / Integração' },
+  { id: 'HandHeart', label: 'Cuidado / Afeto' },
   { id: 'Waves', label: 'Natação / Água' },
   { id: 'Sparkles', label: 'Balé / Brilho' },
   { id: 'Music', label: 'Dança / Músicas' },
@@ -78,7 +83,7 @@ const AVAILABLE_ICONS = [
   { id: 'Coffee', label: 'Lanche / Intervalo' },
   { id: 'BookMarked', label: 'Lição de Casa / Tarefas' },
   { id: 'Sun', label: 'Parquinho / Ar Livre' },
-  { id: 'Smile', label: 'Recreação / Acolhida' },
+  { id: 'Smile', label: 'Recreação / Brincadeiras' },
 ];
 
 export const UserManagement: React.FC<UserManagementProps> = ({
