@@ -1,9 +1,24 @@
-import React, { useState } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, ActivityItem, UserProfile } from '../types';
+import React, { useState, useMemo } from 'react';
+import {
+  Student,
+  AttendanceRecord,
+  ActivityType,
+  TurmaType,
+  WeekInfo,
+  ActivityItem,
+  UserProfile,
+} from '../types';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
-import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
+import {
+  generateStudentPeriodPDFReport,
+  generateTurmaConsolidatedPeriodPDFReport,
+  generateActivityModalityPeriodPDFReport,
+  generateStudentPDFReport,
+  generateTurmaPDFReport,
+} from '../utils/pdfGenerator';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel } from '../utils/dateUtils';
 import {
   BarChart3,
   Printer,
@@ -20,6 +35,11 @@ import {
   UserCheck,
   Users,
   Clock,
+  Calendar,
+  Layers,
+  Sparkles,
+  SlidersHorizontal,
+  Award,
 } from 'lucide-react';
 
 interface WeeklyReportProps {
@@ -42,10 +62,16 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   onDeleteTurma,
 }) => {
   const isCoordenador = currentUser?.role === 'coordenador';
-  const userAssignedTurmas = React.useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
-  const userAssignedActivities = React.useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
+  const userAssignedTurmas = useMemo(
+    () => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [],
+    [currentUser]
+  );
+  const userAssignedActivities = useMemo(
+    () => currentUser?.assignedActivities || [],
+    [currentUser]
+  );
 
-  const turmasList = React.useMemo(() => {
+  const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
     if (isCoordenador || !currentUser) return sorted;
@@ -53,18 +79,21 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     return sorted.filter((t) => userTurmaSet.has(t));
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
-  const activeActivities = React.useMemo(() => {
+  const activeActivities = useMemo(() => {
     const rawList = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
     const rollCallOnly = rawList.filter((act) => act.requiresRollCall !== false);
     if (isCoordenador || !currentUser) return rollCallOnly;
     return rollCallOnly.filter((act) => userAssignedActivities.includes(act.id));
   }, [activitiesList, isCoordenador, currentUser, userAssignedActivities]);
 
-  const allowedActivityIds = React.useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);
+  const allowedActivityIds = useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);
 
-  const sortedStudentsForPdf = React.useMemo(() => {
+  const sortedStudentsForPdf = useMemo(() => {
     const rawStudents = students || [];
-    const list = (isCoordenador || !currentUser) ? rawStudents : rawStudents.filter((s) => s && turmasList.includes(s.turma));
+    const list =
+      isCoordenador || !currentUser
+        ? rawStudents
+        : rawStudents.filter((s) => s && turmasList.includes(s.turma));
     return [...list].sort((a, b) => {
       const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
       if (turmaCompare !== 0) return turmaCompare;
@@ -72,120 +101,229 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     });
   }, [students, isCoordenador, currentUser, turmasList]);
 
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(sortedStudentsForPdf[0]?.id || '');
-  const [showTurmaModal, setShowTurmaModal] = useState(false);
-  const [showStudentModal, setShowStudentModal] = useState(false);
+  // -------------------------------------------------------------------------
+  // Filtering Mode State: Por Semana vs Por Período Personalizado
+  // -------------------------------------------------------------------------
+  const [filterMode, setFilterMode] = useState<'week' | 'period'>('week');
+  const [periodStartDate, setPeriodStartDate] = useState<string>(currentWeek.startDate);
+  const [periodEndDate, setPeriodEndDate] = useState<string>(currentWeek.endDate);
+  const [activePreset, setActivePreset] = useState<'week' | 'month' | 'last30' | 'year' | 'custom'>('week');
 
-  // Filter records for the current selected week and allowed turmas/activities
-  const weekRecords = records.filter((r) => {
-    const isThisWeek = r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year;
-    if (!isThisWeek) return false;
-    if (!isCoordenador && currentUser) {
-      if (!turmasList.includes(r.turma)) return false;
-      if (!allowedActivityIds.includes(r.activity as ActivityType)) return false;
+  // Preset Date Range Applicator
+  const applyPreset = (preset: 'week' | 'month' | 'last30' | 'year') => {
+    setActivePreset(preset);
+    const now = new Date();
+
+    if (preset === 'week') {
+      setPeriodStartDate(currentWeek.startDate);
+      setPeriodEndDate(currentWeek.endDate);
+      setFilterMode('week');
+    } else if (preset === 'month') {
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const start = `${year}-${month}-01`;
+      const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+      const end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+      setPeriodStartDate(start);
+      setPeriodEndDate(end);
+      setFilterMode('period');
+    } else if (preset === 'last30') {
+      const past = new Date();
+      past.setDate(past.getDate() - 30);
+      const start = past.toISOString().split('T')[0];
+      const end = now.toISOString().split('T')[0];
+      setPeriodStartDate(start);
+      setPeriodEndDate(end);
+      setFilterMode('period');
+    } else if (preset === 'year') {
+      const year = now.getFullYear();
+      setPeriodStartDate(`${year}-01-01`);
+      setPeriodEndDate(`${year}-12-31`);
+      setFilterMode('period');
     }
-    return true;
-  });
+  };
 
-  const totalRecords = weekRecords.length;
-  const presenteCount = weekRecords.filter((r) => r.status === 'presente').length;
-  const saidaAntecipadaCount = weekRecords.filter((r) => r.status === 'saida_antecipada').length;
-  const faltaCount = weekRecords.filter((r) => r.status === 'falta').length;
-  const saudeCount = weekRecords.filter((r) => r.status === 'saude').length;
-  const semEquipamentoCount = weekRecords.filter((r) => r.status === 'sem_equipamento').length;
+  // Effective Active Range
+  const effectiveStartDate = filterMode === 'week' ? currentWeek.startDate : periodStartDate;
+  const effectiveEndDate = filterMode === 'week' ? currentWeek.endDate : periodEndDate;
+  const effectivePeriodLabel =
+    filterMode === 'week'
+      ? currentWeek.label
+      : `Período de ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`;
 
-  // Saída antecipada counts as valid presence for rate percentage
+  // Filter records according to active range and user roles
+  const activeRecords = useMemo(() => {
+    return records.filter((r) => {
+      // Date range filter
+      if (filterMode === 'week') {
+        const isThisWeek = r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year;
+        if (!isThisWeek) return false;
+      } else {
+        if (!r.date || r.date < effectiveStartDate || r.date > effectiveEndDate) return false;
+      }
+
+      // Role check
+      if (!isCoordenador && currentUser) {
+        if (!turmasList.includes(r.turma)) return false;
+        if (!allowedActivityIds.includes(r.activity as ActivityType)) return false;
+      }
+      return true;
+    });
+  }, [
+    records,
+    filterMode,
+    currentWeek,
+    effectiveStartDate,
+    effectiveEndDate,
+    isCoordenador,
+    currentUser,
+    turmasList,
+    allowedActivityIds,
+  ]);
+
+  // Overall Statistics
+  const totalRecords = activeRecords.length;
+  const presenteCount = activeRecords.filter((r) => r.status === 'presente').length;
+  const saidaAntecipadaCount = activeRecords.filter((r) => r.status === 'saida_antecipada').length;
+  const faltaCount = activeRecords.filter((r) => r.status === 'falta').length;
+  const saudeCount = activeRecords.filter((r) => r.status === 'saude').length;
+  const semEquipamentoCount = activeRecords.filter((r) => r.status === 'sem_equipamento').length;
+
   const validPresences = presenteCount + saidaAntecipadaCount;
   const presenceRate = totalRecords > 0 ? Math.round((validPresences / totalRecords) * 100) : 0;
-
-  // Equipment missing records
-  const equipmentRecords = weekRecords.filter((r) => r.status === 'sem_equipamento');
+  const equipmentRecords = activeRecords.filter((r) => r.status === 'sem_equipamento');
 
   // Stats per activity
-  const activityStats = activeActivities.map((act) => {
-    const actRecords = weekRecords.filter((r) => r.activity === act.id);
-    const total = actRecords.length;
-    const pres = actRecords.filter((r) => r.status === 'presente').length;
-    const saidaAnt = actRecords.filter((r) => r.status === 'saida_antecipada').length;
-    const falta = actRecords.filter((r) => r.status === 'falta').length;
-    const saude = actRecords.filter((r) => r.status === 'saude').length;
-    const semEquip = actRecords.filter((r) => r.status === 'sem_equipamento').length;
-    const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
+  const activityStats = useMemo(() => {
+    return activeActivities.map((act) => {
+      const actRecords = activeRecords.filter((r) => r.activity === act.id);
+      const total = actRecords.length;
+      const pres = actRecords.filter((r) => r.status === 'presente').length;
+      const saidaAnt = actRecords.filter((r) => r.status === 'saida_antecipada').length;
+      const falta = actRecords.filter((r) => r.status === 'falta').length;
+      const saude = actRecords.filter((r) => r.status === 'saude').length;
+      const semEquip = actRecords.filter((r) => r.status === 'sem_equipamento').length;
+      const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
 
-    return {
-      activity: act.id,
-      total,
-      pres,
-      saidaAnt,
-      falta,
-      saude,
-      semEquip,
-      rate,
-    };
-  });
+      return {
+        activity: act.id,
+        total,
+        pres,
+        saidaAnt,
+        falta,
+        saude,
+        semEquip,
+        rate,
+      };
+    });
+  }, [activeActivities, activeRecords]);
 
   // Stats per turma
-  const turmaStats = turmasList.map((turma) => {
-    const turmaStudents = students.filter((s) => s.turma === turma);
-    const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
-    const turmaRecords = weekRecords.filter(
-      (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
-    );
-    const total = turmaRecords.length;
-    const pres = turmaRecords.filter((r) => r.status === 'presente').length;
-    const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
-    const falta = turmaRecords.filter((r) => r.status === 'falta').length;
-    const saude = turmaRecords.filter((r) => r.status === 'saude').length;
-    const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
-    const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
+  const turmaStats = useMemo(() => {
+    return turmasList.map((turma) => {
+      const turmaStudents = students.filter((s) => s.turma === turma);
+      const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
+      const turmaRecords = activeRecords.filter(
+        (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
+      );
+      const total = turmaRecords.length;
+      const pres = turmaRecords.filter((r) => r.status === 'presente').length;
+      const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
+      const falta = turmaRecords.filter((r) => r.status === 'falta').length;
+      const saude = turmaRecords.filter((r) => r.status === 'saude').length;
+      const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
+      const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
 
-    return {
-      turma,
-      total,
-      pres,
-      saidaAnt,
-      falta,
-      saude,
-      semEquip,
-      rate,
-    };
-  });
+      return {
+        turma,
+        total,
+        pres,
+        saidaAnt,
+        falta,
+        saude,
+        semEquip,
+        rate,
+      };
+    });
+  }, [turmasList, students, activeRecords]);
 
-  // Print handle
+  // -------------------------------------------------------------------------
+  // Modals & PDF Export State
+  // -------------------------------------------------------------------------
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // 1. Student PDF Modal State
+  const [showStudentModal, setShowStudentModal] = useState(false);
+  const [selectedPdfStudentId, setSelectedPdfStudentId] = useState<string>(
+    sortedStudentsForPdf[0]?.id || ''
+  );
+  const [pdfStudentStartDate, setPdfStudentStartDate] = useState<string>(effectiveStartDate);
+  const [pdfStudentEndDate, setPdfStudentEndDate] = useState<string>(effectiveEndDate);
+
+  // 2. Turma PDF Modal State
+  const [showTurmaModal, setShowTurmaModal] = useState(false);
+  const [selectedPdfTurma, setSelectedPdfTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
+  const [pdfTurmaStartDate, setPdfTurmaStartDate] = useState<string>(effectiveStartDate);
+  const [pdfTurmaEndDate, setPdfTurmaEndDate] = useState<string>(effectiveEndDate);
+
+  // 3. Modality/Oficina PDF Modal State
+  const [showModalityModal, setShowModalityModal] = useState(false);
+  const [selectedPdfModality, setSelectedPdfModality] = useState<ActivityType>(
+    activeActivities[0]?.id || 'Natação'
+  );
+  const [pdfModalityTeacher, setPdfModalityTeacher] = useState<string>(
+    currentUser?.name || 'Docente Responsável'
+  );
+  const [pdfModalityStartDate, setPdfModalityStartDate] = useState<string>(effectiveStartDate);
+  const [pdfModalityEndDate, setPdfModalityEndDate] = useState<string>(effectiveEndDate);
+
+  // Quick Open Modal Handlers
+  const handleOpenStudentModal = (studentId?: string) => {
+    if (studentId) setSelectedPdfStudentId(studentId);
+    setPdfStudentStartDate(effectiveStartDate);
+    setPdfStudentEndDate(effectiveEndDate);
+    setShowStudentModal(true);
+  };
+
+  const handleOpenTurmaModal = (turma?: TurmaType) => {
+    if (turma) setSelectedPdfTurma(turma);
+    setPdfTurmaStartDate(effectiveStartDate);
+    setPdfTurmaEndDate(effectiveEndDate);
+    setShowTurmaModal(true);
+  };
+
+  const handleOpenModalityModal = (modality?: ActivityType) => {
+    if (modality) setSelectedPdfModality(modality);
+    setPdfModalityStartDate(effectiveStartDate);
+    setPdfModalityEndDate(effectiveEndDate);
+    setShowModalityModal(true);
+  };
+
+  // Printing & CSV
   const handlePrint = () => {
     window.print();
   };
 
-  // CSV Export handle
   const handleExportCSV = () => {
-    let csv = 'Aluno,Turma,Atividade,Data,Status,Detalhamento Equipamento,Observacao\n';
+    let csv = 'Data,DiaSemana,Semana,Aluno,Turma,Atividade,Status,HorarioSaida,EquipamentoFaltante,Observacao\n';
 
-    weekRecords.forEach((r) => {
-      const student = students.find((s) => s.id === r.studentId);
-      const studentName = student ? student.name : r.studentId;
-      const statusLabel =
-        r.status === 'presente'
-          ? 'Presente'
-          : r.status === 'saida_antecipada'
-          ? `Saida Antecipada (${r.exitTime || 'Sem horario'})`
-          : r.status === 'falta'
-          ? 'Falta'
-          : r.status === 'saude'
-          ? 'Ausencia Saude'
-          : 'Falta de Equipamento';
-
-      csv += `"${studentName}","${r.turma}","${r.activity}","${r.date}","${statusLabel}","${
-        r.equipmentMissingDetails || ''
-      }","${r.observation || ''}"\n`;
+    activeRecords.forEach((r) => {
+      const st = students.find((s) => s.id === r.studentId);
+      const studentName = st ? st.name : 'Aluno';
+      const dayOfWeekKey = getDayOfWeekFromDate(r.date);
+      const dayOfWeekStr = dayOfWeekKey ? getDayOfWeekLabel(dayOfWeekKey) : '';
+      csv += `"${r.date}","${dayOfWeekStr}","${r.weekNumber}","${studentName}","${r.turma}","${
+        r.activity
+      }","${r.status}","${r.exitTime || ''}","${r.equipmentMissingDetails || ''}","${
+        r.observation || ''
+      }"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Frequencia_Integral_Semana_${currentWeek.weekNumber}.csv`);
+    link.setAttribute('download', `Frequencia_Integral_${effectiveStartDate}_a_${effectiveEndDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -194,7 +332,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const copyNotificationText = (rec: AttendanceRecord) => {
     const student = students.find((s) => s.id === rec.studentId);
     const studentName = student ? student.name : 'Aluno';
-    const text = `Prezados responsáveis pelo(a) aluno(a) ${studentName} (${rec.turma}):\nInformamos que na atividade de ${rec.activity} do Integral realizada no dia ${rec.date.split('-').reverse().join('/')}, o(a) aluno(a) esteve impossibilitado(a) de participar devido a: ${rec.equipmentMissingDetails || 'falta de uniforme/equipamento necessário'}.\nSolicitamos a gentileza de verificar o material no próximo dia da atividade.\nAtenciosamente, Coordenação do Integral.`;
+    const text = `Prezados responsáveis pelo(a) aluno(a) ${studentName} (${rec.turma}):\nInformamos que na atividade de ${rec.activity} do Integral realizada no dia ${formatDateBR(
+      rec.date
+    )}, o(a) aluno(a) esteve impossibilitado(a) de participar devido a: ${
+      rec.equipmentMissingDetails || 'falta de uniforme/equipamento necessário'
+    }.\nSolicitamos a gentileza de verificar o material no próximo dia da atividade.\nAtenciosamente, Coordenação do Integral.`;
 
     navigator.clipboard.writeText(text);
     setCopiedId(rec.id);
@@ -203,74 +345,173 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   return (
     <div className="space-y-6 print:space-y-4">
-      {/* Top Controls Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 print:hidden">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-              Relatório de Desempenho
-            </span>
+      {/* Top Header & Period Filter Toolbar */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 print:hidden">
+        {/* Header line + Title */}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                Relatórios de Frequência
+              </span>
+              <span className="text-xs text-slate-400 font-medium">
+                {totalRecords} apontamentos computados
+              </span>
+            </div>
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-1">
+              Painel de Desempenho e Frequência do Integral
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Visualize estatísticas consolidadas e gere relatórios oficiais em PDF com cabeçalho do Colégio Crescer.
+            </p>
           </div>
-          <h2 className="text-xl font-bold text-slate-900 mt-1">
-            Análise Semanal de Frequência e Ocorrências
-          </h2>
-          <p className="text-xs text-slate-500">
-            Período: <span className="font-bold text-slate-800">{currentWeek.label}</span>
-          </p>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleOpenStudentModal()}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              title="Gerar PDF do Histórico Individual do Aluno"
+            >
+              <UserCheck className="w-4 h-4 text-blue-600" />
+              <span>PDF Aluno</span>
+            </button>
+
+            <button
+              onClick={() => handleOpenTurmaModal()}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              title="Gerar PDF da Matriz Consolidada da Turma"
+            >
+              <Users className="w-4 h-4 text-indigo-600" />
+              <span>PDF Turma</span>
+            </button>
+
+            <button
+              onClick={() => handleOpenModalityModal()}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              title="Gerar PDF para Professores Especialistas de Oficinas"
+            >
+              <Award className="w-4 h-4 text-violet-600" />
+              <span>PDF Oficina</span>
+            </button>
+
+            <button
+              onClick={handleExportCSV}
+              className="px-3 py-2 rounded-2xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1"
+              title="Exportar dados brutos em planilha CSV"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>CSV</span>
+            </button>
+
+            <button
+              onClick={handlePrint}
+              className="px-3 py-2 rounded-2xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all cursor-pointer flex items-center space-x-1"
+              title="Imprimir visualização atual"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-          <button
-            onClick={() => setShowTurmaModal(true)}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all cursor-pointer flex items-center space-x-1.5"
-            title="Gerar PDF formatado por Turma"
-          >
-            <Users className="w-4 h-4 text-indigo-600" />
-            <span>PDF por Turma</span>
-          </button>
+        {/* Date Filter & Presets Row */}
+        <div className="pt-4 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Presets buttons */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5" />
+              Período:
+            </span>
+            <button
+              type="button"
+              onClick={() => applyPreset('week')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activePreset === 'week' && filterMode === 'week'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              Semana Atual ({currentWeek.weekNumber})
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('month')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activePreset === 'month' && filterMode === 'period'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              Este Mês
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('last30')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activePreset === 'last30' && filterMode === 'period'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              Últimos 30 Dias
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('year')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activePreset === 'year' && filterMode === 'period'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              Ano Letivo
+            </button>
+          </div>
 
-          <button
-            onClick={() => setShowStudentModal(true)}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all cursor-pointer flex items-center space-x-1.5"
-            title="Gerar PDF formatado individual do Aluno"
-          >
-            <UserCheck className="w-4 h-4 text-blue-600" />
-            <span>PDF por Aluno</span>
-          </button>
-
-          <button
-            onClick={handleExportCSV}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-            <span>Exportar CSV</span>
-          </button>
-
-          <button
-            onClick={handlePrint}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 shadow-md transition-all cursor-pointer flex items-center space-x-1.5"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir</span>
-          </button>
+          {/* Custom Date Pickers */}
+          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-2xl">
+            <span className="text-[11px] font-bold text-slate-500 uppercase">De:</span>
+            <input
+              type="date"
+              value={periodStartDate}
+              onChange={(e) => {
+                setPeriodStartDate(e.target.value);
+                setFilterMode('period');
+                setActivePreset('custom');
+              }}
+              className="bg-white border border-slate-200 text-slate-800 text-xs font-semibold rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] font-bold text-slate-500 uppercase">Até:</span>
+            <input
+              type="date"
+              value={periodEndDate}
+              onChange={(e) => {
+                setPeriodEndDate(e.target.value);
+                setFilterMode('period');
+                setActivePreset('custom');
+              }}
+              className="bg-white border border-slate-200 text-slate-800 text-xs font-semibold rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Overview Cards */}
+      {/* Overview Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Card 1: Presença Geral */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
               Taxa de Presença
             </span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
               <CheckCircle2 className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-slate-900">{presenceRate}%</span>
-            <span className="text-xs text-emerald-700 font-semibold">
+            <span className="text-xs text-emerald-700 font-bold">
               ({validPresences} presenças)
             </span>
           </div>
@@ -278,188 +519,188 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
 
         {/* Card 2: Saída Antecipada */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
               Saída Antecipada
             </span>
-            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
               <Clock className="w-5 h-5 text-amber-700" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-amber-900">{saidaAntecipadaCount}</span>
-            <span className="text-xs text-amber-800 font-semibold">ocorrências</span>
+            <span className="text-xs text-amber-800 font-bold">ocorrências</span>
           </div>
           <p className="text-[11px] text-slate-400 mt-1">Horário de saída registrado</p>
         </div>
 
-        {/* Card 3: Falta de Equipamento / Flauta */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        {/* Card 3: Falta de Equipamento */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
-              Falta de Equipamento
+            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+              Sem Material / Equip.
             </span>
-            <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center font-bold">
-              <Shirt className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-800 flex items-center justify-center font-bold">
+              <Shirt className="w-5 h-5 text-orange-600" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-orange-900">{semEquipamentoCount}</span>
-            <span className="text-xs text-orange-800 font-semibold">ocorrências</span>
+            <span className="text-xs text-orange-800 font-bold">ocorrências</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Uniforme, maiô, flauta, kimono, etc.
-          </p>
+          <p className="text-[11px] text-slate-400 mt-1">Maiô, kimono, flauta, tênis...</p>
         </div>
 
-        {/* Card 4: Ausência por Saúde */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        {/* Card 4: Ausências por Saúde */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
-              Motivo de Saúde
+            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+              Ausência Saúde
             </span>
-            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-              <Stethoscope className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+              <Stethoscope className="w-5 h-5 text-amber-700" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-amber-900">{saudeCount}</span>
-            <span className="text-xs text-amber-800 font-semibold">ausências</span>
+            <span className="text-xs text-amber-800 font-bold">justificadas</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Atestados e indisposição médica</p>
+          <p className="text-[11px] text-slate-400 mt-1">Atestados e indisposições</p>
         </div>
 
-        {/* Card 5: Faltas Gerais */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        {/* Card 5: Faltas Não Justificadas */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
               Faltas Gerais
             </span>
-            <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
               <XCircle className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-3xl font-extrabold text-rose-900">{faltaCount}</span>
-            <span className="text-xs text-rose-800 font-semibold">faltas</span>
+            <span className="text-xs text-rose-700 font-bold">ausências</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Ausências não justificadas</p>
+          <p className="text-[11px] text-slate-400 mt-1">Faltas não justificadas</p>
         </div>
       </div>
 
-      {/* Equipment Missing Detailed List Section */}
-      <div className="bg-white border border-orange-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="p-1.5 bg-orange-500 text-white rounded-lg">
-              <Shirt className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-900 text-sm md:text-base">
-                Ocorrências de Falta de Equipamento / Flauta / Uniforme
+      {/* Equipment Alerts Banner */}
+      {equipmentRecords.length > 0 && (
+        <div className="bg-amber-50/80 border border-amber-200 rounded-3xl p-5 shadow-xs">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-2 text-amber-900">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+              <h3 className="font-extrabold text-sm">
+                Avisos para Envio aos Responsáveis (Alunos sem Equipamento/Uniforme)
               </h3>
-              <p className="text-xs text-orange-900 font-medium">
-                Alunos impedidos de realizar a atividade por ausência de material exigido.
-              </p>
             </div>
+            <span className="text-xs font-bold text-amber-800 bg-amber-100/80 px-2.5 py-0.5 rounded-full border border-amber-200">
+              {equipmentRecords.length} pendências no período
+            </span>
           </div>
-          <span className="text-xs font-bold bg-orange-200 text-orange-900 px-3 py-1 rounded-full border border-orange-300">
-            {equipmentRecords.length} caso(s)
-          </span>
-        </div>
 
-        {equipmentRecords.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-xs">
-            🎉 Nenhuma ocorrência de falta de equipamento ou flauta registrada nesta semana!
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="space-y-2">
             {equipmentRecords.map((rec) => {
               const student = students.find((s) => s.id === rec.studentId);
-              const studentName = student ? student.name : 'Aluno';
+              const isCopied = copiedId === rec.id;
 
               return (
                 <div
                   key={rec.id}
-                  className="p-4 hover:bg-orange-50/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3"
+                  className="bg-white border border-amber-200/80 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
-                      <span className="font-bold text-slate-900 text-sm">{studentName}</span>
-                      <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                        {rec.turma}
-                      </span>
-                      <ActivityBadge activity={rec.activity} size="sm" />
+                      <span className="font-extrabold text-slate-900">{student?.name || 'Aluno'}</span>
+                      <span className="text-slate-400">•</span>
+                      <span className="font-semibold text-slate-600">{rec.turma}</span>
+                      <span className="text-slate-400">•</span>
+                      <span className="font-bold text-indigo-600">{rec.activity}</span>
+                      <span className="text-slate-400">•</span>
+                      <span className="text-slate-500">{formatDateBR(rec.date)}</span>
                     </div>
-
-                    <div className="text-xs text-orange-900 font-semibold bg-orange-50 p-2 rounded-lg border border-orange-200 inline-block">
-                      ⚠️ {rec.equipmentMissingDetails || 'Sem o material/equipamento necessário'}
-                    </div>
-
-                    <div className="text-[11px] text-slate-400">
-                      Data da Atividade: {rec.date.split('-').reverse().join('/')}
+                    <div className="text-amber-800 font-semibold flex items-center space-x-1">
+                      <Shirt className="w-3.5 h-3.5 text-orange-600 inline mr-1" />
+                      <span>Item faltante: {rec.equipmentMissingDetails || 'Não especificado'}</span>
                     </div>
                   </div>
 
-                  {/* Copy Notice Button */}
-                  <div className="shrink-0 print:hidden">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleOpenStudentModal(rec.studentId)}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 font-bold transition-all cursor-pointer flex items-center space-x-1"
+                      title="Gerar PDF individual deste aluno"
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                      <span>PDF</span>
+                    </button>
+
                     <button
                       onClick={() => copyNotificationText(rec)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-orange-100 hover:text-orange-900 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1"
-                      title="Copiar texto de aviso para enviar aos pais no WhatsApp/Agenda"
+                      className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                        isCopied
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-amber-600 hover:bg-amber-700 text-white shadow-2xs'
+                      }`}
                     >
-                      {copiedId === rec.id ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700 font-bold">Copiado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Copiar Comunicado aos Pais</span>
-                        </>
-                      )}
+                      {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{isCopied ? 'Copiado!' : 'Copiar Comunicado'}</span>
                     </button>
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Activity Breakdown Table */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
-          <h3 className="font-bold text-sm md:text-base flex items-center space-x-2">
-            <BarChart3 className="w-4 h-4 text-indigo-400" />
-            <span>Frequência por Atividade Extracurricular</span>
-          </h3>
+      {/* Section: Frequência por Modalidade / Oficina (Professores Especialistas) */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <Award className="w-5 h-5 text-indigo-600" />
+              Frequência por Modalidade / Oficina (Para Professores Especialistas)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Acompanhamento de aproveitamento e emissão de listas de chamada para docentes de oficinas extracurriculares.
+            </p>
+          </div>
+          <button
+            onClick={() => handleOpenModalityModal()}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all cursor-pointer flex items-center space-x-1.5 self-start sm:self-auto"
+          >
+            <Download className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Exportar PDF de Oficina</span>
+          </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3">Atividade</th>
-                <th className="px-4 py-3 text-center">Registros</th>
-                <th className="px-4 py-3 text-center text-emerald-700">Presenças (%)</th>
+                <th className="px-4 py-3">Modalidade / Oficina</th>
+                <th className="px-4 py-3 text-center">Chamadas</th>
+                <th className="px-4 py-3 text-center text-emerald-700">Presenças (Taxa)</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saída Antecipada</th>
                 <th className="px-4 py-3 text-center text-orange-800">Sem Equipamento</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saúde</th>
                 <th className="px-4 py-3 text-center text-rose-700">Faltas</th>
+                <th className="px-4 py-3 text-center">Ação</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {activityStats.map((stat) => (
-                <tr key={stat.activity} className="hover:bg-slate-50/80">
-                  <td className="px-4 py-3 font-bold text-slate-900">
+                <tr key={stat.activity} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="px-4 py-3 font-bold text-slate-900 flex items-center space-x-2">
                     <ActivityBadge activity={stat.activity} size="sm" />
                   </td>
-                  <td className="px-4 py-3 text-center font-medium">{stat.total}</td>
-                  <td className="px-4 py-3 text-center font-bold text-emerald-700">
-                    {stat.pres} ({stat.rate}%)
+                  <td className="px-4 py-3 text-center font-semibold text-slate-700">{stat.total}</td>
+                  <td className="px-4 py-3 text-center font-extrabold text-emerald-700">
+                    {stat.pres + stat.saidaAnt} ({stat.rate}%)
                   </td>
                   <td className="px-4 py-3 text-center font-bold text-amber-800">
                     {stat.saidaAnt}
@@ -467,11 +708,21 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <td className="px-4 py-3 text-center font-bold text-orange-800">
                     {stat.semEquip}
                   </td>
-                  <td className="px-4 py-3 text-center font-medium text-amber-800">
+                  <td className="px-4 py-3 text-center font-semibold text-amber-800">
                     {stat.saude}
                   </td>
-                  <td className="px-4 py-3 text-center font-medium text-rose-700">
+                  <td className="px-4 py-3 text-center font-semibold text-rose-700">
                     {stat.falta}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => handleOpenModalityModal(stat.activity as ActivityType)}
+                      className="px-2.5 py-1 text-[11px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-xl transition-all cursor-pointer inline-flex items-center space-x-1"
+                      title="Gerar PDF oficial desta oficina"
+                    >
+                      <Download className="w-3 h-3 text-violet-600" />
+                      <span>PDF Oficina</span>
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -480,22 +731,34 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
       </div>
 
-      {/* Turma Breakdown Table */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
-          <h3 className="font-bold text-sm md:text-base">
-            Frequência por Turma / Ano Escolar
-          </h3>
-          <span className="text-xs text-slate-400">Clique para baixar o relatório em PDF de cada turma</span>
+      {/* Section: Frequência Consolidada por Turma */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <Users className="w-5 h-5 text-indigo-600" />
+              Frequência Consolidada por Turma (Ano Escolar)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Matriz comparativa de presença e taxa de aproveitamento pedagógico por turma.
+            </p>
+          </div>
+          <button
+            onClick={() => handleOpenTurmaModal()}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all cursor-pointer flex items-center space-x-1.5 self-start sm:self-auto"
+          >
+            <Download className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Exportar PDF por Turma</span>
+          </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3">Turma</th>
-                <th className="px-4 py-3 text-center">Registros</th>
-                <th className="px-4 py-3 text-center text-emerald-700">Presenças (%)</th>
+                <th className="px-4 py-3">Turma / Segmento</th>
+                <th className="px-4 py-3 text-center">Total Chamadas</th>
+                <th className="px-4 py-3 text-center text-emerald-700">Presenças (Taxa)</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saída Antecipada</th>
                 <th className="px-4 py-3 text-center text-orange-800">Sem Equipamento</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saúde</th>
@@ -505,11 +768,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {turmaStats.map((stat) => (
-                <tr key={stat.turma} className="hover:bg-slate-50/80">
+                <tr key={stat.turma} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-4 py-3 font-bold text-slate-900">{stat.turma}</td>
-                  <td className="px-4 py-3 text-center font-medium">{stat.total}</td>
-                  <td className="px-4 py-3 text-center font-bold text-emerald-700">
-                    {stat.pres} ({stat.rate}%)
+                  <td className="px-4 py-3 text-center font-semibold">{stat.total}</td>
+                  <td className="px-4 py-3 text-center font-extrabold text-emerald-700">
+                    {stat.pres + stat.saidaAnt} ({stat.rate}%)
                   </td>
                   <td className="px-4 py-3 text-center font-bold text-amber-800">
                     {stat.saidaAnt}
@@ -517,17 +780,26 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <td className="px-4 py-3 text-center font-bold text-orange-800">
                     {stat.semEquip}
                   </td>
-                  <td className="px-4 py-3 text-center font-medium text-amber-800">
+                  <td className="px-4 py-3 text-center font-semibold text-amber-800">
                     {stat.saude}
                   </td>
-                  <td className="px-4 py-3 text-center font-medium text-rose-700">
+                  <td className="px-4 py-3 text-center font-semibold text-rose-700">
                     {stat.falta}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button
-                      onClick={() => generateTurmaPDFReport(stat.turma, currentWeek, students, records)}
-                      className="px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all cursor-pointer inline-flex items-center space-x-1"
-                      title="Baixar PDF do relatório desta turma"
+                      onClick={() => {
+                        generateTurmaConsolidatedPeriodPDFReport({
+                          turma: stat.turma as TurmaType,
+                          startDate: effectiveStartDate,
+                          endDate: effectiveEndDate,
+                          periodLabel: effectivePeriodLabel,
+                          students,
+                          records,
+                        });
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer inline-flex items-center space-x-1"
+                      title="Baixar PDF consolidado desta turma"
                     >
                       <Download className="w-3 h-3 text-indigo-600" />
                       <span>PDF Turma</span>
@@ -540,62 +812,111 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
       </div>
 
-      {/* Modal: Download Turma PDF */}
+      {/* =========================================================================
+          MODALS DE EXPORTAÇÃO EM PDF
+          ========================================================================= */}
+
+      {/* 1. Modal: Download Turma PDF */}
       {showTurmaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center space-x-3 text-indigo-600">
-              <div className="p-3 bg-indigo-100 rounded-xl">
-                <Users className="w-6 h-6 text-indigo-600" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-900/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Relatório Consolidado da Turma
+                  </h3>
+                  <p className="text-xs text-indigo-200">
+                    Matriz de presença de todos os alunos no período • Colégio Crescer
+                  </p>
+                </div>
               </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Turma Selection */}
               <div>
-                <h3 className="font-bold text-slate-900 text-base">Baixar Relatório em PDF por Turma</h3>
-                <p className="text-xs text-slate-500">Selecione a turma desejada para gerar o PDF.</p>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Selecione a Turma / Ano Escolar:
+                </label>
+                <select
+                  value={selectedPdfTurma}
+                  onChange={(e) => setSelectedPdfTurma(e.target.value as TurmaType)}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500"
+                >
+                  {turmasList.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Period Range Filter */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Período do Relatório:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
+                    <input
+                      type="date"
+                      value={pdfTurmaStartDate}
+                      onChange={(e) => setPdfTurmaStartDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
+                    <input
+                      type="date"
+                      value={pdfTurmaEndDate}
+                      onChange={(e) => setPdfTurmaEndDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                <p className="font-bold text-slate-800">Estrutura do Documento:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-500 text-[11px]">
+                  <li>Cabeçalho oficial com carimbo de emissão</li>
+                  <li>Lista com todos os alunos matriculados na turma</li>
+                  <li>Contagem de presenças, saídas antecipadas, faltas e % de frequência</li>
+                  <li>Campo para assinatura da monitora e coordenação</li>
+                </ul>
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
-              <label className="block text-xs font-semibold text-slate-700">
-                Turma / Ano Escolar:
-              </label>
-              <select
-                value={selectedPdfTurma}
-                onChange={(e) => setSelectedPdfTurma(e.target.value as TurmaType)}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
-              >
-                {turmasList.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
-              <p className="font-semibold text-slate-800">Conteúdo do PDF:</p>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-600">
-                <li>Lista de alunos matriculados na turma</li>
-                <li>Taxa de presença e faltas por aluno</li>
-                <li>Detalhes de ocorrências e materiais ausentes</li>
-                <li>Campo de assinatura da coordenação</li>
-              </ul>
-            </div>
-
-            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end space-x-2">
               <button
                 type="button"
                 onClick={() => setShowTurmaModal(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  generateTurmaPDFReport(selectedPdfTurma, currentWeek, students, records);
+                  generateTurmaConsolidatedPeriodPDFReport({
+                    turma: selectedPdfTurma,
+                    startDate: pdfTurmaStartDate,
+                    endDate: pdfTurmaEndDate,
+                    periodLabel: `De ${formatDateBR(pdfTurmaStartDate)} a ${formatDateBR(pdfTurmaEndDate)}`,
+                    students,
+                    records,
+                  });
                   setShowTurmaModal(false);
                 }}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
+                className="px-5 py-2.5 text-xs font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
               >
                 <Download className="w-4 h-4" />
                 <span>Gerar PDF da Turma</span>
@@ -605,52 +926,90 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
       )}
 
-      {/* Modal: Download Student PDF */}
+      {/* 2. Modal: Download Student PDF */}
       {showStudentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center space-x-3 text-blue-600">
-              <div className="p-3 bg-blue-100 rounded-xl">
-                <UserCheck className="w-6 h-6 text-blue-600" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between border-b border-blue-900/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Relatório Individual do Aluno
+                  </h3>
+                  <p className="text-xs text-blue-200">
+                    Histórico detalhado de presenças, faltas e ocorrências • Colégio Crescer
+                  </p>
+                </div>
               </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Student Selector */}
               <div>
-                <h3 className="font-bold text-slate-900 text-base">Baixar Relatório em PDF por Aluno</h3>
-                <p className="text-xs text-slate-500">Selecione o aluno para gerar o relatório individual.</p>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Selecione o Aluno(a):
+                </label>
+                <select
+                  value={selectedPdfStudentId}
+                  onChange={(e) => setSelectedPdfStudentId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-blue-500"
+                >
+                  {sortedStudentsForPdf.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.turma})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Period Range Filter */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Período do Relatório:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
+                    <input
+                      type="date"
+                      value={pdfStudentStartDate}
+                      onChange={(e) => setPdfStudentStartDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
+                    <input
+                      type="date"
+                      value={pdfStudentEndDate}
+                      onChange={(e) => setPdfStudentEndDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                <p className="font-bold text-slate-800">Conteúdo do PDF Individual:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-500 text-[11px]">
+                  <li>Histórico cronológico de cada dia e oficina</li>
+                  <li>Percentual de assiduidade / taxa de presença</li>
+                  <li>Relato de faltas de uniforme/equipamento e avisos</li>
+                  <li>Campo para ciência e assinatura dos responsáveis</li>
+                </ul>
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
-              <label className="block text-xs font-semibold text-slate-700">
-                Selecione o Aluno(a):
-              </label>
-              <select
-                value={selectedPdfStudentId}
-                onChange={(e) => setSelectedPdfStudentId(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500"
-              >
-                {sortedStudentsForPdf.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.turma})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
-              <p className="font-semibold text-slate-800">Conteúdo do PDF Didático:</p>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-600">
-                <li>Aproveitamento do aluno nas atividades</li>
-                <li>Tabela com datas, presenças e ausências</li>
-                <li>Avisos sobre materiais/equipamentos faltantes</li>
-                <li>Campo para ciência e assinatura dos pais/responsáveis</li>
-              </ul>
-            </div>
-
-            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end space-x-2">
               <button
                 type="button"
                 onClick={() => setShowStudentModal(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
               >
                 Cancelar
               </button>
@@ -659,14 +1018,145 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 onClick={() => {
                   const targetStudent = students.find((s) => s.id === selectedPdfStudentId);
                   if (targetStudent) {
-                    generateStudentPDFReport(targetStudent, currentWeek, records);
+                    generateStudentPeriodPDFReport({
+                      student: targetStudent,
+                      startDate: pdfStudentStartDate,
+                      endDate: pdfStudentEndDate,
+                      periodLabel: `De ${formatDateBR(pdfStudentStartDate)} a ${formatDateBR(pdfStudentEndDate)}`,
+                      records,
+                    });
                   }
                   setShowStudentModal(false);
                 }}
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
+                className="px-5 py-2.5 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
               >
                 <Download className="w-4 h-4" />
                 <span>Gerar PDF do Aluno</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Modal: Download Modality / Oficina PDF (Professores Especialistas) */}
+      {showModalityModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-violet-950 to-slate-900 text-white flex items-center justify-between border-b border-violet-900/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center text-violet-300">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Relatório por Modalidade / Oficina
+                  </h3>
+                  <p className="text-xs text-violet-200">
+                    Lista de presença para professores especialistas • Colégio Crescer
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Modality Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Modalidade / Oficina:
+                </label>
+                <select
+                  value={selectedPdfModality}
+                  onChange={(e) => setSelectedPdfModality(e.target.value as ActivityType)}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-violet-500"
+                >
+                  {activeActivities.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Teacher Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Professor(a) Especialista:
+                </label>
+                <input
+                  type="text"
+                  value={pdfModalityTeacher}
+                  onChange={(e) => setPdfModalityTeacher(e.target.value)}
+                  placeholder="Nome do docente responsável pela oficina"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                />
+              </div>
+
+              {/* Period Range Filter */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Período do Relatório:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
+                    <input
+                      type="date"
+                      value={pdfModalityStartDate}
+                      onChange={(e) => setPdfModalityStartDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
+                    <input
+                      type="date"
+                      value={pdfModalityEndDate}
+                      onChange={(e) => setPdfModalityEndDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                <p className="font-bold text-slate-800">Conteúdo do PDF para Especialistas:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-500 text-[11px]">
+                  <li>Alunos matriculados nesta oficina de todas as turmas</li>
+                  <li>Total de aulas ministradas e presenças individuais</li>
+                  <li>Controle de material faltante (maiô, kimono, flauta, etc.)</li>
+                  <li>Campo para assinatura do professor especialista e coordenação</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowModalityModal(false)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  generateActivityModalityPeriodPDFReport({
+                    activityName: selectedPdfModality,
+                    startDate: pdfModalityStartDate,
+                    endDate: pdfModalityEndDate,
+                    periodLabel: `De ${formatDateBR(pdfModalityStartDate)} a ${formatDateBR(pdfModalityEndDate)}`,
+                    students,
+                    records,
+                    teacherName: pdfModalityTeacher,
+                  });
+                  setShowModalityModal(false);
+                }}
+                className="px-5 py-2.5 text-xs font-extrabold text-white bg-violet-600 hover:bg-violet-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Download className="w-4 h-4" />
+                <span>Gerar PDF da Oficina</span>
               </button>
             </div>
           </div>

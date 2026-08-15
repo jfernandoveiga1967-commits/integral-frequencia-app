@@ -27,10 +27,13 @@ import {
   RefreshCw,
   SlidersHorizontal,
   HelpCircle,
+  Download,
+  Printer,
 } from 'lucide-react';
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType } from '../types';
 import { ActivityBadge } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { generateWeeklySchedulePDF, generateDailyRoutinePDF } from '../utils/pdfGenerator';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
@@ -131,12 +134,60 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [dayReplicateTargetTurmas, setDayReplicateTargetTurmas] = useState<string[]>([]);
   const [dayReplicateOverwrite, setDayReplicateOverwrite] = useState(true);
 
+  // PDF Export Modal State
+  const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState(false);
+  const [pdfReportType, setPdfReportType] = useState<'weekly' | 'daily'>('weekly');
+  const [pdfTargetTurma, setPdfTargetTurma] = useState<TurmaType | 'ALL'>(sortedTurmas[0] || '1º Ano Azul');
+  const [pdfTargetDay, setPdfTargetDay] = useState<DayOfWeek>('segunda');
+
   // Toast feedback
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMsg({ text, type });
     setTimeout(() => setToastMsg(null), 4000);
+  };
+
+  const handleOpenExportPdfModal = () => {
+    setPdfTargetTurma(selectedTurma);
+    setIsExportPdfModalOpen(true);
+  };
+
+  const handleExecuteExportPdf = () => {
+    try {
+      if (pdfReportType === 'weekly') {
+        generateWeeklySchedulePDF({
+          turma: pdfTargetTurma,
+          turmasList: sortedTurmas,
+          schedules,
+          activitiesList,
+          schoolYear: new Date().getFullYear(),
+        });
+        showToast(
+          pdfTargetTurma === 'ALL'
+            ? 'PDF da Grade Semanal de todas as turmas gerado com sucesso!'
+            : `PDF da Grade Semanal (${pdfTargetTurma}) gerado com sucesso!`,
+          'success'
+        );
+      } else {
+        const targetTurma = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
+        generateDailyRoutinePDF({
+          turma: targetTurma,
+          dayOfWeek: pdfTargetDay,
+          schedules,
+          activitiesList,
+          schoolYear: new Date().getFullYear(),
+        });
+        showToast(
+          `PDF da Rotina Diária (${targetTurma} - ${DAYS_OF_WEEK.find((d) => d.id === pdfTargetDay)?.label}) gerado com sucesso!`,
+          'success'
+        );
+      }
+      setIsExportPdfModalOpen(false);
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+      showToast('Ocorreu um erro ao gerar o PDF. Verifique os dados e tente novamente.', 'error');
+    }
   };
 
   // Filter schedules for the selected turma
@@ -547,8 +598,18 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             </div>
           </div>
 
-          {/* Top Actions: Replicar Rotina & Adicionar Horário */}
+          {/* Top Actions: Exportar PDF, Replicar Rotina & Adicionar Horário */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleOpenExportPdfModal}
+              title="Exportar Grade Semanal ou Rotina Diária em PDF oficial"
+              className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer flex items-center space-x-2"
+            >
+              <Download className="w-4 h-4 text-indigo-600" />
+              <span>Exportar PDF</span>
+            </button>
+
             <button
               type="button"
               onClick={handleOpenFullRoutineModal}
@@ -1489,6 +1550,169 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Export Modal */}
+      {isExportPdfModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-900/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Exportar Relatório em PDF
+                  </h3>
+                  <p className="text-xs text-indigo-200">
+                    Grade Horária e Rotina Diária Oficial • Colégio Crescer
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExportPdfModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+              {/* Type of Report: Grade Semanal vs Rotina Diária */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Tipo de Relatório:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPdfReportType('weekly')}
+                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      pdfReportType === 'weekly'
+                        ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-extrabold">Grade Semanal</span>
+                      <Calendar className="w-4 h-4 text-indigo-600" />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      Tabela horizontal com todos os horários de Segunda a Sexta-feira.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPdfReportType('daily')}
+                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      pdfReportType === 'daily'
+                        ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-extrabold">Rotina Diária</span>
+                      <Clock className="w-4 h-4 text-indigo-600" />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      Cronograma detalhado do dia com orientações pedagógicas e locais.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Scope / Turma Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Turma Alvo:
+                </label>
+                <select
+                  value={pdfTargetTurma}
+                  onChange={(e) => setPdfTargetTurma(e.target.value as TurmaType | 'ALL')}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {pdfReportType === 'weekly' && (
+                    <option value="ALL">Todas as Turmas (Documento Unificado com todas as grades)</option>
+                  )}
+                  {sortedTurmas.map((t) => (
+                    <option key={t} value={t}>
+                      {t} ({totalBlocksForTurma(t)} horários cadastrados)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Day Selector (only for Daily Routine) */}
+              {pdfReportType === 'daily' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Dia da Semana:
+                  </label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {DAYS_OF_WEEK.map((d) => {
+                      const isSelected = pdfTargetDay === d.id;
+                      const targetTurmaName = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
+                      const dayCount = schedules.filter((s) => s.turma === targetTurmaName && s.dayOfWeek === d.id).length;
+
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => setPdfTargetDay(d.id)}
+                          className={`py-2 px-1 rounded-xl border text-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-600 font-extrabold shadow-sm'
+                              : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <span className="block text-xs font-bold">{d.short}</span>
+                          <span className={`block text-[9px] ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
+                            {dayCount} ativ.
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Info Box */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 flex items-start space-x-2.5">
+                <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-slate-800">Layout Padrão Oficial do Colégio Crescer</p>
+                  <p className="text-[11px] text-slate-500">
+                    O PDF gerado conterá cabeçalho oficial, identificação do programa integral, carimbo de data/hora de emissão e paginação no rodapé.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2.5">
+              <button
+                type="button"
+                onClick={() => setIsExportPdfModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteExportPdf}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-all cursor-pointer flex items-center space-x-2"
+              >
+                <Download className="w-4 h-4" />
+                <span>Gerar e Baixar PDF</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
