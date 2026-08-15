@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   CalendarDays,
   Clock,
@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType } from '../types';
 import { ActivityBadge } from './ActivityBadge';
+import { sortTurmasPedagogical } from '../utils/turmaUtils';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
@@ -82,7 +83,22 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   onDeleteScheduleBlock,
   onBatchSaveSchedules,
 }) => {
-  const [selectedTurma, setSelectedTurma] = useState<TurmaType>(turmas[0] || '1º Ano A');
+  // Sort turmas in strict pedagogical order: Mini Maternal -> Maternal -> Infantil 1 -> Infantil 2 -> 1º Ano -> ... -> 6º Ano
+  const sortedTurmas = useMemo(() => {
+    return sortTurmasPedagogical(turmas);
+  }, [turmas]);
+
+  const [selectedTurma, setSelectedTurma] = useState<TurmaType>(() => {
+    const sorted = sortTurmasPedagogical(turmas);
+    return sorted[0] || 'Mini Maternal Azul';
+  });
+
+  // Keep selectedTurma valid if the available turmas change
+  useEffect(() => {
+    if (sortedTurmas.length > 0 && !sortedTurmas.includes(selectedTurma)) {
+      setSelectedTurma(sortedTurmas[0]);
+    }
+  }, [sortedTurmas, selectedTurma]);
 
   // Modal State for New/Edit Block
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,7 +106,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [blockToDelete, setBlockToDelete] = useState<ScheduleBlock | null>(null);
 
   // Form State
-  const [formTurma, setFormTurma] = useState<TurmaType>(turmas[0] || '');
+  const [formTurma, setFormTurma] = useState<TurmaType>(() => sortedTurmas[0] || '');
   const [formDayOfWeek, setFormDayOfWeek] = useState<DayOfWeek>('segunda');
   const [formStartTime, setFormStartTime] = useState('13:30');
   const [formEndTime, setFormEndTime] = useState('14:20');
@@ -235,7 +251,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       showToast(`A turma ${selectedTurma} não possui nenhum horário cadastrado para replicar.`, 'error');
       return;
     }
-    const otherTurmas = turmas.filter((t) => t !== selectedTurma);
+    const otherTurmas = sortedTurmas.filter((t) => t !== selectedTurma);
     setFullRoutineTargetTurmas(otherTurmas); // default to all other turmas
     setFullRoutineOverwrite(true);
     setIsFullRoutineModalOpen(true);
@@ -251,7 +267,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   };
 
   const handleSelectAllFullRoutineTurmas = () => {
-    const otherTurmas = turmas.filter((t) => t !== selectedTurma);
+    const otherTurmas = sortedTurmas.filter((t) => t !== selectedTurma);
     setFullRoutineTargetTurmas(otherTurmas);
   };
 
@@ -358,11 +374,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       setDayReplicateTargetTurmas([dayReplicateModal.sourceTurma]);
     } else if (mode === 'other_turmas_same_day') {
       setDayReplicateTargetDays([dayReplicateModal.sourceDay]);
-      setDayReplicateTargetTurmas(turmas.filter((t) => t !== dayReplicateModal.sourceTurma));
+      setDayReplicateTargetTurmas(sortedTurmas.filter((t) => t !== dayReplicateModal.sourceTurma));
     } else {
       // Custom
       setDayReplicateTargetDays(DAYS_OF_WEEK.map((d) => d.id));
-      setDayReplicateTargetTurmas(turmas);
+      setDayReplicateTargetTurmas(sortedTurmas);
     }
   };
 
@@ -563,12 +579,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {turmas.map((t) => {
+            {sortedTurmas.map((t) => {
               const isSelected = selectedTurma === t;
               const blockCount = totalBlocksForTurma(t);
               return (
                 <button
                   key={t}
+                  id={`schedule-select-turma-${t.replace(/\s+/g, '-').toLowerCase()}`}
                   type="button"
                   onClick={() => setSelectedTurma(t)}
                   className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap flex items-center space-x-2 border ${
@@ -830,7 +847,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto p-1">
-                  {turmas
+                  {sortedTurmas
                     .filter((t) => t !== selectedTurma)
                     .map((t) => {
                       const isChecked = fullRoutineTargetTurmas.includes(t);
@@ -1107,7 +1124,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   <div className="flex items-center space-x-2 text-xs">
                     <button
                       type="button"
-                      onClick={() => setDayReplicateTargetTurmas(turmas)}
+                      onClick={() => setDayReplicateTargetTurmas(sortedTurmas)}
                       className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
                     >
                       Todas as Turmas
@@ -1124,7 +1141,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1">
-                  {turmas.map((t) => {
+                  {sortedTurmas.map((t) => {
                     const isChecked = dayReplicateTargetTurmas.includes(t);
                     const isSourceTurma = t === dayReplicateModal.sourceTurma;
                     return (
@@ -1307,7 +1324,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   onChange={(e) => setFormTurma(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {turmas.map((t) => (
+                  {sortedTurmas.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>
