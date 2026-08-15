@@ -15,6 +15,7 @@ import {
   Filter,
   Copy,
   ChevronDown,
+  ChevronUp,
   Layers,
   Utensils,
   BookOpen,
@@ -117,6 +118,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [formLocation, setFormLocation] = useState('');
   const [formGuidelines, setFormGuidelines] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // --- IN-FORM REPLICATION STATE (Modal 3: "Replicar este bloco automaticamente") ---
+  const [formReplicationExpanded, setFormReplicationExpanded] = useState(false);
+  const [formReplicateDays, setFormReplicateDays] = useState<DayOfWeek[]>([]);
+  const [formReplicateTurmas, setFormReplicateTurmas] = useState<string[]>([]);
 
   // --- REPLICATION MODAL 1: Replicar Rotina Completa (Entre Turmas) ---
   const [isFullRoutineModalOpen, setIsFullRoutineModalOpen] = useState(false);
@@ -221,15 +227,19 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
   // Open Modal for New Block
   const handleOpenNewBlock = (defaultDay?: DayOfWeek) => {
+    const targetDay = defaultDay || 'segunda';
     setEditingBlock(null);
     setFormTurma(selectedTurma);
-    setFormDayOfWeek(defaultDay || 'segunda');
+    setFormDayOfWeek(targetDay);
     setFormStartTime('13:30');
     setFormEndTime('14:20');
     setFormActivityId(activitiesList[0]?.id || 'Rotina');
     setFormLocation('');
     setFormGuidelines('');
     setFormError(null);
+    setFormReplicationExpanded(false);
+    setFormReplicateDays([targetDay]);
+    setFormReplicateTurmas([selectedTurma]);
     setIsModalOpen(true);
   };
 
@@ -244,10 +254,79 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     setFormLocation(block.location || '');
     setFormGuidelines(block.guidelines || '');
     setFormError(null);
+    setFormReplicationExpanded(false);
+    setFormReplicateDays([block.dayOfWeek]);
+    setFormReplicateTurmas([block.turma]);
     setIsModalOpen(true);
   };
 
-  // Handle Form Submit
+  // Helper actions for in-form replication
+  const handleToggleFormReplicateDay = (dayId: DayOfWeek) => {
+    setFormReplicateDays((prev) => {
+      if (prev.includes(dayId)) {
+        return prev.filter((d) => d !== dayId);
+      } else {
+        return [...prev, dayId];
+      }
+    });
+  };
+
+  const handleSelectAllFormDays = () => {
+    setFormReplicateDays(DAYS_OF_WEEK.map((d) => d.id));
+  };
+
+  const handleSelectMWFDays = () => {
+    setFormReplicateDays(['segunda', 'quarta', 'sexta']);
+  };
+
+  const handleSelectTTSDays = () => {
+    setFormReplicateDays(['terca', 'quinta']);
+  };
+
+  const handleToggleFormReplicateTurma = (t: string) => {
+    setFormReplicateTurmas((prev) => {
+      if (prev.includes(t)) {
+        return prev.filter((x) => x !== t);
+      } else {
+        return [...prev, t];
+      }
+    });
+  };
+
+  const handleSelectAllFormTurmas = () => {
+    setFormReplicateTurmas([...sortedTurmas]);
+  };
+
+  const handleSelectInfantilFormTurmas = () => {
+    setFormReplicateTurmas(
+      sortedTurmas.filter((t) => t.includes('Maternal') || t.includes('Infantil'))
+    );
+  };
+
+  const handleSelectFundamentalFormTurmas = () => {
+    setFormReplicateTurmas(
+      sortedTurmas.filter((t) => t.includes('Ano'))
+    );
+  };
+
+  // Calculate effective targets for form replication
+  const effectiveFormTargetDays = useMemo(() => {
+    if (!formReplicationExpanded || formReplicateDays.length === 0) {
+      return [formDayOfWeek];
+    }
+    return formReplicateDays;
+  }, [formReplicationExpanded, formReplicateDays, formDayOfWeek]);
+
+  const effectiveFormTargetTurmas = useMemo(() => {
+    if (!formReplicationExpanded || formReplicateTurmas.length === 0) {
+      return [formTurma];
+    }
+    return formReplicateTurmas;
+  }, [formReplicationExpanded, formReplicateTurmas, formTurma]);
+
+  const totalFormBlocksToGenerate = effectiveFormTargetDays.length * effectiveFormTargetTurmas.length;
+
+  // Handle Form Submit with Direct Batch Replication Support
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTurma) {
@@ -267,25 +346,74 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       return;
     }
 
-    const blockToSave: ScheduleBlock = {
-      id: editingBlock ? editingBlock.id : `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      turma: formTurma,
-      dayOfWeek: formDayOfWeek,
-      startTime: formStartTime,
-      endTime: formEndTime,
-      activityId: formActivityId,
-      location: formLocation.trim() || undefined,
-      guidelines: formGuidelines.trim() || undefined,
-      createdAt: editingBlock?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const targetDays: DayOfWeek[] =
+      formReplicationExpanded && formReplicateDays.length > 0
+        ? formReplicateDays
+        : [formDayOfWeek];
 
-    onSaveScheduleBlock(blockToSave);
+    const targetTurmas: string[] =
+      formReplicationExpanded && formReplicateTurmas.length > 0
+        ? formReplicateTurmas
+        : [formTurma];
+
+    const blocksToSave: ScheduleBlock[] = [];
+
+    targetTurmas.forEach((t) => {
+      targetDays.forEach((d) => {
+        const isPrimarySlot = t === formTurma && d === formDayOfWeek;
+        if (isPrimarySlot && editingBlock) {
+          blocksToSave.push({
+            id: editingBlock.id,
+            turma: t,
+            dayOfWeek: d,
+            startTime: formStartTime,
+            endTime: formEndTime,
+            activityId: formActivityId,
+            location: formLocation.trim() || undefined,
+            guidelines: formGuidelines.trim() || undefined,
+            createdAt: editingBlock.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          blocksToSave.push({
+            id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${t.replace(/\s+/g, '_').toLowerCase()}_${d}`,
+            turma: t,
+            dayOfWeek: d,
+            startTime: formStartTime,
+            endTime: formEndTime,
+            activityId: formActivityId,
+            location: formLocation.trim() || undefined,
+            guidelines: formGuidelines.trim() || undefined,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      });
+    });
+
+    if (blocksToSave.length === 1) {
+      onSaveScheduleBlock(blocksToSave[0]);
+      showToast(
+        editingBlock ? 'Horário atualizado com sucesso!' : 'Novo horário cadastrado na grade!',
+        'success'
+      );
+    } else {
+      if (onBatchSaveSchedules) {
+        const existingMap = new Map<string, ScheduleBlock>();
+        schedules.forEach((s) => existingMap.set(s.id, s));
+        blocksToSave.forEach((b) => existingMap.set(b.id, b));
+        const updatedTotal = Array.from(existingMap.values());
+        onBatchSaveSchedules(updatedTotal, [], blocksToSave);
+      } else {
+        blocksToSave.forEach((b) => onSaveScheduleBlock(b));
+      }
+      showToast(
+        `✓ ${blocksToSave.length} blocos de horário salvos e replicados com sucesso no Firestore (${targetDays.length} dia(s) × ${targetTurmas.length} turma(s))!`,
+        'success'
+      );
+    }
+
     setIsModalOpen(false);
-    showToast(
-      editingBlock ? 'Horário atualizado com sucesso!' : 'Novo horário cadastrado na grade!',
-      'success'
-    );
   };
 
   // Handle Delete Confirmation
@@ -1532,6 +1660,190 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 />
               </div>
 
+              {/* 7. Replicar este bloco automaticamente (Seção Expansível / Seleção de Dias e Turmas) */}
+              <div className="border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4 space-y-3.5 transition-all">
+                <div
+                  onClick={() => setFormReplicationExpanded(!formReplicationExpanded)}
+                  className="flex items-center justify-between cursor-pointer select-none"
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                      <Copy className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-black text-slate-900">
+                          Replicar este bloco automaticamente
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          Gravação em Lote
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Aplique esta mesma atividade para múltiplos dias e turmas em 1 clique.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFormReplicationExpanded(!formReplicationExpanded);
+                    }}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                      formReplicationExpanded
+                        ? 'bg-indigo-600 text-white border-indigo-700'
+                        : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+                    }`}
+                  >
+                    {formReplicationExpanded ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+
+                {formReplicationExpanded && (
+                  <div className="pt-3 border-t border-indigo-100 space-y-4 animate-in fade-in duration-150">
+                    {/* A. Dias da Semana de Destino */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Dias da Semana:</span>
+                        </label>
+                        <div className="flex items-center space-x-2 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllFormDays}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Seg a Sex
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={handleSelectMWFDays}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Seg/Qua/Sex
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={handleSelectTTSDays}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Ter/Qui
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {DAYS_OF_WEEK.map((d) => {
+                          const isChecked = formReplicateDays.includes(d.id);
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => handleToggleFormReplicateDay(d.id)}
+                              className={`py-2 px-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center border ${
+                                isChecked
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-1">
+                                {isChecked && <Check className="w-3 h-3 text-white" />}
+                                <span className="text-[10px]">{d.short}</span>
+                              </div>
+                              <span className="text-[11px] truncate">{d.label.split('-')[0]}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* B. Turmas de Destino */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Turmas de Destino:</span>
+                        </label>
+                        <div className="flex items-center space-x-2 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllFormTurmas}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Todas ({sortedTurmas.length})
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={handleSelectInfantilFormTurmas}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Ed. Infantil
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={handleSelectFundamentalFormTurmas}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          >
+                            Fundamental
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1.5 bg-white rounded-xl border border-slate-200">
+                        {sortedTurmas.map((t) => {
+                          const isChecked = formReplicateTurmas.includes(t);
+                          return (
+                            <div
+                              key={t}
+                              onClick={() => handleToggleFormReplicateTurma(t)}
+                              className={`p-2 rounded-lg border text-xs font-bold cursor-pointer transition-all flex items-center justify-between ${
+                                isChecked
+                                  ? 'bg-indigo-50 border-indigo-300 text-indigo-950 shadow-2xs'
+                                  : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                {isChecked ? (
+                                  <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                                )}
+                                <span className="truncate">{t}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* C. Resumo de Gravação em Lote */}
+                    <div className="bg-slate-900 text-white rounded-xl p-3 flex items-center justify-between text-xs shadow-sm">
+                      <div className="flex items-center space-x-2">
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>
+                          Serão gravados{' '}
+                          <strong className="text-emerald-400">
+                            {totalFormBlocksToGenerate} bloco(s)
+                          </strong>{' '}
+                          ({effectiveFormTargetDays.length} dia(s) × {effectiveFormTargetTurmas.length} turma(s)) no Firestore.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Modal Buttons */}
               <div className="flex items-center justify-end space-x-2 pt-4 border-t border-slate-100">
                 <button
@@ -1546,7 +1858,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-colors cursor-pointer flex items-center space-x-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  <span>{editingBlock ? 'Salvar Alterações' : 'Salvar na Grade'}</span>
+                  <span>
+                    {totalFormBlocksToGenerate > 1
+                      ? `Salvar e Gravar ${totalFormBlocksToGenerate} Horários`
+                      : editingBlock
+                      ? 'Salvar Alterações'
+                      : 'Salvar na Grade'}
+                  </span>
                 </button>
               </div>
             </form>
