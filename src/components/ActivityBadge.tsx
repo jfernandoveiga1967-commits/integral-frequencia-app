@@ -1,6 +1,26 @@
 import React from 'react';
 import { ActivityType } from '../types';
-import { Waves, Sparkles, Music, Award, Trophy, Activity, Music2, BookOpen, Cpu, Palette, Dumbbell, Gamepad2, Layers, Clock } from 'lucide-react';
+import {
+  Waves,
+  Sparkles,
+  Music,
+  Award,
+  Trophy,
+  Activity,
+  Music2,
+  BookOpen,
+  Cpu,
+  Palette,
+  Dumbbell,
+  Gamepad2,
+  Layers,
+  Clock,
+  Utensils,
+  Coffee,
+  BookMarked,
+  Sun,
+  Smile,
+} from 'lucide-react';
 
 interface ActivityBadgeProps {
   activity: ActivityType;
@@ -23,6 +43,33 @@ export const activityConfig: Record<
     badgeBg: 'bg-rose-100 text-rose-900 border-rose-300',
     icon: <Clock className="w-4 h-4" />,
     equipmentHint: 'Agenda escolar, uniforme regular e material de uso diário',
+  },
+  'Almoço': {
+    name: 'Almoço',
+    bg: 'bg-amber-50 hover:bg-amber-100',
+    border: 'border-amber-200',
+    text: 'text-amber-800',
+    badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
+    icon: <Utensils className="w-4 h-4" />,
+    equipmentHint: 'Momento de refeição do Integral',
+  },
+  'Lanche': {
+    name: 'Lanche',
+    bg: 'bg-orange-50 hover:bg-orange-100',
+    border: 'border-orange-200',
+    text: 'text-orange-800',
+    badgeBg: 'bg-orange-100 text-orange-900 border-orange-300',
+    icon: <Coffee className="w-4 h-4" />,
+    equipmentHint: 'Momento de lanche e hidratação',
+  },
+  'Lição de Casa': {
+    name: 'Lição de Casa',
+    bg: 'bg-blue-50 hover:bg-blue-100',
+    border: 'border-blue-200',
+    text: 'text-blue-800',
+    badgeBg: 'bg-blue-100 text-blue-900 border-blue-300',
+    icon: <BookMarked className="w-4 h-4" />,
+    equipmentHint: 'Estojo, caderno de tarefas e material didático',
   },
   Natação: {
     name: 'Natação',
@@ -109,6 +156,16 @@ export function renderActivityIcon(iconName?: string) {
       return <Music2 className="w-4 h-4" />;
     case 'BookOpen':
       return <BookOpen className="w-4 h-4" />;
+    case 'BookMarked':
+      return <BookMarked className="w-4 h-4" />;
+    case 'Utensils':
+      return <Utensils className="w-4 h-4" />;
+    case 'Coffee':
+      return <Coffee className="w-4 h-4" />;
+    case 'Sun':
+      return <Sun className="w-4 h-4" />;
+    case 'Smile':
+      return <Smile className="w-4 h-4" />;
     case 'Cpu':
       return <Cpu className="w-4 h-4" />;
     case 'Palette':

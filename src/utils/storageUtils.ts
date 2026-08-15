@@ -13,19 +13,24 @@ export function loadActivities(): ActivityItem[] {
     if (data) {
       const parsed: ActivityItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        if (!parsed.some((a) => a.id === 'Rotina')) {
+        const enriched = parsed.map((act) => ({
+          ...act,
+          requiresRollCall: act.requiresRollCall !== undefined ? act.requiresRollCall : true,
+        }));
+        if (!enriched.some((a) => a.id === 'Rotina')) {
           const rotinaItem = ACTIVITIES_LIST.find((a) => a.id === 'Rotina') || {
             id: 'Rotina',
             name: 'Rotina',
             icon: 'Clock',
             description: 'Rotina diária e acompanhamento obrigatório de todos os alunos do Integral',
             defaultEquipment: 'Agenda escolar / Material de uso diário',
+            requiresRollCall: true,
           };
-          const updated = [rotinaItem, ...parsed];
+          const updated = [rotinaItem, ...enriched];
           saveActivities(updated);
           return updated;
         }
-        return parsed;
+        return enriched;
       }
     }
   } catch (e) {

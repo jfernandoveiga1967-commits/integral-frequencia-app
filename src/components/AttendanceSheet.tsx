@@ -36,17 +36,22 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
   const userCanMarkAttendance = canMarkAttendance(currentUser);
-  const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+
+  // In Attendance Sheet (Chamada de Frequência), ONLY display activities that require roll call (requiresRollCall !== false)
+  const rollCallActivities = useMemo(() => {
+    const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    return active.filter((act) => act.requiresRollCall !== false);
+  }, [activitiesList]);
 
   const isCoordenador = currentUser?.role === 'coordenador';
   const userAssignedActivities = useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
   const userAssignedTurmas = useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
 
-  // For Monitor/Professor: ONLY display their assigned modalities. For Coordenador: display all active activities.
+  // For Monitor/Professor: ONLY display their assigned modalities that require roll call. For Coordenador: display all roll call activities.
   const allowedActivities = useMemo(() => {
-    if (isCoordenador) return activeActivities;
-    return activeActivities.filter((act) => userAssignedActivities.includes(act.id));
-  }, [activeActivities, isCoordenador, userAssignedActivities]);
+    if (isCoordenador) return rollCallActivities;
+    return rollCallActivities.filter((act) => userAssignedActivities.includes(act.id));
+  }, [rollCallActivities, isCoordenador, userAssignedActivities]);
 
   const allowedActivityIds = useMemo(() => allowedActivities.map((a) => a.id), [allowedActivities]);
 

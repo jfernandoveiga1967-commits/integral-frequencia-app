@@ -36,6 +36,7 @@ import {
   Music,
   Music2,
   Waves,
+  Clock,
   ChevronDown,
   ChevronUp,
   ChevronsDown,
@@ -66,6 +67,12 @@ const AVAILABLE_ICONS = [
   { id: 'Palette', label: 'Artes / Pintura' },
   { id: 'BookOpen', label: 'Teatro / Leitura' },
   { id: 'Dumbbell', label: 'Treino / Atletismo' },
+  { id: 'Clock', label: 'Rotina / Horários' },
+  { id: 'Utensils', label: 'Almoço / Refeição' },
+  { id: 'Coffee', label: 'Lanche / Intervalo' },
+  { id: 'BookMarked', label: 'Lição de Casa / Tarefas' },
+  { id: 'Sun', label: 'Parquinho / Ar Livre' },
+  { id: 'Smile', label: 'Recreação / Acolhida' },
 ];
 
 export const UserManagement: React.FC<UserManagementProps> = ({
@@ -118,6 +125,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [actIcon, setActIcon] = useState('Sparkles');
   const [actDescription, setActDescription] = useState('');
   const [actDefaultEquipment, setActDefaultEquipment] = useState('');
+  const [actRequiresRollCall, setActRequiresRollCall] = useState<boolean>(true);
 
   // Toast Feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -438,6 +446,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setActIcon('Sparkles');
     setActDescription('');
     setActDefaultEquipment('');
+    setActRequiresRollCall(true);
     setIsNewActivityModalOpen(true);
   };
 
@@ -447,6 +456,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setActIcon(activity.icon || 'Sparkles');
     setActDescription(activity.description || '');
     setActDefaultEquipment(activity.defaultEquipment || '');
+    setActRequiresRollCall(activity.requiresRollCall !== undefined ? activity.requiresRollCall : true);
   };
 
   const handleSaveActivitySubmit = (e: React.FormEvent) => {
@@ -462,6 +472,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       icon: actIcon,
       description: actDescription.trim() || `Modalidade de ${actName.trim()} no Programa Integral`,
       defaultEquipment: actDefaultEquipment.trim() || 'Material necessário para a aula',
+      requiresRollCall: actRequiresRollCall,
       isCustom: true,
     };
 
@@ -985,17 +996,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between space-y-4"
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="lg" />
-                      {act.isCustom && (
-                        <span className="text-[10px] font-extrabold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
-                          Personalizada
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {act.requiresRollCall !== false ? (
+                          <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">
+                            <Check className="w-3 h-3 text-emerald-700 shrink-0" />
+                            <span>Exige Chamada</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300">
+                            <Clock className="w-3 h-3 text-amber-700 shrink-0" />
+                            <span>Grade / Rotina</span>
+                          </span>
+                        )}
+                        {act.isCustom && (
+                          <span className="text-[10px] font-extrabold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
+                            Personalizada
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                      {act.description || 'Atividade extracurricular do Integral.'}
+                      {act.description || 'Atividade do Programa Integral.'}
                     </p>
 
                     <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs space-y-1">
@@ -1304,7 +1328,60 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
               <div>
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Descrição da Modalidade:
+                  Tipo de Atividade & Chamada de Presença:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActRequiresRollCall(true)}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      actRequiresRollCall
+                        ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20 text-emerald-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-xs flex items-center gap-1.5">
+                        <Check className={`w-3.5 h-3.5 ${actRequiresRollCall ? 'text-emerald-600' : 'text-slate-400'}`} />
+                        Exige Chamada (Diário)
+                      </span>
+                      {actRequiresRollCall && (
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      Gera lista de presença e coluna no diário de frequência diária.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActRequiresRollCall(false)}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      !actRequiresRollCall
+                        ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-500/20 text-amber-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-xs flex items-center gap-1.5">
+                        <Clock className={`w-3.5 h-3.5 ${!actRequiresRollCall ? 'text-amber-600' : 'text-slate-400'}`} />
+                        Apenas Grade / Rotina
+                      </span>
+                      {!actRequiresRollCall && (
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      Momento da rotina (ex: Almoço, Lanche, Lição) sem chamada de presença.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Descrição da Atividade / Modalidade:
                 </label>
                 <textarea
                   value={actDescription}

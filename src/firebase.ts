@@ -325,6 +325,7 @@ export function subscribeActivities(
             icon: data.icon || 'Sparkles',
             description: data.description || '',
             defaultEquipment: data.defaultEquipment || '',
+            requiresRollCall: data.requiresRollCall !== undefined ? Boolean(data.requiresRollCall) : true,
             isCustom: data.isCustom !== undefined ? data.isCustom : true,
           });
         }
@@ -347,6 +348,7 @@ export async function saveActivityToFirestore(activity: ActivityItem) {
       icon: activity.icon || 'Sparkles',
       description: activity.description || '',
       defaultEquipment: activity.defaultEquipment || '',
+      requiresRollCall: activity.requiresRollCall !== undefined ? Boolean(activity.requiresRollCall) : true,
       isCustom: activity.isCustom !== undefined ? activity.isCustom : true,
     });
   } catch (error) {

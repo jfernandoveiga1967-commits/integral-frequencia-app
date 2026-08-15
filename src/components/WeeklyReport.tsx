@@ -54,9 +54,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
   const activeActivities = React.useMemo(() => {
-    const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
-    if (isCoordenador || !currentUser) return active;
-    return active.filter((act) => userAssignedActivities.includes(act.id));
+    const rawList = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    const rollCallOnly = rawList.filter((act) => act.requiresRollCall !== false);
+    if (isCoordenador || !currentUser) return rollCallOnly;
+    return rollCallOnly.filter((act) => userAssignedActivities.includes(act.id));
   }, [activitiesList, isCoordenador, currentUser, userAssignedActivities]);
 
   const allowedActivityIds = React.useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);

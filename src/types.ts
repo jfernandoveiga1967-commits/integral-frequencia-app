@@ -6,6 +6,7 @@ export interface ActivityItem {
   icon: string; // Lucide icon identifier name
   description: string;
   defaultEquipment: string;
+  requiresRollCall?: boolean; // true = Exige registro de presença na chamada; false = Atividade orientativa da Grade/Rotina
   isCustom?: boolean;
 }
 
