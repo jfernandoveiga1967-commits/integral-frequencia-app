@@ -147,7 +147,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Toast Feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Accordion Expand/Collapse State
+  // Accordion Expand/Collapse State for Users
   const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
 
   const toggleUserExpand = (userId: string) => {
@@ -162,6 +162,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const collapseAllUsers = () => {
     setExpandedUserIds([]);
+  };
+
+  // Accordion Expand/Collapse State for Activities / Modalidades
+  const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>(() =>
+    activitiesList.map((a) => a.id)
+  );
+  const [activitySearchTerm, setActivitySearchTerm] = useState('');
+  const [activityTypeFilter, setActivityTypeFilter] = useState<'TODAS' | 'CHAMADA' | 'ROTINA' | 'PERSONALIZADA'>('TODAS');
+
+  const toggleActivityExpand = (actId: string) => {
+    setExpandedActivityIds((prev) =>
+      prev.includes(actId) ? prev.filter((id) => id !== actId) : [...prev, actId]
+    );
+  };
+
+  const expandAllActivities = () => {
+    setExpandedActivityIds(filteredActivities.map((a) => a.id));
+  };
+
+  const collapseAllActivities = () => {
+    setExpandedActivityIds([]);
   };
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -202,6 +223,33 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       // 2. Demais usuários ordenados por nome (A-Z)
       return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
     });
+
+  // Filtered Activities / Modalidades
+  const filteredActivities = useMemo(() => {
+    return (activitiesList || []).filter((act) => {
+      if (!act) return false;
+      const search = activitySearchTerm.toLowerCase().trim();
+      const matchesSearch =
+        !search ||
+        (act.name || '').toLowerCase().includes(search) ||
+        (act.id || '').toLowerCase().includes(search) ||
+        (act.description || '').toLowerCase().includes(search) ||
+        (act.defaultEquipment || '').toLowerCase().includes(search);
+
+      if (!matchesSearch) return false;
+
+      if (activityTypeFilter === 'CHAMADA') {
+        return act.requiresRollCall !== false;
+      }
+      if (activityTypeFilter === 'ROTINA') {
+        return act.requiresRollCall === false;
+      }
+      if (activityTypeFilter === 'PERSONALIZADA') {
+        return !!act.isCustom;
+      }
+      return true;
+    });
+  }, [activitiesList, activitySearchTerm, activityTypeFilter]);
 
   // Stats
   const countCoord = (users || []).filter((u) => u && u.role === 'coordenador').length;
@@ -1018,92 +1066,333 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         </div>
       )}
 
-      {/* ================= SECTION 2: EXTRACURRICULAR ACTIVITIES LAYER ================= */}
+      {/* ================= SECTION 2: EXTRACURRICULAR ACTIVITIES LAYER (ACCORDION / COLAPSÁVEL) ================= */}
       {activeSubTab === 'activities' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">Camada de Gestão de Modalidades</h3>
-              <p className="text-xs text-slate-500">
-                Cadastre novas atividades para o diário de classe ou edite as especificações e materiais padrão.
-              </p>
+          {/* Top Control Bar with Search, Filters & Accordion Actions */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Camada de Gestão de Modalidades</h3>
+                <p className="text-xs text-slate-500">
+                  Gerencie atividades extracurriculares, especificações de materiais e professores vinculados.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenNewActivityModal}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer flex items-center justify-center space-x-1.5 shrink-0 self-start md:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nova Atividade</span>
+              </button>
             </div>
-            <button
-              onClick={handleOpenNewActivityModal}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nova Atividade</span>
-            </button>
+
+            {/* Search and Category Filters */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={activitySearchTerm}
+                  onChange={(e) => setActivitySearchTerm(e.target.value)}
+                  placeholder="Buscar modalidade, descrição ou material..."
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Filter Chips */}
+              <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                {(
+                  [
+                    { id: 'TODAS', label: 'Todas as Modalidades' },
+                    { id: 'CHAMADA', label: 'Exige Chamada' },
+                    { id: 'ROTINA', label: 'Rotina / Grade' },
+                    { id: 'PERSONALIZADA', label: 'Personalizadas' },
+                  ] as const
+                ).map((f) => {
+                  const isSel = activityTypeFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setActivityTypeFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        isSel
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Quick Accordion Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+              <div className="flex items-center space-x-2 text-slate-500 font-medium">
+                <span>
+                  Total: <strong className="text-slate-800 font-bold">{filteredActivities.length}</strong> modalidade(s)
+                </span>
+                {expandedActivityIds.length > 0 && (
+                  <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold text-[11px] border border-indigo-200">
+                    {expandedActivityIds.length} expandida(s)
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={expandAllActivities}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
+                  title="Expandir todas as modalidades"
+                >
+                  <ChevronsDown className="w-3.5 h-3.5" />
+                  <span>Expandir Todas</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={collapseAllActivities}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
+                  title="Recolher todas as modalidades"
+                >
+                  <ChevronsUp className="w-3.5 h-3.5" />
+                  <span>Recolher Todas</span>
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {activitiesList.map((act) => {
-              const assignedProfs = users.filter((u) => u.assignedActivities?.includes(act.id));
+          {/* Activities List - Accordion Cards */}
+          <div className="flex flex-col space-y-4 w-full">
+            {filteredActivities.length === 0 ? (
+              <div className="w-full bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
+                Nenhuma modalidade encontrada para os critérios selecionados.
+              </div>
+            ) : (
+              filteredActivities.map((act) => {
+                const assignedProfs = users.filter((u) => u.assignedActivities?.includes(act.id));
+                const isExpanded = expandedActivityIds.includes(act.id);
+                const requiresRoll = act.requiresRollCall !== false;
 
-              return (
-                <div
-                  key={act.id}
-                  className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between space-y-4"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="lg" />
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {act.requiresRollCall !== false ? (
-                          <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">
-                            <Check className="w-3 h-3 text-emerald-700 shrink-0" />
-                            <span>Exige Chamada</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300">
-                            <Clock className="w-3 h-3 text-amber-700 shrink-0" />
-                            <span>Grade / Rotina</span>
-                          </span>
-                        )}
-                        {act.isCustom && (
-                          <span className="text-[10px] font-extrabold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
-                            Personalizada
-                          </span>
-                        )}
+                return (
+                  <div
+                    key={act.id}
+                    className={`bg-white border rounded-3xl transition-all w-full overflow-hidden shadow-sm hover:shadow-md ${
+                      isExpanded ? 'border-indigo-300 ring-2 ring-indigo-500/10' : 'border-slate-200'
+                    }`}
+                  >
+                    {/* Header (Always visible) - Clickable for Accordion Toggle */}
+                    <div
+                      onClick={() => toggleActivityExpand(act.id)}
+                      className={`p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer transition-colors select-none ${
+                        isExpanded ? 'bg-slate-50/70 border-b border-slate-100' : 'hover:bg-slate-50/50'
+                      }`}
+                      title={isExpanded ? `Clique para recolher ${act.name || act.id}` : `Clique para expandir ${act.name || act.id}`}
+                    >
+                      {/* Left: Badge, Title, Category Pill, and Summary Tags */}
+                      <div className="flex items-start sm:items-center space-x-3.5 min-w-0 flex-1">
+                        <div className="shrink-0">
+                          <ActivityBadge
+                            activity={act.id}
+                            iconName={act.icon}
+                            customEquipment={act.defaultEquipment}
+                            size="lg"
+                          />
+                        </div>
+
+                        <div className="min-w-0 space-y-1 flex-1">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <h3 className="text-base font-extrabold text-slate-900 truncate">
+                              {act.name || act.id}
+                            </h3>
+
+                            {requiresRoll ? (
+                              <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                                <Check className="w-3 h-3 text-emerald-700 shrink-0" />
+                                <span>Exige Chamada</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300">
+                                <Clock className="w-3 h-3 text-amber-700 shrink-0" />
+                                <span>Grade / Rotina</span>
+                              </span>
+                            )}
+
+                            {act.isCustom && (
+                              <span className="text-[10px] font-extrabold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
+                                Personalizada
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                            <span className="flex items-center space-x-1">
+                              <span className="font-semibold text-slate-700">Material Padrão:</span>
+                              <span className="truncate max-w-[200px] sm:max-w-xs text-slate-600">
+                                {act.defaultEquipment || 'Nenhum material cadastrado'}
+                              </span>
+                            </span>
+
+                            <span className="flex items-center space-x-1">
+                              <span className="font-semibold text-slate-700">Professores:</span>
+                              <span className="font-bold text-indigo-600">
+                                {assignedProfs.length} vinculado(s)
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Actions (Edit, Delete, Accordion Toggle) */}
+                      <div
+                        className="flex items-center space-x-2 shrink-0 self-end md:self-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditActivityModal(act)}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => setActivityToDelete(act)}
+                          className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
+                          title="Excluir modalidade"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Accordion Toggle Arrow */}
+                        <button
+                          type="button"
+                          onClick={() => toggleActivityExpand(act.id)}
+                          className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
+                            isExpanded
+                              ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 shadow-2xs'
+                          }`}
+                          title={isExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4" />
+                          )}
+                        </button>
                       </div>
                     </div>
 
-                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                      {act.description || 'Atividade do Programa Integral.'}
-                    </p>
+                    {/* Body (Expanded View) */}
+                    {isExpanded && (
+                      <div className="p-5 sm:p-6 space-y-5 bg-white border-t border-slate-100 animate-fadeIn">
+                        {/* Bento Grid: Details & Material */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Description & Objective */}
+                          <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-4 space-y-2">
+                            <div className="flex items-center space-x-1.5 pb-2 border-b border-slate-200/70 text-xs font-extrabold text-slate-800">
+                              <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>Descrição & Finalidade Pedagógica</span>
+                            </div>
+                            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                              {act.description || 'Atividade extracurricular integrada à rotina do Programa Integral.'}
+                            </p>
+                            <div className="pt-2 text-[11px] text-slate-500">
+                              <span className="font-bold text-slate-700">Tipo de Controle: </span>
+                              {requiresRoll ? (
+                                <span className="text-emerald-700 font-bold">
+                                  Lançamento no Diário de Classe com registro de frequência por aluno.
+                                </span>
+                              ) : (
+                                <span className="text-amber-700 font-bold">
+                                  Grade horária e rotina geral (não exige lista de chamada individual).
+                                </span>
+                              )}
+                            </div>
+                          </div>
 
-                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs space-y-1">
-                      <span className="font-bold text-slate-700 block">Equipamento / Material Padrão:</span>
-                      <span className="text-slate-600">{act.defaultEquipment || 'Sem equipamento específico'}</span>
-                    </div>
+                          {/* Equipment & Kit Required */}
+                          <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-4 space-y-2">
+                            <div className="flex items-center space-x-1.5 pb-2 border-b border-slate-200/70 text-xs font-extrabold text-slate-800">
+                              <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>Equipamentos e Materiais Padrão</span>
+                            </div>
+                            <div className="bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-700 font-semibold shadow-2xs">
+                              {act.defaultEquipment || 'Sem equipamento específico cadastrado.'}
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              💡 Este material é sugerido automaticamente ao cadastrar novos horários desta modalidade na Grade Horária.
+                            </p>
+                          </div>
+                        </div>
 
-                    <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
-                      <span>Professores Associados:</span>
-                      <span className="font-bold text-indigo-600">{assignedProfs.length} profissional(is)</span>
-                    </div>
+                        {/* Associated Teachers & Monitors */}
+                        <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-200/70 text-xs font-extrabold text-slate-800">
+                            <span className="flex items-center space-x-1.5">
+                              <Users className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>
+                                Professores e Monitores Vinculados ({assignedProfs.length})
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              Gerenciado na aba Usuários
+                            </span>
+                          </div>
+
+                          {assignedProfs.length === 0 ? (
+                            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-4 text-center">
+                              <p className="text-xs text-slate-500 font-medium">
+                                Nenhum professor ou monitor vinculado a esta modalidade no momento.
+                              </p>
+                              <p className="text-[11px] text-indigo-600 font-bold mt-1">
+                                Acesse a aba &quot;Usuários e Permissões&quot; para vincular professores a esta atividade.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                              {assignedProfs.map((prof) => (
+                                <div
+                                  key={prof.id}
+                                  className="bg-white border border-slate-200 rounded-xl p-2.5 flex items-center space-x-2.5 shadow-2xs"
+                                >
+                                  <div
+                                    className={`w-8 h-8 rounded-lg ${
+                                      prof.avatarColor || 'bg-indigo-600'
+                                    } text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs`}
+                                  >
+                                    {prof.name ? prof.name.charAt(0).toUpperCase() : 'P'}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <h4 className="text-xs font-bold text-slate-900 truncate">
+                                      {prof.name}
+                                    </h4>
+                                    <span className="text-[10px] text-slate-500 truncate block">
+                                      {prof.email}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
-                    <button
-                      onClick={() => handleOpenEditActivityModal(act)}
-                      className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Editar</span>
-                    </button>
-
-                    <button
-                      onClick={() => setActivityToDelete(act)}
-                      className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
-                      title="Excluir modalidade"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}

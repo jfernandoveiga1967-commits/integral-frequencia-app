@@ -99,6 +99,64 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [blockToDelete, setBlockToDelete] = useState<ScheduleBlock | null>(null);
+  const [slotToDelete, setSlotToDelete] = useState<{
+    turma: string;
+    startTime: string;
+    endTime: string;
+    activityName: string;
+    blockIds: string[];
+    daysLabels: string;
+  } | null>(null);
+
+  // Accordion / Collapsible State for Weekly Days
+  const todayDayId = useMemo((): DayOfWeek | null => {
+    const dayIndex = new Date().getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
+    switch (dayIndex) {
+      case 1:
+        return 'segunda';
+      case 2:
+        return 'terca';
+      case 3:
+        return 'quarta';
+      case 4:
+        return 'quinta';
+      case 5:
+        return 'sexta';
+      default:
+        return null;
+    }
+  }, []);
+
+  // Initialize with all 5 days (Segunda a Sexta) expanded by default
+  const [expandedDays, setExpandedDays] = useState<Record<DayOfWeek, boolean>>({
+    segunda: true,
+    terca: true,
+    quarta: true,
+    quinta: true,
+    sexta: true,
+  });
+
+  const toggleDayExpanded = (dayId: DayOfWeek) => {
+    setExpandedDays((prev) => ({
+      ...prev,
+      [dayId]: !prev[dayId],
+    }));
+  };
+
+  const areAllDaysExpanded = useMemo(() => {
+    return DAYS_OF_WEEK.every((d) => !!expandedDays[d.id]);
+  }, [expandedDays]);
+
+  const handleToggleExpandAllDays = () => {
+    const target = !areAllDaysExpanded;
+    setExpandedDays({
+      segunda: target,
+      terca: target,
+      quarta: target,
+      quinta: target,
+      sexta: target,
+    });
+  };
 
   // Form State
   const [formTurma, setFormTurma] = useState<TurmaType>(() => sortedTurmas[0] || '');
@@ -315,6 +373,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         location?: string;
         guidelines?: string;
         days: Set<DayOfWeek>;
+        blockIds: string[];
       }
     >();
 
@@ -333,10 +392,14 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             location: b.location,
             guidelines: b.guidelines,
             days: new Set([b.dayOfWeek]),
+            blockIds: [b.id],
           });
         } else {
           const item = slotMap.get(key)!;
           item.days.add(b.dayOfWeek);
+          if (!item.blockIds.includes(b.id)) {
+            item.blockIds.push(b.id);
+          }
           if (!item.location && b.location) item.location = b.location;
           if (!item.guidelines && b.guidelines) item.guidelines = b.guidelines;
         }
@@ -463,6 +526,26 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     onDeleteScheduleBlock(blockToDelete.id);
     setBlockToDelete(null);
     showToast('Bloco de horário removido da grade.', 'success');
+  };
+
+  // Handle Quick Delete for Turma Time Slot
+  const confirmDeleteSlot = () => {
+    if (!slotToDelete) return;
+    const deletedIds = slotToDelete.blockIds;
+    const deletedSet = new Set(deletedIds);
+    const updatedSchedules = schedules.filter((s) => !deletedSet.has(s.id));
+
+    if (onBatchSaveSchedules) {
+      onBatchSaveSchedules(updatedSchedules, deletedIds);
+    } else {
+      deletedIds.forEach((id) => onDeleteScheduleBlock(id));
+    }
+
+    setSlotToDelete(null);
+    showToast(
+      `✓ Horário ${slotToDelete.startTime} - ${slotToDelete.endTime} (${slotToDelete.activityName}) excluído da grade de ${slotToDelete.turma}!`,
+      'success'
+    );
   };
 
   // --- REPLICATION 1: OPEN FULL ROUTINE MODAL ---
@@ -841,38 +924,146 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         </div>
       </div>
 
-      {/* Week Timetable Columns (Segunda a Sexta) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* Week Grid Header Bar: Status, Quick Day Selectors & Expand/Collapse All */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white border border-slate-200/80 rounded-2xl p-3 sm:px-4 sm:py-2.5 shadow-2xs">
+        <div className="flex items-center space-x-2">
+          <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span className="text-xs font-extrabold text-slate-800">
+            Dias da Semana:
+          </span>
+          <span className="text-[11px] text-slate-400 font-medium hidden xl:inline">
+            Clique no dia para expandir ou recolher
+          </span>
+        </div>
+
+        {/* Day Quick-Toggle Buttons Strip (Segunda a Sexta) */}
+        <div className="flex items-center flex-wrap gap-1.5">
+          {DAYS_OF_WEEK.map((d) => {
+            const isExp = !!expandedDays[d.id];
+            const count = schedulesByDay[d.id]?.length || 0;
+            const isToday = d.id === todayDayId;
+
+            return (
+              <button
+                key={d.id}
+                id={`btn-toggle-day-${d.id}`}
+                type="button"
+                onClick={() => toggleDayExpanded(d.id)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition-all cursor-pointer border ${
+                  isExp
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 hover:border-slate-300'
+                }`}
+                title={`Clique para ${isExp ? 'recolher' : 'expandir'} ${d.label}`}
+              >
+                <span>{d.short}</span>
+                <span
+                  className={`text-[10px] px-1 py-0.2 rounded font-black ${
+                    isExp ? 'bg-indigo-800/80 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {count}
+                </span>
+                {isToday && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Global Expand / Collapse All Button */}
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            id="btn-toggle-expand-all-days"
+            onClick={handleToggleExpandAllDays}
+            className="w-full sm:w-auto justify-center px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-900 border border-slate-200 hover:border-indigo-200 text-xs font-extrabold flex items-center space-x-1.5 transition-all cursor-pointer shadow-2xs"
+            title={areAllDaysExpanded ? 'Recolher todos os dias da semana' : 'Expandir todos os dias da semana'}
+          >
+            {areAllDaysExpanded ? (
+              <>
+                <ChevronUp className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Recolher Todos</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Expandir Todos</span>
+              </>
+            )}
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-100/70 text-indigo-800 font-black ml-0.5">
+              {Object.values(expandedDays).filter(Boolean).length}/5
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Week Timetable Columns (Segunda a Sexta) - Accordion Enabled */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-start">
         {DAYS_OF_WEEK.map((day) => {
           const dayBlocks = schedulesByDay[day.id];
+          const isExpanded = expandedDays[day.id];
+          const isToday = day.id === todayDayId;
+
           return (
             <div
               key={day.id}
-              className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm flex flex-col min-h-[420px] transition-all hover:border-indigo-200"
+              className={`bg-white border rounded-3xl p-3.5 sm:p-4 shadow-sm flex flex-col transition-all duration-200 overflow-hidden ${
+                isToday ? 'border-indigo-300 ring-2 ring-indigo-500/10' : 'border-slate-200 hover:border-slate-300'
+              } ${isExpanded ? 'min-h-[380px]' : 'min-h-[90px]'}`}
             >
-              {/* Day Header with [📋 Replicar Dia] and [+] */}
-              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
-                <div className="flex items-center space-x-2">
-                  <div className="w-7 h-7 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold text-xs flex items-center justify-center border border-indigo-100">
+              {/* Day Header with [📋 Replicar Dia], [+], and [⌄ / ⌃ Accordion Toggle] */}
+              <div
+                onClick={() => toggleDayExpanded(day.id)}
+                className={`flex items-center justify-between gap-1.5 pb-2.5 cursor-pointer select-none ${
+                  isExpanded ? 'mb-3 border-b border-slate-100' : 'mb-0'
+                }`}
+                title={isExpanded ? `Clique no cabeçalho para recolher ${day.label}` : `Clique no cabeçalho para expandir ${day.label}`}
+              >
+                {/* Left: Clickable Day Title & Info */}
+                <div
+                  id={`schedule-day-header-${day.id}`}
+                  className="flex items-center space-x-1.5 sm:space-x-2 text-left group min-w-0 flex-1"
+                >
+                  <div
+                    className={`w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-xl font-extrabold text-[11px] sm:text-xs flex items-center justify-center border transition-colors shrink-0 ${
+                      isToday
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                        : 'bg-indigo-50 text-indigo-700 border-indigo-100 group-hover:bg-indigo-100'
+                    }`}
+                  >
                     {day.short}
                   </div>
-                  <div>
-                    <h3 className="text-xs font-extrabold text-slate-800 leading-tight">
-                      {day.label}
-                    </h3>
-                    <span className="text-[10px] text-slate-400 font-bold">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <h3 className="text-xs font-extrabold text-slate-800 group-hover:text-indigo-600 leading-tight transition-colors truncate">
+                        {day.label}
+                      </h3>
+                      {isToday && (
+                        <span className="text-[8px] font-black uppercase px-1 py-0.5 rounded bg-indigo-100 text-indigo-800 leading-none shrink-0">
+                          Hoje
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-bold block truncate">
                       {dayBlocks.length} {dayBlocks.length === 1 ? 'atividade' : 'atividades'}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-1">
+                {/* Right: Actions (Replicate, Add, Collapse/Expand) */}
+                <div className="flex items-center space-x-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                   {/* [ 📋 Replicar Dia ] Button */}
                   <button
+                    id={`schedule-day-replicate-${day.id}`}
                     type="button"
-                    onClick={() => handleOpenDayReplicateModal(day.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenDayReplicateModal(day.id);
+                    }}
                     title={`Replicar horários de ${day.label} (${selectedTurma}) para outros dias ou turmas`}
-                    className={`w-7 h-7 rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
+                    className={`w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                       dayBlocks.length > 0
                         ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 hover:border-indigo-300'
                         : 'bg-slate-50 text-slate-300 border-slate-100 hover:bg-slate-100 hover:text-slate-400'
@@ -883,116 +1074,184 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
                   {/* Add block button */}
                   <button
+                    id={`schedule-day-add-${day.id}`}
                     type="button"
-                    onClick={() => handleOpenNewBlock(day.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenNewBlock(day.id);
+                    }}
                     title={`Adicionar horário em ${day.label}`}
-                    className="w-7 h-7 rounded-xl bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 flex items-center justify-center transition-colors cursor-pointer"
+                    className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-xl bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 flex items-center justify-center transition-colors cursor-pointer shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Accordion Toggle Arrow Button */}
+                  <button
+                    id={`schedule-day-toggle-${day.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleDayExpanded(day.id);
+                    }}
+                    title={isExpanded ? `Recolher ${day.label}` : `Expandir ${day.label}`}
+                    className={`w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-xl border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                      isExpanded
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                        : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 shadow-2xs'
+                    }`}
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Schedule Blocks for this Day */}
-              <div className="space-y-3 flex-1 flex flex-col">
-                {dayBlocks.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-4 text-center rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50/50">
-                    <Clock className="w-6 h-6 text-slate-300 mb-1" />
-                    <p className="text-[11px] font-bold text-slate-400">
-                      Nenhum horário cadastrado
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-2">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenNewBlock(day.id)}
-                        className="text-[10px] font-extrabold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                      >
-                        + Cadastrar
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  dayBlocks.map((block) => {
-                    const actDetails = getActivityDetails(block.activityId);
-                    const isRollCall = actDetails?.requiresRollCall !== false;
-
-                    return (
-                      <div
-                        key={block.id}
-                        className="group relative bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl p-3.5 shadow-2xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-2.5"
-                      >
-                        {/* Time & Type Pill */}
-                        <div className="flex items-center justify-between gap-1.5">
-                          <div className="flex items-center space-x-1.5 bg-slate-900 text-white px-2 py-0.5 rounded-lg text-[10px] font-extrabold tracking-wide">
-                            <Clock className="w-3 h-3 text-indigo-400" />
-                            <span>
-                              {block.startTime} - {block.endTime}
-                            </span>
-                          </div>
-
-                          {isRollCall ? (
-                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              Chamada
-                            </span>
-                          ) : (
-                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200">
-                              Rotina
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Activity Badge */}
-                        <div>
-                          <ActivityBadge
-                            activity={block.activityId}
-                            iconName={actDetails?.icon}
-                            size="sm"
-                          />
-                        </div>
-
-                        {/* Location (Optional) */}
-                        {block.location && (
-                          <div className="flex items-center space-x-1.5 text-[11px] text-slate-600 font-semibold bg-white/80 px-2 py-1 rounded-lg border border-slate-100">
-                            <MapPin className="w-3 h-3 text-indigo-500 shrink-0" />
-                            <span className="truncate">{block.location}</span>
-                          </div>
-                        )}
-
-                        {/* Guidelines (Optional) */}
-                        {block.guidelines && (
-                          <div className="text-[11px] text-slate-600 bg-amber-50/70 border border-amber-200/60 rounded-xl p-2 font-medium leading-tight">
-                            <div className="flex items-center space-x-1 text-[9px] font-extrabold uppercase text-amber-800 mb-0.5">
-                              <Info className="w-2.5 h-2.5" />
-                              <span>Orientações:</span>
-                            </div>
-                            <p className="line-clamp-2">{block.guidelines}</p>
-                          </div>
-                        )}
-
-                        {/* Action Buttons */}
-                        <div className="flex items-center justify-end space-x-1 pt-1 border-t border-slate-100">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditBlock(block)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
-                            title="Editar este horário"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setBlockToDelete(block)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                            title="Excluir este horário"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+              {/* Schedule Blocks for this Day (Expanded View) */}
+              {isExpanded ? (
+                <div className="space-y-3 flex-1 flex flex-col">
+                  {dayBlocks.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 text-center rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50/50">
+                      <Clock className="w-6 h-6 text-slate-300 mb-1" />
+                      <p className="text-[11px] font-bold text-slate-400">
+                        Nenhum horário cadastrado
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenNewBlock(day.id)}
+                          className="text-[10px] font-extrabold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
+                        >
+                          + Cadastrar
+                        </button>
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                    </div>
+                  ) : (
+                    dayBlocks.map((block) => {
+                      const actDetails = getActivityDetails(block.activityId);
+                      const isRollCall = actDetails?.requiresRollCall !== false;
+
+                      return (
+                        <div
+                          key={block.id}
+                          className="group relative bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl p-3.5 shadow-2xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-2.5"
+                        >
+                          {/* Time & Type Pill */}
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center space-x-1.5 bg-slate-900 text-white px-2 py-0.5 rounded-lg text-[10px] font-extrabold tracking-wide">
+                              <Clock className="w-3 h-3 text-indigo-400" />
+                              <span>
+                                {block.startTime} - {block.endTime}
+                              </span>
+                            </div>
+
+                            {isRollCall ? (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Chamada
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200">
+                                Rotina
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Activity Badge */}
+                          <div>
+                            <ActivityBadge
+                              activity={block.activityId}
+                              iconName={actDetails?.icon}
+                              size="sm"
+                            />
+                          </div>
+
+                          {/* Location (Optional) */}
+                          {block.location && (
+                            <div className="flex items-center space-x-1.5 text-[11px] text-slate-600 font-semibold bg-white/80 px-2 py-1 rounded-lg border border-slate-100">
+                              <MapPin className="w-3 h-3 text-indigo-500 shrink-0" />
+                              <span className="truncate">{block.location}</span>
+                            </div>
+                          )}
+
+                          {/* Guidelines (Optional) */}
+                          {block.guidelines && (
+                            <div className="text-[11px] text-slate-600 bg-amber-50/70 border border-amber-200/60 rounded-xl p-2 font-medium leading-tight">
+                              <div className="flex items-center space-x-1 text-[9px] font-extrabold uppercase text-amber-800 mb-0.5">
+                                <Info className="w-2.5 h-2.5" />
+                                <span>Orientações:</span>
+                              </div>
+                              <p className="line-clamp-2">{block.guidelines}</p>
+                            </div>
+                          )}
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center justify-end space-x-1 pt-1 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditBlock(block)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                              title="Editar este horário"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBlockToDelete(block)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Excluir este horário"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              ) : (
+                /* Collapsed Preview State */
+                <div
+                  onClick={() => toggleDayExpanded(day.id)}
+                  className="mt-2 pt-2 border-t border-dashed border-slate-100 cursor-pointer group flex flex-col justify-between flex-1"
+                  title={`Clique para expandir e ver todas as atividades de ${day.label}`}
+                >
+                  {dayBlocks.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {dayBlocks.slice(0, 3).map((b) => {
+                          const act = activitiesList.find((a) => a.id === b.activityId);
+                          return (
+                            <span
+                              key={b.id}
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200"
+                            >
+                              <span className="font-bold">{b.startTime}</span>
+                              <span className="text-slate-400">•</span>
+                              <span className="truncate max-w-[80px]">{act?.name || b.activityId}</span>
+                            </span>
+                          );
+                        })}
+                        {dayBlocks.length > 3 && (
+                          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">
+                            +{dayBlocks.length - 3} mais
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium group-hover:text-indigo-600 flex items-center gap-1 mt-1 transition-colors">
+                        <span>Clique para expandir</span>
+                        <ChevronDown className="w-3 h-3 text-indigo-500" />
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="py-2 text-center">
+                      <span className="text-[10px] text-slate-400 italic">Nenhum horário</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1635,7 +1894,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   </div>
 
                   {registeredTurmaTimeSlots.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto pr-1">
+                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pr-1">
                       {registeredTurmaTimeSlots.map((slot, idx) => {
                         const isCurrentActive =
                           formStartTime === slot.startTime &&
@@ -1646,38 +1905,67 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                           .join(', ');
 
                         return (
-                          <button
+                          <div
                             key={idx}
-                            type="button"
-                            onClick={() => {
-                              setFormStartTime(slot.startTime);
-                              setFormEndTime(slot.endTime);
-                              setFormActivityId(slot.activityId);
-                              if (slot.location && !formLocation) {
-                                setFormLocation(slot.location);
-                              }
-                              if (slot.guidelines && !formGuidelines) {
-                                setFormGuidelines(slot.guidelines);
-                              }
-                              setFormError(null);
-                            }}
-                            className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 ${
+                            className={`group inline-flex items-center rounded-xl border transition-all shrink-0 ${
                               isCurrentActive
                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
                                 : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-900 border-slate-200 hover:border-indigo-300'
                             }`}
-                            title={`Clique para preencher: ${slot.startTime} - ${slot.endTime} • ${slot.activityName} (${daysLabels})`}
                           >
-                            <span className={isCurrentActive ? 'text-white' : 'text-indigo-600'}>
-                              {renderActivityIcon(slot.iconName, 'w-3.5 h-3.5')}
-                            </span>
-                            <span>{slot.startTime} - {slot.endTime}</span>
-                            <span className={isCurrentActive ? 'text-indigo-200' : 'text-slate-300'}>•</span>
-                            <span className={`truncate max-w-[140px] ${isCurrentActive ? 'text-white font-extrabold' : 'text-slate-800'}`}>
-                              {slot.activityName}
-                            </span>
-                            {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5 shrink-0" />}
-                          </button>
+                            {/* Click to fill button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormStartTime(slot.startTime);
+                                setFormEndTime(slot.endTime);
+                                setFormActivityId(slot.activityId);
+                                if (slot.location && !formLocation) {
+                                  setFormLocation(slot.location);
+                                }
+                                if (slot.guidelines && !formGuidelines) {
+                                  setFormGuidelines(slot.guidelines);
+                                }
+                                setFormError(null);
+                              }}
+                              className="text-xs font-bold px-2.5 py-1.5 cursor-pointer flex items-center space-x-1.5 text-left"
+                              title={`Clique para preencher: ${slot.startTime} - ${slot.endTime} • ${slot.activityName} (${daysLabels})`}
+                            >
+                              <span className={isCurrentActive ? 'text-white' : 'text-indigo-600'}>
+                                {renderActivityIcon(slot.iconName, 'w-3.5 h-3.5')}
+                              </span>
+                              <span>{slot.startTime} - {slot.endTime}</span>
+                              <span className={isCurrentActive ? 'text-indigo-200' : 'text-slate-300'}>•</span>
+                              <span className={`truncate max-w-[130px] ${isCurrentActive ? 'text-white font-extrabold' : 'text-slate-800'}`}>
+                                {slot.activityName}
+                              </span>
+                              {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5 shrink-0" />}
+                            </button>
+
+                            {/* Quick Delete Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSlotToDelete({
+                                  turma: formTurma,
+                                  startTime: slot.startTime,
+                                  endTime: slot.endTime,
+                                  activityName: slot.activityName,
+                                  blockIds: slot.blockIds,
+                                  daysLabels,
+                                });
+                              }}
+                              className={`p-1 mr-1 rounded-lg transition-colors cursor-pointer ${
+                                isCurrentActive
+                                  ? 'text-indigo-200 hover:text-white hover:bg-indigo-700/60'
+                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                              }`}
+                              title={`Excluir este horário (${slot.startTime} - ${slot.endTime} • ${slot.activityName}) da grade de ${formTurma}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -2122,7 +2410,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal for Single Block */}
       {blockToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
@@ -2151,6 +2439,50 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 cursor-pointer"
               >
                 Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal for Saved Turma Slot */}
+      {slotToDelete && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Remover Horário da Grade?
+              </h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Deseja remover o horário <strong>{slotToDelete.startTime} - {slotToDelete.endTime}</strong> (<strong>{slotToDelete.activityName}</strong>) da turma <strong>{slotToDelete.turma}</strong>?
+              </p>
+              <div className="mt-2 p-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] text-slate-600 font-semibold text-left">
+                <div className="flex items-center justify-between">
+                  <span>Dias cadastrados:</span>
+                  <span className="text-indigo-600 font-bold">{slotToDelete.daysLabels}</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {slotToDelete.blockIds.length} registro{slotToDelete.blockIds.length > 1 ? 's' : ''} no Firestore
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-center space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSlotToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteSlot}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 cursor-pointer"
+              >
+                Sim, Excluir do Firestore
               </button>
             </div>
           </div>
