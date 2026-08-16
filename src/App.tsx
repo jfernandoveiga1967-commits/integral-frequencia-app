@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock } from './types';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, resetAllData, isMockStudent } from './utils/storageUtils';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem } from './types';
+import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
@@ -19,6 +19,7 @@ import {
   subscribeUsers,
   subscribeActivities,
   subscribeToSchedules,
+  subscribeHolidays,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -32,6 +33,9 @@ import {
   deleteScheduleBlockFromFirestore,
   saveAllSchedulesToFirestore,
   batchSyncSchedulesToFirestore,
+  saveHolidayToFirestore,
+  deleteHolidayFromFirestore,
+  batchSaveHolidaysToFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
   deleteDoc,
@@ -44,6 +48,7 @@ export default function App() {
   const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsersList());
   const [activitiesList, setActivitiesList] = useState<ActivityItem[]>(() => loadActivities());
   const [schedules, setSchedules] = useState<ScheduleBlock[]>(() => loadSchedules());
+  const [holidays, setHolidays] = useState<HolidayItem[]>(() => loadHolidays());
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
@@ -341,6 +346,17 @@ export default function App() {
       saveSchedules(fsSchedules);
     });
 
+    const unsubHolidays = subscribeHolidays((fsHolidays) => {
+      if (fsHolidays.length > 0) {
+        setHolidays(fsHolidays);
+        saveHolidays(fsHolidays);
+      } else {
+        const defaultHols = loadHolidays();
+        setHolidays(defaultHols);
+        batchSaveHolidaysToFirestore(defaultHols).catch(() => {});
+      }
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
@@ -348,6 +364,7 @@ export default function App() {
       unsubUsers();
       unsubActivities();
       unsubSchedules();
+      unsubHolidays();
     };
   }, []);
 
@@ -665,6 +682,32 @@ export default function App() {
     }
   };
 
+  // Holiday and Recess Management Handlers
+  const handleSaveHoliday = (holiday: HolidayItem) => {
+    setHolidays((prev) => {
+      const filtered = prev.filter((h) => h.id !== holiday.id);
+      const updated = [...filtered, holiday].sort((a, b) => a.date.localeCompare(b.date));
+      saveHolidays(updated);
+      return updated;
+    });
+    saveHolidayToFirestore(holiday);
+  };
+
+  const handleDeleteHoliday = (holidayId: string) => {
+    setHolidays((prev) => {
+      const updated = prev.filter((h) => h.id !== holidayId);
+      saveHolidays(updated);
+      return updated;
+    });
+    deleteHolidayFromFirestore(holidayId);
+  };
+
+  const handleBatchSaveHolidays = (batch: HolidayItem[]) => {
+    setHolidays(batch);
+    saveHolidays(batch);
+    batchSaveHolidaysToFirestore(batch);
+  };
+
   // Records count for the current week
   const weekRecordsCount = useMemo(() => {
     return records.filter(
@@ -709,6 +752,7 @@ export default function App() {
             turmas={turmas}
             activitiesList={activitiesList}
             schedules={schedules}
+            holidays={holidays}
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
@@ -743,6 +787,7 @@ export default function App() {
             records={records}
             turmas={turmas}
             activitiesList={activitiesList}
+            holidays={holidays}
             currentWeek={currentWeek}
             currentUser={currentUser}
             onDeleteTurma={handleDeleteTurma}
@@ -767,6 +812,7 @@ export default function App() {
             activitiesList={activitiesList}
             turmas={turmas}
             schedules={schedules}
+            holidays={holidays}
             onSaveUser={handleSaveUser}
             onDeleteUser={handleDeleteUser}
             onSaveActivity={handleSaveActivity}
@@ -774,6 +820,9 @@ export default function App() {
             onSaveScheduleBlock={handleSaveScheduleBlock}
             onDeleteScheduleBlock={handleDeleteScheduleBlock}
             onBatchSaveSchedules={handleBatchSaveSchedules}
+            onSaveHoliday={handleSaveHoliday}
+            onDeleteHoliday={handleDeleteHoliday}
+            onBatchSaveHolidays={handleBatchSaveHolidays}
           />
         )}
       </main>

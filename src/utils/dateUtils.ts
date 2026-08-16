@@ -1,4 +1,4 @@
-import { WeekInfo } from '../types';
+import { WeekInfo, HolidayItem } from '../types';
 
 export function getISOWeekNumber(date: Date): { year: number; weekNumber: number } {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -126,3 +126,121 @@ export function getDayOfWeekLabel(day: 'segunda' | 'terca' | 'quarta' | 'quinta'
       return day;
   }
 }
+
+/**
+ * Checks if a date falls on a weekend (Saturday = 6, Sunday = 0)
+ */
+export function isWeekend(date: Date | string): boolean {
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
+  const day = d.getDay();
+  return day === 0 || day === 6; // 0 = Domingo, 6 = Sábado
+}
+
+export function isSaturday(date: Date | string): boolean {
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
+  return d.getDay() === 6;
+}
+
+export function isSunday(date: Date | string): boolean {
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
+  return d.getDay() === 0;
+}
+
+export function getDayNameFull(date: Date | string): string {
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
+  const dayNames = [
+    'Domingo',
+    'Segunda-feira',
+    'Terça-feira',
+    'Quarta-feira',
+    'Quinta-feira',
+    'Sexta-feira',
+    'Sábado',
+  ];
+  return dayNames[d.getDay()] || '';
+}
+
+/**
+ * Checks if a specific date string (YYYY-MM-DD) is a registered holiday or recess
+ */
+export function isHolidayOrRecess(dateStr: string, holidays: HolidayItem[]): HolidayItem | undefined {
+  if (!dateStr || !holidays || holidays.length === 0) return undefined;
+  return holidays.find((h) => h.date === dateStr);
+}
+
+/**
+ * Returns effective school days (Monday-Friday, excluding weekends and registered holidays)
+ */
+export function getEffectiveSchoolDays(
+  startDateStr: string,
+  endDateStr: string,
+  holidays: HolidayItem[]
+): { dateStr: string; dayName: string; dayShort: string }[] {
+  const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+  const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
+
+  const cur = new Date(startYear, startMonth - 1, startDay);
+  const end = new Date(endYear, endMonth - 1, endDay);
+
+  const holidayDateSet = new Set(holidays.map((h) => h.date));
+  const effectiveDays: { dateStr: string; dayName: string; dayShort: string }[] = [];
+
+  while (cur <= end) {
+    const dateStr = toISODateString(cur);
+    const dayOfWeek = cur.getDay();
+
+    // Check if it's a weekday (1-5) and not a holiday
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidayDateSet.has(dateStr)) {
+      effectiveDays.push({
+        dateStr,
+        dayName: getDayNameFull(cur),
+        dayShort: `${formatDateShort(cur)}`,
+      });
+    }
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  return effectiveDays;
+}
+

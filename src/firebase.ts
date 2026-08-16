@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock } from './types';
+import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from './types';
 
 export { doc, deleteDoc };
 
@@ -606,4 +606,86 @@ export async function saveAllSchedulesToFirestore(schedules: ScheduleBlock[]) {
     console.error('Error saving all schedules to Firestore:', error);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Holidays & Recess Management in Firestore
+// ---------------------------------------------------------------------------
+
+export function subscribeHolidays(callback: (holidays: HolidayItem[]) => void) {
+  const holidaysCollection = collection(db, 'holidays');
+  return onSnapshot(
+    holidaysCollection,
+    (snapshot) => {
+      const holidayList: HolidayItem[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.id && data.date && data.name) {
+          holidayList.push({
+            id: data.id,
+            date: data.date,
+            name: data.name,
+            type: data.type || 'feriado',
+            description: data.description || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          });
+        }
+      });
+      // Sort by date ascending
+      holidayList.sort((a, b) => a.date.localeCompare(b.date));
+      callback(holidayList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'holidays');
+    }
+  );
+}
+
+export async function saveHolidayToFirestore(holiday: HolidayItem) {
+  try {
+    const docRef = doc(db, 'holidays', holiday.id);
+    await setDoc(docRef, {
+      id: holiday.id,
+      date: holiday.date,
+      name: holiday.name,
+      type: holiday.type,
+      description: holiday.description || '',
+      createdAt: holiday.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `holidays/${holiday.id}`);
+  }
+}
+
+export async function deleteHolidayFromFirestore(holidayId: string) {
+  try {
+    const docRef = doc(db, 'holidays', holidayId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `holidays/${holidayId}`);
+  }
+}
+
+export async function batchSaveHolidaysToFirestore(holidays: HolidayItem[]) {
+  try {
+    const batch = writeBatch(db);
+    for (const h of holidays) {
+      const docRef = doc(db, 'holidays', h.id);
+      batch.set(docRef, {
+        id: h.id,
+        date: h.date,
+        name: h.name,
+        type: h.type,
+        description: h.description || '',
+        createdAt: h.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    await batch.commit();
+  } catch (error) {
+    console.error('Error batch saving holidays to Firestore:', error);
+  }
+}
+
 

@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 
 interface AttendanceSheetProps {
@@ -16,6 +16,7 @@ interface AttendanceSheetProps {
   turmas?: string[];
   activitiesList?: ActivityItem[];
   schedules?: ScheduleBlock[];
+  holidays?: HolidayItem[];
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
@@ -30,6 +31,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   turmas,
   activitiesList = ACTIVITIES_LIST,
   schedules = [],
+  holidays = [],
   currentWeek,
   selectedDate,
   currentUser = null,
@@ -386,6 +388,7 @@ function getCurrentHHMM(): string {
         selectedTurma={selectedTurma}
         selectedDate={selectedDate}
         turmasList={turmasList}
+        holidays={holidays}
         onSelectActivityAndTurma={(act, turma) => {
           if (act) setSelectedActivity(act);
           if (turma) setSelectedTurma(turma);

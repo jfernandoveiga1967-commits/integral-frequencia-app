@@ -53,6 +53,15 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    match /holidays/{holidayId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'date', 'name', 'type'])
+        && isNonEmptyString(request.resource.data.date, 10)
+        && isNonEmptyString(request.resource.data.name, 128)
+        && isNonEmptyString(request.resource.data.type, 32);
+      allow delete: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

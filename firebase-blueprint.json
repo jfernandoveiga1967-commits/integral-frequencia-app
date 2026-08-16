@@ -94,6 +94,21 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "turma", "dayOfWeek", "startTime", "endTime", "activityId"]
+    },
+    "Holiday": {
+      "title": "Holiday",
+      "description": "School holiday or recess day record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 10 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["feriado", "recesso", "ponto_facultativo"] },
+        "description": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "date", "name", "type"]
     }
   },
   "firestore": {
@@ -120,6 +135,10 @@
     "/schedules/{scheduleId}": {
       "schema": "Schedule",
       "description": "Collection of weekly schedule blocks"
+    },
+    "/holidays/{holidayId}": {
+      "schema": "Holiday",
+      "description": "Collection of school holidays and recesses"
     }
   }
 }

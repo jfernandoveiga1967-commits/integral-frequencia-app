@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock } from '../types';
+import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
+import { HolidayManager } from './HolidayManager';
 import {
   ShieldCheck,
   GraduationCap,
@@ -26,6 +27,7 @@ import {
   Plus,
   Calendar,
   CalendarDays,
+  CalendarOff,
   BookOpen,
   Cpu,
   Palette,
@@ -59,6 +61,7 @@ interface UserManagementProps {
   activitiesList: ActivityItem[];
   turmas?: string[];
   schedules?: ScheduleBlock[];
+  holidays?: HolidayItem[];
   onSaveUser: (user: UserProfile) => void;
   onDeleteUser: (userId: string) => void;
   onSaveActivity: (activity: ActivityItem) => void;
@@ -70,6 +73,9 @@ interface UserManagementProps {
     deletedIds?: string[],
     newOrUpdatedOnly?: ScheduleBlock[]
   ) => void;
+  onSaveHoliday?: (holiday: HolidayItem) => void;
+  onDeleteHoliday?: (id: string) => void;
+  onBatchSaveHolidays?: (holidays: HolidayItem[]) => void;
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({
@@ -78,6 +84,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   activitiesList,
   turmas,
   schedules = [],
+  holidays = [],
   onSaveUser,
   onDeleteUser,
   onSaveActivity,
@@ -85,6 +92,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   onSaveScheduleBlock,
   onDeleteScheduleBlock,
   onBatchSaveSchedules,
+  onSaveHoliday,
+  onDeleteHoliday,
+  onBatchSaveHolidays,
 }) => {
   const isAdmin = isCoordenador(currentUser);
 
@@ -113,7 +123,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   }, [turmas]);
 
   // Sub-tab switcher state
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities' | 'schedules'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities' | 'schedules' | 'holidays'>('users');
 
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
@@ -738,7 +748,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         </div>
 
         {/* Section Navigation Tabs */}
-        <div className="flex flex-wrap sm:flex-nowrap bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mt-6 max-w-2xl gap-1">
+        <div className="flex flex-wrap sm:flex-nowrap bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mt-6 max-w-4xl gap-1">
           <button
             onClick={() => setActiveSubTab('users')}
             className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
@@ -773,6 +783,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           >
             <CalendarDays className="w-4 h-4" />
             <span>Grade Horária ({schedules.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('holidays')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              activeSubTab === 'holidays'
+                ? 'bg-rose-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <CalendarOff className="w-4 h-4" />
+            <span>Feriados e Recessos ({holidays.length})</span>
           </button>
         </div>
       </div>
@@ -1511,6 +1533,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           onSaveScheduleBlock={onSaveScheduleBlock || (() => {})}
           onDeleteScheduleBlock={onDeleteScheduleBlock || (() => {})}
           onBatchSaveSchedules={onBatchSaveSchedules}
+        />
+      )}
+
+      {/* ================= SECTION 4: FERIADOS E RECESSOS ESCOLARES ================= */}
+      {activeSubTab === 'holidays' && (
+        <HolidayManager
+          holidays={holidays}
+          onSaveHoliday={onSaveHoliday || (() => {})}
+          onDeleteHoliday={onDeleteHoliday || (() => {})}
+          onBatchSaveHolidays={onBatchSaveHolidays}
         />
       )}
 

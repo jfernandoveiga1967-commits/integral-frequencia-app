@@ -7,6 +7,7 @@ import {
   WeekInfo,
   ActivityItem,
   UserProfile,
+  HolidayItem,
 } from '../types';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
@@ -18,7 +19,7 @@ import {
   generateStudentPDFReport,
   generateTurmaPDFReport,
 } from '../utils/pdfGenerator';
-import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel } from '../utils/dateUtils';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays } from '../utils/dateUtils';
 import {
   BarChart3,
   Printer,
@@ -40,6 +41,8 @@ import {
   Sparkles,
   SlidersHorizontal,
   Award,
+  CalendarOff,
+  Info,
 } from 'lucide-react';
 
 interface WeeklyReportProps {
@@ -47,6 +50,7 @@ interface WeeklyReportProps {
   records: AttendanceRecord[];
   turmas?: string[];
   activitiesList?: ActivityItem[];
+  holidays?: HolidayItem[];
   currentWeek: WeekInfo;
   currentUser?: UserProfile | null;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
@@ -57,6 +61,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   records,
   turmas,
   activitiesList = ACTIVITIES_LIST,
+  holidays = [],
   currentWeek,
   currentUser,
   onDeleteTurma,
@@ -160,6 +165,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     filterMode === 'week'
       ? currentWeek.label
       : `Período de ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`;
+
+  // Effective School Days Calculation (excluding weekends and registered holidays/recesses)
+  const schoolDaysInfo = useMemo(() => {
+    return getEffectiveSchoolDays(effectiveStartDate, effectiveEndDate, holidays);
+  }, [effectiveStartDate, effectiveEndDate, holidays]);
 
   // Filter records according to active range and user roles
   const activeRecords = useMemo(() => {
@@ -504,6 +514,32 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               className="bg-white border border-slate-200 text-slate-800 text-xs font-semibold rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
+        </div>
+
+        {/* Effective School Days & Holiday Notice Strip */}
+        <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-medium">
+          <div className="flex items-center space-x-2">
+            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-800 border border-indigo-200 font-bold">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span>
+                {schoolDaysInfo.effectiveDaysCount}{' '}
+                {schoolDaysInfo.effectiveDaysCount === 1 ? 'Dia Útil Letivo' : 'Dias Úteis Letivos'}
+              </span>
+            </span>
+            <span className="text-slate-500 text-[11px]">
+              (Desconsiderados fins de semana e feriados/recessos cadastrados)
+            </span>
+          </div>
+
+          {schoolDaysInfo.holidaysCount > 0 && (
+            <div className="flex items-center space-x-1.5 text-rose-700 bg-rose-50 px-2.5 py-1 rounded-xl border border-rose-200 text-[11px] font-bold">
+              <CalendarOff className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span>
+                {schoolDaysInfo.holidaysCount}{' '}
+                {schoolDaysInfo.holidaysCount === 1 ? 'feriado/recesso descontado' : 'feriados/recessos descontados'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
