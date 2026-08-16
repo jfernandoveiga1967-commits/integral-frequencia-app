@@ -50,6 +50,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return sorted.filter((t) => userTurmaSet.has(t));
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
+  const activityMap = React.useMemo(() => {
+    const map = new Map<string, ActivityItem>();
+    activeActivities.forEach((item) => {
+      map.set(item.id, item);
+      map.set(item.name, item);
+    });
+    return map;
+  }, [activeActivities]);
+
   const turmasList = allowedTurmas;
 
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
@@ -803,9 +812,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    {student.activities.map((act) => (
-                      <ActivityBadge key={act} activity={act} size="sm" />
-                    ))}
+                    {student.activities.map((act) => {
+                      const actMeta = activityMap.get(act);
+                      return (
+                        <ActivityBadge
+                          key={act}
+                          activity={act}
+                          iconName={actMeta?.icon}
+                          customIconUrl={actMeta?.customIconUrl}
+                          customEquipment={actMeta?.defaultEquipment}
+                          size="sm"
+                        />
+                      );
+                    })}
                   </div>
                 </div>
 

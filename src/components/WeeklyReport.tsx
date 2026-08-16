@@ -88,6 +88,16 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   const allowedActivityIds = useMemo(() => activeActivities.map((a) => a.id), [activeActivities]);
 
+  const activityMap = useMemo(() => {
+    const map = new Map<string, ActivityItem>();
+    const rawList = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    rawList.forEach((item) => {
+      map.set(item.id, item);
+      map.set(item.name, item);
+    });
+    return map;
+  }, [activitiesList]);
+
   const sortedStudentsForPdf = useMemo(() => {
     const rawStudents = students || [];
     const list =
@@ -693,10 +703,18 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {activityStats.map((stat) => (
+              {activityStats.map((stat) => {
+                const actMeta = activityMap.get(stat.activity);
+                return (
                 <tr key={stat.activity} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-4 py-3 font-bold text-slate-900 flex items-center space-x-2">
-                    <ActivityBadge activity={stat.activity} size="sm" />
+                    <ActivityBadge
+                      activity={stat.activity}
+                      iconName={actMeta?.icon}
+                      customIconUrl={actMeta?.customIconUrl}
+                      customEquipment={actMeta?.defaultEquipment}
+                      size="sm"
+                    />
                   </td>
                   <td className="px-4 py-3 text-center font-semibold text-slate-700">{stat.total}</td>
                   <td className="px-4 py-3 text-center font-extrabold text-emerald-700">
@@ -725,7 +743,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

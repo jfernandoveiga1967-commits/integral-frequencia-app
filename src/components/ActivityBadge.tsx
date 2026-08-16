@@ -46,6 +46,7 @@ interface ActivityBadgeProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
   iconName?: string;
+  customIconUrl?: string;
   customEquipment?: string;
 }
 
@@ -330,25 +331,39 @@ export function renderActivityIcon(iconName?: string, className: string = 'w-4 h
   }
 }
 
+export function renderActivityIconOrImage(
+  iconName?: string,
+  customIconUrl?: string,
+  className: string = 'w-4 h-4',
+  altText: string = 'Ícone da Modalidade'
+) {
+  if (customIconUrl && customIconUrl.trim() !== '') {
+    return (
+      <img
+        src={customIconUrl}
+        alt={altText}
+        className={`${className} object-contain rounded-xs shrink-0 inline-block`}
+        onError={(e) => {
+          // If image fails, hide image element so fallback can render or container stays clean
+          (e.currentTarget as HTMLElement).style.display = 'none';
+        }}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return renderActivityIcon(iconName, className);
+}
+
 export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
   activity,
   showIcon = true,
   size = 'md',
   className = '',
   iconName,
+  customIconUrl,
   customEquipment,
 }) => {
   const defaultConfig = activityConfig[activity];
-
-  const config = defaultConfig || {
-    name: activity,
-    bg: 'bg-cyan-50 hover:bg-cyan-100',
-    border: 'border-cyan-200',
-    text: 'text-cyan-800',
-    badgeBg: 'bg-cyan-100 text-cyan-900 border-cyan-300',
-    icon: renderActivityIcon(iconName || detectIconFromActivityName(activity)),
-    equipmentHint: customEquipment || 'Material necessário para a atividade',
-  };
 
   const sizeClasses = {
     sm: 'text-xs px-2 py-0.5 space-x-1',
@@ -356,12 +371,45 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
     lg: 'text-base px-3 py-1.5 space-x-2 font-medium',
   };
 
+  const iconSizeClasses = {
+    sm: 'w-3.5 h-3.5',
+    md: 'w-4 h-4',
+    lg: 'w-5 h-5',
+  };
+
+  const resolvedIconName = iconName || detectIconFromActivityName(activity);
+
+  const iconNode = customIconUrl && customIconUrl.trim() !== '' ? (
+    <img
+      src={customIconUrl}
+      alt={activity}
+      className={`${iconSizeClasses[size]} object-contain rounded-xs shrink-0 inline-block`}
+      onError={(e) => {
+        // Fallback: replace with default Lucide icon on image error
+        (e.currentTarget as HTMLElement).style.display = 'none';
+      }}
+      referrerPolicy="no-referrer"
+    />
+  ) : (
+    defaultConfig?.icon || renderActivityIcon(resolvedIconName, iconSizeClasses[size])
+  );
+
+  const config = defaultConfig || {
+    name: activity,
+    bg: 'bg-cyan-50 hover:bg-cyan-100',
+    border: 'border-cyan-200',
+    text: 'text-cyan-800',
+    badgeBg: 'bg-cyan-100 text-cyan-900 border-cyan-300',
+    icon: iconNode,
+    equipmentHint: customEquipment || 'Material necessário para a atividade',
+  };
+
   return (
     <span
       className={`inline-flex items-center rounded-full border ${config.badgeBg} ${sizeClasses[size]} ${className}`}
     >
-      {showIcon && <span>{config.icon}</span>}
-      <span>{activity}</span>
+      {showIcon && <span className="flex items-center justify-center shrink-0">{iconNode}</span>}
+      <span className="truncate">{activity}</span>
     </span>
   );
 };

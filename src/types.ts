@@ -3,7 +3,8 @@ export type ActivityType = string;
 export interface ActivityItem {
   id: string; // e.g. 'Natação', 'Xadrez'
   name: string;
-  icon: string; // Lucide icon identifier name
+  icon: string; // Lucide icon identifier name (fallback)
+  customIconUrl?: string; // Base64 data URL (PNG, SVG, JPG) for custom icon
   description: string;
   defaultEquipment: string;
   requiresRollCall?: boolean; // true = Exige registro de presença na chamada; false = Atividade orientativa da Grade/Rotina

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
-import { ActivityBadge, renderActivityIcon, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
+import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import {
   ShieldCheck,
@@ -46,6 +46,11 @@ import {
   ChevronUp,
   ChevronsDown,
   ChevronsUp,
+  Upload,
+  Image as ImageIcon,
+  FileImage,
+  X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -138,6 +143,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Activity Form State
   const [actName, setActName] = useState('');
   const [actIcon, setActIcon] = useState('Sparkles');
+  const [actCustomIconUrl, setActCustomIconUrl] = useState<string>('');
+  const [iconUploadError, setIconUploadError] = useState<string>('');
+  const [iconSourceTab, setIconSourceTab] = useState<'upload' | 'preset'>('upload');
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [isManualIconChosen, setIsManualIconChosen] = useState(false);
   const [iconSearchTerm, setIconSearchTerm] = useState('');
   const [actDescription, setActDescription] = useState('');
@@ -509,11 +518,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingActivity(null);
     setActName('');
     setActIcon('Sparkles');
+    setActCustomIconUrl('');
+    setIconUploadError('');
+    setIconSourceTab('upload');
     setIsManualIconChosen(false);
     setIconSearchTerm('');
     setActDescription('');
     setActDefaultEquipment('');
     setActRequiresRollCall(true);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     setIsNewActivityModalOpen(true);
   };
 
@@ -521,11 +536,99 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingActivity(activity);
     setActName(activity.name);
     setActIcon(activity.icon || detectIconFromActivityName(activity.name) || 'Sparkles');
+    setActCustomIconUrl(activity.customIconUrl || '');
+    setIconUploadError('');
+    setIconSourceTab(activity.customIconUrl ? 'upload' : 'preset');
     setIsManualIconChosen(true);
     setIconSearchTerm('');
     setActDescription(activity.description || '');
     setActDefaultEquipment(activity.defaultEquipment || '');
     setActRequiresRollCall(activity.requiresRollCall !== undefined ? activity.requiresRollCall : true);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    setIsNewActivityModalOpen(true);
+  };
+
+  const handleIconFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setIconUploadError('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validExtensions = /\.(png|svg|jpe?g|webp|gif)$/i;
+    const isImage = file.type.startsWith('image/') || validExtensions.test(file.name);
+    if (!isImage) {
+      setIconUploadError('Por favor, selecione uma imagem válida (PNG, SVG ou JPG).');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setIconUploadError('O arquivo selecionado é muito grande. O limite é 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const rawDataUrl = event.target?.result as string;
+      if (!rawDataUrl) return;
+
+      // If SVG, save vector format directly
+      if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+        setActCustomIconUrl(rawDataUrl);
+        setIconSourceTab('upload');
+        showToast('Ícone vetorial SVG adicionado com sucesso!');
+        return;
+      }
+
+      // For raster images (PNG, JPG, WebP), scale to max 256x256 using Canvas
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 256;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const format = file.type.includes('png') ? 'image/png' : 'image/jpeg';
+          const optimized = canvas.toDataURL(format, 0.9);
+          setActCustomIconUrl(optimized);
+        } else {
+          setActCustomIconUrl(rawDataUrl);
+        }
+        setIconSourceTab('upload');
+        showToast('Ícone/imagem personalizada processada com sucesso!');
+      };
+      img.onerror = () => {
+        setIconUploadError('Não foi possível ler a imagem selecionada.');
+      };
+      img.src = rawDataUrl;
+    };
+    reader.onerror = () => {
+      setIconUploadError('Erro ao ler arquivo.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveCustomIcon = () => {
+    setActCustomIconUrl('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    showToast('Ícone personalizado removido. O sistema usará o ícone padrão.');
   };
 
   const handleActNameChange = (val: string) => {
@@ -557,6 +660,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       id: editingActivity ? editingActivity.id : cleanName,
       name: cleanName,
       icon: finalIcon,
+      customIconUrl: actCustomIconUrl ? actCustomIconUrl : undefined,
       description: actDescription.trim() || `Modalidade de ${cleanName} no Programa Integral`,
       defaultEquipment: actDefaultEquipment.trim() || 'Material necessário para a aula',
       requiresRollCall: actRequiresRollCall,
@@ -1201,6 +1305,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           <ActivityBadge
                             activity={act.id}
                             iconName={act.icon}
+                            customIconUrl={act.customIconUrl}
                             customEquipment={act.defaultEquipment}
                             size="lg"
                           />
@@ -1652,85 +1757,260 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
+              {/* Ícone ou Imagem Personalizada */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
                   <label className="block font-bold text-slate-700 uppercase tracking-wider">
-                    Ícone Representativo:
+                    Identidade Visual / Ícone da Modalidade:
                   </label>
-                  <div className="flex items-center gap-1.5">
-                    {actName && (
-                      <button
-                        type="button"
-                        onClick={handleResetToAutoIcon}
-                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 transition-all cursor-pointer flex items-center gap-1"
-                        title="Detectar automaticamente com base no nome digitado"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        <span>Auto-detectar</span>
-                      </button>
+                  <span className="text-[10px] text-slate-500 font-semibold">
+                    {actCustomIconUrl ? 'Imagem própria ativa' : `Padrão: ${actIcon}`}
+                  </span>
+                </div>
+
+                {/* Sub-tabs: Enviar Imagem vs Biblioteca Lucide */}
+                <div className="flex p-1 bg-slate-100/90 rounded-xl gap-1 border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => setIconSourceTab('upload')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      iconSourceTab === 'upload'
+                        ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/60'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload de Imagem (PNG, SVG, JPG)</span>
+                    {actCustomIconUrl && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                     )}
-                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                      <span>Atual:</span>
-                      <span className="text-indigo-600 font-extrabold">{actIcon}</span>
-                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIconSourceTab('preset')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      iconSourceTab === 'preset'
+                        ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/60'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Biblioteca de Ícones</span>
+                  </button>
+                </div>
+
+                {/* Hidden File Input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleIconFileUpload}
+                  accept="image/png,image/svg+xml,image/jpeg,image/jpg,image/webp"
+                  className="hidden"
+                />
+
+                {/* Error Banner */}
+                {iconUploadError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
+                    <XCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span>{iconUploadError}</span>
                   </div>
-                </div>
+                )}
 
-                {/* Optional Icon search / filter */}
-                <div className="relative mb-2">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={iconSearchTerm}
-                    onChange={(e) => setIconSearchTerm(e.target.value)}
-                    placeholder="Filtrar ícones (ex: esporte, música, arte, luta, natação)..."
-                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  {iconSearchTerm && (
-                    <button
-                      type="button"
-                      onClick={() => setIconSearchTerm('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
+                {/* TAB 1: UPLOAD DE IMAGEM */}
+                {iconSourceTab === 'upload' && (
+                  <div className="space-y-2">
+                    {actCustomIconUrl ? (
+                      /* Active Custom Image Box */
+                      <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-2xl p-3.5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-emerald-900 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>Ícone Personalizado Cadastrado</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
+                            Ativo
+                          </span>
+                        </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto pr-1 border border-slate-100 rounded-2xl p-1.5 bg-slate-50/50">
-                  {availableIconList
-                    .filter((ic) => {
-                      if (!iconSearchTerm) return true;
-                      const q = iconSearchTerm.toLowerCase();
-                      return ic.id.toLowerCase().includes(q) || ic.label.toLowerCase().includes(q);
-                    })
-                    .map((ic) => {
-                      const isSel = actIcon === ic.id;
-                      return (
+                        <div className="flex items-center gap-3 bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center p-1.5 shrink-0 overflow-hidden">
+                            <img
+                              src={actCustomIconUrl}
+                              alt="Ícone personalizado"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-800 truncate">
+                              {actName || 'Modalidade'} (Custom Icon)
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              Renderizado nos cartões de gestão e chips da grade horária.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="px-3 py-1.5 bg-white hover:bg-slate-50 text-indigo-700 font-bold rounded-xl border border-indigo-200 text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Trocar Imagem</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleRemoveCustomIcon}
+                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl border border-rose-200 text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remover Imagem</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Upload Dropzone / Button */
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/70 hover:bg-indigo-50/40 rounded-2xl p-4 text-center cursor-pointer transition-all space-y-2 group"
+                      >
+                        <div className="w-10 h-10 mx-auto rounded-2xl bg-white group-hover:bg-indigo-100/70 text-slate-500 group-hover:text-indigo-600 border border-slate-200 group-hover:border-indigo-300 flex items-center justify-center transition-colors shadow-2xs">
+                          <Upload className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-extrabold text-slate-800 group-hover:text-indigo-900">
+                            Clique para selecionar um ícone ou imagem
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Formatos aceitos: <strong>PNG</strong> (com fundo transparente), <strong>SVG</strong> vetorial ou <strong>JPG</strong> (máx. 5MB).
+                          </p>
+                        </div>
                         <button
-                          key={ic.id}
                           type="button"
-                          onClick={() => {
-                            setActIcon(ic.id);
-                            setIsManualIconChosen(true);
-                          }}
-                          className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-2 shrink-0 ${
-                            isSel
-                              ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs ring-2 ring-indigo-500/20'
-                              : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50/60 hover:border-indigo-200'
-                          }`}
-                          title={`${ic.label} (${ic.id})`}
+                          className="px-3 py-1 bg-white group-hover:bg-indigo-600 text-slate-700 group-hover:text-white font-bold rounded-xl border border-slate-200 group-hover:border-indigo-600 text-[11px] transition-colors shadow-2xs pointer-events-none"
                         >
-                          <span className={isSel ? 'text-white' : 'text-indigo-600'}>
-                            {renderActivityIcon(ic.id, 'w-4 h-4')}
-                          </span>
-                          <span className="text-[11px] truncate flex-1 leading-tight">
-                            {ic.label.split('/')[0].trim()}
-                          </span>
-                          {isSel && <Check className="w-3 h-3 text-white shrink-0 ml-auto" />}
+                          Procurar Arquivo no Computador
                         </button>
-                      );
-                    })}
+                      </div>
+                    )}
+
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      💡 <strong>Dica de Fallback:</strong> Caso não envie uma imagem ou se ela for removida, o sistema usará automaticamente o ícone selecionado na aba Biblioteca ({actIcon}).
+                    </p>
+                  </div>
+                )}
+
+                {/* TAB 2: BIBLIOTECA DE ÍCONES LUCIDE */}
+                {iconSourceTab === 'preset' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600 font-medium">
+                        Selecione o ícone padrão ou de fallback:
+                      </span>
+                      {actName && (
+                        <button
+                          type="button"
+                          onClick={handleResetToAutoIcon}
+                          className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 transition-all cursor-pointer flex items-center gap-1"
+                          title="Detectar automaticamente com base no nome digitado"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          <span>Auto-detectar</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Icon search / filter */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={iconSearchTerm}
+                        onChange={(e) => setIconSearchTerm(e.target.value)}
+                        placeholder="Filtrar ícones (ex: esporte, música, arte, luta, natação)..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      {iconSearchTerm && (
+                        <button
+                          type="button"
+                          onClick={() => setIconSearchTerm('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 max-h-40 overflow-y-auto pr-1 border border-slate-100 rounded-2xl p-1.5 bg-slate-50/50">
+                      {availableIconList
+                        .filter((ic) => {
+                          if (!iconSearchTerm) return true;
+                          const q = iconSearchTerm.toLowerCase();
+                          return ic.id.toLowerCase().includes(q) || ic.label.toLowerCase().includes(q);
+                        })
+                        .map((ic) => {
+                          const isSel = actIcon === ic.id;
+                          return (
+                            <button
+                              key={ic.id}
+                              type="button"
+                              onClick={() => {
+                                setActIcon(ic.id);
+                                setIsManualIconChosen(true);
+                              }}
+                              className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-2 shrink-0 ${
+                                isSel
+                                  ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs ring-2 ring-indigo-500/20'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50/60 hover:border-indigo-200'
+                              }`}
+                              title={`${ic.label} (${ic.id})`}
+                            >
+                              <span className={isSel ? 'text-white' : 'text-indigo-600'}>
+                                {renderActivityIcon(ic.id, 'w-4 h-4')}
+                              </span>
+                              <span className="text-[11px] truncate flex-1 leading-tight">
+                                {ic.label.split('/')[0].trim()}
+                              </span>
+                              {isSel && <Check className="w-3 h-3 text-white shrink-0 ml-auto" />}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Live Preview Box */}
+                <div className="bg-slate-100/90 border border-slate-200 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  <div>
+                    <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                      Prévia do Chip Visual:
+                    </span>
+                    <div className="mt-1">
+                      <ActivityBadge
+                        activity={actName.trim() || 'Nome da Atividade'}
+                        iconName={actIcon}
+                        customIconUrl={actCustomIconUrl}
+                        size="md"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-left sm:text-right text-[11px]">
+                    {actCustomIconUrl ? (
+                      <span className="text-emerald-700 font-extrabold flex items-center sm:justify-end gap-1">
+                        <Check className="w-3.5 h-3.5" />
+                        Usando Imagem Enviada
+                      </span>
+                    ) : (
+                      <span className="text-slate-600 font-medium">
+                        Ícone Padrão: <strong className="text-indigo-700 font-bold">{actIcon}</strong>
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 

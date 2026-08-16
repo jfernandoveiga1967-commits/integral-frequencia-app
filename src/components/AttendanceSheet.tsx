@@ -58,6 +58,16 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const allowedActivityIds = useMemo(() => allowedActivities.map((a) => a.id), [allowedActivities]);
 
+  const activityMap = useMemo(() => {
+    const map = new Map<string, ActivityItem>();
+    const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    active.forEach((item) => {
+      map.set(item.id, item);
+      map.set(item.name, item);
+    });
+    return map;
+  }, [activitiesList]);
+
   const allowedTurmas = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
@@ -674,9 +684,16 @@ function getCurrentHHMM(): string {
                       {student.activities.map((act) => {
                         const isAllowed = allowedActivityIds.includes(act as ActivityType);
                         if (!isCoordenador && !isAllowed) return null; // Hide non-assigned activities for Monitor/Professor
+                        const actMeta = activityMap.get(act);
                         return (
                           <span key={act} className="opacity-90">
-                            <ActivityBadge activity={act} size="sm" />
+                            <ActivityBadge
+                              activity={act}
+                              iconName={actMeta?.icon}
+                              customIconUrl={actMeta?.customIconUrl}
+                              customEquipment={actMeta?.defaultEquipment}
+                              size="sm"
+                            />
                           </span>
                         );
                       })}
@@ -689,6 +706,7 @@ function getCurrentHHMM(): string {
                       const recKey = `${student.id}_${act}_${selectedDate}`;
                       const rec = recordMap.get(recKey);
                       const currentStatus = rec?.status;
+                      const actMeta = activityMap.get(act);
 
                       return (
                         <div
@@ -709,7 +727,13 @@ function getCurrentHHMM(): string {
                         >
                           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                             <div className="flex items-center space-x-2">
-                              <ActivityBadge activity={act} size="sm" />
+                              <ActivityBadge
+                                activity={act}
+                                iconName={actMeta?.icon}
+                                customIconUrl={actMeta?.customIconUrl}
+                                customEquipment={actMeta?.defaultEquipment}
+                                size="sm"
+                              />
                               {rec && (
                                 <StatusBadge
                                   status={rec.status}
