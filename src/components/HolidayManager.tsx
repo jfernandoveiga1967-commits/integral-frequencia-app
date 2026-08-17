@@ -135,8 +135,10 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
 
     let totalRecessoDays = 0;
     let totalRecessoSchoolDays = 0;
+    let totalRecessoWeekendDays = 0;
     let totalFeriadoDays = 0;
     let totalFeriadoSchoolDays = 0;
+    let totalFeriadoWeekendDays = 0;
     let recessoPeriodsCount = 0;
     let feriadoDatesCount = 0;
 
@@ -149,26 +151,32 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
         recessoPeriodsCount++;
         totalRecessoDays += dur.totalCalendarDays;
         totalRecessoSchoolDays += dur.schoolDaysCount;
+        totalRecessoWeekendDays += dur.weekendDaysCount;
       } else {
         feriadoDatesCount++;
         totalFeriadoDays += dur.totalCalendarDays;
         totalFeriadoSchoolDays += dur.schoolDaysCount;
+        totalFeriadoWeekendDays += dur.weekendDaysCount;
       }
     });
 
     const totalDays = totalRecessoDays + totalFeriadoDays;
     const totalSchoolDays = totalRecessoSchoolDays + totalFeriadoSchoolDays;
+    const totalWeekendDays = totalRecessoWeekendDays + totalFeriadoWeekendDays;
     const totalEvents = inYear.length;
 
     return {
       totalEvents,
       totalDays,
       totalSchoolDays,
+      totalWeekendDays,
       totalRecessoDays,
       totalRecessoSchoolDays,
+      totalRecessoWeekendDays,
       recessoPeriodsCount,
       totalFeriadoDays,
       totalFeriadoSchoolDays,
+      totalFeriadoWeekendDays,
       feriadoDatesCount,
     };
   }, [holidays, selectedYear]);
@@ -384,10 +392,10 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
               <CalendarDays className="w-4 h-4 text-slate-400" />
             </div>
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
-              {stats.totalDays} {stats.totalDays === 1 ? 'Dia' : 'Dias'}
+              {stats.totalDays} {stats.totalDays === 1 ? 'Dia Corrido' : 'Dias Corridos'}
             </div>
             <p className="text-xs text-slate-500 font-medium mt-1">
-              {stats.totalSchoolDays} dias úteis letivos suspensos • {stats.totalEvents} registros
+              {stats.totalSchoolDays} dias úteis letivos suspensos • {stats.totalWeekendDays} fins de semana • {stats.totalEvents} registros
             </p>
           </div>
 
@@ -403,7 +411,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
               {stats.totalRecessoDays} {stats.totalRecessoDays === 1 ? 'Dia de Recesso' : 'Dias de Recesso'}
             </div>
             <p className="text-xs text-indigo-700 font-medium mt-1">
-              {stats.totalRecessoSchoolDays} dias úteis letivos • {stats.recessoPeriodsCount}{' '}
+              {stats.totalRecessoSchoolDays} dias úteis letivos {stats.totalRecessoWeekendDays > 0 ? `• ${stats.totalRecessoWeekendDays} fds ` : ''}• {stats.recessoPeriodsCount}{' '}
               {stats.recessoPeriodsCount === 1 ? 'período cadastrado' : 'períodos cadastrados'}
             </p>
           </div>
@@ -420,7 +428,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
               {stats.totalFeriadoDays} {stats.totalFeriadoDays === 1 ? 'Dia de Feriado' : 'Dias de Feriados'}
             </div>
             <p className="text-xs text-rose-700 font-medium mt-1">
-              {stats.feriadoDatesCount} {stats.feriadoDatesCount === 1 ? 'feriado oficial' : 'feriados oficiais'}
+              {stats.totalFeriadoSchoolDays} dias úteis letivos • {stats.feriadoDatesCount} {stats.feriadoDatesCount === 1 ? 'feriado oficial' : 'feriados oficiais'}
             </p>
           </div>
         </div>
@@ -550,7 +558,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                         {h.name}
                       </h4>
 
-                      {/* PROMINENT CARD DAYS COUNT (e.g. 11 Dias de Recesso) */}
+                      {/* PROMINENT CARD DAYS COUNT (e.g. 11 Dias de Recesso (inclui fds) • 9 dias úteis letivos) */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                         <span
                           className={`inline-flex items-center space-x-1.5 text-xs font-black px-3 py-1 rounded-xl border shadow-2xs ${
@@ -568,16 +576,21 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                                 : 'Dia de Feriado'
                               : normalizedType === 'recesso'
                               ? 'Dias de Recesso'
-                              : 'Dias de Feriado'}
+                              : 'Dias de Feriados'}
+                            {normalizedType === 'recesso' && duration.weekendDaysCount > 0 && isInterval && (
+                              <span className="text-[11px] font-bold text-indigo-700 ml-1">
+                                (inclui fds)
+                              </span>
+                            )}
                           </span>
                         </span>
 
-                        <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-xl border border-slate-200">
+                        <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-700 bg-slate-100/90 px-2.5 py-1 rounded-xl border border-slate-200">
                           <span>
-                            {duration.schoolDaysCount}{' '}
+                            • {duration.schoolDaysCount}{' '}
                             {duration.schoolDaysCount === 1
-                              ? 'dia útil letivo suspenso'
-                              : 'dias úteis letivos suspensos'}
+                              ? 'dia útil letivo'
+                              : 'dias úteis letivos'}
                           </span>
                         </span>
 
@@ -776,13 +789,16 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                             ? 'Dia de Recesso'
                             : 'Dia de Feriado'
                           : formType === 'recesso'
-                          ? 'Dias de Recesso Escolar'
-                          : 'Dias de Feriado'}
+                          ? 'Dias de Recesso'
+                          : 'Dias de Feriados'}{' '}
+                        {formDuration.weekendDaysCount > 0 && isRangeMode && (
+                          <span className="text-indigo-700 font-bold">(inclui fds)</span>
+                        )}
                       </span>
                       <span className="text-[11px] text-slate-600">
-                        {formDuration.schoolDaysCount}{' '}
-                        {formDuration.schoolDaysCount === 1 ? 'dia útil letivo' : 'dias úteis letivos'} suspensos da
-                        grade
+                        • {formDuration.schoolDaysCount}{' '}
+                        {formDuration.schoolDaysCount === 1 ? 'dia útil letivo suspenso' : 'dias úteis letivos suspensos'}
+                        {formDuration.weekendDaysCount > 0 && isRangeMode && ` (${formDuration.weekendDaysCount} sáb/dom no período)`}
                       </span>
                     </div>
                   </div>

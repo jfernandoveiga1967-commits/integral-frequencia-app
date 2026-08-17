@@ -214,7 +214,9 @@ export function isHolidayOrRecess(dateStr: string, holidays: HolidayItem[]): Hol
 }
 
 /**
- * Calculates duration and school days breakdown for a holiday or vacation interval
+ * Calculates duration and school days breakdown for a holiday or recess interval
+ * Accurately includes all calendar days (weekdays + weekends) in totalCalendarDays,
+ * and tracks schoolDaysCount (Mon-Fri) and weekendDaysCount (Sat-Sun).
  */
 export function calculateHolidayDuration(startDateStr: string, endDateStr?: string): {
   totalCalendarDays: number;
@@ -229,8 +231,9 @@ export function calculateHolidayDuration(startDateStr: string, endDateStr?: stri
   const [sY, sM, sD] = startDateStr.split('-').map(Number);
   const [eY, eM, eD] = endStr.split('-').map(Number);
 
-  const start = new Date(sY, sM - 1, sD);
-  const end = new Date(eY, eM - 1, eD);
+  // Set hours to 12:00:00 to avoid DST / timezone jump issues
+  const start = new Date(sY, sM - 1, sD, 12, 0, 0);
+  const end = new Date(eY, eM - 1, eD, 12, 0, 0);
 
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
     const isWk = isWeekend(startDateStr);
