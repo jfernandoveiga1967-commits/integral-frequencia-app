@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem } from './types';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
@@ -56,7 +56,7 @@ export default function App() {
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
   // Keep a stable ref of currentUser for real-time listener updates
-  const currentUserRef = React.useRef<UserProfile | null>(currentUser);
+  const currentUserRef = useRef<UserProfile | null>(currentUser);
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);

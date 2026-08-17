@@ -7,7 +7,7 @@ import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 
 interface AttendanceSheetProps {
@@ -503,22 +503,35 @@ function getCurrentHHMM(): string {
             <div className="grid grid-cols-5 gap-1">
               {weekDays.map((day) => {
                 const isSelected = selectedDate === day.dateStr;
+                const dayHoliday = isHolidayOrRecess(day.dateStr, holidays);
+                const isVacation = dayHoliday?.type === 'ferias';
+                const isRecessOrHol = dayHoliday && !isVacation;
+
                 return (
                   <button
                     key={day.dateStr}
                     type="button"
+                    title={dayHoliday ? `${dayHoliday.name} (${dayHoliday.type === 'ferias' ? 'Férias' : 'Recesso/Feriado'})` : undefined}
                     onClick={() => {
                       // Call parent update
                       const event = new CustomEvent('app_select_date', { detail: day.dateStr });
                       window.dispatchEvent(event);
                     }}
-                    className={`px-1.5 py-1.5 text-center rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                    className={`px-1.5 py-1.5 text-center rounded-lg text-xs font-semibold transition-all cursor-pointer border relative ${
                       isSelected
                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : isVacation
+                        ? 'bg-purple-50 hover:bg-purple-100 text-purple-900 border-purple-200'
+                        : isRecessOrHol
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
                         : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
                     }`}
                   >
-                    <div>{day.dayShort.split(' ')[0]}</div>
+                    <div className="flex items-center justify-center space-x-0.5">
+                      <span>{day.dayShort.split(' ')[0]}</span>
+                      {isVacation && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0 inline-block" />}
+                      {isRecessOrHol && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 inline-block" />}
+                    </div>
                     <div className="text-[10px] opacity-80">{day.dateStr.split('-')[2]}</div>
                   </button>
                 );
@@ -543,6 +556,56 @@ function getCurrentHHMM(): string {
             </div>
           </div>
         </div>
+
+        {/* Selected Date Holiday / Vacation Notice Banner */}
+        {(() => {
+          const selectedDayHoliday = isHolidayOrRecess(selectedDate, holidays);
+          if (!selectedDayHoliday) return null;
+
+          if (selectedDayHoliday.type === 'ferias') {
+            return (
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-purple-950">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Palmtree className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-black text-purple-900 block">
+                      Período de Férias Escolares ({selectedDayHoliday.name})
+                    </span>
+                    <span className="text-purple-700 text-[11px]">
+                      Atividades e chamadas do Programa Integral suspensas durante este período.
+                    </span>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 bg-purple-200/80 text-purple-900 rounded-lg font-mono font-bold text-[11px] shrink-0 border border-purple-300">
+                  {formatDateBR(selectedDate)}
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-rose-950">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <CalendarOff className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-black text-rose-900 block">
+                    {selectedDayHoliday.type === 'recesso' ? 'Recesso Escolar' : 'Feriado Oficial'}: {selectedDayHoliday.name}
+                  </span>
+                  <span className="text-rose-700 text-[11px]">
+                    Não há registro de frequência obrigatório para este dia.
+                  </span>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 bg-rose-200/80 text-rose-900 rounded-lg font-mono font-bold text-[11px] shrink-0 border border-rose-300">
+                {formatDateBR(selectedDate)}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Batch Actions and Counters Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 bg-slate-50/70 p-3 rounded-xl">

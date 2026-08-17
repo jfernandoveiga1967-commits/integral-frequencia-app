@@ -102,8 +102,9 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "date": { "type": "string", "maxLength": 10 },
+        "endDate": { "type": "string", "maxLength": 10 },
         "name": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "type": { "type": "string", "enum": ["feriado", "recesso", "ponto_facultativo"] },
+        "type": { "type": "string", "enum": ["feriado", "recesso", "ferias", "ponto_facultativo"] },
         "description": { "type": "string", "maxLength": 500 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }

@@ -68,12 +68,13 @@ export interface ScheduleBlock {
 
 export type UserRole = 'coordenador' | 'professor';
 
-export type HolidayType = 'feriado' | 'recesso' | 'ponto_facultativo';
+export type HolidayType = 'feriado' | 'recesso' | 'ferias' | 'ponto_facultativo';
 
 export interface HolidayItem {
   id: string; // e.g. "hol_2026-09-07" or timestamp
-  date: string; // ISO date string "YYYY-MM-DD"
-  name: string; // e.g. "Independência do Brasil", "Recesso de Julho"
+  date: string; // ISO date string "YYYY-MM-DD" (start date)
+  endDate?: string; // Optional ISO date string "YYYY-MM-DD" (for ranges/vacations)
+  name: string; // e.g. "Independência do Brasil", "Férias Escolares de Julho"
   type: HolidayType;
   description?: string;
   createdAt?: string;

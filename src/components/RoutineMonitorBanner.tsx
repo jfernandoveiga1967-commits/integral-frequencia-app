@@ -22,6 +22,7 @@ import {
   CalendarOff,
   PartyPopper,
   Info,
+  Palmtree,
 } from 'lucide-react';
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType, HolidayItem } from '../types';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage } from './ActivityBadge';
@@ -32,6 +33,8 @@ import {
   isHolidayOrRecess,
   getDayNameFull,
   formatDateBR,
+  formatHolidayRange,
+  formatHolidayRangeShort,
 } from '../utils/dateUtils';
 import {
   isNotificationSupported,
@@ -305,10 +308,17 @@ export const RoutineMonitorBanner: React.FC<RoutineMonitorBannerProps> = ({
               {dateIsWeekend ? (
                 <span className="text-amber-700">Fim de Semana — Dia Não Letivo</span>
               ) : holidayInfo ? (
-                <span className="text-rose-700 flex items-center gap-1.5">
-                  <CalendarOff className="w-4 h-4 text-rose-500 shrink-0" />
-                  Hoje é Feriado / Recesso Escolar ({holidayInfo.name})
-                </span>
+                holidayInfo.type === 'ferias' ? (
+                  <span className="text-purple-800 flex items-center gap-1.5 font-black">
+                    <Palmtree className="w-4 h-4 text-purple-600 shrink-0" />
+                    Período de Férias Escolares ({formatHolidayRangeShort(holidayInfo)})
+                  </span>
+                ) : (
+                  <span className="text-rose-700 flex items-center gap-1.5">
+                    <CalendarOff className="w-4 h-4 text-rose-500 shrink-0" />
+                    Hoje é {holidayInfo.type === 'recesso' ? 'Recesso Escolar' : 'Feriado'} ({holidayInfo.name})
+                  </span>
+                )
               ) : activeBlock ? (
                 <span className="text-emerald-700 flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block" />
@@ -400,46 +410,82 @@ export const RoutineMonitorBanner: React.FC<RoutineMonitorBannerProps> = ({
         </div>
       ) : holidayInfo ? (
         /* ========================================================================= */
-        /* 2. HOLIDAY / RECESS CARD */
+        /* 2. HOLIDAY / RECESS / VACATION CARD */
         /* ========================================================================= */
-        <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-rose-50/90 via-indigo-50/40 to-white border border-rose-200/90 shadow-sm space-y-4 text-center sm:text-left">
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 shadow-inner">
-              <CalendarOff className="w-7 h-7" />
-            </div>
-            <div className="space-y-1.5 flex-1">
-              <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full border border-rose-200">
-                  {holidayInfo.type === 'recesso'
-                    ? 'Recesso Escolar'
-                    : holidayInfo.type === 'ponto_facultativo'
-                    ? 'Ponto Facultativo'
-                    : 'Feriado Oficial'}
-                </span>
-                <span className="text-xs font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                  {formatDateBR(holidayInfo.date)}
-                </span>
+        holidayInfo.type === 'ferias' ? (
+          <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-purple-50 via-indigo-50/50 to-white border border-purple-300 shadow-md space-y-4 text-center sm:text-left relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-purple-600/30">
+                <Palmtree className="w-7 h-7" />
               </div>
+              <div className="space-y-2 flex-1">
+                <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-purple-800 bg-purple-100 px-3 py-1 rounded-full border border-purple-300 shadow-2xs flex items-center gap-1">
+                    <Palmtree className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Férias Escolares</span>
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-purple-200 shadow-2xs">
+                    {formatHolidayRange(holidayInfo)}
+                  </span>
+                </div>
 
-              <h3 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-                Hoje é Feriado / Recesso Escolar ({holidayInfo.name}).
-              </h3>
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  Período de Férias Escolares ({formatHolidayRangeShort(holidayInfo)})
+                </h3>
 
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                {holidayInfo.description ||
-                  'Neste dia as atividades pedagógicas e oficinas extracurriculares do Programa Integral estão suspensas.'}
-              </p>
+                <p className="text-xs sm:text-sm text-slate-700 font-semibold leading-relaxed">
+                  {holidayInfo.name}: {holidayInfo.description || 'Período oficial de recesso e férias escolares do Programa Integral.'}
+                </p>
 
-              <div className="pt-2 text-[11px] text-indigo-700 bg-indigo-50/80 p-2.5 rounded-xl border border-indigo-100/80 flex items-center gap-2">
-                <Info className="w-4 h-4 text-indigo-600 shrink-0" />
-                <span>
-                  <strong>Aviso do Sistema:</strong> Contagem de chamadas pendentes, alarmes de monitoras e status &quot;Em Curso&quot;
-                  estão suspensos para esta data.
-                </span>
+                <div className="pt-2 text-xs text-purple-950 bg-purple-100/70 p-3 rounded-2xl border border-purple-200 flex items-center gap-2.5">
+                  <Info className="w-4 h-4 text-purple-700 shrink-0" />
+                  <span>
+                    <strong>Aviso de Férias:</strong> Durante todo o período de férias, as rotinas de chamada diária, alarmes sonoros para monitoras e status &quot;Em Curso&quot; permanecem suspensos.
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-rose-50/90 via-indigo-50/40 to-white border border-rose-200/90 shadow-sm space-y-4 text-center sm:text-left">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 shadow-inner">
+                <CalendarOff className="w-7 h-7" />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full border border-rose-200">
+                    {holidayInfo.type === 'recesso'
+                      ? 'Recesso Escolar'
+                      : holidayInfo.type === 'ponto_facultativo'
+                      ? 'Ponto Facultativo'
+                      : 'Feriado Oficial'}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                    {formatHolidayRange(holidayInfo)}
+                  </span>
+                </div>
+
+                <h3 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+                  Hoje é {holidayInfo.type === 'recesso' ? 'Recesso Escolar' : 'Feriado'} ({holidayInfo.name}).
+                </h3>
+
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+                  {holidayInfo.description ||
+                    'Neste dia as atividades pedagógicas e oficinas extracurriculares do Programa Integral estão suspensas.'}
+                </p>
+
+                <div className="pt-2 text-[11px] text-indigo-700 bg-indigo-50/80 p-2.5 rounded-xl border border-indigo-100/80 flex items-center gap-2">
+                  <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    <strong>Aviso do Sistema:</strong> Contagem de chamadas pendentes, alarmes de monitoras e status &quot;Em Curso&quot;
+                    estão suspensos para esta data.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
       ) : featuredBlock ? (
         /* ========================================================================= */
         /* 3. ACTIVE OR UPCOMING BLOCK CARD */

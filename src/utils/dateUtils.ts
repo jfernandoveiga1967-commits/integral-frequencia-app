@@ -201,46 +201,137 @@ export function getDayNameFull(date: Date | string): string {
 }
 
 /**
- * Checks if a specific date string (YYYY-MM-DD) is a registered holiday or recess
+ * Checks if a specific date string (YYYY-MM-DD) falls within a registered holiday, recess, or vacation period
  */
 export function isHolidayOrRecess(dateStr: string, holidays: HolidayItem[]): HolidayItem | undefined {
   if (!dateStr || !holidays || holidays.length === 0) return undefined;
-  return holidays.find((h) => h.date === dateStr);
+  return holidays.find((h) => {
+    if (!h || !h.date) return false;
+    const start = h.date;
+    const end = h.endDate && h.endDate >= h.date ? h.endDate : h.date;
+    return dateStr >= start && dateStr <= end;
+  });
 }
 
 /**
- * Returns effective school days (Monday-Friday, excluding weekends and registered holidays)
+ * Calculates duration and school days breakdown for a holiday or vacation interval
+ */
+export function calculateHolidayDuration(startDateStr: string, endDateStr?: string): {
+  totalCalendarDays: number;
+  schoolDaysCount: number;
+  weekendDaysCount: number;
+} {
+  if (!startDateStr) {
+    return { totalCalendarDays: 1, schoolDaysCount: 1, weekendDaysCount: 0 };
+  }
+
+  const endStr = endDateStr && endDateStr >= startDateStr ? endDateStr : startDateStr;
+  const [sY, sM, sD] = startDateStr.split('-').map(Number);
+  const [eY, eM, eD] = endStr.split('-').map(Number);
+
+  const start = new Date(sY, sM - 1, sD);
+  const end = new Date(eY, eM - 1, eD);
+
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
+    const isWk = isWeekend(startDateStr);
+    return { totalCalendarDays: 1, schoolDaysCount: isWk ? 0 : 1, weekendDaysCount: isWk ? 1 : 0 };
+  }
+
+  let totalCalendarDays = 0;
+  let schoolDaysCount = 0;
+  let weekendDaysCount = 0;
+
+  const cur = new Date(start);
+  while (cur <= end) {
+    totalCalendarDays++;
+    const day = cur.getDay();
+    if (day === 0 || day === 6) {
+      weekendDaysCount++;
+    } else {
+      schoolDaysCount++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  return { totalCalendarDays, schoolDaysCount, weekendDaysCount };
+}
+
+/**
+ * Formats a holiday item's date or interval for user-friendly display (e.g. "20/07/2026 a 30/07/2026" or "07/09/2026")
+ */
+export function formatHolidayRange(holiday: HolidayItem): string {
+  if (!holiday || !holiday.date) return '';
+  if (!holiday.endDate || holiday.endDate === holiday.date) {
+    return formatDateBR(holiday.date);
+  }
+  return `${formatDateBR(holiday.date)} a ${formatDateBR(holiday.endDate)}`;
+}
+
+/**
+ * Formats a holiday item's date or interval with short format (e.g. "20/07 a 30/07" or "07/09")
+ */
+export function formatHolidayRangeShort(holiday: HolidayItem): string {
+  if (!holiday || !holiday.date) return '';
+  const sParts = holiday.date.split('-');
+  const startFormatted = sParts.length === 3 ? `${sParts[2]}/${sParts[1]}` : holiday.date;
+
+  if (!holiday.endDate || holiday.endDate === holiday.date) {
+    return startFormatted;
+  }
+
+  const eParts = holiday.endDate.split('-');
+  const endFormatted = eParts.length === 3 ? `${eParts[2]}/${eParts[1]}` : holiday.endDate;
+
+  return `${startFormatted} a ${endFormatted}`;
+}
+
+/**
+ * Returns effective school days (Monday-Friday, excluding weekends and registered holidays/vacations)
  */
 export function getEffectiveSchoolDays(
   startDateStr: string,
   endDateStr: string,
   holidays: HolidayItem[]
-): { dateStr: string; dayName: string; dayShort: string }[] {
+): {
+  effectiveDays: { dateStr: string; dayName: string; dayShort: string }[];
+  effectiveDaysCount: number;
+  holidaysCount: number;
+} {
   const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
   const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
 
   const cur = new Date(startYear, startMonth - 1, startDay);
   const end = new Date(endYear, endMonth - 1, endDay);
 
-  const holidayDateSet = new Set(holidays.map((h) => h.date));
   const effectiveDays: { dateStr: string; dayName: string; dayShort: string }[] = [];
+  let holidaysCount = 0;
 
   while (cur <= end) {
     const dateStr = toISODateString(cur);
     const dayOfWeek = cur.getDay();
 
-    // Check if it's a weekday (1-5) and not a holiday
-    if (dayOfWeek >= 1 && dayOfWeek <= 5 && !holidayDateSet.has(dateStr)) {
-      effectiveDays.push({
-        dateStr,
-        dayName: getDayNameFull(cur),
-        dayShort: `${formatDateShort(cur)}`,
-      });
+    // Check if it's a weekday (1-5)
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      const holidayHit = isHolidayOrRecess(dateStr, holidays);
+      if (holidayHit) {
+        holidaysCount++;
+      } else {
+        effectiveDays.push({
+          dateStr,
+          dayName: getDayNameFull(cur),
+          dayShort: `${formatDateShort(cur)}`,
+        });
+      }
     }
 
     cur.setDate(cur.getDate() + 1);
   }
 
-  return effectiveDays;
+  return {
+    effectiveDays,
+    effectiveDaysCount: effectiveDays.length,
+    holidaysCount,
+  };
 }
+
 
