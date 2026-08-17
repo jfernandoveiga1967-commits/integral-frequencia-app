@@ -68,7 +68,7 @@ export interface ScheduleBlock {
 
 export type UserRole = 'coordenador' | 'professor';
 
-export type HolidayType = 'feriado' | 'recesso' | 'ferias' | 'ponto_facultativo';
+export type HolidayType = 'feriado' | 'recesso';
 
 export interface HolidayItem {
   id: string; // e.g. "hol_2026-09-07" or timestamp

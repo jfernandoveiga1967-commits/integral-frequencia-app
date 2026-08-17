@@ -15,7 +15,20 @@ export function loadHolidays(): HolidayItem[] {
     if (data) {
       const parsed: HolidayItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.sort((a, b) => a.date.localeCompare(b.date));
+        // Normalize any old types ('ferias', 'ponto_facultativo') to 'recesso'
+        let migrated = false;
+        const normalized = parsed.map((h) => {
+          let updated = { ...h };
+          if ((updated.type as string) === 'ferias' || (updated.type as string) === 'ponto_facultativo') {
+            updated.type = 'recesso';
+            migrated = true;
+          }
+          return updated;
+        });
+        if (migrated) {
+          saveHolidays(normalized);
+        }
+        return normalized.sort((a, b) => a.date.localeCompare(b.date));
       }
     }
   } catch (e) {

@@ -7,21 +7,15 @@ import {
   Edit2,
   CheckCircle2,
   XCircle,
-  Sparkles,
   Info,
   Search,
-  Filter,
   RefreshCw,
-  Sun,
   Coffee,
-  AlertTriangle,
-  X,
-  Check,
   CalendarOff,
   CalendarRange,
-  Palmtree,
-  ArrowRight,
   Clock,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { HolidayItem, HolidayType } from '../types';
 import { INITIAL_HOLIDAYS } from '../data/initialData';
@@ -60,7 +54,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
   const [formEndDate, setFormEndDate] = useState<string>('');
   const [isRangeMode, setIsRangeMode] = useState<boolean>(false);
   const [formName, setFormName] = useState<string>('');
-  const [formType, setFormType] = useState<HolidayType>('feriado');
+  const [formType, setFormType] = useState<HolidayType>('recesso');
   const [formDescription, setFormDescription] = useState<string>('');
 
   // Delete Confirm State
@@ -105,8 +99,11 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
           return false;
         }
 
-        // Type filter
-        if (selectedType !== 'TODOS' && h.type !== selectedType) {
+        // Type filter (normalize any legacy types)
+        const normalizedType: HolidayType =
+          h.type === 'feriado' ? 'feriado' : 'recesso';
+
+        if (selectedType !== 'TODOS' && normalizedType !== selectedType) {
           return false;
         }
 
@@ -127,7 +124,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [holidays, selectedYear, selectedType, searchTerm]);
 
-  // Summary counts
+  // Summary counts and total DAYS calculation
   const stats = useMemo(() => {
     const inYear = holidays.filter(
       (h) =>
@@ -135,11 +132,45 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
         h.date.startsWith(selectedYear) ||
         (h.endDate && h.endDate.startsWith(selectedYear))
     );
-    const feriados = inYear.filter((h) => h.type === 'feriado').length;
-    const recessos = inYear.filter((h) => h.type === 'recesso').length;
-    const ferias = inYear.filter((h) => h.type === 'ferias').length;
-    const facultativos = inYear.filter((h) => h.type === 'ponto_facultativo').length;
-    return { total: inYear.length, feriados, recessos, ferias, facultativos };
+
+    let totalRecessoDays = 0;
+    let totalRecessoSchoolDays = 0;
+    let totalFeriadoDays = 0;
+    let totalFeriadoSchoolDays = 0;
+    let recessoPeriodsCount = 0;
+    let feriadoDatesCount = 0;
+
+    inYear.forEach((h) => {
+      const dur = calculateHolidayDuration(h.date, h.endDate);
+      const normalizedType: HolidayType =
+        h.type === 'feriado' ? 'feriado' : 'recesso';
+
+      if (normalizedType === 'recesso') {
+        recessoPeriodsCount++;
+        totalRecessoDays += dur.totalCalendarDays;
+        totalRecessoSchoolDays += dur.schoolDaysCount;
+      } else {
+        feriadoDatesCount++;
+        totalFeriadoDays += dur.totalCalendarDays;
+        totalFeriadoSchoolDays += dur.schoolDaysCount;
+      }
+    });
+
+    const totalDays = totalRecessoDays + totalFeriadoDays;
+    const totalSchoolDays = totalRecessoSchoolDays + totalFeriadoSchoolDays;
+    const totalEvents = inYear.length;
+
+    return {
+      totalEvents,
+      totalDays,
+      totalSchoolDays,
+      totalRecessoDays,
+      totalRecessoSchoolDays,
+      recessoPeriodsCount,
+      totalFeriadoDays,
+      totalFeriadoSchoolDays,
+      feriadoDatesCount,
+    };
   }, [holidays, selectedYear]);
 
   // Form duration calculation in real-time
@@ -148,12 +179,12 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
     return calculateHolidayDuration(formDate, isRangeMode && formEndDate ? formEndDate : formDate);
   }, [formDate, formEndDate, isRangeMode]);
 
-  const handleOpenNewModal = (prefillType: HolidayType = 'feriado') => {
+  const handleOpenNewModal = (prefillType: HolidayType = 'recesso') => {
     setEditingHoliday(null);
     const defaultDate = `${selectedYear !== 'TODOS' ? selectedYear : currentYear}-01-01`;
     setFormDate(defaultDate);
     setFormEndDate('');
-    setIsRangeMode(prefillType === 'ferias');
+    setIsRangeMode(prefillType === 'recesso');
     setFormName('');
     setFormType(prefillType);
     setFormDescription('');
@@ -166,19 +197,18 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
     setFormEndDate(holiday.endDate || '');
     setIsRangeMode(Boolean(holiday.endDate && holiday.endDate !== holiday.date));
     setFormName(holiday.name);
-    setFormType(holiday.type);
+    setFormType(holiday.type === 'feriado' ? 'feriado' : 'recesso');
     setFormDescription(holiday.description || '');
     setIsModalOpen(true);
   };
 
   const handleTypeChange = (type: HolidayType) => {
     setFormType(type);
-    if (type === 'ferias' && !isRangeMode) {
+    if (type === 'recesso' && !isRangeMode) {
       setIsRangeMode(true);
-      // default end date 7 days later
       if (formDate && !formEndDate) {
         const d = new Date(formDate);
-        d.setDate(d.getDate() + 7);
+        d.setDate(d.getDate() + 5);
         setFormEndDate(d.toISOString().split('T')[0]);
       }
     }
@@ -187,7 +217,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formDate || !formName.trim()) {
-      showToast('Preencha a data inicial e o nome do evento.', 'error');
+      showToast('Preencha a data inicial e o nome do período/feriado.', 'error');
       return;
     }
 
@@ -214,10 +244,10 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
     setIsModalOpen(false);
     showToast(
       editingHoliday
-        ? 'Período/Feriado atualizado com sucesso!'
-        : formType === 'ferias'
-        ? 'Férias Escolares cadastradas com sucesso!'
-        : 'Novo registro adicionado ao calendário!'
+        ? 'Registro atualizado com sucesso!'
+        : formType === 'recesso'
+        ? 'Recesso Escolar cadastrado com sucesso!'
+        : 'Feriado Oficial adicionado ao calendário!'
     );
   };
 
@@ -231,7 +261,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
   const handleLoadOfficialPreset = () => {
     if (
       window.confirm(
-        'Deseja carregar o Calendário Padrão Oficial de Feriados, Férias e Recessos Escolares? Isso adicionará as datas e intervalos pré-configurados no sistema.'
+        'Deseja carregar o Calendário Padrão Oficial de Feriados e Recessos Escolares? Isso atualizará a lista com os feriados e recessos recomendados.'
       )
     ) {
       if (onBatchSaveHolidays) {
@@ -239,48 +269,30 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
       } else {
         INITIAL_HOLIDAYS.forEach((h) => onSaveHoliday(h));
       }
-      showToast(`${INITIAL_HOLIDAYS.length} feriados, férias e recessos carregados com sucesso!`);
+      showToast(`${INITIAL_HOLIDAYS.length} feriados e recessos escolares carregados com sucesso!`);
     }
   };
 
   const getTypeBadge = (type: HolidayType) => {
-    switch (type) {
-      case 'ferias':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-black bg-purple-100 text-purple-800 border border-purple-300 shadow-2xs">
-            <Palmtree className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-            <span>Férias Escolares</span>
-          </span>
-        );
-      case 'recesso':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-            <Coffee className="w-3 h-3 text-indigo-500 shrink-0" />
-            <span>Recesso Escolar</span>
-          </span>
-        );
-      case 'feriado':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <CalendarOff className="w-3 h-3 text-rose-500 shrink-0" />
-            <span>Feriado Oficial</span>
-          </span>
-        );
-      case 'ponto_facultativo':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <Sun className="w-3 h-3 text-amber-500 shrink-0" />
-            <span>Ponto Facultativo</span>
-          </span>
-        );
-      default:
-        return null;
+    if (type === 'recesso') {
+      return (
+        <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-800 border border-indigo-200 shadow-2xs">
+          <Coffee className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+          <span>Recesso Escolar</span>
+        </span>
+      );
     }
+    return (
+      <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+        <CalendarOff className="w-3 h-3 text-rose-500 shrink-0" />
+        <span>Feriado Oficial</span>
+      </span>
+    );
   };
 
   return (
     <div className="space-y-6">
-      {/* Toast */}
+      {/* Toast Feedback */}
       {toastMsg && (
         <div
           className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-2xl shadow-xl border flex items-center space-x-2 text-xs font-bold ${
@@ -304,15 +316,16 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
           <div>
             <div className="inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-100 px-3 py-1 rounded-full text-indigo-700 text-xs font-bold uppercase tracking-wider mb-2">
               <CalendarRange className="w-4 h-4 text-indigo-600" />
-              <span>CALENDÁRIO LETIVO, FÉRIAS & RECESSO ESCOLAR</span>
+              <span>CALENDÁRIO LETIVO & GESTÃO DE RECESSO ESCOLAR</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">
-              Gestão de Feriados, Férias e Recessos
+              Gestão de Feriados e Recessos Escolares
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-              Cadastre feriados pontuais e períodos prolongados de <strong>Férias Escolares</strong> ou recessos. O
-              sistema bloqueia chamadas pendentes, alarmes e o status &quot;Em Curso&quot; durante todo o período
-              selecionado, ajustando automaticamente a contagem de dias úteis letivos.
+              Cadastre <strong>Feriados Oficiais</strong> pontuais e períodos prolongados de{' '}
+              <strong>Recesso Escolar por Intervalo de Datas</strong> (ex: 20/07 a 30/07). O sistema bloqueia
+              automaticamente os alertas de chamada pendente, avisos sonoros de monitoras e o status &quot;Em
+              Curso&quot; durante todo o período cadastrado.
             </p>
           </div>
 
@@ -320,70 +333,95 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             <button
               onClick={handleLoadOfficialPreset}
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl border border-slate-200 transition-all cursor-pointer flex items-center space-x-2"
-              title="Carregar feriados, férias e recessos escolares brasileiros padrão"
+              title="Carregar calendário brasileiro padrão de feriados e recessos escolares"
             >
               <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
               <span>Carregar Padrão Oficial</span>
             </button>
 
             <button
-              onClick={() => handleOpenNewModal('ferias')}
-              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center space-x-2"
+              onClick={() => handleOpenNewModal('recesso')}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-sm shadow-indigo-600/20 transition-all cursor-pointer flex items-center space-x-2"
             >
-              <Palmtree className="w-4 h-4" />
-              <span>Cadastrar Férias</span>
+              <Coffee className="w-4 h-4" />
+              <span>Novo Recesso Escolar (Intervalo)</span>
             </button>
 
             <button
               onClick={() => handleOpenNewModal('feriado')}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center space-x-2"
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-2xl shadow-sm shadow-rose-600/20 transition-all cursor-pointer flex items-center space-x-2"
             >
               <Plus className="w-4 h-4" />
-              <span>Novo Feriado / Recesso</span>
+              <span>Novo Feriado Oficial</span>
             </button>
           </div>
         </div>
 
-        {/* Info Rules Card */}
-        <div className="bg-indigo-50/70 border border-indigo-200/70 rounded-2xl p-4 text-xs text-indigo-950 flex items-start space-x-3">
+        {/* Informative Rule Card: Suspension of Activities & Alarms */}
+        <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 text-xs text-indigo-950 flex items-start space-x-3">
           <Info className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <p className="font-bold">Como funciona a Trava Automática de Férias e Feriados no Sistema:</p>
+            <p className="font-bold text-indigo-950">
+              Trava Automática e Suspensão de Atividades Durante Recessos e Feriados:
+            </p>
             <p className="text-indigo-800 leading-relaxed">
-              • <strong>Férias Escolares e Recessos por Intervalo (Ex: 20/07 a 30/07):</strong> Suspendem
-              automaticamente as chamadas de todas as turmas durante o intervalo de datas completo.<br />
-              • <strong>Bloqueio de Notificações:</strong> Nenhum alarme sonoro ou notificação web de rotina é disparado
-              durante o período de férias/recesso.<br />
-              • <strong>Relatórios e Frequência:</strong> O cálculo de dias úteis letivos no Relatório Semanal desconta
-              automaticamente os dias correspondentes aos feriados e recessos cadastrados.
+              • <strong>Recesso Escolar por Intervalo (Ex: 20/07/2026 a 30/07/2026):</strong> Abrange todos os dias do
+              período de forma contínua, suspendendo chamadas e rotinas.<br />
+              • <strong>Suspensão de Alertas e Notificações:</strong> Nenhum alarme sonoro, aviso de chamada pendente ou
+              notificação de rotina é emitido para as monitoras durante o período de recesso cadastrado.<br />
+              • <strong>Cálculo Real de Dias:</strong> Os relatórios e contagens exibem a soma total de dias corridos e
+              descontam com exatidão os dias úteis letivos da grade escolar.
             </p>
           </div>
         </div>
 
-        {/* Stats Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
-          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Eventos</div>
-            <div className="text-2xl font-black text-slate-800 mt-0.5">{stats.total}</div>
-          </div>
-          <div className="bg-purple-50/70 border border-purple-200/80 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1">
-              <Palmtree className="w-3 h-3" />
-              <span>Férias</span>
+        {/* Stats Strip: Displaying TOTAL DAYS instead of just event count */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          {/* Total Days */}
+          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4">
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+              <span>Total Dias Não Letivos</span>
+              <CalendarDays className="w-4 h-4 text-slate-400" />
             </div>
-            <div className="text-2xl font-black text-purple-800 mt-0.5">{stats.ferias}</div>
+            <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
+              {stats.totalDays} {stats.totalDays === 1 ? 'Dia' : 'Dias'}
+            </div>
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              {stats.totalSchoolDays} dias úteis letivos suspensos • {stats.totalEvents} registros
+            </p>
           </div>
-          <div className="bg-rose-50/60 border border-rose-200/70 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-rose-500 uppercase tracking-wider">Feriados</div>
-            <div className="text-2xl font-black text-rose-700 mt-0.5">{stats.feriados}</div>
+
+          {/* Recesso Days */}
+          <div className="bg-indigo-50/70 border border-indigo-200/90 rounded-2xl p-4">
+            <div className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Coffee className="w-4 h-4 text-indigo-600" />
+                <span>Dias de Recesso Escolar</span>
+              </span>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-indigo-900 mt-1">
+              {stats.totalRecessoDays} {stats.totalRecessoDays === 1 ? 'Dia de Recesso' : 'Dias de Recesso'}
+            </div>
+            <p className="text-xs text-indigo-700 font-medium mt-1">
+              {stats.totalRecessoSchoolDays} dias úteis letivos • {stats.recessoPeriodsCount}{' '}
+              {stats.recessoPeriodsCount === 1 ? 'período cadastrado' : 'períodos cadastrados'}
+            </p>
           </div>
-          <div className="bg-indigo-50/60 border border-indigo-200/70 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Recessos</div>
-            <div className="text-2xl font-black text-indigo-700 mt-0.5">{stats.recessos}</div>
-          </div>
-          <div className="bg-amber-50/60 border border-amber-200/70 rounded-2xl p-3">
-            <div className="text-[11px] font-bold text-amber-600 uppercase tracking-wider">Pontos Facult.</div>
-            <div className="text-2xl font-black text-amber-800 mt-0.5">{stats.facultativos}</div>
+
+          {/* Feriados Days */}
+          <div className="bg-rose-50/70 border border-rose-200/90 rounded-2xl p-4">
+            <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <CalendarOff className="w-4 h-4 text-rose-600" />
+                <span>Dias de Feriados Oficiais</span>
+              </span>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-rose-900 mt-1">
+              {stats.totalFeriadoDays} {stats.totalFeriadoDays === 1 ? 'Dia de Feriado' : 'Dias de Feriados'}
+            </div>
+            <p className="text-xs text-rose-700 font-medium mt-1">
+              {stats.feriadoDatesCount} {stats.feriadoDatesCount === 1 ? 'feriado oficial' : 'feriados oficiais'}
+            </p>
           </div>
         </div>
 
@@ -408,17 +446,15 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
 
           {/* Type selector */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Tipo de Evento:</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1">Tipo de Registro:</label>
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as 'TODOS' | HolidayType)}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500"
             >
               <option value="TODOS">Todos os Tipos</option>
-              <option value="ferias">🌴 Férias Escolares</option>
-              <option value="feriado">🚩 Feriado Oficial</option>
               <option value="recesso">☕ Recesso Escolar</option>
-              <option value="ponto_facultativo">☀️ Ponto Facultativo</option>
+              <option value="feriado">🚩 Feriado Oficial</option>
             </select>
           </div>
 
@@ -429,7 +465,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Ex: Férias de Julho, Carnaval, 20/07..."
+                placeholder="Ex: Recesso de Julho, Carnaval, 20/07..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-800 placeholder-slate-400"
@@ -439,14 +475,14 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
         </div>
       </div>
 
-      {/* Holiday & Vacation List Cards */}
+      {/* Holiday and Recess List Cards */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider flex items-center space-x-2">
             <CalendarDays className="w-4 h-4 text-indigo-600" />
-            <span>Feriados, Férias e Recessos Cadastrados ({filteredHolidays.length})</span>
+            <span>Feriados e Recessos Cadastrados ({filteredHolidays.length})</span>
           </h3>
-          <span className="text-xs text-slate-500 font-medium">Cronograma de não-letivos</span>
+          <span className="text-xs text-slate-500 font-medium">Contagem por dias de suspensão</span>
         </div>
 
         {filteredHolidays.length === 0 ? (
@@ -454,35 +490,36 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             <CalendarOff className="w-12 h-12 text-slate-300 mx-auto" />
             <h4 className="text-sm font-bold text-slate-700">Nenhum evento encontrado</h4>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Não há datas comemorativas ou períodos de férias cadastrados para o filtro selecionado. Clique em
-              &quot;Cadastrar Férias&quot; ou &quot;Novo Feriado&quot; para adicionar.
+              Não há feriados ou períodos de recesso cadastrados para o filtro selecionado. Clique em &quot;Novo
+              Recesso Escolar&quot; ou &quot;Novo Feriado&quot; para adicionar.
             </p>
             <button
               onClick={handleLoadOfficialPreset}
               className="px-4 py-2 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-xl hover:bg-indigo-100 transition-all cursor-pointer inline-flex items-center space-x-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Carregar Calendário Oficial Padrão</span>
+              <span>Carregar Calendário Padrão Oficial</span>
             </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {filteredHolidays.map((h) => {
-              const isInterval = Boolean(h.endDate && h.endDate !== h.date);
               const duration = calculateHolidayDuration(h.date, h.endDate);
               const todayStr = new Date().toISOString().split('T')[0];
               const effectiveEnd = h.endDate || h.date;
               const isPast = effectiveEnd < todayStr;
               const isCurrent = todayStr >= h.date && todayStr <= effectiveEnd;
+              const isInterval = Boolean(h.endDate && h.endDate !== h.date);
+              const normalizedType: HolidayType = h.type === 'feriado' ? 'feriado' : 'recesso';
 
               return (
                 <div
                   key={h.id}
                   className={`border rounded-2xl p-4.5 transition-all flex flex-col justify-between space-y-3 relative overflow-hidden ${
                     isCurrent
-                      ? 'bg-gradient-to-br from-purple-50/90 via-indigo-50/60 to-white border-purple-300 shadow-md ring-2 ring-purple-400/30'
-                      : h.type === 'ferias'
-                      ? 'bg-gradient-to-br from-purple-50/40 via-white to-white border-purple-200/90 hover:border-purple-300 hover:shadow-sm'
+                      ? 'bg-gradient-to-br from-indigo-50/95 via-purple-50/60 to-white border-indigo-400 shadow-md ring-2 ring-indigo-400/30'
+                      : normalizedType === 'recesso'
+                      ? 'bg-gradient-to-br from-indigo-50/30 via-white to-white border-indigo-200/90 hover:border-indigo-300 hover:shadow-sm'
                       : isPast
                       ? 'bg-slate-50/70 border-slate-200/80 opacity-85'
                       : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'
@@ -490,7 +527,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                 >
                   {/* Current Active Indicator Pill */}
                   {isCurrent && (
-                    <div className="absolute top-0 right-0 bg-purple-600 text-white text-[9px] font-black uppercase px-3 py-0.5 rounded-bl-xl tracking-wider shadow-xs">
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-black uppercase px-3 py-0.5 rounded-bl-xl tracking-wider shadow-xs">
                       Em Curso Hoje
                     </div>
                   )}
@@ -499,9 +536,9 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                     <div className="space-y-1.5 flex-1 min-w-0">
                       {/* Top Badges Row */}
                       <div className="flex flex-wrap items-center gap-2">
-                        {getTypeBadge(h.type)}
+                        {getTypeBadge(normalizedType)}
 
-                        {/* Date Range Badge */}
+                        {/* Date Interval Badge */}
                         <div className="inline-flex items-center space-x-1.5 text-xs font-mono font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200/80">
                           <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
                           <span>{formatHolidayRange(h)}</span>
@@ -513,31 +550,39 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                         {h.name}
                       </h4>
 
-                      {/* Calculated Duration Highlight Card */}
+                      {/* PROMINENT CARD DAYS COUNT (e.g. 11 Dias de Recesso) */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                         <span
-                          className={`inline-flex items-center space-x-1 text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${
-                            h.type === 'ferias'
-                              ? 'bg-purple-100 text-purple-900 border-purple-200'
-                              : 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                          className={`inline-flex items-center space-x-1.5 text-xs font-black px-3 py-1 rounded-xl border shadow-2xs ${
+                            normalizedType === 'recesso'
+                              ? 'bg-indigo-100/90 text-indigo-950 border-indigo-300'
+                              : 'bg-rose-100/90 text-rose-950 border-rose-300'
                           }`}
                         >
-                          <Clock className="w-3 h-3 text-purple-600 shrink-0" />
+                          <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                           <span>
                             {duration.totalCalendarDays}{' '}
-                            {duration.totalCalendarDays === 1 ? 'dia corrido' : 'dias corridos'}
+                            {duration.totalCalendarDays === 1
+                              ? normalizedType === 'recesso'
+                                ? 'Dia de Recesso'
+                                : 'Dia de Feriado'
+                              : normalizedType === 'recesso'
+                              ? 'Dias de Recesso'
+                              : 'Dias de Feriado'}
                           </span>
                         </span>
 
-                        <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100/90 px-2.5 py-0.5 rounded-lg border border-slate-200">
+                        <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-xl border border-slate-200">
                           <span>
                             {duration.schoolDaysCount}{' '}
-                            {duration.schoolDaysCount === 1 ? 'dia útil letivo' : 'dias úteis letivos'}
+                            {duration.schoolDaysCount === 1
+                              ? 'dia útil letivo suspenso'
+                              : 'dias úteis letivos suspensos'}
                           </span>
                         </span>
 
                         {!isInterval && (
-                          <span className="text-[11px] text-slate-400 font-medium italic">
+                          <span className="text-[11px] text-slate-500 font-medium italic">
                             ({getDayNameFull(h.date)})
                           </span>
                         )}
@@ -575,7 +620,7 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
         )}
       </div>
 
-      {/* Modal Add / Edit Holiday / Vacation */}
+      {/* Modal Add / Edit Recesso or Feriado */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-5 animate-fade-in max-h-[90vh] overflow-y-auto">
@@ -583,22 +628,24 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
               <div className="flex items-center space-x-2.5">
                 <div
                   className={`w-9 h-9 rounded-2xl flex items-center justify-center text-white ${
-                    formType === 'ferias' ? 'bg-purple-600 shadow-sm shadow-purple-600/30' : 'bg-indigo-600'
+                    formType === 'recesso' ? 'bg-indigo-600 shadow-sm shadow-indigo-600/30' : 'bg-rose-600'
                   }`}
                 >
-                  {formType === 'ferias' ? <Palmtree className="w-5 h-5" /> : <CalendarRange className="w-5 h-5" />}
+                  {formType === 'recesso' ? <Coffee className="w-5 h-5" /> : <CalendarOff className="w-5 h-5" />}
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">
                     {editingHoliday
-                      ? formType === 'ferias'
-                        ? 'Editar Férias Escolares'
-                        : 'Editar Feriado / Recesso'
-                      : formType === 'ferias'
-                      ? 'Cadastrar Férias Escolares'
-                      : 'Cadastrar Feriado / Recesso'}
+                      ? formType === 'recesso'
+                        ? 'Editar Recesso Escolar'
+                        : 'Editar Feriado Oficial'
+                      : formType === 'recesso'
+                      ? 'Cadastrar Recesso Escolar (Intervalo)'
+                      : 'Cadastrar Feriado Oficial'}
                   </h3>
-                  <p className="text-xs text-slate-500 font-medium">Configure as datas e os detalhes do período</p>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Configure a data inicial, final e os detalhes do período
+                  </p>
                 </div>
               </div>
               <button
@@ -610,73 +657,52 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             </div>
 
             <form onSubmit={handleFormSubmit} className="space-y-4">
-              {/* Type Selection */}
+              {/* Type Selection (Recesso Escolar vs Feriado Oficial) */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Tipo de Evento:</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleTypeChange('ferias')}
-                    className={`py-2 px-2 text-center rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      formType === 'ferias'
-                        ? 'bg-purple-50 border-purple-400 text-purple-800 ring-2 ring-purple-400/20'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Palmtree className="w-4 h-4 text-purple-600" />
-                    <span>Férias</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleTypeChange('feriado')}
-                    className={`py-2 px-2 text-center rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      formType === 'feriado'
-                        ? 'bg-rose-50 border-rose-400 text-rose-700 ring-2 ring-rose-400/20'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <CalendarOff className="w-4 h-4 text-rose-600" />
-                    <span>Feriado</span>
-                  </button>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">Categoria do Evento:</label>
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => handleTypeChange('recesso')}
-                    className={`py-2 px-2 text-center rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                    className={`py-3 px-3 rounded-2xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-2 ${
                       formType === 'recesso'
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700 ring-2 ring-indigo-400/20'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-900 ring-2 ring-indigo-500/20 shadow-xs'
                         : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <Coffee className="w-4 h-4 text-indigo-600" />
-                    <span>Recesso</span>
+                    <span>Recesso Escolar</span>
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => handleTypeChange('ponto_facultativo')}
-                    className={`py-2 px-2 text-center rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      formType === 'ponto_facultativo'
-                        ? 'bg-amber-50 border-amber-400 text-amber-700 ring-2 ring-amber-400/20'
+                    onClick={() => handleTypeChange('feriado')}
+                    className={`py-3 px-3 rounded-2xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      formType === 'feriado'
+                        ? 'bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-500/20 shadow-xs'
                         : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    <Sun className="w-4 h-4 text-amber-600" />
-                    <span>Ponto Fac.</span>
+                    <CalendarOff className="w-4 h-4 text-rose-600" />
+                    <span>Feriado Oficial</span>
                   </button>
                 </div>
               </div>
 
-              {/* Range Toggle Mode */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between">
+              {/* Interval Toggle Mode */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 flex items-center justify-between">
                 <div className="space-y-0.5">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <CalendarRange className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Definir Intervalo de Vários Dias (Data Inicial a Final)</span>
+                    <CalendarRange className="w-4 h-4 text-indigo-600" />
+                    <span>Intervalo de Vários Dias (Data Inicial a Data Final)</span>
                   </span>
                   <p className="text-[11px] text-slate-500">
-                    Ative para períodos contínuos de férias ou recessos prolongados.
+                    {formType === 'recesso'
+                      ? 'Recomendado para recessos escolares prolongados (ex: 20/07 a 30/07).'
+                      : 'Ative se o feriado abranger mais de 1 dia de emenda/ponte.'}
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-2">
                   <input
                     type="checkbox"
                     checked={isRangeMode}
@@ -692,12 +718,12 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                 </label>
               </div>
 
-              {/* Date Inputs */}
+              {/* Date Pickers (Data Inicial e Data Final) */}
               <div className={`grid ${isRangeMode ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} gap-3`}>
                 {/* Start Date */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {isRangeMode ? 'Data Inicial do Período' : 'Data do Feriado / Evento'}{' '}
+                    {isRangeMode ? 'Data Inicial do Período' : 'Data do Evento'}{' '}
                     <span className="text-rose-500">*</span>:
                   </label>
                   <input
@@ -707,14 +733,14 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                     onChange={(e) => setFormDate(e.target.value)}
                     className="w-full px-3.5 py-2.5 text-xs sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-800"
                   />
-                  {formDate && !isRangeMode && (
+                  {formDate && (
                     <p className="text-[11px] font-medium text-indigo-600 mt-1">
-                      Dia da semana: {getDayNameFull(formDate)}
+                      Início: {getDayNameFull(formDate)}
                     </p>
                   )}
                 </div>
 
-                {/* End Date (if in range mode) */}
+                {/* End Date (Range mode) */}
                 {isRangeMode && (
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -730,38 +756,38 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                     />
                     {formEndDate && (
                       <p className="text-[11px] font-medium text-indigo-600 mt-1">
-                        Até: {getDayNameFull(formEndDate)}
+                        Término: {getDayNameFull(formEndDate)}
                       </p>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Real-time duration breakdown pill */}
+              {/* Dynamic Real-time duration breakdown pill */}
               {formDate && (
-                <div
-                  className={`p-3 rounded-2xl border text-xs flex items-center justify-between gap-2 ${
-                    formType === 'ferias'
-                      ? 'bg-purple-50/80 border-purple-200 text-purple-950'
-                      : 'bg-indigo-50/80 border-indigo-200 text-indigo-950'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <Clock className="w-4 h-4 text-purple-600 shrink-0" />
+                <div className="p-3.5 rounded-2xl border text-xs flex items-center justify-between gap-2 bg-indigo-50/80 border-indigo-200 text-indigo-950">
+                  <div className="flex items-center space-x-2.5">
+                    <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
                     <div>
-                      <span className="font-extrabold block">
-                        Cálculo do Período: {formDuration.totalCalendarDays}{' '}
-                        {formDuration.totalCalendarDays === 1 ? 'dia' : 'dias corridos'}
+                      <span className="font-extrabold block text-slate-900">
+                        Total Calculado: {formDuration.totalCalendarDays}{' '}
+                        {formDuration.totalCalendarDays === 1
+                          ? formType === 'recesso'
+                            ? 'Dia de Recesso'
+                            : 'Dia de Feriado'
+                          : formType === 'recesso'
+                          ? 'Dias de Recesso Escolar'
+                          : 'Dias de Feriado'}
                       </span>
                       <span className="text-[11px] text-slate-600">
                         {formDuration.schoolDaysCount}{' '}
-                        {formDuration.schoolDaysCount === 1 ? 'dia útil letivo' : 'dias úteis letivos'} descontados da
+                        {formDuration.schoolDaysCount === 1 ? 'dia útil letivo' : 'dias úteis letivos'} suspensos da
                         grade
                       </span>
                     </div>
                   </div>
                   {isRangeMode && formEndDate && (
-                    <span className="text-[11px] font-mono font-bold bg-white px-2 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                    <span className="text-[11px] font-mono font-bold bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs shrink-0">
                       {formatDateBR(formDate)} a {formatDateBR(formEndDate)}
                     </span>
                   )}
@@ -777,10 +803,8 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                   type="text"
                   required
                   placeholder={
-                    formType === 'ferias'
-                      ? 'Ex: Férias Escolares de Julho'
-                      : formType === 'recesso'
-                      ? 'Ex: Recesso de Carnaval e Cinzas'
+                    formType === 'recesso'
+                      ? 'Ex: Recesso Escolar de Julho (20/07 a 30/07)'
                       : 'Ex: Independência do Brasil'
                   }
                   value={formName}
@@ -796,14 +820,14 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Ex: Período oficial de férias escolares do Programa Integral. Atividades suspensas."
+                  placeholder="Ex: Período oficial de recesso escolar do Programa Integral. Atividades e chamadas suspensas."
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-800 placeholder-slate-400"
                 />
               </div>
 
-              {/* Actions */}
+              {/* Action Buttons */}
               <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -815,9 +839,9 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
                 <button
                   type="submit"
                   className={`px-5 py-2.5 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer ${
-                    formType === 'ferias'
-                      ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/25'
-                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
+                    formType === 'recesso'
+                      ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
+                      : 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/25'
                   }`}
                 >
                   {editingHoliday ? 'Salvar Alterações' : 'Confirmar Cadastro'}

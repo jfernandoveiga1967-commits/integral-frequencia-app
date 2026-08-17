@@ -504,14 +504,14 @@ function getCurrentHHMM(): string {
               {weekDays.map((day) => {
                 const isSelected = selectedDate === day.dateStr;
                 const dayHoliday = isHolidayOrRecess(day.dateStr, holidays);
-                const isVacation = dayHoliday?.type === 'ferias';
-                const isRecessOrHol = dayHoliday && !isVacation;
+                const isRecess = dayHoliday?.type === 'recesso';
+                const isFeriado = dayHoliday?.type === 'feriado';
 
                 return (
                   <button
                     key={day.dateStr}
                     type="button"
-                    title={dayHoliday ? `${dayHoliday.name} (${dayHoliday.type === 'ferias' ? 'Férias' : 'Recesso/Feriado'})` : undefined}
+                    title={dayHoliday ? `${dayHoliday.name} (${isRecess ? 'Recesso Escolar' : 'Feriado Oficial'})` : undefined}
                     onClick={() => {
                       // Call parent update
                       const event = new CustomEvent('app_select_date', { detail: day.dateStr });
@@ -520,17 +520,17 @@ function getCurrentHHMM(): string {
                     className={`px-1.5 py-1.5 text-center rounded-lg text-xs font-semibold transition-all cursor-pointer border relative ${
                       isSelected
                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                        : isVacation
-                        ? 'bg-purple-50 hover:bg-purple-100 text-purple-900 border-purple-200'
-                        : isRecessOrHol
+                        : isRecess
+                        ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border-indigo-200'
+                        : isFeriado
                         ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
                         : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
                     }`}
                   >
                     <div className="flex items-center justify-center space-x-0.5">
                       <span>{day.dayShort.split(' ')[0]}</span>
-                      {isVacation && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0 inline-block" />}
-                      {isRecessOrHol && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 inline-block" />}
+                      {isRecess && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 inline-block" />}
+                      {isFeriado && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 inline-block" />}
                     </div>
                     <div className="text-[10px] opacity-80">{day.dateStr.split('-')[2]}</div>
                   </button>
@@ -557,28 +557,28 @@ function getCurrentHHMM(): string {
           </div>
         </div>
 
-        {/* Selected Date Holiday / Vacation Notice Banner */}
+        {/* Selected Date Holiday / Recess Notice Banner */}
         {(() => {
           const selectedDayHoliday = isHolidayOrRecess(selectedDate, holidays);
           if (!selectedDayHoliday) return null;
 
-          if (selectedDayHoliday.type === 'ferias') {
+          if (selectedDayHoliday.type === 'recesso') {
             return (
-              <div className="p-3 bg-purple-50 border border-purple-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-purple-950">
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-indigo-950">
                 <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <Palmtree className="w-4 h-4" />
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Coffee className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="font-black text-purple-900 block">
-                      Período de Férias Escolares ({selectedDayHoliday.name})
+                    <span className="font-black text-indigo-950 block">
+                      Recesso Escolar: {selectedDayHoliday.name}
                     </span>
-                    <span className="text-purple-700 text-[11px]">
-                      Atividades e chamadas do Programa Integral suspensas durante este período.
+                    <span className="text-indigo-700 text-[11px]">
+                      Atividades pedagógicas e chamadas do Programa Integral suspensas durante este período.
                     </span>
                   </div>
                 </div>
-                <span className="px-2.5 py-1 bg-purple-200/80 text-purple-900 rounded-lg font-mono font-bold text-[11px] shrink-0 border border-purple-300">
+                <span className="px-2.5 py-1 bg-indigo-100 text-indigo-900 rounded-lg font-mono font-bold text-[11px] shrink-0 border border-indigo-200">
                   {formatDateBR(selectedDate)}
                 </span>
               </div>
@@ -593,10 +593,10 @@ function getCurrentHHMM(): string {
                 </div>
                 <div>
                   <span className="font-black text-rose-900 block">
-                    {selectedDayHoliday.type === 'recesso' ? 'Recesso Escolar' : 'Feriado Oficial'}: {selectedDayHoliday.name}
+                    Feriado Oficial: {selectedDayHoliday.name}
                   </span>
                   <span className="text-rose-700 text-[11px]">
-                    Não há registro de frequência obrigatório para este dia.
+                    Não há registro de frequência obrigatório para esta data.
                   </span>
                 </div>
               </div>
