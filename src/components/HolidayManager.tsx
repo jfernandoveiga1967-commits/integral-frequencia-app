@@ -394,8 +394,8 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
               {stats.totalDays} {stats.totalDays === 1 ? 'Dia Corrido' : 'Dias Corridos'}
             </div>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              {stats.totalSchoolDays} dias úteis letivos suspensos • {stats.totalWeekendDays} fins de semana • {stats.totalEvents} registros
+            <p className="text-xs text-slate-600 font-medium mt-1">
+              <strong>{stats.totalDays}</strong> {stats.totalDays === 1 ? 'Dia Corrido Total' : 'Dias Corridos Totais'} • <strong>{stats.totalSchoolDays}</strong> dias úteis letivos suspensos • <strong>{stats.totalEvents}</strong> {stats.totalEvents === 1 ? 'registro' : 'registros cadastrados'}
             </p>
           </div>
 
@@ -410,8 +410,8 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             <div className="text-2xl sm:text-3xl font-black text-indigo-900 mt-1">
               {stats.totalRecessoDays} {stats.totalRecessoDays === 1 ? 'Dia de Recesso' : 'Dias de Recesso'}
             </div>
-            <p className="text-xs text-indigo-700 font-medium mt-1">
-              {stats.totalRecessoSchoolDays} dias úteis letivos {stats.totalRecessoWeekendDays > 0 ? `• ${stats.totalRecessoWeekendDays} fds ` : ''}• {stats.recessoPeriodsCount}{' '}
+            <p className="text-xs text-indigo-800 font-medium mt-1">
+              <strong>{stats.totalRecessoDays}</strong> {stats.totalRecessoDays === 1 ? 'Dia Corrido Total de Recesso' : 'Dias Corridos Totais de Recesso'} • <strong>{stats.totalRecessoSchoolDays}</strong> dias úteis letivos suspensos • <strong>{stats.recessoPeriodsCount}</strong>{' '}
               {stats.recessoPeriodsCount === 1 ? 'período cadastrado' : 'períodos cadastrados'}
             </p>
           </div>
@@ -427,8 +427,9 @@ export const HolidayManager: React.FC<HolidayManagerProps> = ({
             <div className="text-2xl sm:text-3xl font-black text-rose-900 mt-1">
               {stats.totalFeriadoDays} {stats.totalFeriadoDays === 1 ? 'Dia de Feriado' : 'Dias de Feriados'}
             </div>
-            <p className="text-xs text-rose-700 font-medium mt-1">
-              {stats.totalFeriadoSchoolDays} dias úteis letivos • {stats.feriadoDatesCount} {stats.feriadoDatesCount === 1 ? 'feriado oficial' : 'feriados oficiais'}
+            <p className="text-xs text-rose-800 font-medium mt-1">
+              <strong>{stats.totalFeriadoDays}</strong> {stats.totalFeriadoDays === 1 ? 'Dia Corrido Total de Feriado' : 'Dias Corridos Totais de Feriados'} • <strong>{stats.totalFeriadoSchoolDays}</strong> dias úteis letivos suspensos • <strong>{stats.feriadoDatesCount}</strong>{' '}
+              {stats.feriadoDatesCount === 1 ? 'feriado oficial' : 'feriados oficiais'}
             </p>
           </div>
         </div>

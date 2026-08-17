@@ -15,16 +15,35 @@ export function loadHolidays(): HolidayItem[] {
     if (data) {
       const parsed: HolidayItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Normalize any old types ('ferias', 'ponto_facultativo') to 'recesso'
+        // Create lookup map for initial data to enrich any missing endDates
+        const initialMap = new Map<string, HolidayItem>();
+        INITIAL_HOLIDAYS.forEach((initH) => {
+          initialMap.set(initH.id, initH);
+          initialMap.set(initH.name.toLowerCase().trim(), initH);
+        });
+
         let migrated = false;
         const normalized = parsed.map((h) => {
           let updated = { ...h };
+          
+          // Normalize any old types ('ferias', 'ponto_facultativo') to 'recesso'
           if ((updated.type as string) === 'ferias' || (updated.type as string) === 'ponto_facultativo') {
             updated.type = 'recesso';
             migrated = true;
           }
+
+          // If this is a known initial holiday that originally lacked endDate in previous storage versions, enrich it
+          if (!updated.endDate) {
+            const initMatch = initialMap.get(updated.id) || initialMap.get(updated.name.toLowerCase().trim());
+            if (initMatch && initMatch.endDate) {
+              updated.endDate = initMatch.endDate;
+              migrated = true;
+            }
+          }
+
           return updated;
         });
+
         if (migrated) {
           saveHolidays(normalized);
         }

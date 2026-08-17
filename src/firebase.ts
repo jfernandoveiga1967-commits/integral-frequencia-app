@@ -623,8 +623,9 @@ export function subscribeHolidays(callback: (holidays: HolidayItem[]) => void) {
           holidayList.push({
             id: data.id,
             date: data.date,
+            endDate: data.endDate || data.date,
             name: data.name,
-            type: data.type || 'feriado',
+            type: data.type === 'feriado' ? 'feriado' : 'recesso',
             description: data.description || '',
             createdAt: data.createdAt || new Date().toISOString(),
             updatedAt: data.updatedAt || new Date().toISOString(),
@@ -647,6 +648,7 @@ export async function saveHolidayToFirestore(holiday: HolidayItem) {
     await setDoc(docRef, {
       id: holiday.id,
       date: holiday.date,
+      endDate: holiday.endDate || holiday.date,
       name: holiday.name,
       type: holiday.type,
       description: holiday.description || '',
@@ -675,6 +677,7 @@ export async function batchSaveHolidaysToFirestore(holidays: HolidayItem[]) {
       batch.set(docRef, {
         id: h.id,
         date: h.date,
+        endDate: h.endDate || h.date,
         name: h.name,
         type: h.type,
         description: h.description || '',

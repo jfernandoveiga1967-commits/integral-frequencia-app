@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem } from './types';
+import { INITIAL_HOLIDAYS } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
@@ -348,8 +349,34 @@ export default function App() {
 
     const unsubHolidays = subscribeHolidays((fsHolidays) => {
       if (fsHolidays.length > 0) {
-        setHolidays(fsHolidays);
-        saveHolidays(fsHolidays);
+        const initialMap = new Map<string, HolidayItem>();
+        INITIAL_HOLIDAYS.forEach((initH) => {
+          initialMap.set(initH.id, initH);
+          initialMap.set(initH.name.toLowerCase().trim(), initH);
+        });
+
+        let needsSync = false;
+        const normalized = fsHolidays.map((h) => {
+          let updated = { ...h };
+          if ((updated.type as string) === 'ferias' || (updated.type as string) === 'ponto_facultativo') {
+            updated.type = 'recesso';
+            needsSync = true;
+          }
+          if (!updated.endDate || updated.endDate === updated.date) {
+            const match = initialMap.get(updated.id) || initialMap.get(updated.name.toLowerCase().trim());
+            if (match && match.endDate && match.endDate !== updated.endDate) {
+              updated.endDate = match.endDate;
+              needsSync = true;
+            }
+          }
+          return updated;
+        });
+
+        setHolidays(normalized);
+        saveHolidays(normalized);
+        if (needsSync) {
+          batchSaveHolidaysToFirestore(normalized).catch(() => {});
+        }
       } else {
         const defaultHols = loadHolidays();
         setHolidays(defaultHols);
