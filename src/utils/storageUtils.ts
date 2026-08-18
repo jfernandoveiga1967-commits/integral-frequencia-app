@@ -96,23 +96,25 @@ export function loadActivities(): ActivityItem[] {
     if (data) {
       const parsed: ActivityItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const enriched = parsed.map((act) => ({
-          ...act,
-          requiresRollCall: act.requiresRollCall !== undefined ? act.requiresRollCall : true,
-        }));
-        if (!enriched.some((a) => a.id === 'Rotina')) {
-          const rotinaItem = ACTIVITIES_LIST.find((a) => a.id === 'Rotina') || {
-            id: 'Rotina',
-            name: 'Rotina',
-            icon: 'Clock',
-            description: 'Rotina diária e acompanhamento obrigatório de todos os alunos do Integral',
-            defaultEquipment: 'Agenda escolar / Material de uso diário',
-            requiresRollCall: true,
+        const officialIds = new Set(ACTIVITIES_LIST.map((a) => a.id));
+        
+        // Enrich and guarantee requiresRollCall: true for official extracurriculars
+        let enriched = parsed.map((act) => {
+          const isOfficial = officialIds.has(act.id) || officialIds.has(act.name);
+          return {
+            ...act,
+            requiresRollCall: isOfficial ? true : (act.requiresRollCall !== undefined ? act.requiresRollCall : true),
           };
-          const updated = [rotinaItem, ...enriched];
-          saveActivities(updated);
-          return updated;
-        }
+        });
+
+        // Ensure all default official activities are present
+        ACTIVITIES_LIST.forEach((officialAct) => {
+          if (!enriched.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
+            enriched.push({ ...officialAct, requiresRollCall: true });
+          }
+        });
+
+        saveActivities(enriched);
         return enriched;
       }
     }

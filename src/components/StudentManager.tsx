@@ -4,7 +4,7 @@ import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
 interface StudentManagerProps {
   students: Student[];
@@ -13,10 +13,10 @@ interface StudentManagerProps {
   activitiesList?: ActivityItem[];
   currentWeek?: WeekInfo;
   currentUser?: UserProfile | null;
-  onAddStudent: (student: Omit<Student, 'id'>) => void;
-  onBatchAddStudents: (names: string[], turma: TurmaType, activities: ActivityType[]) => void;
-  onUpdateStudent: (student: Student) => void;
-  onDeleteStudent: (id: string) => void;
+  onAddStudent: (student: Omit<Student, 'id'>) => void | Promise<void>;
+  onBatchAddStudents: (names: string[], turma: TurmaType, activities: ActivityType[]) => void | Promise<void>;
+  onUpdateStudent: (student: Student) => void | Promise<void>;
+  onDeleteStudent: (id: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
@@ -59,6 +59,70 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return map;
   }, [activeActivities]);
 
+  // Filter activities to only extracurricular modalities that require roll call (requiresRollCall !== false / exigeChamada !== false)
+  // Completely hides routine/general schedule blocks that don't have individual student roll call (Acolhimento, Almoço, Higienização, Lanche, Descanso, Parque, etc.)
+  const extracurricularRollCallActivities = React.useMemo(() => {
+    const routineKeywords = [
+      'acolhimento',
+      'almoço',
+      'almoco',
+      'higienização',
+      'higienizacao',
+      'higiene',
+      'lanche',
+      'descanso',
+      'sono',
+      'parque',
+      'recreio',
+      'patio',
+      'pátio',
+      'lição de casa',
+      'licao de casa',
+      'estudo orientado',
+      'saída',
+      'saida',
+      'entrada',
+    ];
+
+    const officialExtracurriculars = new Set([
+      'rotina',
+      'natação',
+      'natacao',
+      'balé',
+      'bale',
+      'dança',
+      'danca',
+      'judô',
+      'judo',
+      'futebol',
+      'ginástica',
+      'ginastica',
+      'flauta',
+    ]);
+
+    return activeActivities.filter((act) => {
+      const norm = (act.name || act.id || '').toLowerCase().trim();
+      const normNoAccent = norm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Official extracurricular activities (including Natação, Judô, Balé, etc.) are always included
+      if (officialExtracurriculars.has(norm) || officialExtracurriculars.has(normNoAccent)) {
+        return act.requiresRollCall !== false && (act as any).exigeChamada !== false;
+      }
+
+      // Check explicit roll call requirements
+      if (act.requiresRollCall === false || (act as any).exigeChamada === false) {
+        return false;
+      }
+
+      // Check routine keywords
+      if (routineKeywords.some((k) => norm === k || norm.startsWith(`${k} `) || norm.endsWith(` ${k}`))) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [activeActivities]);
+
   const turmasList = allowedTurmas;
 
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
@@ -70,12 +134,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+  const [isSavingSingle, setIsSavingSingle] = useState(false);
 
   // Batch Add state
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [batchNamesText, setBatchNamesText] = useState('');
   const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
 
   // Keep selectedTurma and form turmas aligned with allowed turmas for non-coordenador
   React.useEffect(() => {
@@ -108,15 +174,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
   const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
   const [targetTransferTurma, setTargetTransferTurma] = useState<string>('');
+  const [isSavingTransfer, setIsSavingTransfer] = useState(false);
 
   const handleOpenEdit = (student: Student) => {
     if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
       return;
     }
-    setEditingStudent(student);
+    setEditFormError(null);
+    setEditingStudent({ ...student });
   };
 
   const handleOpenDelete = (student: Student) => {
@@ -135,7 +205,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     setTargetTransferTurma(otherTurmas[0] || student.turma);
   };
 
-  const handleConfirmTransfer = (e: React.FormEvent) => {
+  const handleConfirmTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!transferringStudent || !targetTransferTurma) return;
     if (!isCoordenador && currentUser && !allowedTurmas.includes(targetTransferTurma)) {
@@ -145,12 +215,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setTransferringStudent(null);
       return;
     }
-    // Update active turma for student while preserving all historical attendance records
-    onUpdateStudent({
-      ...transferringStudent,
-      turma: targetTransferTurma,
-    });
-    setTransferringStudent(null);
+    setIsSavingTransfer(true);
+    try {
+      // Update active turma for student while preserving all historical attendance records
+      await Promise.resolve(
+        onUpdateStudent({
+          ...transferringStudent,
+          turma: targetTransferTurma,
+        })
+      );
+      setTransferringStudent(null);
+    } catch (err) {
+      console.error('Error transferring student:', err);
+    } finally {
+      setIsSavingTransfer(false);
+    }
   };
 
   // Turma deletion and management states
@@ -189,10 +268,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       });
   }, [students, selectedTurma, selectedActivity, searchTerm, isCoordenador, currentUser, allowedTurmas]);
 
-  const handleSingleAdd = (e: React.FormEvent) => {
+  const handleSingleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setSingleFormError(null);
-    if (!newName.trim()) {
+    const trimmedName = (newName || '').trim();
+    if (!trimmedName) {
       setSingleFormError('Por favor, digite o nome do aluno.');
       return;
     }
@@ -200,17 +280,30 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setSingleFormError('Você só tem permissão para cadastrar alunos nas suas turmas vinculadas.');
       return;
     }
-    const finalActivities = newActivities.includes('Rotina') ? newActivities : ['Rotina', ...newActivities];
-    onAddStudent({
-      name: newName.trim(),
-      turma: newTurma,
-      activities: finalActivities,
-    });
-    setNewName('');
-    setShowAddForm(false);
+    setIsSavingSingle(true);
+    try {
+      const finalActivities = newActivities.includes('Rotina')
+        ? Array.from(new Set(newActivities))
+        : ['Rotina', ...Array.from(new Set(newActivities))];
+      await Promise.resolve(
+        onAddStudent({
+          name: trimmedName,
+          turma: newTurma,
+          activities: finalActivities,
+        })
+      );
+      setNewName('');
+      setShowAddForm(false);
+      setSingleFormError(null);
+    } catch (err: any) {
+      console.error('Error saving new student:', err);
+      setSingleFormError(err?.message || 'Erro ao cadastrar aluno. Tente novamente.');
+    } finally {
+      setIsSavingSingle(false);
+    }
   };
 
-  const handleBatchAddSubmit = (e: React.FormEvent) => {
+  const handleBatchAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBatchFormError(null);
     const names = batchNamesText
@@ -226,18 +319,30 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setBatchFormError('Você só tem permissão para importar alunos nas suas turmas vinculadas.');
       return;
     }
-    const finalActivities = batchActivities.includes('Rotina') ? batchActivities : ['Rotina', ...batchActivities];
+    setIsSavingBatch(true);
+    try {
+      const finalActivities = batchActivities.includes('Rotina')
+        ? Array.from(new Set(batchActivities))
+        : ['Rotina', ...Array.from(new Set(batchActivities))];
 
-    onBatchAddStudents(names, batchTurma, finalActivities);
-    setBatchNamesText('');
-    setShowBatchForm(false);
+      await Promise.resolve(onBatchAddStudents(names, batchTurma, finalActivities));
+      setBatchNamesText('');
+      setShowBatchForm(false);
+      setBatchFormError(null);
+    } catch (err: any) {
+      console.error('Error importing batch students:', err);
+      setBatchFormError(err?.message || 'Erro ao importar alunos em lote. Tente novamente.');
+    } finally {
+      setIsSavingBatch(false);
+    }
   };
 
-  const handleEditSave = (e: React.FormEvent) => {
+  const handleEditSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditFormError(null);
     if (!editingStudent) return;
-    if (!editingStudent.name.trim()) {
+    const trimmedName = (editingStudent.name || '').trim();
+    if (!trimmedName) {
       setEditFormError('O nome do aluno não pode ficar em branco.');
       return;
     }
@@ -245,29 +350,45 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setEditFormError('Você só tem permissão para vincular alunos às suas turmas liberadas.');
       return;
     }
-    const finalActivities = editingStudent.activities.includes('Rotina')
-      ? editingStudent.activities
-      : ['Rotina', ...editingStudent.activities];
 
-    onUpdateStudent({
-      ...editingStudent,
-      activities: finalActivities,
-    });
-    setEditingStudent(null);
+    setIsSavingEdit(true);
+    try {
+      const currentActs = Array.isArray(editingStudent.activities) ? editingStudent.activities : [];
+      const finalActivities = currentActs.includes('Rotina')
+        ? Array.from(new Set(currentActs))
+        : ['Rotina', ...Array.from(new Set(currentActs))];
+
+      const studentToSave: Student = {
+        ...editingStudent,
+        name: trimmedName,
+        turma: editingStudent.turma,
+        activities: finalActivities,
+      };
+
+      await Promise.resolve(onUpdateStudent(studentToSave));
+      setEditingStudent(null);
+      setEditFormError(null);
+    } catch (err: any) {
+      console.error('Error saving student modifications:', err);
+      setEditFormError(err?.message || 'Ocorreu um erro ao salvar os dados do aluno. Tente novamente.');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const toggleActivityInList = (
     currentList: ActivityType[],
     activity: ActivityType
   ): ActivityType[] => {
+    const list = Array.isArray(currentList) ? [...currentList] : [];
     if (activity === 'Rotina') {
       // Rotina is mandatory for all students and cannot be removed
-      return currentList.includes('Rotina') ? currentList : ['Rotina', ...currentList];
+      return list.includes('Rotina') ? list : ['Rotina', ...list];
     }
-    if (currentList.includes(activity)) {
-      return currentList.filter((a) => a !== activity);
+    if (list.includes(activity)) {
+      return list.filter((a) => a !== activity);
     } else {
-      return [...currentList, activity];
+      return [...list, activity];
     }
   };
 
@@ -399,28 +520,34 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              Atividades Extracurriculares do Aluno (Marque as aplicáveis):
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Atividades Extracurriculares (Apenas com Chamada):
+              </label>
+              <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades ativas
+              </span>
+            </div>
             <div className="flex flex-wrap gap-2">
-              {activeActivities.map((act) => {
+              {extracurricularRollCallActivities.map((act) => {
                 const isSelected = newActivities.includes(act.id);
                 const isRotina = act.id === 'Rotina';
                 return (
                   <button
                     type="button"
                     key={act.id}
+                    disabled={isSavingSingle}
                     onClick={() =>
                       setNewActivities(toggleActivityInList(newActivities, act.id))
                     }
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border flex items-center space-x-1.5 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border flex items-center space-x-1.5 cursor-pointer ${
                       isSelected
                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                     } ${isRotina ? 'ring-2 ring-rose-400' : ''}`}
                   >
                     <span>{isSelected ? '✓' : '+'}</span>
-                    <span>{act.id} {isRotina ? '(Obrigatória)' : ''}</span>
+                    <span>{act.name || act.id} {isRotina ? '(Obrigatória)' : ''}</span>
                   </button>
                 );
               })}
@@ -430,17 +557,28 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           <div className="flex justify-end space-x-2 pt-2 border-t border-indigo-100">
             <button
               type="button"
+              disabled={isSavingSingle}
               onClick={() => setShowAddForm(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl cursor-pointer"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer flex items-center space-x-1"
+              disabled={isSavingSingle}
+              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs cursor-pointer flex items-center space-x-1.5 transition-all"
             >
-              <Check className="w-4 h-4" />
-              <span>Salvar Aluno</span>
+              {isSavingSingle ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Salvar Aluno</span>
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -459,8 +597,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </h3>
             <button
               type="button"
+              disabled={isSavingBatch}
               onClick={() => setShowBatchForm(false)}
-              className="text-slate-400 hover:text-white cursor-pointer"
+              className="text-slate-400 hover:text-white cursor-pointer disabled:opacity-50"
             >
               <X className="w-4 h-4" />
             </button>
@@ -480,7 +619,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <select
                 value={batchTurma}
                 onChange={(e) => setBatchTurma(e.target.value as TurmaType)}
-                disabled={!isCoordenador && allowedTurmas.length === 1}
+                disabled={isSavingBatch || (!isCoordenador && allowedTurmas.length === 1)}
                 className={`w-full px-3 py-2 text-sm border border-slate-700 bg-slate-800 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 font-medium ${
                   !isCoordenador && allowedTurmas.length === 1 ? 'opacity-75 cursor-not-allowed' : ''
                 }`}
@@ -499,26 +638,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Atividades dessa Turma (Serão atribuídas a todos da lista):
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Atividades com Chamada (Turma):
+                </label>
+                <span className="text-[10px] text-indigo-300 font-medium">
+                  {extracurricularRollCallActivities.filter(a => a.id !== 'Rotina').length} opções
+                </span>
+              </div>
               <div className="flex flex-wrap gap-1.5">
-                {activeActivities.map((act) => {
+                {extracurricularRollCallActivities.map((act) => {
                   const isSelected = batchActivities.includes(act.id);
                   return (
                     <button
                       type="button"
                       key={act.id}
+                      disabled={isSavingBatch}
                       onClick={() =>
                         setBatchActivities(toggleActivityInList(batchActivities, act.id))
                       }
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border transition-all ${
                         isSelected
                           ? 'bg-indigo-500 text-white border-indigo-400'
                           : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                       }`}
                     >
-                      {act.id}
+                      {act.name || act.id}
                     </button>
                   );
                 })}
@@ -534,8 +679,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               rows={5}
               placeholder={`Exemplo:\nAna Julia Santos\nBruno Henrique Lima\nCarolina Mendes\nDaniel Oliveira`}
               value={batchNamesText}
+              disabled={isSavingBatch}
               onChange={(e) => setBatchNamesText(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono border border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 text-xs font-mono border border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
               required
             />
           </div>
@@ -543,17 +689,28 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
             <button
               type="button"
+              disabled={isSavingBatch}
               onClick={() => setShowBatchForm(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer"
+              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md cursor-pointer flex items-center space-x-1"
+              disabled={isSavingBatch}
+              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
             >
-              <Check className="w-4 h-4" />
-              <span>Importar Alunos</span>
+              {isSavingBatch ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Importando...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Importar Alunos</span>
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -573,8 +730,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </h3>
               <button
                 type="button"
-                onClick={() => setEditingStudent(null)}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                disabled={isSavingEdit}
+                onClick={() => {
+                  setEditingStudent(null);
+                  setEditFormError(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -593,10 +754,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <input
                 type="text"
                 value={editingStudent.name}
+                disabled={isSavingEdit}
                 onChange={(e) =>
                   setEditingStudent({ ...editingStudent, name: e.target.value })
                 }
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-bold text-slate-900"
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
                 required
               />
             </div>
@@ -610,11 +772,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 onChange={(e) =>
                   setEditingStudent({ ...editingStudent, turma: e.target.value as TurmaType })
                 }
-                disabled={!isCoordenador && allowedTurmas.length === 1}
+                disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1)}
                 className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
                   !isCoordenador && allowedTurmas.length === 1
                     ? 'bg-slate-100 cursor-not-allowed text-slate-600'
-                    : 'text-slate-800 bg-white'
+                    : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
                 }`}
               >
                 {turmasList.map((t) => (
@@ -640,34 +802,40 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-2">
-                Atividades Extracurriculares:
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {activeActivities.map((act) => {
-                  const isChecked = editingStudent.activities.includes(act.id);
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Atividades Extracurriculares (Apenas com Chamada):
+                </label>
+                <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                  {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1">
+                {extracurricularRollCallActivities.map((act) => {
+                  const isChecked = (editingStudent.activities || []).includes(act.id);
                   const isRotina = act.id === 'Rotina';
                   return (
                     <button
                       type="button"
                       key={act.id}
+                      disabled={isSavingEdit}
                       onClick={() =>
                         setEditingStudent({
                           ...editingStudent,
                           activities: toggleActivityInList(editingStudent.activities, act.id),
                         })
                       }
-                      className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all ${
+                      className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all cursor-pointer ${
                         isChecked
-                          ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold'
-                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                          ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold shadow-2xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       } ${isRotina ? 'border-rose-300 bg-rose-50/50' : ''}`}
                     >
-                      <div className="flex items-center space-x-1.5">
-                        <ActivityBadge activity={act.id} size="sm" />
+                      <div className="flex items-center space-x-1.5 truncate">
+                        <ActivityBadge activity={act.id} size="sm" iconName={act.icon} customIconUrl={act.customIconUrl} />
                         {isRotina && <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded-full font-bold">Obrigatória</span>}
                       </div>
-                      <span className="text-indigo-600">{isChecked ? '✓' : ''}</span>
+                      <span className="text-indigo-600 font-bold ml-1">{isChecked ? '✓' : ''}</span>
                     </button>
                   );
                 })}
@@ -677,17 +845,31 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setEditingStudent(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                disabled={isSavingEdit}
+                onClick={() => {
+                  setEditingStudent(null);
+                  setEditFormError(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1"
+                disabled={isSavingEdit}
+                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
               >
-                <Check className="w-4 h-4" />
-                <span>Salvar Alterações</span>
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Salvando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Salvar Alterações</span>
+                  </>
+                )}
               </button>
             </div>
           </form>
@@ -747,11 +929,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium"
           >
             <option value="TODOS">Todas as Atividades</option>
-            {activeActivities.map((a) => {
-              const count = students.filter((s) => s.activities.includes(a.id)).length;
+            {extracurricularRollCallActivities.map((a) => {
+              const count = students.filter((s) => (s.activities || []).includes(a.id)).length;
               return (
                 <option key={a.id} value={a.id}>
-                  {a.name} ({count} alunos)
+                  {a.name || a.id} ({count} alunos)
                 </option>
               );
             })}
@@ -944,18 +1126,28 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isSavingTransfer}
                   onClick={() => setTransferringStudent(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={!targetTransferTurma || targetTransferTurma === transferringStudent.turma}
+                  disabled={isSavingTransfer || !targetTransferTurma || targetTransferTurma === transferringStudent.turma}
                   className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
                 >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  <span>Confirmar Troca de Turma</span>
+                  {isSavingTransfer ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Transferindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="w-4 h-4" />
+                      <span>Confirmar Troca de Turma</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

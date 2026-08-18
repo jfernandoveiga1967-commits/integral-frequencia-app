@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem } from './types';
-import { INITIAL_HOLIDAYS } from './data/initialData';
+import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
@@ -333,12 +333,48 @@ export default function App() {
 
     const unsubActivities = subscribeActivities((fsActivities) => {
       if (fsActivities.length > 0) {
-        setActivitiesList(fsActivities);
-        saveActivities(fsActivities);
+        const officialMap = new Map<string, ActivityItem>();
+        ACTIVITIES_LIST.forEach((initAct) => {
+          officialMap.set(initAct.id, initAct);
+          officialMap.set(initAct.name, initAct);
+        });
+
+        const healedActivities = fsActivities.map((act) => {
+          const isOfficial = officialMap.has(act.id) || officialMap.has(act.name);
+          if (isOfficial) {
+            const officialTemplate = officialMap.get(act.id) || officialMap.get(act.name)!;
+            // If requiresRollCall is false in Firestore, fix it immediately in Firestore
+            if (act.requiresRollCall !== true) {
+              saveActivityToFirestore({
+                ...officialTemplate,
+                ...act,
+                requiresRollCall: true,
+              });
+            }
+            return {
+              ...officialTemplate,
+              ...act,
+              requiresRollCall: true,
+            };
+          }
+          return act;
+        });
+
+        // If any official activity is missing from Firestore, seed it to Firestore
+        ACTIVITIES_LIST.forEach((officialAct) => {
+          if (!healedActivities.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
+            saveActivityToFirestore(officialAct);
+            healedActivities.push(officialAct);
+          }
+        });
+
+        setActivitiesList(healedActivities);
+        saveActivities(healedActivities);
       } else {
         // Seed default initial activities to Firestore
         const defaultActs = loadActivities();
         defaultActs.forEach((act) => saveActivityToFirestore(act));
+        setActivitiesList(defaultActs);
       }
     });
 
@@ -409,18 +445,24 @@ export default function App() {
   }, []);
 
   // Save student modifications
-  const handleAddStudent = (newStudentData: Omit<Student, 'id'>) => {
+  const handleAddStudent = async (newStudentData: Omit<Student, 'id'>) => {
     const newStudent: Student = {
       ...newStudentData,
       id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     };
-    const updated = [newStudent, ...students];
-    setStudents(updated);
-    saveStudents(updated);
-    saveStudentToFirestore(newStudent);
+    setStudents((prev) => {
+      const updated = [newStudent, ...prev];
+      saveStudents(updated);
+      return updated;
+    });
+    try {
+      await saveStudentToFirestore(newStudent);
+    } catch (err) {
+      console.error('Error adding student to Firestore:', err);
+    }
   };
 
-  const handleBatchAddStudents = (
+  const handleBatchAddStudents = async (
     names: string[],
     turma: TurmaType,
     activities: ActivityType[]
@@ -432,24 +474,43 @@ export default function App() {
       activities,
     }));
 
-    const updated = [...newStudentsList, ...students];
-    setStudents(updated);
-    saveStudents(updated);
-    newStudentsList.forEach((s) => saveStudentToFirestore(s));
+    setStudents((prev) => {
+      const updated = [...newStudentsList, ...prev];
+      saveStudents(updated);
+      return updated;
+    });
+
+    try {
+      await Promise.allSettled(newStudentsList.map((s) => saveStudentToFirestore(s)));
+    } catch (err) {
+      console.error('Error batch adding students to Firestore:', err);
+    }
   };
 
-  const handleUpdateStudent = (updatedStudent: Student) => {
-    const updated = students.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
-    setStudents(updated);
-    saveStudents(updated);
-    saveStudentToFirestore(updatedStudent);
+  const handleUpdateStudent = async (updatedStudent: Student) => {
+    setStudents((prev) => {
+      const updated = prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
+      saveStudents(updated);
+      return updated;
+    });
+    try {
+      await saveStudentToFirestore(updatedStudent);
+    } catch (err) {
+      console.error('Error updating student in Firestore:', err);
+    }
   };
 
-  const handleDeleteStudent = (id: string) => {
-    const updated = students.filter((s) => s.id !== id);
-    setStudents(updated);
-    saveStudents(updated);
-    deleteStudentFromFirestore(id);
+  const handleDeleteStudent = async (id: string) => {
+    setStudents((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      saveStudents(updated);
+      return updated;
+    });
+    try {
+      await deleteStudentFromFirestore(id);
+    } catch (err) {
+      console.error('Error deleting student from Firestore:', err);
+    }
   };
 
   // Save attendance record modifications
