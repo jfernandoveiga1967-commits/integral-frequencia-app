@@ -57,19 +57,6 @@ const DAYS_OF_WEEK: { id: DayOfWeek; label: string; short: string }[] = [
   { id: 'sexta', label: 'Sexta-feira', short: 'SEX' },
 ];
 
-const COMMON_LOCATIONS = [
-  'Piscina',
-  'Refeitório',
-  'Quadra Coberta',
-  'Campo de Futebol',
-  'Sala de Balé / Dança',
-  'Tatame / Judô',
-  'Sala de Música',
-  'Sala de Estudos / Lição',
-  'Parquinho / Pátio',
-  'Ateliê de Artes',
-];
-
 export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   turmas,
   activitiesList,
@@ -99,14 +86,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [blockToDelete, setBlockToDelete] = useState<ScheduleBlock | null>(null);
-  const [slotToDelete, setSlotToDelete] = useState<{
-    turma: string;
-    startTime: string;
-    endTime: string;
-    activityName: string;
-    blockIds: string[];
-    daysLabels: string;
-  } | null>(null);
 
   // Accordion / Collapsible State for Weekly Days
   const todayDayId = useMemo((): DayOfWeek | null => {
@@ -358,61 +337,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     );
   };
 
-  // Calculate unique registered time slots with activity details in the selected formTurma
-  const registeredTurmaTimeSlots = useMemo(() => {
-    if (!formTurma) return [];
-    const turmaBlocks = schedules.filter((s) => s.turma === formTurma);
-    const slotMap = new Map<
-      string,
-      {
-        startTime: string;
-        endTime: string;
-        activityId: string;
-        activityName: string;
-        iconName?: string;
-        location?: string;
-        guidelines?: string;
-        days: Set<DayOfWeek>;
-        blockIds: string[];
-      }
-    >();
-
-    turmaBlocks.forEach((b) => {
-      if (b.startTime && b.endTime) {
-        const key = `${b.startTime}_${b.endTime}_${b.activityId}`;
-        const act = activitiesList.find((a) => a.id === b.activityId);
-        const actName = act?.name || b.activityId;
-        if (!slotMap.has(key)) {
-          slotMap.set(key, {
-            startTime: b.startTime,
-            endTime: b.endTime,
-            activityId: b.activityId,
-            activityName: actName,
-            iconName: act?.icon,
-            location: b.location,
-            guidelines: b.guidelines,
-            days: new Set([b.dayOfWeek]),
-            blockIds: [b.id],
-          });
-        } else {
-          const item = slotMap.get(key)!;
-          item.days.add(b.dayOfWeek);
-          if (!item.blockIds.includes(b.id)) {
-            item.blockIds.push(b.id);
-          }
-          if (!item.location && b.location) item.location = b.location;
-          if (!item.guidelines && b.guidelines) item.guidelines = b.guidelines;
-        }
-      }
-    });
-
-    return Array.from(slotMap.values()).sort((a, b) => {
-      const timeCmp = a.startTime.localeCompare(b.startTime);
-      if (timeCmp !== 0) return timeCmp;
-      return a.activityName.localeCompare(b.activityName, 'pt-BR');
-    });
-  }, [schedules, formTurma, activitiesList]);
-
   // Calculate effective targets for form replication
   const effectiveFormTargetDays = useMemo(() => {
     if (!formReplicationExpanded || formReplicateDays.length === 0) {
@@ -526,26 +450,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     onDeleteScheduleBlock(blockToDelete.id);
     setBlockToDelete(null);
     showToast('Bloco de horário removido da grade.', 'success');
-  };
-
-  // Handle Quick Delete for Turma Time Slot
-  const confirmDeleteSlot = () => {
-    if (!slotToDelete) return;
-    const deletedIds = slotToDelete.blockIds;
-    const deletedSet = new Set(deletedIds);
-    const updatedSchedules = schedules.filter((s) => !deletedSet.has(s.id));
-
-    if (onBatchSaveSchedules) {
-      onBatchSaveSchedules(updatedSchedules, deletedIds);
-    } else {
-      deletedIds.forEach((id) => onDeleteScheduleBlock(id));
-    }
-
-    setSlotToDelete(null);
-    showToast(
-      `✓ Horário ${slotToDelete.startTime} - ${slotToDelete.endTime} (${slotToDelete.activityName}) excluído da grade de ${slotToDelete.turma}!`,
-      'success'
-    );
   };
 
   // --- REPLICATION 1: OPEN FULL ROUTINE MODAL ---
@@ -1764,16 +1668,16 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 3: CADASTRO / EDIÇÃO DE BLOCO INDIVIDUAL */}
+      {/* MODAL 3: CADASTRO / EDIÇÃO DE BLOCO INDIVIDUAL (COMPACTO E LIMPO) */}
       {/* ========================================================================= */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
             {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
+            <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0">
               <div className="flex items-center space-x-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
-                  <Clock className="w-5 h-5" />
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
+                  <Clock className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-sm sm:text-base leading-tight">
@@ -1788,16 +1692,16 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleFormSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleFormSubmit} className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
               {formError && (
-                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center space-x-2">
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center space-x-2">
                   <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
                   <span>{formError}</span>
                 </div>
@@ -1805,13 +1709,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
               {/* 1. Turma */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Turma:
                 </label>
                 <select
                   value={formTurma}
                   onChange={(e) => setFormTurma(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   {sortedTurmas.map((t) => (
                     <option key={t} value={t}>
@@ -1823,10 +1727,10 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
               {/* 2. Dia da Semana */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Dia da Semana:
                 </label>
-                <div className="grid grid-cols-5 gap-1.5">
+                <div className="grid grid-cols-5 gap-1">
                   {DAYS_OF_WEEK.map((d) => {
                     const isSelected = formDayOfWeek === d.id;
                     return (
@@ -1834,13 +1738,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                         key={d.id}
                         type="button"
                         onClick={() => setFormDayOfWeek(d.id)}
-                        className={`py-2 px-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center border ${
+                        className={`py-1.5 px-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center border ${
                           isSelected
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-500/20'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-1 ring-indigo-500/30'
                             : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        <span className="text-[10px] opacity-75">{d.short}</span>
+                        <span className="text-[9px] opacity-75">{d.short}</span>
                         <span className="text-[11px] truncate">{d.label.split('-')[0]}</span>
                       </button>
                     );
@@ -1850,13 +1754,10 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
               {/* 3. Horário de Início e Término */}
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Horário da Atividade:
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Horário da Atividade:
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <span className="text-[10px] text-slate-500 font-bold block mb-0.5">Início:</span>
                     <input
@@ -1864,7 +1765,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                       value={formStartTime}
                       onChange={(e) => setFormStartTime(e.target.value)}
                       required
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                   <div>
@@ -1874,118 +1775,21 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                       value={formEndTime}
                       onChange={(e) => setFormEndTime(e.target.value)}
                       required
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
-                </div>
-
-                {/* Dynamic Chips: Horários Lançados na Turma */}
-                <div className="mt-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Horários Lançados na Turma:</span>
-                    </span>
-                    {registeredTurmaTimeSlots.length > 0 && (
-                      <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
-                        {registeredTurmaTimeSlots.length} salvo{registeredTurmaTimeSlots.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </div>
-
-                  {registeredTurmaTimeSlots.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pr-1">
-                      {registeredTurmaTimeSlots.map((slot, idx) => {
-                        const isCurrentActive =
-                          formStartTime === slot.startTime &&
-                          formEndTime === slot.endTime &&
-                          formActivityId === slot.activityId;
-                        const daysLabels = Array.from(slot.days)
-                          .map((d) => DAYS_OF_WEEK.find((dw) => dw.id === d)?.short || d)
-                          .join(', ');
-
-                        return (
-                          <div
-                            key={idx}
-                            className={`group inline-flex items-center rounded-xl border transition-all shrink-0 ${
-                              isCurrentActive
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
-                                : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-900 border-slate-200 hover:border-indigo-300'
-                            }`}
-                          >
-                            {/* Click to fill button */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFormStartTime(slot.startTime);
-                                setFormEndTime(slot.endTime);
-                                setFormActivityId(slot.activityId);
-                                if (slot.location && !formLocation) {
-                                  setFormLocation(slot.location);
-                                }
-                                if (slot.guidelines && !formGuidelines) {
-                                  setFormGuidelines(slot.guidelines);
-                                }
-                                setFormError(null);
-                              }}
-                              className="text-xs font-bold px-2.5 py-1.5 cursor-pointer flex items-center space-x-1.5 text-left"
-                              title={`Clique para preencher: ${slot.startTime} - ${slot.endTime} • ${slot.activityName} (${daysLabels})`}
-                            >
-                              <span className={isCurrentActive ? 'text-white' : 'text-indigo-600'}>
-                                {renderActivityIcon(slot.iconName, 'w-3.5 h-3.5')}
-                              </span>
-                              <span>{slot.startTime} - {slot.endTime}</span>
-                              <span className={isCurrentActive ? 'text-indigo-200' : 'text-slate-300'}>•</span>
-                              <span className={`truncate max-w-[130px] ${isCurrentActive ? 'text-white font-extrabold' : 'text-slate-800'}`}>
-                                {slot.activityName}
-                              </span>
-                              {isCurrentActive && <Check className="w-3 h-3 text-white ml-0.5 shrink-0" />}
-                            </button>
-
-                            {/* Quick Delete Button */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSlotToDelete({
-                                  turma: formTurma,
-                                  startTime: slot.startTime,
-                                  endTime: slot.endTime,
-                                  activityName: slot.activityName,
-                                  blockIds: slot.blockIds,
-                                  daysLabels,
-                                });
-                              }}
-                              className={`p-1 mr-1 rounded-lg transition-colors cursor-pointer ${
-                                isCurrentActive
-                                  ? 'text-indigo-200 hover:text-white hover:bg-indigo-700/60'
-                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                              }`}
-                              title={`Excluir este horário (${slot.startTime} - ${slot.endTime} • ${slot.activityName}) da grade de ${formTurma}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 rounded-xl p-2 text-center">
-                      Nenhum horário cadastrado nesta turma ainda. Digite o início e término acima.
-                    </p>
-                  )}
                 </div>
               </div>
 
               {/* 4. Atividade (Dropdown listando TODAS as cadastradas) */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Atividade / Modalidade:
                 </label>
                 <select
                   value={formActivityId}
                   onChange={(e) => setFormActivityId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   {activitiesList.map((act) => (
                     <option key={act.id} value={act.id}>
@@ -1995,67 +1799,55 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </select>
               </div>
 
-              {/* 5. Local / Sala (Opcional) */}
+              {/* 5. Local / Sala (Opcional) - Campo de texto limpo */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Local / Sala (Opcional):
                 </label>
                 <input
                   type="text"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
-                  placeholder="Ex: Piscina Aquecida, Sala de Dança, Refeitório..."
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Ex: Piscina, Refeitório, Quadra Coberta, Sala de Dança..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {COMMON_LOCATIONS.map((loc) => (
-                    <button
-                      key={loc}
-                      type="button"
-                      onClick={() => setFormLocation(loc)}
-                      className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
-                    >
-                      {loc}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* 6. Orientações para a Monitora (Opcional) */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Orientações para a Monitora / Professor (Opcional):
                 </label>
                 <textarea
                   value={formGuidelines}
                   onChange={(e) => setFormGuidelines(e.target.value)}
                   rows={2}
-                  placeholder="Ex: Conferir toucas antes de entrar na piscina; levar garrafas de água; separar material de leitura..."
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  placeholder="Ex: Conferir toucas antes de entrar na piscina; levar garrafas de água; separar material..."
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                 />
               </div>
 
               {/* 7. Replicar este bloco automaticamente (Seção Expansível / Seleção de Dias e Turmas) */}
-              <div className="border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4 space-y-3.5 transition-all">
+              <div className="border border-indigo-200 bg-indigo-50/50 rounded-2xl p-3 space-y-2.5 transition-all">
                 <div
                   onClick={() => setFormReplicationExpanded(!formReplicationExpanded)}
                   className="flex items-center justify-between cursor-pointer select-none"
                 >
                   <div className="flex items-center space-x-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                      <Copy className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-2xs">
+                      <Copy className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1.5">
                         <span className="text-xs font-black text-slate-900">
                           Replicar este bloco automaticamente
                         </span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
-                          Gravação em Lote
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          Lote
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Aplique esta mesma atividade para múltiplos dias e turmas em 1 clique.
+                      <p className="text-[10px] text-slate-500">
+                        Aplicar atividade para múltiplos dias e turmas em 1 clique.
                       </p>
                     </div>
                   </div>
@@ -2073,23 +1865,23 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     }`}
                   >
                     {formReplicationExpanded ? (
-                      <ChevronUp className="w-4 h-4" />
+                      <ChevronUp className="w-3.5 h-3.5" />
                     ) : (
-                      <ChevronDown className="w-4 h-4" />
+                      <ChevronDown className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </div>
 
                 {formReplicationExpanded && (
-                  <div className="pt-3 border-t border-indigo-100 space-y-4 animate-in fade-in duration-150">
+                  <div className="pt-2.5 border-t border-indigo-100 space-y-3 animate-in fade-in duration-150">
                     {/* A. Dias da Semana de Destino */}
                     <div>
-                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                      <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+                        <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-indigo-600" />
                           <span>Dias da Semana:</span>
                         </label>
-                        <div className="flex items-center space-x-2 text-[11px]">
+                        <div className="flex items-center space-x-2 text-[10px]">
                           <button
                             type="button"
                             onClick={handleSelectAllFormDays}
@@ -2116,7 +1908,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-5 gap-1.5">
+                      <div className="grid grid-cols-5 gap-1">
                         {DAYS_OF_WEEK.map((d) => {
                           const isChecked = formReplicateDays.includes(d.id);
                           return (
@@ -2124,17 +1916,17 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                               key={d.id}
                               type="button"
                               onClick={() => handleToggleFormReplicateDay(d.id)}
-                              className={`py-2 px-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center border ${
+                              className={`py-1.5 px-0.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center border ${
                                 isChecked
-                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20'
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs ring-1 ring-indigo-500/20'
                                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                               }`}
                             >
-                              <div className="flex items-center space-x-1">
-                                {isChecked && <Check className="w-3 h-3 text-white" />}
-                                <span className="text-[10px]">{d.short}</span>
+                              <div className="flex items-center space-x-0.5">
+                                {isChecked && <Check className="w-2.5 h-2.5 text-white" />}
+                                <span className="text-[9px]">{d.short}</span>
                               </div>
-                              <span className="text-[11px] truncate">{d.label.split('-')[0]}</span>
+                              <span className="text-[10px] truncate">{d.label.split('-')[0]}</span>
                             </button>
                           );
                         })}
@@ -2143,12 +1935,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
                     {/* B. Turmas de Destino */}
                     <div>
-                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                      <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+                        <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-indigo-600" />
                           <span>Turmas de Destino:</span>
                         </label>
-                        <div className="flex items-center space-x-2 text-[11px]">
+                        <div className="flex items-center space-x-2 text-[10px]">
                           <button
                             type="button"
                             onClick={handleSelectAllFormTurmas}
@@ -2162,7 +1954,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                             onClick={handleSelectInfantilFormTurmas}
                             className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
                           >
-                            Ed. Infantil
+                            Infantil
                           </button>
                           <span className="text-slate-300">•</span>
                           <button
@@ -2175,26 +1967,26 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1.5 bg-white rounded-xl border border-slate-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-white rounded-xl border border-slate-200">
                         {sortedTurmas.map((t) => {
                           const isChecked = formReplicateTurmas.includes(t);
                           return (
                             <div
                               key={t}
                               onClick={() => handleToggleFormReplicateTurma(t)}
-                              className={`p-2 rounded-lg border text-xs font-bold cursor-pointer transition-all flex items-center justify-between ${
+                              className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all flex items-center justify-between ${
                                 isChecked
                                   ? 'bg-indigo-50 border-indigo-300 text-indigo-950 shadow-2xs'
                                   : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100'
                               }`}
                             >
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center space-x-1.5">
                                 {isChecked ? (
-                                  <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
+                                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                                 ) : (
-                                  <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                                  <Square className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                                 )}
-                                <span className="truncate">{t}</span>
+                                <span className="truncate text-[11px]">{t}</span>
                               </div>
                             </div>
                           );
@@ -2203,15 +1995,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     </div>
 
                     {/* C. Resumo de Gravação em Lote */}
-                    <div className="bg-slate-900 text-white rounded-xl p-3 flex items-center justify-between text-xs shadow-sm">
+                    <div className="bg-slate-900 text-white rounded-xl p-2.5 flex items-center justify-between text-xs shadow-xs">
                       <div className="flex items-center space-x-2">
-                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>
-                          Serão gravados{' '}
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="text-[11px]">
+                          Gravar{' '}
                           <strong className="text-emerald-400">
                             {totalFormBlocksToGenerate} bloco(s)
                           </strong>{' '}
-                          ({effectiveFormTargetDays.length} dia(s) × {effectiveFormTargetTurmas.length} turma(s)) no Firestore.
+                          ({effectiveFormTargetDays.length} dia(s) × {effectiveFormTargetTurmas.length} turma(s)).
                         </span>
                       </div>
                     </div>
@@ -2220,22 +2012,22 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
               </div>
 
               {/* Modal Buttons */}
-              <div className="flex items-center justify-end space-x-2 pt-4 border-t border-slate-100">
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-colors cursor-pointer flex items-center space-x-1.5"
+                  className="px-4.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-colors cursor-pointer flex items-center space-x-1.5"
                 >
-                  <Check className="w-4 h-4" />
+                  <Check className="w-3.5 h-3.5" />
                   <span>
                     {totalFormBlocksToGenerate > 1
-                      ? `Salvar e Gravar ${totalFormBlocksToGenerate} Horários`
+                      ? `Gravar ${totalFormBlocksToGenerate} Horários`
                       : editingBlock
                       ? 'Salvar Alterações'
                       : 'Salvar na Grade'}
@@ -2439,50 +2231,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 cursor-pointer"
               >
                 Sim, Excluir
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal for Saved Turma Slot */}
-      {slotToDelete && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                Remover Horário da Grade?
-              </h3>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Deseja remover o horário <strong>{slotToDelete.startTime} - {slotToDelete.endTime}</strong> (<strong>{slotToDelete.activityName}</strong>) da turma <strong>{slotToDelete.turma}</strong>?
-              </p>
-              <div className="mt-2 p-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] text-slate-600 font-semibold text-left">
-                <div className="flex items-center justify-between">
-                  <span>Dias cadastrados:</span>
-                  <span className="text-indigo-600 font-bold">{slotToDelete.daysLabels}</span>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
-                  {slotToDelete.blockIds.length} registro{slotToDelete.blockIds.length > 1 ? 's' : ''} no Firestore
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center justify-center space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setSlotToDelete(null)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-100 cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteSlot}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 cursor-pointer"
-              >
-                Sim, Excluir do Firestore
               </button>
             </div>
           </div>
