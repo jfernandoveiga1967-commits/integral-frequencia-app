@@ -85,6 +85,7 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  phone?: string; // Telefone / WhatsApp (ex: 19999999999 ou (19) 99999-9999)
   role: UserRole;
   cargoLabel: string;
   avatarColor?: string;

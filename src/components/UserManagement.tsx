@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
+import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
@@ -16,6 +17,8 @@ import {
   CheckCircle2,
   XCircle,
   Mail,
+  Phone,
+  MessageSquare,
   Lock,
   KeyRound,
   ShieldAlert,
@@ -137,6 +140,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // User Form State
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formPhone, setFormPhone] = useState('');
   const [formBirthDate, setFormBirthDate] = useState('1990-01-01');
   const [formRole, setFormRole] = useState<UserRole>('professor');
   const [formPin, setFormPin] = useState('1234');
@@ -279,6 +283,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingUser(user);
     setFormName(user.name);
     setFormEmail(user.email);
+    setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
     setFormPin(user.pin || '1234');
@@ -296,6 +301,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingUser(null);
     setFormName('');
     setFormEmail('');
+    setFormPhone('');
     setFormBirthDate('1995-05-20');
     setFormRole('professor');
     setFormPin('1234');
@@ -367,6 +373,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       id: targetId,
       name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
       email: normalizedEmail,
+      phone: formPhone.trim() || undefined,
       role: effectiveRole,
       cargoLabel: roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
@@ -945,6 +952,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               <span className="truncate">{user.email}</span>
                             </span>
 
+                            {user.phone && (
+                              <span className="flex items-center text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
+                                <Phone className="w-3 h-3 text-emerald-600 mr-1 shrink-0" />
+                                <span>{formatPhoneDisplay(user.phone)}</span>
+                              </span>
+                            )}
+
                             {/* Compact Badges shown in header */}
                             <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
                               <BookOpen className="w-3 h-3 text-blue-600" />
@@ -961,6 +975,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                       {/* Header Action Buttons & Expand Toggle */}
                       <div className="flex items-center space-x-2 shrink-0 self-end md:self-center" onClick={(e) => e.stopPropagation()}>
+                        {user.phone && (
+                          <a
+                            href={generateWhatsAppUrl(user.phone, `Olá, ${user.name}! Tudo bem?\nAqui é a Coordenação do Programa Integral do Colégio Crescer.`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
+                            title="Conversar no WhatsApp"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="hidden sm:inline">WhatsApp</span>
+                          </a>
+                        )}
+
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(user)}
@@ -1631,18 +1658,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 )}
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Data de Nascimento:</span>
-                </label>
-                <input
-                  type="date"
-                  value={formBirthDate}
-                  onChange={(e) => setFormBirthDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Data de Nascimento:</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={formBirthDate}
+                    onChange={(e) => setFormBirthDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1.5">
+                    <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Telefone / WhatsApp:</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder="Ex: (19) 99999-9999 ou 19999999999"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
 
               <div className="pt-2 border-t border-slate-100">

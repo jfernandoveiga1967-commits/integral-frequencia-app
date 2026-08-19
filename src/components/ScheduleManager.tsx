@@ -30,16 +30,21 @@ import {
   HelpCircle,
   Download,
   Printer,
+  MessageSquare,
+  Phone,
 } from 'lucide-react';
-import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType } from '../types';
+import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType, UserProfile } from '../types';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateWeeklySchedulePDF, generateDailyRoutinePDF } from '../utils/pdfGenerator';
+import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
   activitiesList: ActivityItem[];
   schedules: ScheduleBlock[];
+  users?: UserProfile[];
+  currentUser?: UserProfile | null;
   onSaveScheduleBlock: (block: ScheduleBlock) => void;
   onDeleteScheduleBlock: (id: string) => void;
   onBatchSaveSchedules?: (
@@ -47,6 +52,7 @@ interface ScheduleManagerProps {
     deletedIds?: string[],
     newOrUpdatedOnly?: ScheduleBlock[]
   ) => void;
+  onUpdateUserPhone?: (userId: string, newPhone: string) => void;
 }
 
 const DAYS_OF_WEEK: { id: DayOfWeek; label: string; short: string }[] = [
@@ -61,9 +67,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   turmas,
   activitiesList,
   schedules,
+  users = [],
+  currentUser = null,
   onSaveScheduleBlock,
   onDeleteScheduleBlock,
   onBatchSaveSchedules,
+  onUpdateUserPhone,
 }) => {
   // Sort turmas in strict pedagogical order: Mini Maternal -> Maternal -> Infantil 1 -> Infantil 2 -> 1º Ano -> ... -> 6º Ano
   const sortedTurmas = useMemo(() => {
@@ -86,6 +95,17 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [blockToDelete, setBlockToDelete] = useState<ScheduleBlock | null>(null);
+
+  // WhatsApp Notify Modal State
+  const [whatsAppModalData, setWhatsAppModalData] = useState<{
+    isOpen: boolean;
+    turmaName: string;
+    activityName: string;
+    startTime: string;
+    endTime: string;
+    location?: string;
+    guidelines?: string;
+  } | null>(null);
 
   // Accordion / Collapsible State for Weekly Days
   const todayDayId = useMemo((): DayOfWeek | null => {
@@ -1095,6 +1115,24 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                           <div className="flex items-center justify-end space-x-1 pt-1 border-t border-slate-100">
                             <button
                               type="button"
+                              onClick={() =>
+                                setWhatsAppModalData({
+                                  isOpen: true,
+                                  turmaName: block.turma,
+                                  activityName: block.activityId,
+                                  startTime: block.startTime,
+                                  endTime: block.endTime,
+                                  location: block.location,
+                                  guidelines: block.guidelines,
+                                })
+                              }
+                              className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
+                              title="Avisar Monitora via WhatsApp"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleOpenEditBlock(block)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
                               title="Editar este horário"
@@ -1752,7 +1790,25 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </div>
               </div>
 
-              {/* 3. Horário de Início e Término */}
+              {/* 3. Atividade / Modalidade */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Atividade / Modalidade:
+                </label>
+                <select
+                  value={formActivityId}
+                  onChange={(e) => setFormActivityId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {activitiesList.map((act) => (
+                    <option key={act.id} value={act.id}>
+                      {act.name} {act.requiresRollCall !== false ? '• (Exige Chamada)' : '• (Rotina / Grade)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Horário da Atividade (Início e Término) */}
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Horário da Atividade:
@@ -1779,24 +1835,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* 4. Atividade (Dropdown listando TODAS as cadastradas) */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Atividade / Modalidade:
-                </label>
-                <select
-                  value={formActivityId}
-                  onChange={(e) => setFormActivityId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {activitiesList.map((act) => (
-                    <option key={act.id} value={act.id}>
-                      {act.name} {act.requiresRollCall !== false ? '• (Exige Chamada)' : '• (Rotina / Grade)'}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {/* 5. Local / Sala (Opcional) - Campo de texto limpo */}
@@ -2012,27 +2050,49 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
               </div>
 
               {/* Modal Buttons */}
-              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100 shrink-0">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0 flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
+                  onClick={() =>
+                    setWhatsAppModalData({
+                      isOpen: true,
+                      turmaName: formTurma,
+                      activityName: formActivityId,
+                      startTime: formStartTime,
+                      endTime: formEndTime,
+                      location: formLocation,
+                      guidelines: formGuidelines,
+                    })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-extrabold text-xs transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs"
+                  title="Avisar Monitora via WhatsApp sobre esta atividade/horário"
                 >
-                  Cancelar
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Avisar Monitora</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-4.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-colors cursor-pointer flex items-center space-x-1.5"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>
-                    {totalFormBlocksToGenerate > 1
-                      ? `Gravar ${totalFormBlocksToGenerate} Horários`
-                      : editingBlock
-                      ? 'Salvar Alterações'
-                      : 'Salvar na Grade'}
-                  </span>
-                </button>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-colors cursor-pointer flex items-center space-x-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>
+                      {totalFormBlocksToGenerate > 1
+                        ? `Gravar ${totalFormBlocksToGenerate} Horários`
+                        : editingBlock
+                        ? 'Salvar Alterações'
+                        : 'Salvar na Grade'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -2235,6 +2295,23 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* WhatsApp Monitor Notification Modal */}
+      {whatsAppModalData && whatsAppModalData.isOpen && (
+        <WhatsAppNotifyModal
+          isOpen={whatsAppModalData.isOpen}
+          onClose={() => setWhatsAppModalData(null)}
+          users={users}
+          currentUser={currentUser}
+          turmaName={whatsAppModalData.turmaName}
+          activityName={whatsAppModalData.activityName}
+          startTime={whatsAppModalData.startTime}
+          endTime={whatsAppModalData.endTime}
+          location={whatsAppModalData.location}
+          guidelines={whatsAppModalData.guidelines}
+          onUpdateUserPhone={onUpdateUserPhone}
+        />
       )}
     </div>
   );
