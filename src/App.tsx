@@ -8,6 +8,7 @@ import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, P
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
 import { AttendanceSheet } from './components/AttendanceSheet';
+import { CurrentActivities } from './components/CurrentActivities';
 import { StudentManager } from './components/StudentManager';
 import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
@@ -796,6 +797,21 @@ export default function App() {
     batchSaveHolidaysToFirestore(batch);
   };
 
+  // Navigate from Atividades do Momento directly to attendance sheet with filters
+  const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
+    if (date) {
+      setSelectedDate(date);
+    }
+    setActiveTab('frequencia');
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('app_select_attendance_filter', {
+          detail: { activity, turma, date },
+        })
+      );
+    }, 60);
+  };
+
   // Records count for the current week
   const weekRecordsCount = useMemo(() => {
     return records.filter(
@@ -850,7 +866,26 @@ export default function App() {
           />
         )}
 
-        {/* Tab 2: Alunos e Turmas */}
+        {/* Tab 2: Atividades do Momento */}
+        {activeTab === 'momento' && (
+          <CurrentActivities
+            students={students}
+            records={records}
+            turmas={turmas}
+            activitiesList={activitiesList}
+            schedules={schedules}
+            holidays={holidays}
+            currentWeek={currentWeek}
+            selectedDate={selectedDate}
+            currentUser={currentUser}
+            onSaveRecord={handleSaveRecord}
+            onBatchMarkPresent={handleBatchMarkPresent}
+            onClearRecords={handleClearRecords}
+            onNavigateToAttendance={handleNavigateToAttendance}
+          />
+        )}
+
+        {/* Tab 3: Alunos e Turmas */}
         {activeTab === 'alunos' && (
           <StudentManager
             students={students}

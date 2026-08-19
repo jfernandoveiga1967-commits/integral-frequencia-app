@@ -129,6 +129,25 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Observations edit state map (studentId_activity_date -> string)
   const [obsMap, setObsMap] = useState<Record<string, string>>({});
 
+  // Listen for navigation filter events from other tabs (like CurrentActivities)
+  useEffect(() => {
+    const handleFilterEvent = (e: CustomEvent<{ activity?: ActivityType; turma?: TurmaType; date?: string }>) => {
+      if (e.detail) {
+        if (e.detail.activity) {
+          setSelectedActivity(e.detail.activity);
+        }
+        if (e.detail.turma) {
+          setSelectedTurma(e.detail.turma);
+        }
+      }
+    };
+
+    window.addEventListener('app_select_attendance_filter', handleFilterEvent as EventListener);
+    return () => {
+      window.removeEventListener('app_select_attendance_filter', handleFilterEvent as EventListener);
+    };
+  }, []);
+
   const weekDays = useMemo(() => getWeekDays(currentWeek.startDate), [currentWeek.startDate]);
 
   // Filter students who are enrolled in the allowed activities and allowed turmas

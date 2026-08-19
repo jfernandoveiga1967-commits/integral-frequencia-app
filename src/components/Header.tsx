@@ -1,9 +1,9 @@
 import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck, UserCog } from 'lucide-react';
+import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck, UserCog, Radio } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
 
-export type TabType = 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
+export type TabType = 'frequencia' | 'momento' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -118,6 +118,21 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <ClipboardCheck className="w-4 h-4" />
             <span>Chamada de Frequência</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('momento')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+              activeTab === 'momento'
+                ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+            }`}
+          >
+            <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+            <span>Atividades do Momento</span>
+            <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              Ao Vivo
+            </span>
           </button>
 
           <button
