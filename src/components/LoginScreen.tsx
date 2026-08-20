@@ -8,8 +8,13 @@ import {
   Mail,
   CheckCircle2,
   Calendar,
-  Info,
+  Bell,
+  BellRing,
 } from 'lucide-react';
+import {
+  requestNotificationAndAudioPermission,
+  getNotificationPermission,
+} from '../utils/notificationUtils';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -43,7 +48,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
   const [customBirthDate, setCustomBirthDate] = useState('1995-05-20');
   const [customError, setCustomError] = useState<string | null>(null);
 
-  const handleEmailPasswordSubmit = (e: React.FormEvent) => {
+  const handleEmailPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
@@ -63,6 +68,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     );
 
     if (matchedUser) {
+      // Trigger Web Push Notification permission and Audio context unlock on login gesture
+      try {
+        await requestNotificationAndAudioPermission();
+      } catch (err) {
+        console.warn('Could not request notification on login gesture:', err);
+      }
+
       const isMasterAdmin =
         (matchedUser.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
         matchedUser.id === 'usr_coord_1';
@@ -86,7 +98,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     }
   };
 
-  const handleCustomSubmit = (e: React.FormEvent) => {
+  const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setCustomError(null);
 
@@ -103,6 +115,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     if (!customBirthDate) {
       setCustomError('Por favor, selecione a data de nascimento.');
       return;
+    }
+
+    // Trigger Web Push Notification permission and Audio context unlock on signup gesture
+    try {
+      await requestNotificationAndAudioPermission();
+    } catch (err) {
+      console.warn('Could not request notification on register gesture:', err);
     }
 
     const normalizedEmail = customEmail.trim().toLowerCase();
@@ -261,6 +280,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
                 {loginError}
               </div>
             )}
+
+            {/* Notification Permission Benefit Notice */}
+            <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 flex items-start space-x-2.5 text-xs text-indigo-200">
+              <BellRing className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-white">Notificações Push e Som:</span> Ao entrar, permita o acesso às notificações do navegador para receber alertas sonoros de chamada pendente mesmo com o app em segundo plano.
+              </div>
+            </div>
 
             <button
               type="submit"

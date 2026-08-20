@@ -68,7 +68,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
       location,
       guidelines,
       customNote,
-      coordName: currentUser?.name || 'Coordenação',
+      coordName: currentUser?.name || 'Fernando Veiga',
     });
   }, [selectedUser, turmaName, activityName, startTime, endTime, location, guidelines, customNote, currentUser]);
 
@@ -176,7 +176,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
                     location,
                     guidelines,
                     customNote,
-                    coordName: currentUser?.name || 'Coordenação',
+                    coordName: currentUser?.name || 'Fernando Veiga',
                   });
                   setEditableMessage(updatedMsg);
                 }
@@ -240,7 +240,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
                     location,
                     guidelines,
                     customNote: val,
-                    coordName: currentUser?.name || 'Coordenação',
+                    coordName: currentUser?.name || 'Fernando Veiga',
                   });
                   setEditableMessage(updatedMsg);
                 }

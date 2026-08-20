@@ -95,3 +95,74 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Push Event - Handle incoming Web Push Notifications
+self.addEventListener('push', (event) => {
+  let data = {
+    title: '🔔 Integral: Notificação de Chamada',
+    body: 'Verifique as atividades e chamadas do Programa Integral.',
+    tag: 'integral_push_notification',
+    url: '/',
+  };
+
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    } catch {
+      data.body = event.data.text() || data.body;
+    }
+  }
+
+  const options = {
+    body: data.body,
+    icon: data.icon || '/pwa-192.png',
+    badge: data.badge || '/icon.svg',
+    tag: data.tag || 'integral_notification',
+    renotify: true,
+    vibrate: [200, 100, 200, 100, 300],
+    data: {
+      url: data.url || '/',
+      activityId: data.activityId,
+      turma: data.turma,
+      date: data.date,
+    },
+    actions: [
+      { action: 'open_attendance', title: '📋 Abrir Chamada' },
+      { action: 'dismiss', title: 'Dispensar' },
+    ],
+  };
+
+  event.waitUntil(self.registration.showNotification(data.title, options));
+});
+
+// Notification Click Event - Bring app tab into focus or navigate
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  if (event.action === 'dismiss') {
+    return;
+  }
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // If a tab is already open, focus it and post a message
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          if (event.notification.data) {
+            client.postMessage({
+              type: 'NOTIFICATION_CLICKED',
+              data: event.notification.data,
+            });
+          }
+          return client.focus();
+        }
+      }
+      // Otherwise open a new window
+      if (self.clients.openWindow) {
+        const targetUrl = event.notification.data?.url || '/';
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});

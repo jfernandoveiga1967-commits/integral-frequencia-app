@@ -228,7 +228,7 @@ export function getNotificationPermission(): NotificationPermission {
 }
 
 /**
- * Request notification permission from user
+ * Request notification permission from user and unlock audio
  */
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (!isNotificationSupported()) return 'denied';
@@ -245,6 +245,185 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 /**
+ * Combined helper to unlock audio and request push notification permissions during user interaction
+ */
+export async function requestNotificationAndAudioPermission(): Promise<{
+  notificationPermission: NotificationPermission;
+  audioUnlocked: boolean;
+}> {
+  const audioUnlocked = await unlockAudioContextAndPlayTest();
+  let notificationPermission: NotificationPermission = 'denied';
+
+  if (isNotificationSupported()) {
+    try {
+      notificationPermission = await Notification.requestPermission();
+    } catch {
+      notificationPermission = getNotificationPermission();
+    }
+  }
+
+  return { notificationPermission, audioUnlocked };
+}
+
+/**
+ * Initialize Service Worker and listen for notification click messages
+ */
+export function initWebPushAndServiceWorker(): void {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+  try {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((registration) => {
+        console.log('[Push/PWA] Service Worker registered with scope:', registration.scope);
+      })
+      .catch((err) => {
+        console.warn('[Push/PWA] Service Worker registration failed:', err);
+      });
+
+    // Listen for messages sent when a background notification is clicked
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
+        const payload = event.data.data;
+        if (payload) {
+          window.dispatchEvent(
+            new CustomEvent('app_select_attendance_filter', {
+              detail: {
+                activity: payload.activityId,
+                turma: payload.turma,
+                date: payload.date,
+              },
+            })
+          );
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('[Push/PWA] Init error:', err);
+  }
+}
+
+export interface PushNotificationOptions {
+  title: string;
+  body: string;
+  tag?: string;
+  icon?: string;
+  badge?: string;
+  activityId?: string;
+  turma?: string;
+  date?: string;
+  type?: 'start' | 'pending_call' | 'reminder' | 'test';
+}
+
+/**
+ * Sends a native System Push Notification (via Service Worker or Notification API)
+ * with accompanying device vibration and Web Audio alert chime.
+ */
+export async function sendSystemPushNotification(
+  options: PushNotificationOptions
+): Promise<boolean> {
+  const {
+    title,
+    body,
+    tag = 'integral_notification',
+    icon = '/pwa-192.png',
+    badge = '/icon.svg',
+    activityId,
+    turma,
+    date,
+    type = 'start',
+  } = options;
+
+  // 1. Play appropriate audio alert
+  if (type === 'test') {
+    playTestSound();
+  } else if (type === 'pending_call') {
+    playPendingRollCallAlertSound();
+  } else {
+    playPendingRollCallAlertSound();
+  }
+
+  // 2. Hardware vibration for mobile devices
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try {
+      if (type === 'pending_call') {
+        navigator.vibrate([300, 150, 300, 150, 400]);
+      } else {
+        navigator.vibrate([200, 100, 200]);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Check browser notification permission
+  if (!isNotificationSupported() || Notification.permission !== 'granted') {
+    return false;
+  }
+
+  const notificationPayload = {
+    body,
+    icon,
+    badge,
+    tag,
+    renotify: true,
+    requireInteraction: type === 'pending_call',
+    data: {
+      url: '/',
+      activityId,
+      turma,
+      date,
+      type,
+    },
+  };
+
+  // Try Service Worker registration showNotification first (native background support on mobile & desktop)
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      if (registration && registration.showNotification) {
+        await registration.showNotification(title, notificationPayload);
+        return true;
+      }
+    } catch (err) {
+      console.warn('[Push] ServiceWorker showNotification fallback:', err);
+    }
+  }
+
+  // Fallback to standard Window Notification API
+  try {
+    const notification = new Notification(title, notificationPayload);
+
+    notification.onclick = () => {
+      window.focus();
+      if (activityId || turma) {
+        window.dispatchEvent(
+          new CustomEvent('app_select_attendance_filter', {
+            detail: { activity: activityId, turma, date },
+          })
+        );
+      }
+      notification.close();
+    };
+
+    if (type !== 'pending_call') {
+      setTimeout(() => {
+        try {
+          notification.close();
+        } catch {
+          // ignore
+        }
+      }, 10000);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[Push] Standard Notification failed:', err);
+    return false;
+  }
+}
+
+/**
  * Send a native notification for a schedule block transition with audio alert
  */
 export function sendScheduleNotification(
@@ -252,57 +431,58 @@ export function sendScheduleNotification(
   activityName: string,
   type: 'start' | 'reminder' | 'test' = 'start'
 ): boolean {
+  let title = `🔔 Integral: Hora de ${activityName}`;
   if (type === 'test') {
-    playTestSound();
-  } else {
-    // For start and reminders, play the stronger audible attention chime
-    playPendingRollCallAlertSound();
+    title = `🔔 Teste de Notificação: Integral Rotina`;
+  } else if (type === 'reminder') {
+    title = `⏳ Próxima Atividade: ${activityName}`;
   }
 
-  if (!isNotificationSupported() || Notification.permission !== 'granted') {
-    return false;
+  const bodyLines: string[] = [
+    `Turma: ${block.turma} • ${block.startTime} às ${block.endTime}`,
+  ];
+
+  if (block.location) {
+    bodyLines.push(`📍 Local: ${block.location}`);
   }
 
-  try {
-    let title = `🔔 Integral: Hora de ${activityName}`;
-    if (type === 'test') {
-      title = `🔔 Teste de Notificação: Integral Rotina`;
-    } else if (type === 'reminder') {
-      title = `⏳ Próxima Atividade: ${activityName}`;
-    }
-
-    const bodyLines: string[] = [
-      `Turma: ${block.turma} • ${block.startTime} às ${block.endTime}`,
-    ];
-
-    if (block.location) {
-      bodyLines.push(`📍 Local: ${block.location}`);
-    }
-
-    if (block.guidelines) {
-      bodyLines.push(`📋 ${block.guidelines}`);
-    }
-
-    const notification = new Notification(title, {
-      body: bodyLines.join('\n'),
-      icon: '/icon.png',
-      tag: `schedule_${block.id}_${block.startTime}`,
-      silent: false,
-    });
-
-    // Auto close after 8 seconds
-    setTimeout(() => {
-      try {
-        notification.close();
-      } catch {
-        // ignore
-      }
-    }, 8000);
-
-    return true;
-  } catch (err) {
-    console.error('Error showing notification:', err);
-    return false;
+  if (block.guidelines) {
+    bodyLines.push(`📋 ${block.guidelines}`);
   }
+
+  sendSystemPushNotification({
+    title,
+    body: bodyLines.join('\n'),
+    tag: `schedule_${block.id}_${block.startTime}`,
+    activityId: block.activityId,
+    turma: block.turma,
+    type,
+  });
+
+  return true;
+}
+
+/**
+ * Send a system push notification for a Pending Roll Call (Chamada Pendente)
+ */
+export function sendPendingRollCallPushNotification(
+  activityName: string,
+  turma: string,
+  startTime: string,
+  activityId?: string
+): boolean {
+  const title = `🚨 Chamada Pendente: ${activityName} (${turma})`;
+  const body = `A atividade iniciou às ${startTime}. A chamada dos alunos ainda não foi realizada. Toque para registrar a presença agora.`;
+
+  sendSystemPushNotification({
+    title,
+    body,
+    tag: `pending_call_${activityId || activityName}_${turma}`,
+    activityId,
+    turma,
+    type: 'pending_call',
+  });
+
+  return true;
 }
 

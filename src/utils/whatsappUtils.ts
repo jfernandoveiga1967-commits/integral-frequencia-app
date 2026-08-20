@@ -87,7 +87,10 @@ export function buildActivityWhatsAppMessage(params: ActivityWhatsAppParams): st
 
   lines.push('');
   lines.push('Agradecemos a atenção e dedicação com nossos alunos!');
-  lines.push(`_${params.coordName ? `Coordenação (${params.coordName})` : 'Coordenação do Programa Integral'} • Colégio Crescer_`);
+  lines.push('');
+  const senderName = params.coordName && params.coordName.trim() ? params.coordName.trim() : 'Fernando Veiga';
+  lines.push(senderName);
+  lines.push('Coordenação do Integral - Colégio Crescer');
 
   return lines.join('\n');
 }

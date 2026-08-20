@@ -14,6 +14,7 @@ import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
 import { UserManagement } from './components/UserManagement';
 import { LoginScreen } from './components/LoginScreen';
+import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   subscribeStudents,
   subscribeRecords,
@@ -829,6 +830,17 @@ export default function App() {
       (r) => r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year
     ).length;
   }, [records, currentWeek]);
+
+  // Web Push Notifications & Background Audio Alerts Engine
+  useWebPushNotifications({
+    currentUser,
+    schedules,
+    records,
+    students,
+    activitiesList,
+    holidays,
+    onNavigateToAttendance: handleNavigateToAttendance,
+  });
 
   // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
