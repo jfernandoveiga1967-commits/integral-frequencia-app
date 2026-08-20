@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MessageSquare, Send, Copy, Check, X, Phone, User, MapPin, Clock, Sparkles, AlertCircle, Edit3, RotateCcw } from 'lucide-react';
-import { UserProfile, ScheduleBlock } from '../types';
+import { UserProfile } from '../types';
 import { buildActivityWhatsAppMessage, generateWhatsAppUrl, formatPhoneDisplay, cleanPhoneNumber } from '../utils/whatsappUtils';
 
 interface WhatsAppNotifyModalProps {
@@ -17,6 +17,63 @@ interface WhatsAppNotifyModalProps {
   onUpdateUserPhone?: (userId: string, newPhone: string) => void;
 }
 
+/**
+ * Identifies the best responsible monitor or teacher for a given activity and turma
+ */
+function findBestResponsibleUser(
+  users: UserProfile[],
+  turmaName: string,
+  activityName: string
+): UserProfile | null {
+  if (!users || users.length === 0) return null;
+
+  const normActivity = (activityName || '').trim().toLowerCase();
+  const normTurma = (turmaName || '').trim().toLowerCase();
+
+  const isActivityMatch = (u: UserProfile) => {
+    const assignedActs = (u.assignedActivities || []).map((a) => a.trim().toLowerCase());
+    const specialty = (u.specialtyActivity || '').trim().toLowerCase();
+    const cargo = (u.cargoLabel || '').trim().toLowerCase();
+    return (
+      assignedActs.includes(normActivity) ||
+      specialty === normActivity ||
+      (normActivity !== '' && cargo.includes(normActivity))
+    );
+  };
+
+  const isTurmaMatch = (u: UserProfile) => {
+    const assignedTurmas = (u.assignedTurmas || u.allowedClassIds || []).map((t) =>
+      t.trim().toLowerCase()
+    );
+    return assignedTurmas.includes(normTurma);
+  };
+
+  // 1. Non-coordinators matching BOTH Activity and Turma
+  const perfectMatch = users.find(
+    (u) => u.role !== 'coordenador' && isActivityMatch(u) && isTurmaMatch(u)
+  );
+  if (perfectMatch) return perfectMatch;
+
+  // 2. Non-coordinators matching Activity (e.g. Professor de Natação, Professor de Judô, etc.)
+  const activityMatch = users.find((u) => u.role !== 'coordenador' && isActivityMatch(u));
+  if (activityMatch) return activityMatch;
+
+  // 3. Non-coordinators matching Turma (e.g. Monitora do 1º Ano Azul)
+  const turmaMatch = users.find((u) => u.role !== 'coordenador' && isTurmaMatch(u));
+  if (turmaMatch) return turmaMatch;
+
+  // 4. Any Non-coordinator (professor / monitor)
+  const anyTeacher = users.find((u) => u.role !== 'coordenador');
+  if (anyTeacher) return anyTeacher;
+
+  // 5. Coordinator matching Activity or Turma
+  const coordMatch = users.find((u) => isActivityMatch(u) || isTurmaMatch(u));
+  if (coordMatch) return coordMatch;
+
+  // 6. First user
+  return users[0] || null;
+}
+
 export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   isOpen,
   onClose,
@@ -30,23 +87,13 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   currentUser,
   onUpdateUserPhone,
 }) => {
-  // Find potential monitors for this turma or activity
-  const relevantUsers = useMemo(() => {
-    return users.filter((u) => {
-      if (u.role === 'coordenador') return true;
-      const assignedTurmas = u.assignedTurmas || u.allowedClassIds || [];
-      const assignedActs = u.assignedActivities || [];
-      return (
-        assignedTurmas.includes(turmaName) ||
-        assignedActs.includes(activityName as any)
-      );
-    });
+  // Find the automatically identified best responsible monitor
+  const bestUser = useMemo(() => {
+    return findBestResponsibleUser(users, turmaName, activityName);
   }, [users, turmaName, activityName]);
 
-  const defaultUser = relevantUsers.find((u) => u.role !== 'coordenador') || users[0] || null;
-
-  const [selectedUserId, setSelectedUserId] = useState<string>(defaultUser?.id || '');
-  const [customPhone, setCustomPhone] = useState<string>(defaultUser?.phone || '');
+  const [selectedUserId, setSelectedUserId] = useState<string>(bestUser?.id || '');
+  const [customPhone, setCustomPhone] = useState<string>(bestUser?.phone || '');
   const [customNote, setCustomNote] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [editableMessage, setEditableMessage] = useState<string>('');
@@ -72,29 +119,53 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
     });
   }, [selectedUser, turmaName, activityName, startTime, endTime, location, guidelines, customNote, currentUser]);
 
-  // Initialize and update editableMessage when default params change, unless user manually edited
-  useEffect(() => {
-    if (!isManuallyEdited) {
-      setEditableMessage(defaultGeneratedMessage);
-    }
-  }, [defaultGeneratedMessage, isManuallyEdited]);
-
-  // When modal is newly opened or turma/activity changes, reset manual edit lock
+  // When modal is newly opened or turma/activity changes, automatically select the responsible monitor
   useEffect(() => {
     if (isOpen) {
+      const targetUser = bestUser || users[0] || null;
+      setSelectedUserId(targetUser?.id || '');
+      setCustomPhone(targetUser?.phone || '');
       setIsManuallyEdited(false);
-      setEditableMessage(defaultGeneratedMessage);
-    }
-  }, [isOpen, turmaName, activityName, startTime, endTime]);
 
-  // Sync phone when selected user changes
-  useEffect(() => {
-    if (selectedUser && selectedUser.phone) {
-      setCustomPhone(selectedUser.phone);
-    } else if (!selectedUserId) {
-      setCustomPhone('');
+      const initialMsg = buildActivityWhatsAppMessage({
+        monitorName: targetUser?.name,
+        turmaName,
+        activityName,
+        startTime,
+        endTime,
+        location,
+        guidelines,
+        customNote,
+        coordName: currentUser?.name || 'Fernando Veiga',
+      });
+      setEditableMessage(initialMsg);
     }
-  }, [selectedUserId, selectedUser]);
+  }, [isOpen, turmaName, activityName, startTime, endTime, bestUser, users]);
+
+  // Handle manual selection of recipient from the dropdown
+  const handleSelectRecipient = (userId: string) => {
+    setSelectedUserId(userId);
+    const chosenUser = users.find((u) => u.id === userId) || null;
+
+    // Immediately update phone field
+    const newPhone = chosenUser?.phone || '';
+    setCustomPhone(newPhone);
+
+    // Immediately update the message with the chosen user's greeting ("Olá, [Nome]!")
+    const updatedMsg = buildActivityWhatsAppMessage({
+      monitorName: chosenUser?.name,
+      turmaName,
+      activityName,
+      startTime,
+      endTime,
+      location,
+      guidelines,
+      customNote,
+      coordName: currentUser?.name || 'Fernando Veiga',
+    });
+    setEditableMessage(updatedMsg);
+    setIsManuallyEdited(false);
+  };
 
   const handleResetToDefault = () => {
     setIsManuallyEdited(false);
@@ -123,6 +194,8 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   };
 
   if (!isOpen) return null;
+
+  const otherUsers = bestUser ? users.filter((u) => u.id !== bestUser.id) : users;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs">
@@ -156,39 +229,39 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
           {/* Recipient Selector */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <User className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Selecionar Monitora / Destinatário:</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="whatsapp-recipient-select" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                <User className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Selecionar Monitora / Destinatário:</span>
+              </label>
+              {bestUser && selectedUserId === bestUser.id && (
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                  Responsável Vinculada
+                </span>
+              )}
+            </div>
+
             <select
+              id="whatsapp-recipient-select"
               value={selectedUserId}
-              onChange={(e) => {
-                setSelectedUserId(e.target.value);
-                // When selecting a new user, update template if not manually edited
-                if (!isManuallyEdited) {
-                  const newUser = users.find((u) => u.id === e.target.value);
-                  const updatedMsg = buildActivityWhatsAppMessage({
-                    monitorName: newUser?.name,
-                    turmaName,
-                    activityName,
-                    startTime,
-                    endTime,
-                    location,
-                    guidelines,
-                    customNote,
-                    coordName: currentUser?.name || 'Fernando Veiga',
-                  });
-                  setEditableMessage(updatedMsg);
-                }
-              }}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              onChange={(e) => handleSelectRecipient(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all cursor-pointer shadow-xs"
             >
-              <option value="">-- Escolha um colaborador --</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.cargoLabel || u.role}) {u.phone ? `• ${formatPhoneDisplay(u.phone)}` : '• (Sem tel)'}
-                </option>
-              ))}
+              <option value="">-- Selecione uma monitora ou colaborador --</option>
+              {bestUser && (
+                <optgroup label="⭐ Responsável Vinculado(a) à Atividade / Turma">
+                  <option value={bestUser.id}>
+                    ⭐ {bestUser.name} ({bestUser.cargoLabel || bestUser.role}) {bestUser.phone ? `• ${formatPhoneDisplay(bestUser.phone)}` : '• (Sem telefone)'}
+                  </option>
+                </optgroup>
+              )}
+              <optgroup label="📋 Todos os Colaboradores Cadastrados">
+                {otherUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.cargoLabel || u.role}) {u.phone ? `• ${formatPhoneDisplay(u.phone)}` : '• (Sem telefone)'}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -199,9 +272,13 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
                 <Phone className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Telefone / WhatsApp:</span>
               </span>
-              {selectedUser?.phone && (
+              {selectedUser?.phone ? (
                 <span className="text-[10px] text-emerald-600 font-semibold">
                   Cadastrado: {formatPhoneDisplay(selectedUser.phone)}
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-600 font-semibold">
+                  Nenhum telefone no cadastro
                 </span>
               )}
             </label>
