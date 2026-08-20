@@ -9,6 +9,7 @@ import {
   DayOfWeek,
   ActivityItem,
   ActivityType,
+  UserProfile,
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -498,7 +499,242 @@ export function generateDailyRoutinePDF({
 }
 
 // ---------------------------------------------------------------------------
+// 2.1. GRADE GERAL CONSOLIDADA POR ATIVIDADE / MODALIDADE
+// ---------------------------------------------------------------------------
+
+export interface GenerateActivitySchedulePDFOptions {
+  activityName: ActivityType;
+  schedules: ScheduleBlock[];
+  activitiesList?: ActivityItem[];
+  users?: UserProfile[];
+  schoolYear?: number | string;
+  periodLabel?: string;
+  teacherName?: string;
+}
+
+export function generateActivitySchedulePDF({
+  activityName,
+  schedules,
+  activitiesList = [],
+  users = [],
+  schoolYear = new Date().getFullYear(),
+  teacherName,
+}: GenerateActivitySchedulePDFOptions) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const DAYS_ORDER_MAP: Record<DayOfWeek, { order: number; label: string }> = {
+    segunda: { order: 1, label: 'Segunda-feira' },
+    terca: { order: 2, label: 'Terça-feira' },
+    quarta: { order: 3, label: 'Quarta-feira' },
+    quinta: { order: 4, label: 'Quinta-feira' },
+    sexta: { order: 5, label: 'Sexta-feira' },
+  };
+
+  // Find all schedule blocks matching this activity (case insensitive or exact)
+  const activityBlocks = schedules
+    .filter(
+      (s) =>
+        s.activityId?.trim().toLowerCase() === activityName.trim().toLowerCase() ||
+        s.activityId === activityName
+    )
+    .sort((a, b) => {
+      // 1. Day of Week order
+      const dayA = DAYS_ORDER_MAP[a.dayOfWeek]?.order || 99;
+      const dayB = DAYS_ORDER_MAP[b.dayOfWeek]?.order || 99;
+      if (dayA !== dayB) return dayA - dayB;
+
+      // 2. Start Time
+      const timeComp = a.startTime.localeCompare(b.startTime);
+      if (timeComp !== 0) return timeComp;
+
+      // 3. End Time
+      const endComp = a.endTime.localeCompare(b.endTime);
+      if (endComp !== 0) return endComp;
+
+      // 4. Turma pedagogical comparison
+      return (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
+    });
+
+  // Calculate unique turmas attended
+  const uniqueTurmas = Array.from(new Set(activityBlocks.map((b) => b.turma)));
+  const sortedUniqueTurmas = sortTurmasPedagogical(uniqueTurmas);
+
+  // Find activity metadata
+  const activityMeta = activitiesList.find(
+    (a) => a.id.toLowerCase() === activityName.toLowerCase() || a.name.toLowerCase() === activityName.toLowerCase()
+  );
+
+  // Detect responsible teacher(s)
+  let resolvedTeacher = teacherName;
+  if (!resolvedTeacher) {
+    const specialists = users.filter(
+      (u) =>
+        u.assignedActivities?.some(
+          (act) => act.toLowerCase() === activityName.toLowerCase()
+        ) ||
+        u.specialtyActivity?.toLowerCase() === activityName.toLowerCase()
+    );
+    if (specialists.length > 0) {
+      resolvedTeacher = specialists.map((s) => s.name).join(', ');
+    } else {
+      resolvedTeacher = 'Docente Especialista / Coordenação';
+    }
+  }
+
+  // Header banner
+  drawOfficialHeader(
+    doc,
+    `Grade de Horários - ${activityName}`,
+    'Quadro Geral Consolidado de Turmas, Espaços e Docentes da Modalidade',
+    [`Modalidade: ${activityName}`, `Ano Letivo: ${schoolYear}`],
+    'portrait'
+  );
+
+  let startY = 38;
+
+  // Overview Info Card
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, startY, 182, 26, 2.5, 2.5, 'FD');
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Modalidade: ${activityName}`, 18, startY + 7);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Professor(a) Especialista Responsável: ${resolvedTeacher}`,
+    18,
+    startY + 14
+  );
+  doc.text(
+    `Ano / Período Letivo: ${schoolYear}  •  Total de Aulas Semanais: ${activityBlocks.length}  •  Turmas Atendidas: ${sortedUniqueTurmas.length}`,
+    18,
+    startY + 20
+  );
+
+  // Badges on top right of the card
+  doc.setFillColor(238, 242, 255);
+  doc.setDrawColor(199, 210, 254);
+  doc.roundedRect(140, startY + 3, 50, 20, 2, 2, 'FD');
+
+  doc.setTextColor(67, 56, 202);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('TOTAL SEMANAL', 165, startY + 8.5, { align: 'center' });
+  doc.setFontSize(12);
+  doc.text(`${activityBlocks.length} AULAS`, 165, startY + 17.5, { align: 'center' });
+
+  startY += 32;
+
+  // Build table data
+  const tableData = activityBlocks.map((b) => {
+    const dayLabel = DAYS_ORDER_MAP[b.dayOfWeek]?.label || b.dayOfWeek;
+    const timeRange = `${b.startTime} às ${b.endTime}`;
+    const location = b.location || 'Sala / Espaço Padrão';
+    
+    // Resolve teacher for this specific block or fallback to general specialist
+    const blockTeacher = resolvedTeacher || 'Docente Responsável';
+
+    const guidelines = b.guidelines || activityMeta?.defaultEquipment || '-';
+
+    return [
+      dayLabel,
+      timeRange,
+      b.turma,
+      location,
+      blockTeacher,
+      guidelines,
+    ];
+  });
+
+  autoTable(doc, {
+    startY: startY,
+    head: [
+      [
+        'Dia da Semana',
+        'Horário',
+        'Turma',
+        'Local / Sala',
+        'Professor(a) / Monitor(a)',
+        'Orientações / Material',
+      ],
+    ],
+    body:
+      tableData.length > 0
+        ? tableData
+        : [
+            [
+              '-',
+              '-',
+              'Nenhum horário cadastrado para esta modalidade na grade',
+              '-',
+              '-',
+              '-',
+            ],
+          ],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'center',
+    },
+    bodyStyles: {
+      fontSize: 7.8,
+      textColor: [30, 41, 59],
+      cellPadding: 3,
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 28, fontStyle: 'bold' },
+      1: { cellWidth: 26, fontStyle: 'bold', halign: 'center' },
+      2: { cellWidth: 30, fontStyle: 'bold' },
+      3: { cellWidth: 32 },
+      4: { cellWidth: 36 },
+      5: { cellWidth: 'auto' },
+    },
+  });
+
+  // Signatures
+  const finalY = (doc as any).lastAutoTable?.finalY || 160;
+  if (finalY < 240) {
+    const sigY = Math.max(finalY + 18, 235);
+    doc.setDrawColor(203, 213, 225);
+    doc.line(20, sigY, 90, sigY);
+    doc.line(120, sigY, 190, sigY);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Professor(a) Especialista (${activityName})`,
+      55,
+      sigY + 4,
+      { align: 'center' }
+    );
+    doc.text('Coordenação do Programa Integral', 155, sigY + 4, { align: 'center' });
+  }
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+  doc.save(
+    `Grade_Horarios_${activityName.replace(/[\/\s]+/g, '_')}_${schoolYear}.pdf`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 3. RELATÓRIO INDIVIDUAL DO ALUNO (Filtro por Período / Data Inicial e Final)
+// ---------------------------------------------------------------------------l)
 // ---------------------------------------------------------------------------
 
 export interface GenerateStudentPeriodPDFOptions {

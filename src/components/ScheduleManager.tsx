@@ -36,8 +36,9 @@ import {
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType, UserProfile } from '../types';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { generateWeeklySchedulePDF, generateDailyRoutinePDF } from '../utils/pdfGenerator';
+import { generateWeeklySchedulePDF, generateDailyRoutinePDF, generateActivitySchedulePDF } from '../utils/pdfGenerator';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
+import { ActivityScheduleView } from './ActivityScheduleView';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
@@ -188,11 +189,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [dayReplicateTargetTurmas, setDayReplicateTargetTurmas] = useState<string[]>([]);
   const [dayReplicateOverwrite, setDayReplicateOverwrite] = useState(true);
 
+  // Main Schedule View Mode: 'turma' (Grade por Turma) or 'activity' (Grade Geral por Atividade/Modalidade)
+  const [scheduleViewMode, setScheduleViewMode] = useState<'turma' | 'activity'>('turma');
+
   // PDF Export Modal State
   const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState(false);
-  const [pdfReportType, setPdfReportType] = useState<'weekly' | 'daily'>('weekly');
+  const [pdfReportType, setPdfReportType] = useState<'weekly' | 'daily' | 'activity'>('weekly');
   const [pdfTargetTurma, setPdfTargetTurma] = useState<TurmaType | 'ALL'>(sortedTurmas[0] || '1º Ano Azul');
   const [pdfTargetDay, setPdfTargetDay] = useState<DayOfWeek>('segunda');
+  const [pdfTargetActivity, setPdfTargetActivity] = useState<string>(activitiesList[0]?.id || 'Natação');
 
   // Toast feedback
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -223,7 +228,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             : `PDF da Grade Semanal (${pdfTargetTurma}) gerado com sucesso!`,
           'success'
         );
-      } else {
+      } else if (pdfReportType === 'daily') {
         const targetTurma = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
         generateDailyRoutinePDF({
           turma: targetTurma,
@@ -234,6 +239,18 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         });
         showToast(
           `PDF da Rotina Diária (${targetTurma} - ${DAYS_OF_WEEK.find((d) => d.id === pdfTargetDay)?.label}) gerado com sucesso!`,
+          'success'
+        );
+      } else if (pdfReportType === 'activity') {
+        generateActivitySchedulePDF({
+          activityName: pdfTargetActivity,
+          schedules,
+          activitiesList,
+          users,
+          schoolYear: new Date().getFullYear(),
+        });
+        showToast(
+          `PDF da Grade de Horários (${pdfTargetActivity}) gerado com sucesso!`,
           'success'
         );
       }
@@ -274,14 +291,14 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   }, [currentTurmaSchedules]);
 
   // Open Modal for New Block
-  const handleOpenNewBlock = (defaultDay?: DayOfWeek) => {
+  const handleOpenNewBlock = (defaultDay?: DayOfWeek, defaultActivityId?: string) => {
     const targetDay = defaultDay || 'segunda';
     setEditingBlock(null);
     setFormTurma(selectedTurma);
     setFormDayOfWeek(targetDay);
     setFormStartTime('');
     setFormEndTime('');
-    setFormActivityId(activitiesList[0]?.id || 'Rotina');
+    setFormActivityId(defaultActivityId || activitiesList[0]?.id || 'Rotina');
     setFormLocation('');
     setFormGuidelines('');
     setFormError(null);
@@ -749,8 +766,68 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         </div>
       )}
 
-      {/* Header Card */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
+      {/* Top View Mode Switcher */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-xs print:hidden">
+        <div className="flex items-center space-x-1.5 p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
+          <button
+            type="button"
+            id="btn-switch-schedule-turma"
+            onClick={() => setScheduleViewMode('turma')}
+            className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center space-x-2 ${
+              scheduleViewMode === 'turma'
+                ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4 text-indigo-600" />
+            <span>Grade Semanal por Turma</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-switch-schedule-activity"
+            onClick={() => setScheduleViewMode('activity')}
+            className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center space-x-2 ${
+              scheduleViewMode === 'activity'
+                ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>Grade Geral por Atividade / Modalidade</span>
+            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 uppercase tracking-wider">
+              Novo
+            </span>
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 font-medium px-2">
+          {scheduleViewMode === 'turma' ? (
+            <span>Organize a rotina de Segunda a Sexta por turma escolar</span>
+          ) : (
+            <span>Quadro consolidado com docentes, salas, impressão e exportação PDF</span>
+          )}
+        </div>
+      </div>
+
+      {scheduleViewMode === 'activity' ? (
+        <ActivityScheduleView
+          activitiesList={activitiesList}
+          schedules={schedules}
+          turmas={sortedTurmas}
+          users={users}
+          currentUser={currentUser}
+          onOpenNewBlock={(actId) => handleOpenNewBlock(undefined, actId)}
+          onEditBlock={(block) => handleOpenEditBlock(block)}
+          onSwitchToTurmaView={(turma) => {
+            if (turma) setSelectedTurma(turma);
+            setScheduleViewMode('turma');
+          }}
+        />
+      ) : (
+        <>
+          {/* Header Card */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start space-x-4">
             <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 shadow-sm">
@@ -1198,6 +1275,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           );
         })}
       </div>
+    </>
+  )}
 
       {/* ========================================================================= */}
       {/* MODAL 1: REPLICAR ROTINA COMPLETA (ENTRE TURMAS) */}
@@ -2129,70 +2208,113 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
             {/* Modal Body */}
             <div className="p-6 space-y-5">
-              {/* Type of Report: Grade Semanal vs Rotina Diária */}
+              {/* Type of Report: Grade Semanal vs Rotina Diária vs Grade por Atividade */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                   Tipo de Relatório:
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setPdfReportType('weekly')}
-                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                       pdfReportType === 'weekly'
                         ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
                         : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-extrabold">Grade Semanal</span>
                       <Calendar className="w-4 h-4 text-indigo-600" />
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-tight">
-                      Tabela horizontal com todos os horários de Segunda a Sexta-feira.
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Tabela de Segunda a Sexta por turma ou unificada.
                     </p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setPdfReportType('daily')}
-                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                       pdfReportType === 'daily'
                         ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
                         : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-extrabold">Rotina Diária</span>
                       <Clock className="w-4 h-4 text-indigo-600" />
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-tight">
-                      Cronograma detalhado do dia com orientações pedagógicas e locais.
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Cronograma detalhado do dia com salas e orientações.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPdfReportType('activity')}
+                    className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      pdfReportType === 'activity'
+                        ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-extrabold">Por Atividade</span>
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Grade consolidada da modalidade com todas as turmas.
                     </p>
                   </button>
                 </div>
               </div>
 
-              {/* Scope / Turma Selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Turma Alvo:
-                </label>
-                <select
-                  value={pdfTargetTurma}
-                  onChange={(e) => setPdfTargetTurma(e.target.value as TurmaType | 'ALL')}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {pdfReportType === 'weekly' && (
-                    <option value="ALL">Todas as Turmas (Documento Unificado com todas as grades)</option>
-                  )}
-                  {sortedTurmas.map((t) => (
-                    <option key={t} value={t}>
-                      {t} ({totalBlocksForTurma(t)} horários cadastrados)
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Target Activity Selector (when pdfReportType === 'activity') */}
+              {pdfReportType === 'activity' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Selecione a Modalidade / Atividade:
+                  </label>
+                  <select
+                    value={pdfTargetActivity}
+                    onChange={(e) => setPdfTargetActivity(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {activitiesList.map((a) => {
+                      const count = schedules.filter((s) => s.activityId === a.id).length;
+                      return (
+                        <option key={a.id} value={a.id}>
+                          {a.id} ({count} horários na semana)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {/* Scope / Turma Selector (when pdfReportType !== 'activity') */}
+              {pdfReportType !== 'activity' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Turma Alvo:
+                  </label>
+                  <select
+                    value={pdfTargetTurma}
+                    onChange={(e) => setPdfTargetTurma(e.target.value as TurmaType | 'ALL')}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {pdfReportType === 'weekly' && (
+                      <option value="ALL">Todas as Turmas (Documento Unificado com todas as grades)</option>
+                    )}
+                    {sortedTurmas.map((t) => (
+                      <option key={t} value={t}>
+                        {t} ({totalBlocksForTurma(t)} horários cadastrados)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Day Selector (only for Daily Routine) */}
               {pdfReportType === 'daily' && (

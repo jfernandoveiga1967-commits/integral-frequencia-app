@@ -47,7 +47,7 @@ export const WeekSelector: React.FC<WeekSelectorProps> = ({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 print:hidden">
       {/* Current Week Badge & Information */}
       <div className="flex items-center space-x-3 w-full md:w-auto">
         <div className="w-10 h-10 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-semibold shrink-0">
