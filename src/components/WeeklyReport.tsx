@@ -53,6 +53,7 @@ interface WeeklyReportProps {
   holidays?: HolidayItem[];
   currentWeek: WeekInfo;
   currentUser?: UserProfile | null;
+  users?: UserProfile[];
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
 
@@ -64,6 +65,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   holidays = [],
   currentWeek,
   currentUser,
+  users = [],
   onDeleteTurma,
 }) => {
   const isCoordenador = currentUser?.role === 'coordenador';
@@ -286,14 +288,87 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const [pdfTurmaStartDate, setPdfTurmaStartDate] = useState<string>(effectiveStartDate);
   const [pdfTurmaEndDate, setPdfTurmaEndDate] = useState<string>(effectiveEndDate);
 
+  // Helper to find the registered Specialist Teacher full name assigned to an activity/modality
+  const getSpecialistTeacherForActivity = (
+    activityId: string,
+    usersList: UserProfile[] = [],
+    currentUserProfile?: UserProfile | null
+  ): string => {
+    if (!activityId) return '';
+    const normAct = activityId.trim().toLowerCase();
+    const normActNoAccent = normAct.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // 1. Search non-coordinator teachers/monitors who have this activity assigned in their profile
+    const specialist = usersList.find((u) => {
+      if (!u || u.role === 'coordenador') return false;
+      const acts = u.assignedActivities || [];
+      const hasInAssigned = acts.some((a) => {
+        if (!a) return false;
+        const aNorm = a.trim().toLowerCase();
+        const aNormNoAccent = aNorm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return aNorm === normAct || aNormNoAccent === normActNoAccent;
+      });
+      const hasInSpecialty =
+        u.specialtyActivity &&
+        (u.specialtyActivity.trim().toLowerCase() === normAct ||
+          u.specialtyActivity.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') === normActNoAccent);
+
+      return hasInAssigned || hasInSpecialty;
+    });
+
+    if (specialist && specialist.name) {
+      return specialist.name.trim();
+    }
+
+    // 2. Search any user (including other staff) who has this activity assigned
+    const anyUser = usersList.find((u) => {
+      if (!u) return false;
+      const acts = u.assignedActivities || [];
+      const hasInAssigned = acts.some((a) => {
+        if (!a) return false;
+        const aNorm = a.trim().toLowerCase();
+        const aNormNoAccent = aNorm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return aNorm === normAct || aNormNoAccent === normActNoAccent;
+      });
+      const hasInSpecialty =
+        u.specialtyActivity &&
+        (u.specialtyActivity.trim().toLowerCase() === normAct ||
+          u.specialtyActivity.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') === normActNoAccent);
+
+      return hasInAssigned || hasInSpecialty;
+    });
+
+    if (anyUser && anyUser.name) {
+      return anyUser.name.trim();
+    }
+
+    // 3. Fallback: If current user is a teacher assigned to this activity
+    if (currentUserProfile && currentUserProfile.role !== 'coordenador') {
+      const userActs = currentUserProfile.assignedActivities || [];
+      const hasInAssigned = userActs.some((a) => {
+        if (!a) return false;
+        const aNorm = a.trim().toLowerCase();
+        const aNormNoAccent = aNorm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return aNorm === normAct || aNormNoAccent === normActNoAccent;
+      });
+      if (hasInAssigned && currentUserProfile.name) {
+        return currentUserProfile.name.trim();
+      }
+    }
+
+    return '';
+  };
+
   // 3. Modality/Oficina PDF Modal State
   const [showModalityModal, setShowModalityModal] = useState(false);
   const [selectedPdfModality, setSelectedPdfModality] = useState<ActivityType>(
     activeActivities[0]?.id || 'Natação'
   );
-  const [pdfModalityTeacher, setPdfModalityTeacher] = useState<string>(
-    currentUser?.name || 'Docente Responsável'
-  );
+  const [pdfModalityTeacher, setPdfModalityTeacher] = useState<string>(() => {
+    const initialMod = activeActivities[0]?.id || 'Natação';
+    const found = getSpecialistTeacherForActivity(initialMod, users, currentUser);
+    return found || (currentUser?.role === 'professor' ? currentUser.name : '');
+  });
   const [pdfModalityStartDate, setPdfModalityStartDate] = useState<string>(effectiveStartDate);
   const [pdfModalityEndDate, setPdfModalityEndDate] = useState<string>(effectiveEndDate);
 
@@ -313,7 +388,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   };
 
   const handleOpenModalityModal = (modality?: ActivityType) => {
-    if (modality) setSelectedPdfModality(modality);
+    const targetModality = modality || selectedPdfModality || activeActivities[0]?.id || 'Natação';
+    setSelectedPdfModality(targetModality);
+    const teacherFound = getSpecialistTeacherForActivity(targetModality, users, currentUser);
+    setPdfModalityTeacher(teacherFound || (currentUser?.role === 'professor' ? currentUser.name : ''));
     setPdfModalityStartDate(effectiveStartDate);
     setPdfModalityEndDate(effectiveEndDate);
     setShowModalityModal(true);
@@ -1122,8 +1200,13 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 </label>
                 <select
                   value={selectedPdfModality}
-                  onChange={(e) => setSelectedPdfModality(e.target.value as ActivityType)}
-                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-violet-500"
+                  onChange={(e) => {
+                    const newModality = e.target.value as ActivityType;
+                    setSelectedPdfModality(newModality);
+                    const foundTeacher = getSpecialistTeacherForActivity(newModality, users, currentUser);
+                    setPdfModalityTeacher(foundTeacher || (currentUser?.role === 'professor' ? currentUser.name : ''));
+                  }}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-violet-500 focus:outline-none"
                 >
                   {activeActivities.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -1135,16 +1218,24 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
               {/* Teacher Name */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Professor(a) Especialista:
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Professor(a) Especialista:
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    {pdfModalityTeacher ? 'Auto-preenchido • Editável' : 'Campo editável'}
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={pdfModalityTeacher}
                   onChange={(e) => setPdfModalityTeacher(e.target.value)}
                   placeholder="Nome do docente responsável pela oficina"
-                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Carregado automaticamente a partir do perfil do usuário cadastrado na modalidade. Pode ser alterado livremente antes da impressão.
+                </p>
               </div>
 
               {/* Period Range Filter */}

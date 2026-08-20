@@ -41,7 +41,9 @@ import {
   getNotificationPermission,
   requestNotificationPermission,
   sendScheduleNotification,
-  playChimeSound,
+  playPendingRollCallAlertSound,
+  playTestSound,
+  unlockAudioContextAndPlayTest,
 } from '../utils/notificationUtils';
 
 interface RoutineMonitorBannerProps {
@@ -208,20 +210,20 @@ export const RoutineMonitorBanner: React.FC<RoutineMonitorBannerProps> = ({
 
   // Handle request notification permission
   const handleEnableNotifications = async () => {
+    await unlockAudioContextAndPlayTest();
     const perm = await requestNotificationPermission();
     setNotifPermission(perm);
     if (perm === 'granted') {
-      setNotifBannerFeedback('Notificações de rotina ativadas com sucesso!');
+      setNotifBannerFeedback('Notificações e alertas sonoros ativados com sucesso!');
       setTimeout(() => setNotifBannerFeedback(null), 4000);
     } else if (perm === 'denied') {
-      setNotifBannerFeedback('Notificações foram bloqueadas no navegador. Verifique as permissões.');
+      setNotifBannerFeedback('Notificações visuais foram bloqueadas no navegador, mas o som está ativo.');
       setTimeout(() => setNotifBannerFeedback(null), 5000);
     }
   };
 
   // Handle Test Notification
   const handleTestNotification = () => {
-    playChimeSound();
     if (todaySchedules.length > 0) {
       const sample = activeBlock || nextBlock || todaySchedules[0];
       const act = getActivityDetails(sample.activityId);

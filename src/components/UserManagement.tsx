@@ -274,6 +274,63 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     });
   }, [activitiesList, activitySearchTerm, activityTypeFilter]);
 
+  // Modalidades extracurriculares que exigem chamada individual (inclui "Rotina" e modalidades com requiresRollCall: true, excluindo blocos gerais informativos de rotina que não possuem chamada)
+  const rollCallExtracurriculars = useMemo(() => {
+    const nonRollCallRoutineKeywords = [
+      'acolhimento',
+      'almoço',
+      'almoco',
+      'higienização',
+      'higienizacao',
+      'higiene',
+      'lanche',
+      'descanso',
+      'sono',
+      'parque',
+      'recreio',
+      'patio',
+      'pátio',
+      'lição de casa',
+      'licao de casa',
+      'estudo orientado',
+      'saída',
+      'saida',
+      'entrada',
+    ];
+
+    return (activitiesList || []).filter((act) => {
+      if (!act) return false;
+      // Deve exigir chamada
+      if (act.requiresRollCall === false || (act as any).exigeChamada === false) {
+        return false;
+      }
+      const norm = (act.name || act.id || '').toLowerCase().trim();
+      const normNoAccent = norm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Se for a atividade oficial "Rotina", sempre inclui
+      if (norm === 'rotina' || normNoAccent === 'rotina') {
+        return true;
+      }
+
+      // Exclui termos de rotina secundária/informativa
+      if (
+        nonRollCallRoutineKeywords.some(
+          (k) =>
+            norm === k ||
+            normNoAccent === k ||
+            norm.startsWith(`${k} `) ||
+            norm.endsWith(` ${k}`) ||
+            normNoAccent.startsWith(`${k} `) ||
+            normNoAccent.endsWith(` ${k}`)
+        )
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [activitiesList]);
+
   // Stats
   const countCoord = (users || []).filter((u) => u && u.role === 'coordenador').length;
   const countProf = (users || []).filter((u) => u && u.role === 'professor').length;
@@ -366,7 +423,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
 
     const effectiveActivities = isMasterAdmin
-      ? (formActivities && formActivities.length >= 7 ? formActivities : ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
+      ? (formActivities && formActivities.length >= 8 ? formActivities : ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
       : formActivities;
 
     const updatedUser: UserProfile = {
@@ -1701,15 +1758,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               </div>
 
               <div className="pt-2 border-t border-slate-100">
-                <label className="block font-bold text-slate-800 uppercase tracking-wider mb-2">
-                  Atribuir Modalidades Extracurriculares ao Usuário:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-800 uppercase tracking-wider text-xs">
+                    Atribuir Modalidades Extracurriculares ao Usuário:
+                  </label>
+                  <div className="flex items-center space-x-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setFormActivities(rollCallExtracurriculars.map((a) => a.id))}
+                      className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                    >
+                      Todas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setFormActivities([])}
+                      className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
                 <p className="text-[11px] text-slate-500 mb-2">
-                  Selecione as atividades específicas que este professor/monitor gerencia:
+                  Selecione as modalidades com chamada individual gerenciadas por este professor/monitor:
                 </p>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {activitiesList.map((act) => {
+                  {rollCallExtracurriculars.map((act) => {
                     const isChecked = formActivities.includes(act.id);
                     return (
                       <button
@@ -1722,7 +1798,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
                         }`}
                       >
-                        <ActivityBadge activity={act.id} iconName={act.icon} customEquipment={act.defaultEquipment} size="sm" />
+                        <ActivityBadge
+                          activity={act.id}
+                          iconName={act.icon}
+                          customIconUrl={act.customIconUrl}
+                          customEquipment={act.defaultEquipment}
+                          size="sm"
+                        />
                         {isChecked && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
                       </button>
                     );

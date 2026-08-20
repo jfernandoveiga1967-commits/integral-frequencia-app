@@ -1,48 +1,212 @@
 import { ScheduleBlock } from '../types';
 
+const STORAGE_KEY_SOUND_ENABLED = 'integral_sound_notifications_enabled';
 let audioCtx: AudioContext | null = null;
+let isAudioUnlocked = false;
 
 /**
- * Play a pleasant, non-intrusive alert chime using Web Audio API
+ * Check if sound notifications are enabled in user settings (default: true)
  */
-export function playChimeSound(): void {
+export function isAudioNotificationsEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
   try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
+    const val = localStorage.getItem(STORAGE_KEY_SOUND_ENABLED);
+    return val !== 'false';
+  } catch {
+    return true;
+  }
+}
 
-    if (!audioCtx || audioCtx.state === 'suspended') {
+/**
+ * Set sound notifications enabled / disabled and broadcast event
+ */
+export function setAudioNotificationsEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_SOUND_ENABLED, enabled ? 'true' : 'false');
+    window.dispatchEvent(
+      new CustomEvent('integral_audio_state_change', {
+        detail: { enabled, isUnlocked: isAudioUnlocked },
+      })
+    );
+  } catch (err) {
+    console.warn('Failed to save sound preference:', err);
+  }
+}
+
+/**
+ * Checks if the Web Audio API context is unlocked and ready for playback
+ */
+export function isAudioContextReady(): boolean {
+  return isAudioUnlocked && audioCtx !== null && audioCtx.state === 'running';
+}
+
+/**
+ * Get or initialize the Web Audio API context
+ */
+function getOrCreateAudioContext(): AudioContext | null {
+  try {
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    if (!audioCtx) {
       audioCtx = new AudioContextClass();
     }
 
-    const now = audioCtx.currentTime;
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(() => {
+        isAudioUnlocked = true;
+        window.dispatchEvent(
+          new CustomEvent('integral_audio_state_change', {
+            detail: { enabled: isAudioNotificationsEnabled(), isUnlocked: true },
+          })
+        );
+      }).catch(() => {});
+    } else if (audioCtx.state === 'running') {
+      isAudioUnlocked = true;
+    }
 
+    return audioCtx;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Helper to play a single bell-like harmonic tone
+ */
+function playBellHarmonic(
+  ctx: AudioContext,
+  freq: number,
+  startTime: number,
+  duration: number = 0.4,
+  volume: number = 0.2
+): void {
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, startTime);
+
+    // Fast attack, smooth exponential decay
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.linearRampToValueAtTime(volume, startTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.05);
+
+    // Secondary overtone for rich metallic bell texture
+    const overtoneOsc = ctx.createOscillator();
+    const overtoneGain = ctx.createGain();
+    overtoneOsc.type = 'triangle';
+    overtoneOsc.frequency.setValueAtTime(freq * 2.02, startTime);
+
+    overtoneGain.gain.setValueAtTime(0.0001, startTime);
+    overtoneGain.gain.linearRampToValueAtTime(volume * 0.35, startTime + 0.015);
+    overtoneGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration * 0.6);
+
+    overtoneOsc.connect(overtoneGain);
+    overtoneGain.connect(ctx.destination);
+
+    overtoneOsc.start(startTime);
+    overtoneOsc.stop(startTime + duration * 0.6 + 0.05);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Unlocks audio context on user click and plays a crisp test sound
+ */
+export async function unlockAudioContextAndPlayTest(): Promise<boolean> {
+  setAudioNotificationsEnabled(true);
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return false;
+
+  try {
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    isAudioUnlocked = true;
+    playTestSound();
+    window.dispatchEvent(
+      new CustomEvent('integral_audio_state_change', {
+        detail: { enabled: true, isUnlocked: true },
+      })
+    );
+    return true;
+  } catch (err) {
+    console.warn('Failed to unlock audio context:', err);
+    return false;
+  }
+}
+
+/**
+ * Plays a quick, pleasant 2-note confirmation test sound (C5 -> G5)
+ */
+export function playTestSound(): void {
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    playBellHarmonic(ctx, 523.25, now, 0.28, 0.18); // C5
+    playBellHarmonic(ctx, 783.99, now + 0.14, 0.45, 0.24); // G5
+  } catch (err) {
+    console.warn('Test sound playback error:', err);
+  }
+}
+
+/**
+ * Play a strong, repetitive alert sound (3 distinct striking chime bursts) for pending roll calls
+ */
+export function playPendingRollCallAlertSound(): void {
+  if (!isAudioNotificationsEnabled()) return;
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+
+    // Burst 1: High distinct chime (E5 - 659Hz + B5 - 987Hz)
+    playBellHarmonic(ctx, 659.25, now, 0.35, 0.26);
+    playBellHarmonic(ctx, 987.77, now + 0.04, 0.4, 0.3);
+
+    // Burst 2: Second attention chime (E5 - 659Hz + B5 - 987Hz) at +320ms
+    playBellHarmonic(ctx, 659.25, now + 0.32, 0.35, 0.28);
+    playBellHarmonic(ctx, 987.77, now + 0.36, 0.45, 0.32);
+
+    // Burst 3: Third higher resolving chime (G#5 - 830Hz + E6 - 1318Hz) at +640ms
+    playBellHarmonic(ctx, 830.61, now + 0.64, 0.45, 0.32);
+    playBellHarmonic(ctx, 1318.51, now + 0.68, 0.65, 0.38);
+  } catch (err) {
+    console.warn('Pending roll call alert sound error:', err);
+  }
+}
+
+/**
+ * Play a standard chime sound
+ */
+export function playChimeSound(): void {
+  if (!isAudioNotificationsEnabled()) return;
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
     // Tone 1 (D5 - 587.33 Hz)
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(587.33, now);
-    gain1.gain.setValueAtTime(0, now);
-    gain1.gain.linearRampToValueAtTime(0.18, now + 0.04);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-    osc1.start(now);
-    osc1.stop(now + 0.35);
-
-    // Tone 2 (A5 - 880 Hz) - harmonic chime
-    const osc2 = audioCtx.createOscillator();
-    const gain2 = audioCtx.createGain();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(880, now + 0.12);
-    gain2.gain.setValueAtTime(0, now + 0.12);
-    gain2.gain.linearRampToValueAtTime(0.22, now + 0.16);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
-
-    osc2.connect(gain2);
-    gain2.connect(audioCtx.destination);
-    osc2.start(now + 0.12);
-    osc2.stop(now + 0.65);
+    playBellHarmonic(ctx, 587.33, now, 0.35, 0.22);
+    // Tone 2 (A5 - 880 Hz)
+    playBellHarmonic(ctx, 880.0, now + 0.12, 0.6, 0.28);
   } catch (err) {
     console.warn('Audio chime playback failed:', err);
   }
@@ -71,7 +235,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
-      playChimeSound();
+      unlockAudioContextAndPlayTest();
     }
     return permission;
   } catch (e) {
@@ -81,14 +245,19 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 /**
- * Send a native notification for a schedule block transition
+ * Send a native notification for a schedule block transition with audio alert
  */
 export function sendScheduleNotification(
   block: ScheduleBlock,
   activityName: string,
   type: 'start' | 'reminder' | 'test' = 'start'
 ): boolean {
-  playChimeSound();
+  if (type === 'test') {
+    playTestSound();
+  } else {
+    // For start and reminders, play the stronger audible attention chime
+    playPendingRollCallAlertSound();
+  }
 
   if (!isNotificationSupported() || Notification.permission !== 'granted') {
     return false;
@@ -136,3 +305,4 @@ export function sendScheduleNotification(
     return false;
   }
 }
+

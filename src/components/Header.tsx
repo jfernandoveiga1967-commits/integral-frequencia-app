@@ -1,7 +1,28 @@
-import React from 'react';
-import { ClipboardCheck, Users, BarChart3, Library, LogOut, ShieldCheck, GraduationCap, UserCheck, UserCog, Radio } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  ClipboardCheck,
+  Users,
+  BarChart3,
+  Library,
+  LogOut,
+  ShieldCheck,
+  GraduationCap,
+  UserCog,
+  Radio,
+  Volume2,
+  VolumeX,
+  BellRing,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { UserProfile } from '../types';
 import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
+import {
+  isAudioNotificationsEnabled,
+  setAudioNotificationsEnabled,
+  unlockAudioContextAndPlayTest,
+  isAudioContextReady,
+} from '../utils/notificationUtils';
 
 export type TabType = 'frequencia' | 'momento' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
 
@@ -24,6 +45,55 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
 
+  // Sound Notifications state
+  const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(() => isAudioNotificationsEnabled());
+  const [isAudioReady, setIsAudioReady] = useState<boolean>(() => isAudioContextReady());
+  const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
+  const [showToastFeedback, setShowToastFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleAudioStateChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean; isUnlocked: boolean }>;
+      if (customEvent.detail) {
+        setIsAudioEnabled(customEvent.detail.enabled);
+        setIsAudioReady(customEvent.detail.isUnlocked);
+      } else {
+        setIsAudioEnabled(isAudioNotificationsEnabled());
+        setIsAudioReady(isAudioContextReady());
+      }
+    };
+
+    window.addEventListener('integral_audio_state_change', handleAudioStateChange);
+    return () => {
+      window.removeEventListener('integral_audio_state_change', handleAudioStateChange);
+    };
+  }, []);
+
+  const handleToggleAudio = async () => {
+    if (!isAudioEnabled) {
+      // Enabling & Unlocking Audio with test chime
+      const success = await unlockAudioContextAndPlayTest();
+      setIsAudioEnabled(true);
+      setIsAudioReady(success);
+      setShowToastFeedback('Som de Notificações ativado com teste sonoro!');
+      setTimeout(() => setShowToastFeedback(null), 3500);
+    } else {
+      // Disabling Audio
+      setAudioNotificationsEnabled(false);
+      setIsAudioEnabled(false);
+      setShowToastFeedback('Som de Notificações desativado');
+      setTimeout(() => setShowToastFeedback(null), 2500);
+    }
+  };
+
+  const handleUnlockAudioFromBanner = async () => {
+    const success = await unlockAudioContextAndPlayTest();
+    setIsAudioEnabled(true);
+    setIsAudioReady(success);
+    setShowToastFeedback('Alertas sonoros de chamada liberados com sucesso!');
+    setTimeout(() => setShowToastFeedback(null), 3500);
+  };
+
   const renderRoleIcon = () => {
     if (!currentUser) return null;
     switch (currentUser.role) {
@@ -35,8 +105,46 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  // Determine if audio needs activation banner (either disabled in preferences or blocked/not yet unlocked by browser gesture)
+  const isSoundBlockedOrInactive = (!isAudioEnabled || !isAudioReady) && !isBannerDismissed;
+
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-md">
+      {/* Discrete Top Audio Activation Banner if sound is blocked or inactive */}
+      {isSoundBlockedOrInactive && (
+        <div className="bg-gradient-to-r from-amber-500/90 via-indigo-600/95 to-amber-600/90 text-white px-3 py-1.5 text-xs font-semibold flex items-center justify-between shadow-inner border-b border-amber-400/30">
+          <button
+            type="button"
+            onClick={handleUnlockAudioFromBanner}
+            className="flex-1 flex items-center justify-center space-x-2 text-center hover:opacity-90 transition-opacity cursor-pointer py-0.5"
+          >
+            <BellRing className="w-3.5 h-3.5 text-amber-200 animate-bounce shrink-0" />
+            <span className="underline decoration-amber-200 underline-offset-2 tracking-wide font-bold">
+              Clique aqui para ativar os alertas sonoros de chamada
+            </span>
+            <span className="hidden sm:inline text-[11px] opacity-90 font-normal">
+              • Libera o áudio para as monitoras sem bloqueios do navegador
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsBannerDismissed(true)}
+            className="p-1 hover:bg-black/20 rounded-md transition-colors text-white/80 hover:text-white shrink-0 ml-2"
+            title="Fechar aviso temporariamente"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Floating Action Feedback Toast */}
+      {showToastFeedback && (
+        <div className="absolute top-12 right-4 z-50 bg-slate-950/95 border border-indigo-500/40 text-indigo-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
+          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{showToastFeedback}</span>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between py-3 gap-3">
           {/* Logo & Main Title */}
@@ -60,8 +168,34 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* User Badge & Header Stats */}
-          <div className="flex flex-wrap items-center justify-between lg:justify-end gap-3 border-t lg:border-t-0 border-slate-800 pt-2 lg:pt-0 select-none">
+          {/* User Badge, Sound Notification Toggle & Header Stats */}
+          <div className="flex flex-wrap items-center justify-between lg:justify-end gap-2.5 border-t lg:border-t-0 border-slate-800 pt-2 lg:pt-0 select-none">
+            {/* Sound Notification Button Indicator */}
+            <button
+              type="button"
+              onClick={handleToggleAudio}
+              title={
+                isAudioEnabled
+                  ? 'Som de Notificações ativado. Clique para desativar.'
+                  : 'Som de Notificações desativado. Clique para ativar e tocar teste sonoro.'
+              }
+              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer shadow-sm ${
+                isAudioEnabled
+                  ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80 hover:border-emerald-400'
+                  : 'bg-slate-800/90 border-slate-700 text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'
+              }`}
+            >
+              {isAudioEnabled ? (
+                <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              )}
+              <span className="hidden sm:inline">Som:</span>
+              <span className={isAudioEnabled ? 'text-emerald-300' : 'text-slate-400'}>
+                {isAudioEnabled ? 'Ativado' : 'Desativado'}
+              </span>
+            </button>
+
             {/* Active User Card */}
             {currentUser && roleStyle && (
               <div className="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm">
@@ -195,3 +329,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

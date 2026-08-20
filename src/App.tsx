@@ -926,6 +926,7 @@ export default function App() {
             holidays={holidays}
             currentWeek={currentWeek}
             currentUser={currentUser}
+            users={users}
             onDeleteTurma={handleDeleteTurma}
           />
         )}

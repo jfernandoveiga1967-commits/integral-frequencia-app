@@ -92,6 +92,7 @@ export interface UserProfile {
   birthDate?: string; // YYYY-MM-DD or DD/MM/YYYY
   pin?: string;
   assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user
+  specialtyActivity?: ActivityType; // Legacy or primary specialty activity
   assignedTurmas?: string[]; // Turmas assigned to this user (optional)
   allowedClassIds?: string[]; // List of class IDs/names allowed for this teacher/monitor
   canManageStudents?: boolean;
