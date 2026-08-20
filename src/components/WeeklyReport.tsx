@@ -20,6 +20,7 @@ import {
   generateTurmaPDFReport,
 } from '../utils/pdfGenerator';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays } from '../utils/dateUtils';
+import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
   BarChart3,
   Printer,
@@ -80,7 +81,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const sorted = sortTurmasPedagogical(rawList);
     if (isCoordenador || !currentUser) return sorted;
     const userTurmaSet = new Set(userAssignedTurmas);
     return sorted.filter((t) => userTurmaSet.has(t));

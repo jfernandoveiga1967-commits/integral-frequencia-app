@@ -4,6 +4,7 @@ import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
+import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
 interface StudentManagerProps {
@@ -44,7 +45,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const allowedTurmas = React.useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const sorted = sortTurmasPedagogical(rawList);
     if (isCoordenador || !currentUser) return sorted;
     const userTurmaSet = new Set(userAssignedTurmas);
     return sorted.filter((t) => userTurmaSet.has(t));

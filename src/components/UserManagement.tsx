@@ -3,6 +3,7 @@ import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock, Holid
 import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
+import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
@@ -122,7 +123,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const availableTurmas = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    return [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    return sortTurmasPedagogical(rawList);
   }, [turmas]);
 
   // Sub-tab switcher state

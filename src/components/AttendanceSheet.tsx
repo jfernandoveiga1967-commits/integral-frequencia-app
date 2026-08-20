@@ -9,6 +9,7 @@ import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess } from '../util
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
+import { sortTurmasPedagogical } from '../utils/turmaUtils';
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -72,7 +73,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const allowedTurmas = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
-    const sorted = [...rawList].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const sorted = sortTurmasPedagogical(rawList);
     if (isCoordenador || !currentUser) return sorted;
     const userTurmaSet = new Set(userAssignedTurmas);
     return sorted.filter((t) => userTurmaSet.has(t));

@@ -76,6 +76,11 @@ export function getTurmaPedagogicalWeight(turmaName: string): number {
     return 45;
   }
 
+  // Special case: composite ranges like "6º ao 9º Ano", "6 ao 9", etc.
+  if (name.includes('6') && (name.includes('9') || name.includes('ao') || name.includes('a 9'))) {
+    return 195;
+  }
+
   // 6. Ensino Fundamental (1º ao 9º Ano)
   const anoMatch = name.match(/(\d+)\s*(?:º|°|o|ª|\.|\-)?\s*(?:ano|série|serie)?/);
   if (anoMatch) {

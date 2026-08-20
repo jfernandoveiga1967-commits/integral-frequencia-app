@@ -4,6 +4,7 @@ import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfi
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
+import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { WeekSelector } from './components/WeekSelector';
@@ -105,7 +106,7 @@ export default function App() {
   useEffect(() => {
     const loadedStudents = loadStudents();
     const loadedRecords = loadAttendanceRecords();
-    const loadedTurmas = loadTurmas().sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const loadedTurmas = sortTurmasPedagogical(loadTurmas());
     setStudents(loadedStudents);
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
@@ -172,7 +173,7 @@ export default function App() {
 
     const unsubTurmas = subscribeTurmas((fsTurmas) => {
       if (fsTurmas.length > 0) {
-        const sortedTurmas = [...fsTurmas].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+        const sortedTurmas = sortTurmasPedagogical(fsTurmas);
         setTurmas(sortedTurmas);
         saveTurmas(sortedTurmas);
       } else if (isInitialTurmasSync && loadedTurmas.length > 0) {
@@ -619,7 +620,7 @@ export default function App() {
   const handleAddTurma = (newTurmaName: string): boolean => {
     const name = newTurmaName.trim();
     if (!name || turmas.includes(name)) return false;
-    const updated = [...turmas, name].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const updated = sortTurmasPedagogical([...turmas, name]);
     setTurmas(updated);
     saveTurmas(updated);
     saveTurmaToFirestore(name);
