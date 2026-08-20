@@ -1557,9 +1557,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           turmas={availableTurmas}
           activitiesList={activitiesList}
           schedules={schedules}
+          users={users}
+          currentUser={currentUser}
           onSaveScheduleBlock={onSaveScheduleBlock || (() => {})}
           onDeleteScheduleBlock={onDeleteScheduleBlock || (() => {})}
           onBatchSaveSchedules={onBatchSaveSchedules}
+          onUpdateUserPhone={(userId, newPhone) => {
+            const target = users.find((u) => u.id === userId);
+            if (target) {
+              onSaveUser({
+                ...target,
+                phone: newPhone.trim() || undefined,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }}
         />
       )}
 

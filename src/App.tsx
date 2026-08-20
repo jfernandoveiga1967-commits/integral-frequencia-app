@@ -707,6 +707,17 @@ export default function App() {
     }
   };
 
+  const handleUpdateUserPhone = (userId: string, newPhone: string) => {
+    const targetUser = users.find((u) => u.id === userId);
+    if (!targetUser) return;
+    const updated: UserProfile = {
+      ...targetUser,
+      phone: newPhone.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    handleSaveUser(updated);
+  };
+
   const handleDeleteUser = (userId: string) => {
     const updatedUsers = users.filter((u) => u.id !== userId);
     setUsers(updatedUsers);
@@ -878,6 +889,8 @@ export default function App() {
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
+            users={users}
+            onUpdateUserPhone={handleUpdateUserPhone}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}

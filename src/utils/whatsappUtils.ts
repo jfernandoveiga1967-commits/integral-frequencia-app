@@ -93,13 +93,13 @@ export function buildActivityWhatsAppMessage(params: ActivityWhatsAppParams): st
 }
 
 /**
- * Generates the direct wa.me link with encoded text
+ * Generates the direct WhatsApp link with UTF-8 URL encoded text and emojis
  */
 export function generateWhatsAppUrl(phone: string, message: string): string {
   const cleanPhone = cleanPhoneNumber(phone);
   const encodedText = encodeURIComponent(message);
   if (!cleanPhone) {
-    return `https://wa.me/?text=${encodedText}`;
+    return `https://api.whatsapp.com/send?text=${encodedText}`;
   }
-  return `https://wa.me/${cleanPhone}?text=${encodedText}`;
+  return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
 }

@@ -51,6 +51,7 @@
         "id": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "minLength": 1, "maxLength": 128 },
         "email": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
         "role": { "type": "string", "maxLength": 64 },
         "cargoLabel": { "type": "string", "maxLength": 128 },
         "avatarColor": { "type": "string", "maxLength": 64 },

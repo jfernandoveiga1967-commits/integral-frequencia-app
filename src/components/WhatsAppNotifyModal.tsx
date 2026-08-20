@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { MessageSquare, Send, Copy, Check, X, Phone, User, MapPin, Clock, Sparkles, AlertCircle, Edit3 } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { MessageSquare, Send, Copy, Check, X, Phone, User, MapPin, Clock, Sparkles, AlertCircle, Edit3, RotateCcw } from 'lucide-react';
 import { UserProfile, ScheduleBlock } from '../types';
 import { buildActivityWhatsAppMessage, generateWhatsAppUrl, formatPhoneDisplay, cleanPhoneNumber } from '../utils/whatsappUtils';
 
@@ -49,22 +49,16 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   const [customPhone, setCustomPhone] = useState<string>(defaultUser?.phone || '');
   const [customNote, setCustomNote] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
-
-  // Sync phone when selected user changes
-  useEffect(() => {
-    const user = users.find((u) => u.id === selectedUserId);
-    if (user && user.phone) {
-      setCustomPhone(user.phone);
-    } else {
-      setCustomPhone('');
-    }
-  }, [selectedUserId, users]);
+  const [editableMessage, setEditableMessage] = useState<string>('');
+  const [isManuallyEdited, setIsManuallyEdited] = useState<boolean>(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedUser = useMemo(() => {
     return users.find((u) => u.id === selectedUserId) || null;
   }, [users, selectedUserId]);
 
-  const messageText = useMemo(() => {
+  // Generate base message template
+  const defaultGeneratedMessage = useMemo(() => {
     return buildActivityWhatsAppMessage({
       monitorName: selectedUser?.name,
       turmaName,
@@ -78,14 +72,38 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
     });
   }, [selectedUser, turmaName, activityName, startTime, endTime, location, guidelines, customNote, currentUser]);
 
-  const whatsAppUrl = useMemo(() => {
-    const phoneToUse = customPhone || selectedUser?.phone || '';
-    return generateWhatsAppUrl(phoneToUse, messageText);
-  }, [customPhone, selectedUser, messageText]);
+  // Initialize and update editableMessage when default params change, unless user manually edited
+  useEffect(() => {
+    if (!isManuallyEdited) {
+      setEditableMessage(defaultGeneratedMessage);
+    }
+  }, [defaultGeneratedMessage, isManuallyEdited]);
+
+  // When modal is newly opened or turma/activity changes, reset manual edit lock
+  useEffect(() => {
+    if (isOpen) {
+      setIsManuallyEdited(false);
+      setEditableMessage(defaultGeneratedMessage);
+    }
+  }, [isOpen, turmaName, activityName, startTime, endTime]);
+
+  // Sync phone when selected user changes
+  useEffect(() => {
+    if (selectedUser && selectedUser.phone) {
+      setCustomPhone(selectedUser.phone);
+    } else if (!selectedUserId) {
+      setCustomPhone('');
+    }
+  }, [selectedUserId, selectedUser]);
+
+  const handleResetToDefault = () => {
+    setIsManuallyEdited(false);
+    setEditableMessage(defaultGeneratedMessage);
+  };
 
   const handleCopyMessage = async () => {
     try {
-      await navigator.clipboard.writeText(messageText);
+      await navigator.clipboard.writeText(editableMessage);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -94,11 +112,14 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   };
 
   const handleSendWhatsApp = () => {
-    // If phone was typed manually and user is selected, optionally save to profile
+    // If phone was typed manually and user is selected, save phone to profile
     if (selectedUser && customPhone && customPhone !== selectedUser.phone && onUpdateUserPhone) {
       onUpdateUserPhone(selectedUser.id, customPhone);
     }
-    window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
+
+    const phoneToUse = customPhone || selectedUser?.phone || '';
+    const url = generateWhatsAppUrl(phoneToUse, editableMessage);
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   if (!isOpen) return null;
@@ -141,7 +162,25 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
             </label>
             <select
               value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
+              onChange={(e) => {
+                setSelectedUserId(e.target.value);
+                // When selecting a new user, update template if not manually edited
+                if (!isManuallyEdited) {
+                  const newUser = users.find((u) => u.id === e.target.value);
+                  const updatedMsg = buildActivityWhatsAppMessage({
+                    monitorName: newUser?.name,
+                    turmaName,
+                    activityName,
+                    startTime,
+                    endTime,
+                    location,
+                    guidelines,
+                    customNote,
+                    coordName: currentUser?.name || 'Coordenação',
+                  });
+                  setEditableMessage(updatedMsg);
+                }
+              }}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="">-- Escolha um colaborador --</option>
@@ -188,38 +227,94 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
             </label>
             <textarea
               value={customNote}
-              onChange={(e) => setCustomNote(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomNote(val);
+                if (!isManuallyEdited) {
+                  const updatedMsg = buildActivityWhatsAppMessage({
+                    monitorName: selectedUser?.name,
+                    turmaName,
+                    activityName,
+                    startTime,
+                    endTime,
+                    location,
+                    guidelines,
+                    customNote: val,
+                    coordName: currentUser?.name || 'Coordenação',
+                  });
+                  setEditableMessage(updatedMsg);
+                }
+              }}
               rows={2}
               placeholder="Ex: Favor verificar se todos estão de maiô/touca antes de descer; aula com professor substituto..."
               className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
             />
           </div>
 
-          {/* Live Message Preview */}
+          {/* Editable Text Area for Formatted Message */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center justify-between">
-              <span>Prévia da Mensagem Formatada:</span>
-              <button
-                type="button"
-                onClick={handleCopyMessage}
-                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center space-x-1 cursor-pointer"
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-3 h-3 text-emerald-600" />
-                    <span className="text-emerald-600 font-extrabold">Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3" />
-                    <span>Copiar Texto</span>
-                  </>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                  Prévia da Mensagem (Editável):
+                </label>
+                {isManuallyEdited && (
+                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                    Modificado
+                  </span>
                 )}
-              </button>
-            </label>
-            <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-3.5 text-xs text-slate-800 font-sans whitespace-pre-wrap leading-relaxed shadow-inner max-h-48 overflow-y-auto">
-              {messageText}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {isManuallyEdited && (
+                  <button
+                    type="button"
+                    onClick={handleResetToDefault}
+                    className="text-[10px] text-slate-500 hover:text-slate-800 font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                    title="Restaurar mensagem gerada automaticamente"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Restaurar Padrão</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center space-x-1 cursor-pointer"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      <span className="text-emerald-600 font-extrabold">Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Copiar Texto</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
+
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={editableMessage}
+                onChange={(e) => {
+                  setEditableMessage(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
+                rows={8}
+                placeholder="Escreva ou edite a mensagem..."
+                className="w-full p-3 bg-emerald-50/40 border border-emerald-300/80 rounded-2xl text-xs sm:text-[13px] text-slate-800 font-sans leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white resize-y min-h-[140px] max-h-[300px] shadow-inner selection:bg-emerald-200 selection:text-emerald-950"
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>✍️ Você pode alterar, copiar, colar ou apagar qualquer parte do texto livremente.</span>
+              <span className="font-mono text-[9px] text-slate-400">{editableMessage.length} caracteres</span>
+            </p>
           </div>
         </div>
 
@@ -240,7 +335,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
               className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-extrabold text-xs transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? 'Copiado' : 'Copiar'}</span>
+              <span>{copied ? 'Copiado' : 'Copiar Texto'}</span>
             </button>
 
             <button
