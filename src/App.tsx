@@ -7,7 +7,6 @@ import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtil
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
-import { WeekSelector } from './components/WeekSelector';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { CurrentActivities } from './components/CurrentActivities';
 import { StudentManager } from './components/StudentManager';
@@ -825,12 +824,43 @@ export default function App() {
     }, 60);
   };
 
-  // Records count for the current week
-  const weekRecordsCount = useMemo(() => {
-    return records.filter(
-      (r) => r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year
-    ).length;
-  }, [records, currentWeek]);
+  // Contadores em tempo real baseados exclusivamente nos lançamentos da modalidade "Rotina" de hoje
+  const todayRoutineStats = useMemo(() => {
+    const todayStr = toISODateString(new Date());
+    const totalStudentsCount = students.length;
+
+    // Mapa dos registros de Rotina do dia de hoje por studentId
+    const studentRoutineRecords = new Map<string, AttendanceRecord>();
+
+    records.forEach((r) => {
+      if (
+        r.date === todayStr &&
+        (r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina'))
+      ) {
+        studentRoutineRecords.set(r.studentId, r);
+      }
+    });
+
+    let presentesCount = 0;
+    let faltasCount = 0;
+
+    students.forEach((student) => {
+      const rec = studentRoutineRecords.get(student.id);
+      if (rec) {
+        if (rec.status === 'presente' || rec.status === 'saida_antecipada' || rec.status === 'sem_equipamento') {
+          presentesCount++;
+        } else if (rec.status === 'falta' || rec.status === 'saude') {
+          faltasCount++;
+        }
+      }
+    });
+
+    return {
+      totalStudents: totalStudentsCount,
+      presentesHoje: presentesCount,
+      faltasHoje: faltasCount,
+    };
+  }, [students, records]);
 
   // Web Push Notifications & Background Audio Alerts Engine
   useWebPushNotifications({
@@ -855,23 +885,14 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         totalStudents={students.length}
-        totalRecordsThisWeek={weekRecordsCount}
+        presentesHoje={todayRoutineStats.presentesHoje}
+        faltasHoje={todayRoutineStats.faltasHoje}
         currentUser={currentUser}
         onLogout={handleLogout}
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Week Selector Bar */}
-        <WeekSelector
-          currentWeek={currentWeek}
-          selectedDate={selectedDate}
-          onWeekChange={setCurrentWeek}
-          onDateChange={setSelectedDate}
-          onGoToCurrentWeek={handleGoToCurrentWeek}
-          onOpenLibrary={() => setActiveTab('biblioteca')}
-        />
-
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
         {/* Tab 1: Chamada de Frequência */}
         {activeTab === 'frequencia' && (
           <AttendanceSheet

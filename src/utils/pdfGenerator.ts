@@ -950,11 +950,19 @@ export function generateTurmaConsolidatedPeriodPDFReport({
       (r.turma === turma || studentIdsInTurma.has(r.studentId))
   );
 
-  const total = periodRecords.length;
-  const pres = periodRecords.filter((r) => r.status === 'presente').length;
-  const saidaAnt = periodRecords.filter((r) => r.status === 'saida_antecipada').length;
-  const falta = periodRecords.filter((r) => r.status === 'falta').length;
-  const saude = periodRecords.filter((r) => r.status === 'saude').length;
+  const routineRecords = periodRecords.filter(
+    (r) => r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina')
+  );
+
+  // Use routine records for base attendance calculation if available (avoids workshop overlap distortion)
+  const baseRecords = routineRecords.length > 0 ? routineRecords : periodRecords;
+  const isRoutineBased = routineRecords.length > 0;
+
+  const total = baseRecords.length;
+  const pres = baseRecords.filter((r) => r.status === 'presente').length;
+  const saidaAnt = baseRecords.filter((r) => r.status === 'saida_antecipada').length;
+  const falta = baseRecords.filter((r) => r.status === 'falta').length;
+  const saude = baseRecords.filter((r) => r.status === 'saude').length;
   const semEquip = periodRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
@@ -962,7 +970,9 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   drawOfficialHeader(
     doc,
     `Relatório Consolidado - ${turma}`,
-    'Matriz de Frequência e Indicadores Gerais da Turma',
+    isRoutineBased
+      ? 'Matriz de Assiduidade no Integral (Modalidade Rotina Diária)'
+      : 'Matriz de Frequência e Indicadores Gerais da Turma',
     [`Turma: ${turma}`, `Período: ${formatDate(startDate)} a ${formatDate(endDate)}`],
     'portrait'
   );
@@ -982,7 +992,13 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(`Total de Alunos Matriculados: ${turmaStudents.length}`, 18, startY + 14);
-  doc.text(`Total de Registros de Chamada no Período: ${total}`, 18, startY + 20);
+  doc.text(
+    isRoutineBased
+      ? `Total de Chamadas de Rotina no Período: ${total}`
+      : `Total de Registros de Chamada no Período: ${total}`,
+    18,
+    startY + 20
+  );
 
   // Rate Badge
   doc.setFillColor(238, 242, 255);
@@ -1012,16 +1028,17 @@ export function generateTurmaConsolidatedPeriodPDFReport({
 
   // Table Data
   const tableData = turmaStudents.map((st) => {
-    const stRecords = periodRecords.filter((r) => r.studentId === st.id);
-    const stTotal = stRecords.length;
-    const stPres = stRecords.filter((r) => r.status === 'presente').length;
-    const stSaidaAnt = stRecords.filter((r) => r.status === 'saida_antecipada').length;
-    const stFalta = stRecords.filter((r) => r.status === 'falta').length;
-    const stSaude = stRecords.filter((r) => r.status === 'saude').length;
-    const stEquip = stRecords.filter((r) => r.status === 'sem_equipamento').length;
+    const stBaseRecords = baseRecords.filter((r) => r.studentId === st.id);
+    const stAllRecords = periodRecords.filter((r) => r.studentId === st.id);
+    const stTotal = stBaseRecords.length;
+    const stPres = stBaseRecords.filter((r) => r.status === 'presente').length;
+    const stSaidaAnt = stBaseRecords.filter((r) => r.status === 'saida_antecipada').length;
+    const stFalta = stBaseRecords.filter((r) => r.status === 'falta').length;
+    const stSaude = stBaseRecords.filter((r) => r.status === 'saude').length;
+    const stEquip = stAllRecords.filter((r) => r.status === 'sem_equipamento').length;
     const stRate = stTotal > 0 ? Math.round(((stPres + stSaidaAnt) / stTotal) * 100) : '-';
 
-    const occurrences = stRecords
+    const occurrences = stAllRecords
       .filter((r) => r.status !== 'presente')
       .map((r) => {
         const text =

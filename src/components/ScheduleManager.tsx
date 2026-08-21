@@ -37,6 +37,7 @@ import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType, UserPr
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateWeeklySchedulePDF, generateDailyRoutinePDF, generateActivitySchedulePDF } from '../utils/pdfGenerator';
+import { findResponsibleCollaborator } from '../utils/whatsappUtils';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
 import { ActivityScheduleView } from './ActivityScheduleView';
 
@@ -106,6 +107,9 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     endTime: string;
     location?: string;
     guidelines?: string;
+    targetUserId?: string;
+    targetUserEmail?: string;
+    targetUserName?: string;
   } | null>(null);
 
   // Accordion / Collapsible State for Weekly Days
@@ -1192,7 +1196,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                           <div className="flex items-center justify-end space-x-1 pt-1 border-t border-slate-100">
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
+                                const collab = findResponsibleCollaborator({
+                                  users,
+                                  turmaName: block.turma,
+                                  activityName: block.activityId,
+                                  targetUserId: (block as any).teacherId || (block as any).monitorId,
+                                });
                                 setWhatsAppModalData({
                                   isOpen: true,
                                   turmaName: block.turma,
@@ -1201,8 +1211,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                                   endTime: block.endTime,
                                   location: block.location,
                                   guidelines: block.guidelines,
-                                })
-                              }
+                                  targetUserId: collab?.id,
+                                  targetUserEmail: collab?.email,
+                                  targetUserName: collab?.name,
+                                });
+                              }}
                               className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
                               title="Avisar Monitora via WhatsApp"
                             >
@@ -2432,6 +2445,9 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           endTime={whatsAppModalData.endTime}
           location={whatsAppModalData.location}
           guidelines={whatsAppModalData.guidelines}
+          targetUserId={whatsAppModalData.targetUserId}
+          targetUserEmail={whatsAppModalData.targetUserEmail}
+          targetUserName={whatsAppModalData.targetUserName}
           onUpdateUserPhone={onUpdateUserPhone}
         />
       )}

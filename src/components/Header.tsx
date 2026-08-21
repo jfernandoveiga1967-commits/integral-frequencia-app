@@ -30,7 +30,8 @@ interface HeaderProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   totalStudents: number;
-  totalRecordsThisWeek: number;
+  presentesHoje?: number;
+  faltasHoje?: number;
   currentUser: UserProfile | null;
   onLogout: () => void;
 }
@@ -39,7 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   totalStudents,
-  totalRecordsThisWeek,
+  presentesHoje = 0,
+  faltasHoje = 0,
   currentUser,
   onLogout,
 }) => {
@@ -225,16 +227,24 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            {/* Stats Counter */}
-            <div className="flex items-center space-x-3 text-xs text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
-              <div>
-                <span className="text-slate-400">Total Alunos: </span>
-                <span className="font-bold text-indigo-300">{totalStudents}</span>
+            {/* Live Real-Time Attendance Counters (Baseado na Rotina de Hoje) */}
+            <div className="flex items-center space-x-2.5 text-xs text-slate-300 bg-slate-800/90 px-3.5 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
+              <div className="flex items-center space-x-1.5" title="Total de alunos matriculados no Integral">
+                <span className="text-slate-400 font-medium">Total:</span>
+                <span className="font-extrabold text-indigo-300">{totalStudents}</span>
               </div>
-              <div className="h-3 w-px bg-slate-700" />
-              <div>
-                <span className="text-slate-400">Registros no Período: </span>
-                <span className="font-bold text-emerald-400">{totalRecordsThisWeek}</span>
+              <div className="h-3.5 w-px bg-slate-700" />
+              <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (lançados na chamada da Rotina)">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="text-slate-400 font-medium">Presentes Hoje:</span>
+                <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
+              </div>
+              <div className="h-3.5 w-px bg-slate-700" />
+              <div className="flex items-center space-x-1.5" title="Faltas registradas hoje no Integral (modalidade Rotina)">
+                <span className="text-slate-400 font-medium">Faltas:</span>
+                <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                  {faltasHoje}
+                </span>
               </div>
             </div>
           </div>

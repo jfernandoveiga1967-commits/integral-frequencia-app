@@ -56,6 +56,7 @@ import {
 } from '../utils/dateUtils';
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { findResponsibleCollaborator } from '../utils/whatsappUtils';
 
 interface CurrentActivitiesProps {
   students: Student[];
@@ -126,6 +127,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     endTime: string;
     location?: string;
     guidelines?: string;
+    targetUserId?: string;
+    targetUserEmail?: string;
+    targetUserName?: string;
   } | null>(null);
 
   // Update real-time clock every second
@@ -852,7 +856,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
                                 <button
                                   type="button"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const collab = findResponsibleCollaborator({
+                                      users,
+                                      turmaName,
+                                      activityName: activeBlock.activityId,
+                                      targetUserId: (activeBlock as any).teacherId || (activeBlock as any).monitorId,
+                                    });
                                     setWhatsAppModalData({
                                       isOpen: true,
                                       turmaName,
@@ -861,8 +871,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                       endTime: activeBlock.endTime,
                                       location: activeBlock.location,
                                       guidelines: activeBlock.guidelines,
-                                    })
-                                  }
+                                      targetUserId: collab?.id,
+                                      targetUserEmail: collab?.email,
+                                      targetUserName: collab?.name,
+                                    });
+                                  }}
                                   className="py-1 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold transition-colors cursor-pointer flex items-center space-x-1"
                                   title="Avisar Monitora via WhatsApp"
                                 >
@@ -890,7 +903,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               </div>
                               <button
                                 type="button"
-                                onClick={() =>
+                                onClick={() => {
+                                  const collab = findResponsibleCollaborator({
+                                    users,
+                                    turmaName,
+                                    activityName: activeBlock.activityId,
+                                    targetUserId: (activeBlock as any).teacherId || (activeBlock as any).monitorId,
+                                  });
                                   setWhatsAppModalData({
                                     isOpen: true,
                                     turmaName,
@@ -899,8 +918,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                     endTime: activeBlock.endTime,
                                     location: activeBlock.location,
                                     guidelines: activeBlock.guidelines,
-                                  })
-                                }
+                                    targetUserId: collab?.id,
+                                    targetUserEmail: collab?.email,
+                                    targetUserName: collab?.name,
+                                  });
+                                }}
                                 className="py-0.5 px-1.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-bold transition-colors cursor-pointer flex items-center space-x-1 shrink-0"
                                 title="Avisar Monitora via WhatsApp"
                               >
@@ -961,7 +983,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           </span>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const collab = findResponsibleCollaborator({
+                                users,
+                                turmaName,
+                                activityName: nextBlock.activityId,
+                                targetUserId: (nextBlock as any).teacherId || (nextBlock as any).monitorId,
+                              });
                               setWhatsAppModalData({
                                 isOpen: true,
                                 turmaName,
@@ -970,8 +998,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                 endTime: nextBlock.endTime,
                                 location: nextBlock.location,
                                 guidelines: nextBlock.guidelines,
-                              })
-                            }
+                                targetUserId: collab?.id,
+                                targetUserEmail: collab?.email,
+                                targetUserName: collab?.name,
+                              });
+                            }}
                             className="p-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors cursor-pointer"
                             title="Avisar Monitora da Próxima Atividade via WhatsApp"
                           >
@@ -1213,6 +1244,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           endTime={whatsAppModalData.endTime}
           location={whatsAppModalData.location}
           guidelines={whatsAppModalData.guidelines}
+          targetUserId={whatsAppModalData.targetUserId}
+          targetUserEmail={whatsAppModalData.targetUserEmail}
+          targetUserName={whatsAppModalData.targetUserName}
           onUpdateUserPhone={onUpdateUserPhone}
         />
       )}

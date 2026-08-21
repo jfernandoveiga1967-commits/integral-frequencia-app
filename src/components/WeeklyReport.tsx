@@ -204,16 +204,23 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     allowedActivityIds,
   ]);
 
-  // Overall Statistics
-  const totalRecords = activeRecords.length;
-  const presenteCount = activeRecords.filter((r) => r.status === 'presente').length;
-  const saidaAntecipadaCount = activeRecords.filter((r) => r.status === 'saida_antecipada').length;
-  const faltaCount = activeRecords.filter((r) => r.status === 'falta').length;
-  const saudeCount = activeRecords.filter((r) => r.status === 'saude').length;
+  // Registros oficiais da modalidade "Rotina" no período ativo (utilizados para a taxa de assiduidade real do Integral)
+  const routineRecords = useMemo(() => {
+    return activeRecords.filter(
+      (r) => r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina')
+    );
+  }, [activeRecords]);
+
+  // Overall Statistics baseadas na modalidade "Rotina" (evita distorções por sobreposição de oficinas)
+  const totalRoutineRecords = routineRecords.length;
+  const presenteCount = routineRecords.filter((r) => r.status === 'presente').length;
+  const saidaAntecipadaCount = routineRecords.filter((r) => r.status === 'saida_antecipada').length;
+  const faltaCount = routineRecords.filter((r) => r.status === 'falta').length;
+  const saudeCount = routineRecords.filter((r) => r.status === 'saude').length;
   const semEquipamentoCount = activeRecords.filter((r) => r.status === 'sem_equipamento').length;
 
   const validPresences = presenteCount + saidaAntecipadaCount;
-  const presenceRate = totalRecords > 0 ? Math.round((validPresences / totalRecords) * 100) : 0;
+  const presenceRate = totalRoutineRecords > 0 ? Math.round((validPresences / totalRoutineRecords) * 100) : 0;
   const equipmentRecords = activeRecords.filter((r) => r.status === 'sem_equipamento');
 
   // Stats per activity
@@ -241,20 +248,24 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     });
   }, [activeActivities, activeRecords]);
 
-  // Stats per turma
+  // Stats per turma baseadas na Rotina (1 registro por dia letivo por aluno)
   const turmaStats = useMemo(() => {
     return turmasList.map((turma) => {
       const turmaStudents = students.filter((s) => s.turma === turma);
       const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
-      const turmaRecords = activeRecords.filter(
+      const turmaRoutineRecords = routineRecords.filter(
         (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
       );
-      const total = turmaRecords.length;
-      const pres = turmaRecords.filter((r) => r.status === 'presente').length;
-      const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
-      const falta = turmaRecords.filter((r) => r.status === 'falta').length;
-      const saude = turmaRecords.filter((r) => r.status === 'saude').length;
-      const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
+      const total = turmaRoutineRecords.length;
+      const pres = turmaRoutineRecords.filter((r) => r.status === 'presente').length;
+      const saidaAnt = turmaRoutineRecords.filter((r) => r.status === 'saida_antecipada').length;
+      const falta = turmaRoutineRecords.filter((r) => r.status === 'falta').length;
+      const saude = turmaRoutineRecords.filter((r) => r.status === 'saude').length;
+      
+      const turmaAllRecords = activeRecords.filter(
+        (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
+      );
+      const semEquip = turmaAllRecords.filter((r) => r.status === 'sem_equipamento').length;
       const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 0;
 
       return {
@@ -268,7 +279,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         rate,
       };
     });
-  }, [turmasList, students, activeRecords]);
+  }, [turmasList, students, routineRecords, activeRecords]);
 
   // -------------------------------------------------------------------------
   // Modals & PDF Export State
@@ -454,7 +465,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 Relatórios de Frequência
               </span>
               <span className="text-xs text-slate-400 font-medium">
-                {totalRecords} apontamentos computados
+                {totalRoutineRecords} chamadas de rotina apuradas ({activeRecords.length} lançamentos totais)
               </span>
             </div>
             <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-1">
@@ -623,92 +634,104 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       </div>
 
       {/* Overview Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        {/* Card 1: Presença Geral */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-              Taxa de Presença
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <div className="flex items-center space-x-1.5 font-semibold text-indigo-900 bg-indigo-50/90 px-3 py-1 rounded-xl border border-indigo-200/70">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <span>Métricas e taxas de assiduidade apuradas exclusivamente via chamada de <strong>Rotina</strong> do Integral</span>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-slate-900">{presenceRate}%</span>
-            <span className="text-xs text-emerald-700 font-bold">
-              ({validPresences} presenças)
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">Total de chamadas: {totalRecords}</p>
+          <span className="hidden sm:inline text-[11px] text-slate-400">
+            1 registro diário oficial por aluno
+          </span>
         </div>
 
-        {/* Card 2: Saída Antecipada */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-              Saída Antecipada
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-              <Clock className="w-5 h-5 text-amber-700" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {/* Card 1: Presença Geral */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+                Taxa de Presença
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
             </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-slate-900">{presenceRate}%</span>
+              <span className="text-xs text-emerald-700 font-bold">
+                ({validPresences} presenças)
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Chamadas de Rotina: {totalRoutineRecords}</p>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-amber-900">{saidaAntecipadaCount}</span>
-            <span className="text-xs text-amber-800 font-bold">ocorrências</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">Horário de saída registrado</p>
-        </div>
 
-        {/* Card 3: Falta de Equipamento */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-              Sem Material / Equip.
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-800 flex items-center justify-center font-bold">
-              <Shirt className="w-5 h-5 text-orange-600" />
+          {/* Card 2: Saída Antecipada */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+                Saída Antecipada
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                <Clock className="w-5 h-5 text-amber-700" />
+              </div>
             </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-amber-900">{saidaAntecipadaCount}</span>
+              <span className="text-xs text-amber-800 font-bold">ocorrências</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Registradas na Rotina</p>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-orange-900">{semEquipamentoCount}</span>
-            <span className="text-xs text-orange-800 font-bold">ocorrências</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">Maiô, kimono, flauta, tênis...</p>
-        </div>
 
-        {/* Card 4: Ausências por Saúde */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-              Ausência Saúde
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-              <Stethoscope className="w-5 h-5 text-amber-700" />
+          {/* Card 3: Falta de Equipamento */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+                Sem Material / Equip.
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-800 flex items-center justify-center font-bold">
+                <Shirt className="w-5 h-5 text-orange-600" />
+              </div>
             </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-orange-900">{semEquipamentoCount}</span>
+              <span className="text-xs text-orange-800 font-bold">ocorrências</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Maiô, kimono, flauta, tênis...</p>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-amber-900">{saudeCount}</span>
-            <span className="text-xs text-amber-800 font-bold">justificadas</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">Atestados e indisposições</p>
-        </div>
 
-        {/* Card 5: Faltas Não Justificadas */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-              Faltas Gerais
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-              <XCircle className="w-5 h-5" />
+          {/* Card 4: Ausências por Saúde */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+                Ausência Saúde
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                <Stethoscope className="w-5 h-5 text-amber-700" />
+              </div>
             </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-amber-900">{saudeCount}</span>
+              <span className="text-xs text-amber-800 font-bold">justificadas</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Registradas na Rotina</p>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-rose-900">{faltaCount}</span>
-            <span className="text-xs text-rose-700 font-bold">ausências</span>
+
+          {/* Card 5: Faltas Não Justificadas */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
+                Faltas Gerais
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+                <XCircle className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-rose-900">{faltaCount}</span>
+              <span className="text-xs text-rose-700 font-bold">ausências</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Apuradas na chamada da Rotina</p>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Faltas não justificadas</p>
         </div>
       </div>
 
@@ -871,10 +894,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           <div>
             <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
               <Users className="w-5 h-5 text-indigo-600" />
-              Frequência Consolidada por Turma (Ano Escolar)
+              Frequência Consolidada por Turma (Assiduidade no Integral • Modalidade Rotina)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Matriz comparativa de presença e taxa de aproveitamento pedagógico por turma.
+              Matriz comparativa de assiduidade real por turma escolar apurada via chamada de Rotina diária (1 registro/dia, sem sobreposição de oficinas).
             </p>
           </div>
           <button
@@ -891,7 +914,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3">Turma / Segmento</th>
-                <th className="px-4 py-3 text-center">Total Chamadas</th>
+                <th className="px-4 py-3 text-center">Chamadas de Rotina</th>
                 <th className="px-4 py-3 text-center text-emerald-700">Presenças (Taxa)</th>
                 <th className="px-4 py-3 text-center text-amber-800">Saída Antecipada</th>
                 <th className="px-4 py-3 text-center text-orange-800">Sem Equipamento</th>
