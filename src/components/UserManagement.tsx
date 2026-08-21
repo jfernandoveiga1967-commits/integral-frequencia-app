@@ -149,6 +149,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formTurmas, setFormTurmas] = useState<string[]>([]);
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
+  const [formPixKey, setFormPixKey] = useState('');
+  const [formContractSchedule, setFormContractSchedule] = useState('11:40 - 17:40');
+  const [formContractDailyHours, setFormContractDailyHours] = useState(6);
+  const [formBaseSalary, setFormBaseSalary] = useState(1200);
+  const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
 
   // Activity Management State
   const [editingActivity, setEditingActivity] = useState<ActivityItem | null>(null);
@@ -353,6 +358,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     );
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
+    setFormPixKey(user.pixKey || user.phone || '');
+    setFormContractSchedule(user.contractSchedule || '11:40 - 17:40');
+    setFormContractDailyHours(user.contractDailyHours || 6);
+    setFormBaseSalary(user.baseSalary || 1200);
+    setFormCompany(user.company || 'GADAL - Gestão e Apoio');
   };
 
   const handleOpenNewUserModal = () => {
@@ -367,6 +377,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormTurmas(availableTurmas);
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
+    setFormPixKey('');
+    setFormContractSchedule('11:40 - 17:40');
+    setFormContractDailyHours(6);
+    setFormBaseSalary(1200);
+    setFormCompany('GADAL - Gestão e Apoio');
     setIsNewUserModalOpen(true);
   };
 
@@ -442,6 +457,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: formTurmas,
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
+      pixKey: formPixKey.trim() || formPhone.trim() || undefined,
+      contractSchedule: formContractSchedule.trim() || '11:40 - 17:40',
+      contractDailyHours: Number(formContractDailyHours) || 6,
+      baseSalary: Number(formBaseSalary) || 1200,
+      company: formCompany.trim() || 'GADAL - Gestão e Apoio',
       updatedAt: new Date().toISOString(),
     };
 
@@ -1755,6 +1775,76 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     placeholder="Ex: (19) 99999-9999 ou 19999999999"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
+                </div>
+              </div>
+
+              {/* Seção Contratual & Livro Ponto */}
+              <div className="p-3.5 bg-indigo-50/60 border border-indigo-200/80 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                    Contrato & Livro Ponto (GADAL / Crescer)
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-200 text-indigo-900">
+                    Folha de Pagamento
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
+                      Chave PIX para Depósito:
+                    </label>
+                    <input
+                      type="text"
+                      value={formPixKey}
+                      onChange={(e) => setFormPixKey(e.target.value)}
+                      placeholder="Ex: CPF, celular, e-mail ou chave aleatória"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
+                      Bolsa Auxílio Base Mensal (R$):
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formBaseSalary}
+                      onChange={(e) => setFormBaseSalary(Number(e.target.value) || 0)}
+                      placeholder="1200.00"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
+                      Horário Contratual Padrão:
+                    </label>
+                    <input
+                      type="text"
+                      value={formContractSchedule}
+                      onChange={(e) => setFormContractSchedule(e.target.value)}
+                      placeholder="11:40 - 17:40"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
+                      Horas Diárias:
+                    </label>
+                    <input
+                      type="number"
+                      value={formContractDailyHours}
+                      onChange={(e) => setFormContractDailyHours(Number(e.target.value) || 6)}
+                      placeholder="6"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
 

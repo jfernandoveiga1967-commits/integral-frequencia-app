@@ -81,6 +81,74 @@ export interface HolidayItem {
   updatedAt?: string;
 }
 
+export type PontoStatus =
+  | 'normal'
+  | 'falta_injustificada'
+  | 'falta_justificada'
+  | 'atestado'
+  | 'feriado'
+  | 'recesso'
+  | 'compensado'
+  | 'sabado'
+  | 'domingo';
+
+export interface PontoRecord {
+  id: string; // e.g. "userId_YYYY-MM-DD"
+  userId: string;
+  userName?: string;
+  date: string; // ISO date string "YYYY-MM-DD"
+  monthKey: string; // "YYYY-MM", e.g. "2026-08"
+  dayNumber: number; // 1 to 31
+  entry1?: string; // e.g. "11:40"
+  exit1?: string; // e.g. ""
+  entry2?: string; // e.g. ""
+  exit2?: string; // e.g. "17:40"
+  status: PontoStatus;
+  manualOverride?: boolean;
+  note?: string;
+  extraMinutes?: number;
+  missingMinutes?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface PontoMonthClosing {
+  id: string; // e.g. "userId_YYYY-MM"
+  userId: string;
+  userName: string;
+  userCargo: string;
+  monthKey: string; // "YYYY-MM"
+  year: number;
+  month: number; // 1-12
+  baseSalary: number; // default R$ 1200
+  divisorDays: number; // default 30
+  contractDailyHours: number; // default 6
+  contractSchedule: string; // default "11:40 - 17:40"
+  companyName: string; // default "GADAL - Gestão e Apoio"
+  institutionName: string; // default "Instituto Educacional Crescer"
+  pixKey?: string;
+  unjustifiedAbsencesCount: number;
+  unjustifiedAbsencesDiscount: number;
+  extraMinutesTotal: number;
+  extraHoursAmount: number;
+  manualAddition: number;
+  manualAdditionNote?: string;
+  manualDiscount: number;
+  manualDiscountNote?: string;
+  netTotal: number;
+  isClosed: boolean;
+  closedAt?: string;
+  closedBy?: string;
+  signedDigitally: boolean;
+  signedAt?: string;
+  signedBy?: string;
+  digitalSignatureHash?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -97,5 +165,10 @@ export interface UserProfile {
   allowedClassIds?: string[]; // List of class IDs/names allowed for this teacher/monitor
   canManageStudents?: boolean;
   canMarkAttendance?: boolean;
+  pixKey?: string; // Chave PIX (CPF, Telefone, E-mail ou Aleatória)
+  contractSchedule?: string; // Horário contratual (ex: "11:40 - 17:40")
+  contractDailyHours?: number; // Horas diárias contratuais (ex: 6)
+  baseSalary?: number; // Bolsa Auxílio Base (ex: 1200)
+  company?: string; // Empresa conveniada (ex: "GADAL")
   updatedAt?: string;
 }

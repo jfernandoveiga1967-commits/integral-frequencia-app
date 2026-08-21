@@ -62,6 +62,22 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    match /pontoRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'userId', 'date', 'monthKey', 'status'])
+        && isNonEmptyString(request.resource.data.userId, 128)
+        && isNonEmptyString(request.resource.data.date, 10);
+      allow delete: if true;
+    }
+
+    match /pontoClosings/{closingId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'userId', 'monthKey', 'year', 'month', 'netTotal', 'isClosed'])
+        && isNonEmptyString(request.resource.data.userId, 128)
+        && isNonEmptyString(request.resource.data.monthKey, 10);
+      allow delete: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

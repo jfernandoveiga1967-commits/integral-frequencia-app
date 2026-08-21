@@ -121,10 +121,10 @@ export interface ResolveCollaboratorParams {
 }
 
 /**
- * Identifies the exact responsible monitor or teacher specifically linked to a turma/activity.
- * Avoids picking arbitrary first users or fixed fallbacks.
+ * Identifies ALL responsible monitors and teachers linked to a turma/activity in priority order.
+ * Returns an array of UserProfile (unique by id).
  */
-export function findResponsibleCollaborator({
+export function findAllResponsibleCollaborators({
   users = [],
   turmaName = '',
   activityName = '',
@@ -133,14 +133,24 @@ export function findResponsibleCollaborator({
   targetUserName,
   teacherId,
   monitorId,
-}: ResolveCollaboratorParams): UserProfile | null {
-  if (!users || users.length === 0) return null;
+}: ResolveCollaboratorParams): UserProfile[] {
+  if (!users || users.length === 0) return [];
+
+  const matched: UserProfile[] = [];
+  const addedIds = new Set<string>();
+
+  const addUnique = (u: UserProfile | undefined | null) => {
+    if (u && !addedIds.has(u.id)) {
+      matched.push(u);
+      addedIds.add(u.id);
+    }
+  };
 
   // 1. Exact match by ID (targetUserId, teacherId, monitorId)
   const explicitId = (targetUserId || teacherId || monitorId || '').trim();
   if (explicitId) {
     const directUser = users.find((u) => u.id === explicitId);
-    if (directUser) return directUser;
+    if (directUser) addUnique(directUser);
   }
 
   // 2. Exact match by Email
@@ -149,7 +159,7 @@ export function findResponsibleCollaborator({
     const directByEmail = users.find(
       (u) => (u.email || '').trim().toLowerCase() === explicitEmail
     );
-    if (directByEmail) return directByEmail;
+    if (directByEmail) addUnique(directByEmail);
   }
 
   // 3. Exact match by Name
@@ -158,7 +168,7 @@ export function findResponsibleCollaborator({
     const directByName = users.find(
       (u) => (u.name || '').trim().toLowerCase() === explicitName
     );
-    if (directByName) return directByName;
+    if (directByName) addUnique(directByName);
   }
 
   const normActivity = (activityName || '').trim().toLowerCase();
@@ -186,12 +196,10 @@ export function findResponsibleCollaborator({
   };
 
   // 4. Non-coordinators specifically assigned to BOTH Activity and Turma
-  const exactBoth = users.find(
-    (u) => u.role !== 'coordenador' && isActivityMatch(u) && isTurmaMatch(u)
-  );
-  if (exactBoth) return exactBoth;
+  users
+    .filter((u) => u.role !== 'coordenador' && isActivityMatch(u) && isTurmaMatch(u))
+    .forEach(addUnique);
 
-  // 5. Check if it is an extracurricular specialized activity
   const isSpecialistExtracurricular =
     normActivity !== '' &&
     normActivity !== 'rotina' &&
@@ -210,28 +218,46 @@ export function findResponsibleCollaborator({
 
   if (isSpecialistExtracurricular) {
     // For specialist activity, check if there is an activity specialist teacher first
-    const actSpecialist = users.find((u) => u.role !== 'coordenador' && isActivityMatch(u));
-    if (actSpecialist) return actSpecialist;
+    users
+      .filter((u) => u.role !== 'coordenador' && isActivityMatch(u))
+      .forEach(addUnique);
 
-    const turmaMonitor = users.find((u) => u.role !== 'coordenador' && isTurmaMatch(u));
-    if (turmaMonitor) return turmaMonitor;
+    // Then include turma monitors
+    users
+      .filter((u) => u.role !== 'coordenador' && isTurmaMatch(u))
+      .forEach(addUnique);
   } else {
-    // For regular routine/turma activities, prefer the Turma monitor
-    const turmaMonitor = users.find((u) => u.role !== 'coordenador' && isTurmaMatch(u));
-    if (turmaMonitor) return turmaMonitor;
+    // For regular routine/turma activities, prefer the Turma monitors
+    users
+      .filter((u) => u.role !== 'coordenador' && isTurmaMatch(u))
+      .forEach(addUnique);
 
-    const actSpecialist = users.find((u) => u.role !== 'coordenador' && isActivityMatch(u));
-    if (actSpecialist) return actSpecialist;
+    // Then include activity specialists
+    users
+      .filter((u) => u.role !== 'coordenador' && isActivityMatch(u))
+      .forEach(addUnique);
   }
 
-  // 6. Coordinator matching Turma or Activity specifically
-  const coordMatch =
-    users.find((u) => isTurmaMatch(u) && isActivityMatch(u)) ||
-    users.find((u) => isTurmaMatch(u)) ||
-    users.find((u) => isActivityMatch(u));
-  if (coordMatch) return coordMatch;
+  // 5. Coordinators matching Turma or Activity specifically
+  users
+    .filter((u) => isTurmaMatch(u) && isActivityMatch(u))
+    .forEach(addUnique);
+  users
+    .filter((u) => isTurmaMatch(u))
+    .forEach(addUnique);
+  users
+    .filter((u) => isActivityMatch(u))
+    .forEach(addUnique);
 
-  // 7. No fallback to generic users[0] - return null so UI handles unassigned state accurately
-  return null;
+  return matched;
+}
+
+/**
+ * Identifies the exact primary responsible monitor or teacher specifically linked to a turma/activity.
+ * Avoids picking arbitrary first users or fixed fallbacks.
+ */
+export function findResponsibleCollaborator(params: ResolveCollaboratorParams): UserProfile | null {
+  const all = findAllResponsibleCollaborators(params);
+  return all.length > 0 ? all[0] : null;
 }
 

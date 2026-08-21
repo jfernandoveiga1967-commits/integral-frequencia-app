@@ -14,6 +14,7 @@ import {
   BellRing,
   Sparkles,
   X,
+  Clock,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
@@ -24,7 +25,7 @@ import {
   isAudioContextReady,
 } from '../utils/notificationUtils';
 
-export type TabType = 'frequencia' | 'momento' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
+export type TabType = 'momento' | 'frequencia' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios' | 'ponto';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -253,18 +254,6 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Navigation Tabs */}
         <div className="flex space-x-1 border-t border-slate-800 overflow-x-auto pt-1 no-scrollbar">
           <button
-            onClick={() => setActiveTab('frequencia')}
-            className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
-              activeTab === 'frequencia'
-                ? 'bg-slate-800 text-indigo-400 border-indigo-500'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-            }`}
-          >
-            <ClipboardCheck className="w-4 h-4" />
-            <span>Chamada de Frequência</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('momento')}
             className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
               activeTab === 'momento'
@@ -277,6 +266,18 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
               Ao Vivo
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('frequencia')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+              activeTab === 'frequencia'
+                ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+            }`}
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            <span>Chamada de Frequência</span>
           </button>
 
           <button
@@ -334,6 +335,21 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </button>
           )}
+
+          <button
+            onClick={() => setActiveTab('ponto')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+              activeTab === 'ponto'
+                ? 'bg-slate-800 text-emerald-400 border-emerald-500'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+            }`}
+          >
+            <Clock className="w-4 h-4 text-emerald-400" />
+            <span>Livro Ponto</span>
+            <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              GADAL
+            </span>
+          </button>
         </div>
       </div>
     </header>

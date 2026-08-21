@@ -111,6 +111,48 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "date", "name", "type"]
+    },
+    "PontoRecord": {
+      "title": "PontoRecord",
+      "description": "Daily punch and attendance record for a collaborator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 10 },
+        "monthKey": { "type": "string", "maxLength": 10 },
+        "dayNumber": { "type": "number" },
+        "entry1": { "type": "string", "maxLength": 10 },
+        "exit1": { "type": "string", "maxLength": 10 },
+        "entry2": { "type": "string", "maxLength": 10 },
+        "exit2": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "maxLength": 32 },
+        "note": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "date", "monthKey", "status"]
+    },
+    "PontoClosing": {
+      "title": "PontoClosing",
+      "description": "Monthly timesheet closing and digital signature receipt record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "monthKey": { "type": "string", "maxLength": 10 },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
+        "baseSalary": { "type": "number" },
+        "netTotal": { "type": "number" },
+        "isClosed": { "type": "boolean" },
+        "signedDigitally": { "type": "boolean" },
+        "digitalSignatureHash": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "monthKey", "year", "month", "netTotal", "isClosed"]
     }
   },
   "firestore": {
@@ -141,6 +183,14 @@
     "/holidays/{holidayId}": {
       "schema": "Holiday",
       "description": "Collection of school holidays and recesses"
+    },
+    "/pontoRecords/{recordId}": {
+      "schema": "PontoRecord",
+      "description": "Collection of daily collaborator time tracking records"
+    },
+    "/pontoClosings/{closingId}": {
+      "schema": "PontoClosing",
+      "description": "Collection of monthly collaborator closing summaries and signatures"
     }
   }
 }

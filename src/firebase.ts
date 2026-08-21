@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from './types';
+import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 
 export { doc, deleteDoc };
 
@@ -690,6 +690,218 @@ export async function batchSaveHolidaysToFirestore(holidays: HolidayItem[]) {
     await batch.commit();
   } catch (error) {
     console.error('Error batch saving holidays to Firestore:', error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Livro Ponto: Daily Punch Records & Monthly Closings in Firestore
+// ---------------------------------------------------------------------------
+
+export function subscribePontoRecords(callback: (records: PontoRecord[]) => void) {
+  const pontoCollection = collection(db, 'pontoRecords');
+  return onSnapshot(
+    pontoCollection,
+    (snapshot) => {
+      const recordList: PontoRecord[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.id && data.userId && data.date) {
+          recordList.push({
+            id: data.id,
+            userId: data.userId,
+            userName: data.userName || '',
+            date: data.date,
+            monthKey: data.monthKey || data.date.substring(0, 7),
+            dayNumber: data.dayNumber || Number(data.date.split('-')[2]) || 1,
+            entry1: data.entry1 || '',
+            exit1: data.exit1 || '',
+            entry2: data.entry2 || '',
+            exit2: data.exit2 || '',
+            status: data.status || 'normal',
+            manualOverride: !!data.manualOverride,
+            note: data.note || '',
+            extraMinutes: data.extraMinutes || 0,
+            missingMinutes: data.missingMinutes || 0,
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || new Date().toISOString(),
+            updatedBy: data.updatedBy || '',
+          });
+        }
+      });
+      callback(recordList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'pontoRecords');
+    }
+  );
+}
+
+export async function savePontoRecordToFirestore(record: PontoRecord) {
+  try {
+    const docRef = doc(db, 'pontoRecords', record.id);
+    await setDoc(
+      docRef,
+      {
+        id: record.id,
+        userId: record.userId,
+        userName: record.userName || '',
+        date: record.date,
+        monthKey: record.monthKey || record.date.substring(0, 7),
+        dayNumber: record.dayNumber || Number(record.date.split('-')[2]) || 1,
+        entry1: record.entry1 || '',
+        exit1: record.exit1 || '',
+        entry2: record.entry2 || '',
+        exit2: record.exit2 || '',
+        status: record.status || 'normal',
+        manualOverride: !!record.manualOverride,
+        note: record.note || '',
+        extraMinutes: record.extraMinutes || 0,
+        missingMinutes: record.missingMinutes || 0,
+        createdAt: record.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: record.updatedBy || '',
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `pontoRecords/${record.id}`);
+  }
+}
+
+export async function batchSavePontoRecordsToFirestore(records: PontoRecord[]) {
+  try {
+    const batch = writeBatch(db);
+    for (const record of records) {
+      const docRef = doc(db, 'pontoRecords', record.id);
+      batch.set(
+        docRef,
+        {
+          id: record.id,
+          userId: record.userId,
+          userName: record.userName || '',
+          date: record.date,
+          monthKey: record.monthKey || record.date.substring(0, 7),
+          dayNumber: record.dayNumber || Number(record.date.split('-')[2]) || 1,
+          entry1: record.entry1 || '',
+          exit1: record.exit1 || '',
+          entry2: record.entry2 || '',
+          exit2: record.exit2 || '',
+          status: record.status || 'normal',
+          manualOverride: !!record.manualOverride,
+          note: record.note || '',
+          extraMinutes: record.extraMinutes || 0,
+          missingMinutes: record.missingMinutes || 0,
+          createdAt: record.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: record.updatedBy || '',
+        },
+        { merge: true }
+      );
+    }
+    await batch.commit();
+  } catch (error) {
+    console.error('Error batch saving ponto records:', error);
+  }
+}
+
+export function subscribePontoClosings(callback: (closings: PontoMonthClosing[]) => void) {
+  const closingsCollection = collection(db, 'pontoClosings');
+  return onSnapshot(
+    closingsCollection,
+    (snapshot) => {
+      const closingList: PontoMonthClosing[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.id && data.userId && data.monthKey) {
+          closingList.push({
+            id: data.id,
+            userId: data.userId,
+            userName: data.userName || '',
+            userCargo: data.userCargo || 'Estagiária',
+            monthKey: data.monthKey,
+            year: data.year || Number(data.monthKey.split('-')[0]),
+            month: data.month || Number(data.monthKey.split('-')[1]),
+            baseSalary: Number(data.baseSalary) || 1200,
+            divisorDays: Number(data.divisorDays) || 30,
+            contractDailyHours: Number(data.contractDailyHours) || 6,
+            contractSchedule: data.contractSchedule || '11:40 - 17:40',
+            companyName: data.companyName || 'GADAL - Gestão e Apoio',
+            institutionName: data.institutionName || 'Instituto Educacional Crescer',
+            pixKey: data.pixKey || '',
+            unjustifiedAbsencesCount: Number(data.unjustifiedAbsencesCount) || 0,
+            unjustifiedAbsencesDiscount: Number(data.unjustifiedAbsencesDiscount) || 0,
+            extraMinutesTotal: Number(data.extraMinutesTotal) || 0,
+            extraHoursAmount: Number(data.extraHoursAmount) || 0,
+            manualAddition: Number(data.manualAddition) || 0,
+            manualAdditionNote: data.manualAdditionNote || '',
+            manualDiscount: Number(data.manualDiscount) || 0,
+            manualDiscountNote: data.manualDiscountNote || '',
+            netTotal: Number(data.netTotal) || 0,
+            isClosed: !!data.isClosed,
+            closedAt: data.closedAt || '',
+            closedBy: data.closedBy || '',
+            signedDigitally: !!data.signedDigitally,
+            signedAt: data.signedAt || '',
+            signedBy: data.signedBy || '',
+            digitalSignatureHash: data.digitalSignatureHash || '',
+            notes: data.notes || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          });
+        }
+      });
+      callback(closingList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'pontoClosings');
+    }
+  );
+}
+
+export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
+  try {
+    const docRef = doc(db, 'pontoClosings', closing.id);
+    await setDoc(
+      docRef,
+      {
+        id: closing.id,
+        userId: closing.userId,
+        userName: closing.userName || '',
+        userCargo: closing.userCargo || 'Estagiária',
+        monthKey: closing.monthKey,
+        year: closing.year,
+        month: closing.month,
+        baseSalary: Number(closing.baseSalary) || 1200,
+        divisorDays: Number(closing.divisorDays) || 30,
+        contractDailyHours: Number(closing.contractDailyHours) || 6,
+        contractSchedule: closing.contractSchedule || '11:40 - 17:40',
+        companyName: closing.companyName || 'GADAL - Gestão e Apoio',
+        institutionName: closing.institutionName || 'Instituto Educacional Crescer',
+        pixKey: closing.pixKey || '',
+        unjustifiedAbsencesCount: Number(closing.unjustifiedAbsencesCount) || 0,
+        unjustifiedAbsencesDiscount: Number(closing.unjustifiedAbsencesDiscount) || 0,
+        extraMinutesTotal: Number(closing.extraMinutesTotal) || 0,
+        extraHoursAmount: Number(closing.extraHoursAmount) || 0,
+        manualAddition: Number(closing.manualAddition) || 0,
+        manualAdditionNote: closing.manualAdditionNote || '',
+        manualDiscount: Number(closing.manualDiscount) || 0,
+        manualDiscountNote: closing.manualDiscountNote || '',
+        netTotal: Number(closing.netTotal) || 0,
+        isClosed: !!closing.isClosed,
+        closedAt: closing.closedAt || '',
+        closedBy: closing.closedBy || '',
+        signedDigitally: !!closing.signedDigitally,
+        signedAt: closing.signedAt || '',
+        signedBy: closing.signedBy || '',
+        digitalSignatureHash: closing.digitalSignatureHash || '',
+        notes: closing.notes || '',
+        createdAt: closing.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `pontoClosings/${closing.id}`);
   }
 }
 

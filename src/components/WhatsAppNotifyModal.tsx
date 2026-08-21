@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { MessageSquare, Send, Copy, Check, X, Phone, User, MapPin, Clock, Sparkles, AlertCircle, Edit3, RotateCcw, UserCheck } from 'lucide-react';
+import { MessageSquare, Send, Copy, Check, X, Phone, User, MapPin, Clock, Sparkles, AlertCircle, Edit3, RotateCcw, UserCheck, Users } from 'lucide-react';
 import { UserProfile } from '../types';
 import {
   buildActivityWhatsAppMessage,
   generateWhatsAppUrl,
   formatPhoneDisplay,
   cleanPhoneNumber,
-  findResponsibleCollaborator,
+  findAllResponsibleCollaborators,
 } from '../utils/whatsappUtils';
 
 export interface WhatsAppNotifyModalProps {
@@ -46,9 +46,9 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
   currentUser,
   onUpdateUserPhone,
 }) => {
-  // Find the exact responsible collaborator specifically linked to this card/turma/activity
-  const responsibleUser = useMemo(() => {
-    return findResponsibleCollaborator({
+  // Find ALL responsible collaborators specifically linked to this card/turma/activity
+  const responsibleUsers = useMemo(() => {
+    return findAllResponsibleCollaborators({
       users,
       turmaName,
       activityName,
@@ -59,6 +59,14 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
       monitorId,
     });
   }, [users, turmaName, activityName, targetUserId, targetUserEmail, targetUserName, teacherId, monitorId]);
+
+  const responsibleUserIds = useMemo(() => {
+    return new Set(responsibleUsers.map((u) => u.id));
+  }, [responsibleUsers]);
+
+  const otherUsers = useMemo(() => {
+    return users.filter((u) => !responsibleUserIds.has(u.id));
+  }, [users, responsibleUserIds]);
 
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [customPhone, setCustomPhone] = useState<string>('');
@@ -73,10 +81,10 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
     return users.find((u) => u.id === selectedUserId) || null;
   }, [users, selectedUserId]);
 
-  // Synchronize modal state on open or when exact collaborator/turma/activity changes
+  // Synchronize modal state on open or when exact collaborators/turma/activity change
   useEffect(() => {
     if (isOpen) {
-      const initialCollaborator = findResponsibleCollaborator({
+      const collabs = findAllResponsibleCollaborators({
         users,
         turmaName,
         activityName,
@@ -86,6 +94,8 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
         teacherId,
         monitorId,
       });
+
+      const initialCollaborator = collabs.length > 0 ? collabs[0] : null;
 
       setSelectedUserId(initialCollaborator?.id || '');
       setCustomPhone(initialCollaborator?.phone || '');
@@ -120,7 +130,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
     users,
   ]);
 
-  // Handle manual selection of recipient from the dropdown
+  // Handle manual selection of recipient from the dropdown or quick buttons
   const handleSelectRecipient = (userId: string) => {
     setSelectedUserId(userId);
     const chosenUser = users.find((u) => u.id === userId) || null;
@@ -129,7 +139,7 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
     const newPhone = chosenUser?.phone || '';
     setCustomPhone(newPhone);
 
-    // Immediately update the message greeting with the chosen user ("Olá, [Nome]!")
+    // Immediately update the message greeting with the chosen user ("Olá, [Nome da Monitora]!")
     const updatedMsg = buildActivityWhatsAppMessage({
       monitorName: chosenUser?.name,
       turmaName,
@@ -184,10 +194,6 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
 
   if (!isOpen) return null;
 
-  const otherUsers = responsibleUser
-    ? users.filter((u) => u.id !== responsibleUser.id)
-    : users;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
@@ -198,11 +204,13 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
               <MessageSquare className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
+              <div className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 flex items-center gap-1.5 flex-wrap">
                 <span>Avisar Monitora / WhatsApp</span>
-                {responsibleUser && (
-                  <span className="bg-emerald-500/30 text-emerald-200 text-[9px] px-1.5 py-0.2 rounded-md border border-emerald-400/30">
-                    Vínculo Exato
+                {responsibleUsers.length > 0 && (
+                  <span className="bg-emerald-500/30 text-emerald-200 text-[9px] px-2 py-0.5 rounded-md border border-emerald-400/30 font-bold">
+                    {responsibleUsers.length === 1
+                      ? '⭐ 1 Responsável Vinculado'
+                      : `⭐ ${responsibleUsers.length} Responsáveis Vinculados`}
                   </span>
                 )}
               </div>
@@ -225,18 +233,54 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
           {/* Recipient Selector */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="whatsapp-recipient-select" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
                 <User className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Selecionar Monitora / Destinatário:</span>
               </label>
-              {responsibleUser && selectedUserId === responsibleUser.id && (
+              {selectedUser && responsibleUserIds.has(selectedUser.id) && (
                 <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
                   <UserCheck className="w-3 h-3 text-emerald-600" />
-                  <span>Responsável da Turma</span>
+                  <span>Responsável Vinculado(a)</span>
                 </span>
               )}
             </div>
+
+            {/* Quick Switch Chips when multiple responsible collaborators are linked */}
+            {responsibleUsers.length > 1 && (
+              <div className="mb-2 p-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-emerald-900 font-bold uppercase tracking-wider">
+                  <span className="flex items-center gap-1">
+                    <Users className="w-3 h-3 text-emerald-700" />
+                    <span>Responsáveis vinculados a esta turma/atividade:</span>
+                  </span>
+                  <span className="text-emerald-700 font-semibold">{responsibleUsers.length} encontrados</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {responsibleUsers.map((u) => {
+                    const isSelected = selectedUserId === u.id;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => handleSelectRecipient(u.id)}
+                        className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-all cursor-pointer flex items-center space-x-1.5 ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-400/50'
+                            : 'bg-white hover:bg-emerald-100 text-slate-700 hover:text-emerald-900 border-slate-200'
+                        }`}
+                      >
+                        <span>⭐</span>
+                        <span>{u.name}</span>
+                        <span className={`text-[10px] ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>
+                          ({u.cargoLabel || u.role})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <select
               id="whatsapp-recipient-select"
@@ -245,14 +289,28 @@ export const WhatsAppNotifyModal: React.FC<WhatsAppNotifyModalProps> = ({
               className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all cursor-pointer shadow-xs"
             >
               <option value="">-- Selecione uma monitora ou colaborador --</option>
-              {responsibleUser && (
-                <optgroup label="⭐ Responsável Vinculado(a) à Atividade / Turma">
-                  <option value={responsibleUser.id}>
-                    ⭐ {responsibleUser.name} ({responsibleUser.cargoLabel || responsibleUser.role}) {responsibleUser.phone ? `• ${formatPhoneDisplay(responsibleUser.phone)}` : '• (Sem telefone)'}
-                  </option>
+              {responsibleUsers.length > 0 && (
+                <optgroup
+                  label={
+                    responsibleUsers.length > 1
+                      ? `⭐ Responsáveis Vinculados à Atividade / Turma (${responsibleUsers.length})`
+                      : '⭐ Responsável Vinculado(a) à Atividade / Turma'
+                  }
+                >
+                  {responsibleUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      ⭐ {u.name} ({u.cargoLabel || u.role}) {u.phone ? `• ${formatPhoneDisplay(u.phone)}` : '• (Sem telefone)'}
+                    </option>
+                  ))}
                 </optgroup>
               )}
-              <optgroup label="📋 Todos os Colaboradores Cadastrados">
+              <optgroup
+                label={
+                  responsibleUsers.length > 0
+                    ? '📋 Outros Colaboradores Cadastrados'
+                    : '📋 Todos os Colaboradores Cadastrados'
+                }
+              >
                 {otherUsers.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name} ({u.cargoLabel || u.role}) {u.phone ? `• ${formatPhoneDisplay(u.phone)}` : '• (Sem telefone)'}

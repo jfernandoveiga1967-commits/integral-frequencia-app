@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
@@ -13,6 +13,7 @@ import { StudentManager } from './components/StudentManager';
 import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
 import { UserManagement } from './components/UserManagement';
+import { LivroPonto } from './components/LivroPonto';
 import { LoginScreen } from './components/LoginScreen';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
@@ -23,6 +24,11 @@ import {
   subscribeActivities,
   subscribeToSchedules,
   subscribeHolidays,
+  subscribePontoRecords,
+  savePontoRecordToFirestore,
+  batchSavePontoRecordsToFirestore,
+  subscribePontoClosings,
+  savePontoClosingToFirestore,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -55,7 +61,9 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('frequencia');
+  const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>([]);
+  const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
   // Keep a stable ref of currentUser for real-time listener updates
@@ -422,6 +430,14 @@ export default function App() {
       }
     });
 
+    const unsubPontoRecords = subscribePontoRecords((fsPontoRecords) => {
+      setPontoRecords(fsPontoRecords);
+    });
+
+    const unsubPontoClosings = subscribePontoClosings((fsPontoClosings) => {
+      setPontoClosings(fsPontoClosings);
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
@@ -430,6 +446,8 @@ export default function App() {
       unsubActivities();
       unsubSchedules();
       unsubHolidays();
+      unsubPontoRecords();
+      unsubPontoClosings();
     };
   }, []);
 
@@ -809,6 +827,43 @@ export default function App() {
     batchSaveHolidaysToFirestore(batch);
   };
 
+  // Ponto Records & Closings Handlers
+  const handleSavePontoRecord = (record: PontoRecord) => {
+    setPontoRecords((prev) => {
+      const idx = prev.findIndex((r) => r.id === record.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = record;
+        return next;
+      }
+      return [...prev, record];
+    });
+    savePontoRecordToFirestore(record);
+  };
+
+  const handleBatchSavePontoRecords = (recordsToSave: PontoRecord[]) => {
+    setPontoRecords((prev) => {
+      const map = new Map<string, PontoRecord>();
+      prev.forEach((r) => map.set(r.id, r));
+      recordsToSave.forEach((r) => map.set(r.id, r));
+      return Array.from(map.values());
+    });
+    batchSavePontoRecordsToFirestore(recordsToSave);
+  };
+
+  const handleSavePontoClosing = (closing: PontoMonthClosing) => {
+    setPontoClosings((prev) => {
+      const idx = prev.findIndex((c) => c.id === closing.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = closing;
+        return next;
+      }
+      return [...prev, closing];
+    });
+    savePontoClosingToFirestore(closing);
+  };
+
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
     if (date) {
@@ -950,7 +1005,7 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Relatório Semanal */}
+        {/* Tab 4: Relatório Semanal */}
         {activeTab === 'relatorio' && (
           <WeeklyReport
             students={students}
@@ -965,7 +1020,7 @@ export default function App() {
           />
         )}
 
-        {/* Tab 4: Biblioteca de Semanas */}
+        {/* Tab 5: Biblioteca de Semanas */}
         {activeTab === 'biblioteca' && (
           <WeeklyLibrary
             students={students}
@@ -991,6 +1046,23 @@ export default function App() {
             onSaveScheduleBlock={handleSaveScheduleBlock}
             onDeleteScheduleBlock={handleDeleteScheduleBlock}
             onBatchSaveSchedules={handleBatchSaveSchedules}
+            onSaveHoliday={handleSaveHoliday}
+            onDeleteHoliday={handleDeleteHoliday}
+            onBatchSaveHolidays={handleBatchSaveHolidays}
+          />
+        )}
+
+        {/* Tab 6: Livro Ponto & Folha de Frequência */}
+        {activeTab === 'ponto' && (
+          <LivroPonto
+            currentUser={currentUser}
+            users={users}
+            holidays={holidays}
+            pontoRecords={pontoRecords}
+            pontoClosings={pontoClosings}
+            onSavePontoRecord={handleSavePontoRecord}
+            onBatchSavePontoRecords={handleBatchSavePontoRecords}
+            onSavePontoClosing={handleSavePontoClosing}
             onSaveHoliday={handleSaveHoliday}
             onDeleteHoliday={handleDeleteHoliday}
             onBatchSaveHolidays={handleBatchSaveHolidays}
