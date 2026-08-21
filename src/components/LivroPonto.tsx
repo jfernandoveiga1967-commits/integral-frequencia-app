@@ -1239,7 +1239,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
                 </h2>
                 <p className="text-xs font-semibold text-slate-600">
-                  EMPRESA CONVENIADA: <strong>GADAL - GESTÃO E APOIO OPERACIONAL</strong>
+                  EMPRESA CONVENIADA: <strong className="text-slate-900 uppercase">{companyName}</strong>
                 </p>
                 <div className="inline-block mt-1 px-4 py-1 bg-slate-100 rounded-full font-black text-xs uppercase tracking-widest text-slate-900">
                   RECIBO DE PAGAMENTO DE BOLSA AUXÍLIO
@@ -1351,7 +1351,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <span className="font-bold text-slate-900 capitalize">{numberToWordsBRL(financials.netTotal)}</span>.
                 </p>
                 <p className="text-justify">
-                  Declaro para os devidos fins de direito que recebi do <strong>Instituto Educacional Crescer / GADAL</strong> a importância líquida supra descrita, referente ao pagamento de Bolsa Auxílio do mês de competência{' '}
+                  Declaro para os devidos fins de direito que recebi de <strong>Instituto Educacional Crescer / {companyName}</strong> a importância líquida supra descrita, referente ao pagamento de Bolsa Auxílio do mês de competência{' '}
                   <strong>{getMonthNameBR(selectedMonth)} de {selectedYear}</strong>, conferindo plena, rasa, geral e irrevogável quitação de todas as obrigações para nada mais exigir a qualquer título.
                 </p>
               </div>
@@ -1382,8 +1382,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <div className="grid grid-cols-2 gap-8 pt-6">
                   <div className="text-center">
                     <div className="border-b border-slate-900 pb-1 w-full"></div>
-                    <span className="text-[10px] text-slate-500 font-semibold block mt-1">
-                      INSTITUTO EDUCACIONAL CRESCER / GADAL
+                    <span className="text-[10px] text-slate-500 font-semibold block mt-1 uppercase">
+                      INSTITUTO EDUCACIONAL CRESCER / {companyName}
                     </span>
                   </div>
                   <div className="text-center">

@@ -6,7 +6,10 @@ import { isWeekend, isSaturday, isSunday, isHolidayOrRecess, toISODateString } f
  */
 export function parseTimeToMinutes(timeStr?: string): number | null {
   if (!timeStr || !timeStr.includes(':')) return null;
-  const [h, m] = timeStr.trim().split(':').map(Number);
+  const parts = timeStr.trim().split(':');
+  if (parts.length < 2) return null;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
 }
@@ -22,7 +25,89 @@ export function formatMinutesToTime(totalMinutes: number): string {
 }
 
 /**
- * Parses contract schedule string like "11:40 - 17:40" or "11:40 às 17:40"
+ * Dynamically calculates contractual daily hours from a schedule string.
+ * Supports:
+ * - Single shift: "11:40 - 17:40" (6h), "08:00 - 14:00" (6h)
+ * - Two shifts with lunch interval: "08:00 - 12:00 / 13:00 - 17:00" (4h + 4h = 8h, 1h almoço descontado)
+ * - Free text variations: "08:00 às 12:00 e 13:30 às 17:30" (4h + 4h = 8h, 1h30 almoço descontado)
+ */
+export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
+  dailyHours: number;
+  workedMinutes: number;
+  lunchBreakMinutes: number;
+  shiftsCount: number;
+  summary: string;
+} {
+  if (!scheduleStr || !scheduleStr.trim()) {
+    return {
+      dailyHours: 6,
+      workedMinutes: 360,
+      lunchBreakMinutes: 0,
+      shiftsCount: 0,
+      summary: '',
+    };
+  }
+
+  // Extract all time patterns like "08:00", "8:00", "11:40", "17:40"
+  const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
+  const matches = Array.from(scheduleStr.matchAll(timeRegex));
+
+  if (matches.length < 2) {
+    return {
+      dailyHours: 6,
+      workedMinutes: 360,
+      lunchBreakMinutes: 0,
+      shiftsCount: 0,
+      summary: '',
+    };
+  }
+
+  const timesInMinutes: number[] = matches.map((m) => {
+    const h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    return h * 60 + min;
+  });
+
+  let totalWorkedMinutes = 0;
+  let totalLunchBreakMinutes = 0;
+  let shiftsCount = 0;
+
+  if (timesInMinutes.length >= 4) {
+    // 2 shifts: Turno 1 (times[0] -> times[1]), Almoço (times[1] -> times[2]), Turno 2 (times[2] -> times[3])
+    const shift1 = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
+    const lunch = Math.max(0, timesInMinutes[2] - timesInMinutes[1]);
+    const shift2 = Math.max(0, timesInMinutes[3] - timesInMinutes[2]);
+
+    totalWorkedMinutes = shift1 + shift2;
+    totalLunchBreakMinutes = lunch;
+    shiftsCount = 2;
+  } else if (timesInMinutes.length >= 2) {
+    // 1 shift: times[0] -> times[1]
+    totalWorkedMinutes = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
+    shiftsCount = 1;
+  }
+
+  const dailyHours = totalWorkedMinutes > 0 ? Number((totalWorkedMinutes / 60).toFixed(2)) : 6;
+
+  let summary = '';
+  if (shiftsCount === 2 && totalLunchBreakMinutes > 0) {
+    const lunchFormatted = formatMinutesToTime(totalLunchBreakMinutes);
+    summary = `Carga Calculada: ${dailyHours}h (${timesInMinutes.length >= 4 ? `${formatMinutesToTime(timesInMinutes[1] - timesInMinutes[0])} + ${formatMinutesToTime(timesInMinutes[3] - timesInMinutes[2])}` : ''} • ${lunchFormatted} de almoço descontado)`;
+  } else if (shiftsCount === 1) {
+    summary = `Carga Calculada: ${dailyHours}h diárias`;
+  }
+
+  return {
+    dailyHours,
+    workedMinutes: totalWorkedMinutes,
+    lunchBreakMinutes: totalLunchBreakMinutes,
+    shiftsCount,
+    summary,
+  };
+}
+
+/**
+ * Parses contract schedule string like "11:40 - 17:40", "08:00 - 12:00 / 13:00 - 17:00"
  */
 export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
   start: string;
@@ -30,18 +115,37 @@ export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
   startMinutes: number;
   endMinutes: number;
   dailyHours: number;
+  lunchBreakMinutes: number;
 } {
-  const clean = scheduleStr.replace(/às/gi, '-').replace(/\s+/g, ' ').trim();
-  const parts = clean.split('-').map((s) => s.trim());
-  const start = parts[0] || '11:40';
-  const end = parts[1] || '17:40';
+  const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
+  const matches = Array.from(scheduleStr.matchAll(timeRegex));
 
-  const startMinutes = parseTimeToMinutes(start) ?? 700; // 11:40 = 700
-  const endMinutes = parseTimeToMinutes(end) ?? 1060; // 17:40 = 1060
-  const totalMinutes = Math.max(0, endMinutes - startMinutes);
-  const dailyHours = totalMinutes / 60 || 6;
+  const { dailyHours, lunchBreakMinutes } = calculateDailyHoursFromSchedule(scheduleStr);
 
-  return { start, end, startMinutes, endMinutes, dailyHours };
+  if (matches.length >= 4) {
+    const start = matches[0][0];
+    const end = matches[3][0];
+    const startMinutes = (parseInt(matches[0][1], 10) * 60) + parseInt(matches[0][2], 10);
+    const endMinutes = (parseInt(matches[3][1], 10) * 60) + parseInt(matches[3][2], 10);
+    return { start, end, startMinutes, endMinutes, dailyHours, lunchBreakMinutes };
+  }
+
+  if (matches.length >= 2) {
+    const start = matches[0][0];
+    const end = matches[1][0];
+    const startMinutes = (parseInt(matches[0][1], 10) * 60) + parseInt(matches[0][2], 10);
+    const endMinutes = (parseInt(matches[1][1], 10) * 60) + parseInt(matches[1][2], 10);
+    return { start, end, startMinutes, endMinutes, dailyHours, lunchBreakMinutes };
+  }
+
+  return {
+    start: '11:40',
+    end: '17:40',
+    startMinutes: 700,
+    endMinutes: 1060,
+    dailyHours: 6,
+    lunchBreakMinutes: 0,
+  };
 }
 
 /**

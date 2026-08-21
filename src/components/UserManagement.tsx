@@ -4,6 +4,7 @@ import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { calculateDailyHoursFromSchedule, formatMinutesToTime } from '../utils/pontoUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
@@ -45,6 +46,9 @@ import {
   Music2,
   Waves,
   Clock,
+  Briefcase,
+  Building2,
+  DollarSign,
   HeartHandshake,
   HandHeart,
   Heart,
@@ -150,10 +154,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
   const [formPixKey, setFormPixKey] = useState('');
-  const [formContractSchedule, setFormContractSchedule] = useState('11:40 - 17:40');
-  const [formContractDailyHours, setFormContractDailyHours] = useState(6);
-  const [formBaseSalary, setFormBaseSalary] = useState(1200);
+  const [formContractSchedule, setFormContractSchedule] = useState('');
+  const [formContractDailyHours, setFormContractDailyHours] = useState<number | string>(6);
+  const [formBaseSalary, setFormBaseSalary] = useState<number | string>(1200);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
+
+  // Dynamic calculation for schedule and lunch interval
+  const scheduleCalculation = useMemo(() => {
+    return calculateDailyHoursFromSchedule(formContractSchedule);
+  }, [formContractSchedule]);
+
+  const handleScheduleInputChange = (val: string) => {
+    setFormContractSchedule(val);
+    if (val.trim()) {
+      const calc = calculateDailyHoursFromSchedule(val);
+      if (calc.workedMinutes > 0) {
+        setFormContractDailyHours(calc.dailyHours);
+      }
+    }
+  };
 
   // Activity Management State
   const [editingActivity, setEditingActivity] = useState<ActivityItem | null>(null);
@@ -359,9 +378,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
     setFormPixKey(user.pixKey || user.phone || '');
-    setFormContractSchedule(user.contractSchedule || '11:40 - 17:40');
-    setFormContractDailyHours(user.contractDailyHours || 6);
-    setFormBaseSalary(user.baseSalary || 1200);
+    const sched = user.contractSchedule || '';
+    setFormContractSchedule(sched);
+    if (user.contractDailyHours !== undefined) {
+      setFormContractDailyHours(user.contractDailyHours);
+    } else if (sched) {
+      setFormContractDailyHours(calculateDailyHoursFromSchedule(sched).dailyHours);
+    } else {
+      setFormContractDailyHours(6);
+    }
+    setFormBaseSalary(user.baseSalary !== undefined ? user.baseSalary : 1200);
     setFormCompany(user.company || 'GADAL - Gestão e Apoio');
   };
 
@@ -378,7 +404,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setFormPixKey('');
-    setFormContractSchedule('11:40 - 17:40');
+    setFormContractSchedule('');
     setFormContractDailyHours(6);
     setFormBaseSalary(1200);
     setFormCompany('GADAL - Gestão e Apoio');
@@ -442,6 +468,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       ? (formActivities && formActivities.length >= 8 ? formActivities : ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
       : formActivities;
 
+    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Number(formBaseSalary) : 1200;
+    const parsedDailyHours = formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours)) && Number(formContractDailyHours) > 0 ? Number(formContractDailyHours) : 6;
+
     const updatedUser: UserProfile = {
       id: targetId,
       name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
@@ -458,9 +487,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
-      contractSchedule: formContractSchedule.trim() || '11:40 - 17:40',
-      contractDailyHours: Number(formContractDailyHours) || 6,
-      baseSalary: Number(formBaseSalary) || 1200,
+      contractSchedule: formContractSchedule.trim() || undefined,
+      contractDailyHours: parsedDailyHours,
+      baseSalary: parsedSalary,
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
       updatedAt: new Date().toISOString(),
     };
@@ -1127,6 +1156,31 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           </button>
                         </div>
 
+                        {/* Contract & Livro Ponto Summary Bar */}
+                        <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs text-indigo-950">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center space-x-1.5 font-bold">
+                              <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>Empresa: <strong className="text-slate-900">{user.company || 'GADAL - Gestão e Apoio'}</strong></span>
+                            </div>
+                            <span className="text-indigo-300 hidden sm:inline">•</span>
+                            <div className="flex items-center space-x-1.5 font-bold">
+                              <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>Horário: <strong className="text-slate-900">{user.contractSchedule || 'Conforme escala'}</strong> ({user.contractDailyHours || 6}h/dia)</span>
+                            </div>
+                            <span className="text-indigo-300 hidden sm:inline">•</span>
+                            <div className="flex items-center space-x-1.5 font-bold">
+                              <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span>Bolsa: <strong className="text-emerald-800">R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+                            </div>
+                          </div>
+                          {user.pixKey && (
+                            <div className="text-[11px] font-mono text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-indigo-200">
+                              PIX: <strong className="text-slate-900">{user.pixKey}</strong>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Permissões, Turmas e Modalidades */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 text-xs">
                           {/* Permissões Rápidas: 3 cols on xl */}
@@ -1779,21 +1833,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               </div>
 
               {/* Seção Contratual & Livro Ponto */}
-              <div className="p-3.5 bg-indigo-50/60 border border-indigo-200/80 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
+              <div className="p-4 bg-gradient-to-br from-indigo-50/80 to-slate-50 border border-indigo-200/90 rounded-2xl space-y-3.5 shadow-2xs">
+                <div className="flex items-center justify-between pb-2 border-b border-indigo-100">
                   <span className="text-xs font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                    Contrato & Livro Ponto (GADAL / Crescer)
+                    <Briefcase className="w-4 h-4 text-indigo-600" />
+                    Contrato & Livro Ponto (Empresa / Convênio)
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-200 text-indigo-900">
-                    Folha de Pagamento
+                  <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-200/80 text-indigo-900 border border-indigo-300/60">
+                    Folha & Ponto
                   </span>
                 </div>
 
+                {/* Campo Empresa / Convênio */}
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Empresa Conveniada / Vinculada (Cabeçalho do Ponto & Recibo):</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formCompany}
+                    onChange={(e) => setFormCompany(e.target.value)}
+                    placeholder="Ex: GADAL - Gestão e Apoio, Colégio Crescer, etc."
+                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Nome da empresa conveniada que sairá no cabeçalho do Livro Ponto, Espelho e Recibo de Pagamento.
+                  </span>
+                </div>
+
+                {/* Grid PIX e Bolsa Auxílio */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
-                      Chave PIX para Depósito:
+                      Chave PIX para Pagamento:
                     </label>
                     <input
                       type="text"
@@ -1805,30 +1878,33 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </div>
 
                   <div>
-                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
-                      Bolsa Auxílio Base Mensal (R$):
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Bolsa Auxílio Base Mensal (R$):</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={formBaseSalary}
-                      onChange={(e) => setFormBaseSalary(Number(e.target.value) || 0)}
-                      placeholder="1200.00"
+                      onChange={(e) => setFormBaseSalary(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="Ex: 1200.00"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                 </div>
 
+                {/* Grid Horário Contratual e Carga Horária */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="sm:col-span-2">
-                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
-                      Horário Contratual Padrão:
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Horário Contratual Padrão (Livre digitação):</span>
                     </label>
                     <input
                       type="text"
                       value={formContractSchedule}
-                      onChange={(e) => setFormContractSchedule(e.target.value)}
-                      placeholder="11:40 - 17:40"
+                      onChange={(e) => handleScheduleInputChange(e.target.value)}
+                      placeholder="Ex: 11:40 - 17:40 ou 08:00 - 12:00 / 13:00 - 17:00"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
@@ -1839,13 +1915,29 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </label>
                     <input
                       type="number"
+                      step="0.1"
                       value={formContractDailyHours}
-                      onChange={(e) => setFormContractDailyHours(Number(e.target.value) || 6)}
+                      onChange={(e) => setFormContractDailyHours(e.target.value === '' ? '' : Number(e.target.value))}
                       placeholder="6"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                 </div>
+
+                {/* Dynamic Calculation Helper Card */}
+                {scheduleCalculation.shiftsCount > 0 && (
+                  <div className="p-2.5 bg-indigo-100/70 border border-indigo-300/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-indigo-950">
+                    <div className="flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="font-bold">{scheduleCalculation.summary}</span>
+                    </div>
+                    {scheduleCalculation.lunchBreakMinutes > 0 && (
+                      <span className="text-[10px] bg-indigo-200/90 text-indigo-900 font-extrabold px-2 py-0.5 rounded-full border border-indigo-300 self-start sm:self-auto">
+                        Intervalo de Refeição Descontado
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 border-t border-slate-100">
