@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
+import { findAllResponsibleCollaborators } from './whatsappUtils';
 
 // Helper to format date string YYYY-MM-DD to DD/MM/YYYY
 function formatDate(dateStr: string): string {
@@ -84,29 +85,43 @@ function drawOfficialHeader(
   doc.setFillColor(79, 70, 229); // indigo-600
   doc.rect(0, 0, pageWidth, 3, 'F');
 
+  // Logo / Emblem Badge on the left
+  doc.setFillColor(79, 70, 229); // indigo-600
+  doc.setDrawColor(99, 102, 241); // indigo-500
+  doc.roundedRect(14, 5.5, 19, 20, 2.5, 2.5, 'FD');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('IEC', 23.5, 14.5, { align: 'center' });
+
+  doc.setFontSize(5);
+  doc.setTextColor(224, 231, 255);
+  doc.text('CRESCER', 23.5, 20.5, { align: 'center' });
+
   // Brand Name
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(244, 63, 94); // rose-500 badge look
-  doc.text('COLÉGIO CRESCER • PROGRAMA INTEGRAL', 14, 10);
+  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', 38, 10.5);
 
   // Document Title
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text(title.toUpperCase(), 14, 18);
+  doc.text(title.toUpperCase(), 38, 18);
 
   // Subtitle / Description
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(191, 219, 254); // blue-200
-  doc.text(subtitle, 14, 25);
+  doc.text(subtitle, 38, 25);
 
   // Right Side: Emission Date and Filters
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(203, 213, 225); // slate-300
-  doc.text(`Emissão: ${getCurrentDateTimeString()}`, pageWidth - 14, 11, { align: 'right' });
+  doc.text(`Emissão: ${getCurrentDateTimeString()}`, pageWidth - 14, 10.5, { align: 'right' });
 
   if (filterDetails.length > 0) {
     doc.setFont('helvetica', 'bold');
@@ -133,22 +148,22 @@ function applyPageNumbersAndFooters(doc: jsPDF, orientation: 'portrait' | 'lands
 
     // Footer divider line
     doc.setDrawColor(226, 232, 240);
-    doc.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
+    doc.line(14, pageHeight - 11, pageWidth - 14, pageHeight - 11);
 
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184); // slate-400
 
     doc.text(
-      'Colégio Crescer - Sistema de Gestão do Programa Integral',
+      'Instituto Educacional Crescer - Sistema de Gestão do Programa Integral',
       14,
-      pageHeight - 7
+      pageHeight - 6
     );
 
     doc.text(
       `Página ${i} de ${pageCount}`,
       pageWidth - 14,
-      pageHeight - 7,
+      pageHeight - 6,
       { align: 'right' }
     );
   }
@@ -187,7 +202,7 @@ function drawMetricBoxes(
 }
 
 // ---------------------------------------------------------------------------
-// 1. GRADE HORÁRIA: GRADE SEMANAL DA TURMA (Tabela Segunda a Sexta)
+// 1. GRADE HORÁRIA: GRADE SEMANAL DA TURMA / TODAS AS TURMAS (Tabela por Dias Selecionados)
 // ---------------------------------------------------------------------------
 
 export interface GenerateWeeklySchedulePDFOptions {
@@ -195,14 +210,19 @@ export interface GenerateWeeklySchedulePDFOptions {
   turmasList?: string[];
   schedules: ScheduleBlock[];
   activitiesList?: ActivityItem[];
+  users?: UserProfile[];
   schoolYear?: number | string;
+  selectedDays?: DayOfWeek[];
 }
 
 export function generateWeeklySchedulePDF({
   turma,
   turmasList = [],
   schedules,
+  activitiesList = [],
+  users = [],
   schoolYear = new Date().getFullYear(),
+  selectedDays,
 }: GenerateWeeklySchedulePDFOptions) {
   const isAll = turma === 'ALL';
   const targetTurmas = isAll
@@ -215,13 +235,20 @@ export function generateWeeklySchedulePDF({
     format: 'a4',
   });
 
-  const DAYS_ORDER: { id: DayOfWeek; label: string }[] = [
-    { id: 'segunda', label: 'Segunda-feira' },
-    { id: 'terca', label: 'Terça-feira' },
-    { id: 'quarta', label: 'Quarta-feira' },
-    { id: 'quinta', label: 'Quinta-feira' },
-    { id: 'sexta', label: 'Sexta-feira' },
+  const ALL_DAYS_ORDER: { id: DayOfWeek; label: string; short: string }[] = [
+    { id: 'segunda', label: 'Segunda-feira', short: 'SEG' },
+    { id: 'terca', label: 'Terça-feira', short: 'TER' },
+    { id: 'quarta', label: 'Quarta-feira', short: 'QUA' },
+    { id: 'quinta', label: 'Quinta-feira', short: 'QUI' },
+    { id: 'sexta', label: 'Sexta-feira', short: 'SEX' },
   ];
+
+  const DAYS_ORDER = selectedDays && selectedDays.length > 0
+    ? ALL_DAYS_ORDER.filter((d) => selectedDays.includes(d.id))
+    : ALL_DAYS_ORDER;
+
+  const daysFilterLabel = DAYS_ORDER.map((d) => d.short).join(', ');
+  const daysHeaderLabel = DAYS_ORDER.length === 5 ? 'Segunda a Sexta-feira' : DAYS_ORDER.map((d) => d.label).join(' • ');
 
   targetTurmas.forEach((currentTurma, index) => {
     if (index > 0) {
@@ -232,40 +259,7 @@ export function generateWeeklySchedulePDF({
       .filter((s) => s.turma === currentTurma)
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-    const totalBlocks = turmaSchedules.length;
-
-    // Header
-    drawOfficialHeader(
-      doc,
-      'Grade Horária Semanal',
-      'Cronograma e Distribuição de Atividades do Integral',
-      [`Turma: ${currentTurma}`, `Ano Letivo: ${schoolYear}`],
-      'landscape'
-    );
-
-    // Sub-card with Turma Information
-    let startY = 38;
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(14, startY, 269, 14, 2, 2, 'FD');
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Turma / Segmento: ${currentTurma}`, 18, startY + 6);
-
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text(`Total de Horários / Blocos Cadastrados: ${totalBlocks} atividades na semana`, 18, startY + 11);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(79, 70, 229);
-    doc.text('Horário de Atendimento: Segunda a Sexta-feira', 269, startY + 8.5, { align: 'right' });
-
-    startY += 18;
-
-    // Prepare 5-day columns matrix
+    // Prepare day columns matrix
     const dayBlocksMap: Record<DayOfWeek, ScheduleBlock[]> = {
       segunda: turmaSchedules.filter((s) => s.dayOfWeek === 'segunda'),
       terca: turmaSchedules.filter((s) => s.dayOfWeek === 'terca'),
@@ -274,81 +268,147 @@ export function generateWeeklySchedulePDF({
       sexta: turmaSchedules.filter((s) => s.dayOfWeek === 'sexta'),
     };
 
+    const totalFilteredBlocks = DAYS_ORDER.reduce(
+      (acc, d) => acc + (dayBlocksMap[d.id]?.length || 0),
+      0
+    );
+
+    // Header on every page
+    drawOfficialHeader(
+      doc,
+      isAll ? 'Grade Semanal Geral' : 'Grade Horária da Turma',
+      'Cronograma e Distribuição de Atividades do Integral',
+      [`Turma: ${currentTurma}`, `Dias: ${daysFilterLabel}`, `Ano Letivo: ${schoolYear}`],
+      'landscape'
+    );
+
+    // Sub-card with Turma Information
+    let startY = 35;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(14, startY, 269, 13, 2, 2, 'FD');
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Turma / Segmento: ${currentTurma}`, 18, startY + 5.5);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      `Total de Atividades nos Dias Selecionados: ${totalFilteredBlocks} horários (${DAYS_ORDER.length} ${DAYS_ORDER.length === 1 ? 'dia' : 'dias'})`,
+      18,
+      startY + 10
+    );
+
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(79, 70, 229);
+    doc.text(`Atendimento: ${daysHeaderLabel} • Turno Integral`, 269, startY + 7.5, { align: 'right' });
+
+    startY += 16;
+
     const maxRows = Math.max(
-      dayBlocksMap.segunda.length,
-      dayBlocksMap.terca.length,
-      dayBlocksMap.quarta.length,
-      dayBlocksMap.quinta.length,
-      dayBlocksMap.sexta.length,
+      ...DAYS_ORDER.map((d) => dayBlocksMap[d.id]?.length || 0),
       1
     );
 
     const tableRows: string[][] = [];
 
-    if (totalBlocks === 0) {
-      tableRows.push([
-        'Sem horários cadastrados',
-        'Sem horários cadastrados',
-        'Sem horários cadastrados',
-        'Sem horários cadastrados',
-        'Sem horários cadastrados',
-      ]);
+    if (totalFilteredBlocks === 0) {
+      tableRows.push(DAYS_ORDER.map(() => 'Sem horários cadastrados'));
     } else {
       for (let r = 0; r < maxRows; r++) {
         const rowCells = DAYS_ORDER.map((d) => {
-          const block = dayBlocksMap[d.id][r];
+          const block = dayBlocksMap[d.id]?.[r];
           if (!block) return '-';
-          let text = `${block.startTime} - ${block.endTime}\n${block.activityId.toUpperCase()}`;
-          if (block.location) {
-            text += `\nLocal: ${block.location}`;
+
+          const lines: string[] = [];
+          lines.push(`⏰ ${block.startTime} às ${block.endTime}`);
+          lines.push(`⭐ ${block.activityId.toUpperCase()}`);
+
+          if (block.location && block.location.trim()) {
+            lines.push(`📍 Sala: ${block.location.trim()}`);
           }
-          if (block.guidelines) {
-            text += `\nObs: ${block.guidelines}`;
+
+          // Resolve instructor/collaborator
+          if (users && users.length > 0) {
+            const collabs = findAllResponsibleCollaborators({
+              users,
+              turmaName: currentTurma,
+              activityName: block.activityId,
+            });
+            if (collabs.length > 0 && collabs[0].name) {
+              lines.push(`👤 Docente: ${collabs[0].name}`);
+            }
           }
-          return text;
+
+          if (block.guidelines && block.guidelines.trim()) {
+            lines.push(`📋 Obs: ${block.guidelines.trim()}`);
+          }
+
+          return lines.join('\n');
         });
         tableRows.push(rowCells);
       }
     }
 
+    const startPageForThisTurma = (doc as any).internal.getNumberOfPages();
+
+    // Calculate dynamic column widths to fill 269mm evenly
+    const colWidth = 269 / DAYS_ORDER.length;
+    const dynamicColumnStyles: Record<number, { cellWidth: number }> = {};
+    DAYS_ORDER.forEach((_, idx) => {
+      dynamicColumnStyles[idx] = { cellWidth: colWidth };
+    });
+
     autoTable(doc, {
       startY: startY,
-      head: [DAYS_ORDER.map((d) => `${d.label.toUpperCase()} (${dayBlocksMap[d.id].length})`)],
+      head: [DAYS_ORDER.map((d) => `${d.label.toUpperCase()} (${dayBlocksMap[d.id]?.length || 0})`)],
       body: tableRows,
       theme: 'grid',
       styles: {
-        fontSize: 8,
-        cellPadding: 3.5,
+        fontSize: DAYS_ORDER.length <= 3 ? 8 : 7.2,
+        cellPadding: DAYS_ORDER.length <= 3 ? 3.5 : 2.5,
         valign: 'middle',
+        overflow: 'linebreak',
       },
       headStyles: {
         fillColor: [15, 23, 42], // slate-900
         textColor: [255, 255, 255],
         fontStyle: 'bold',
-        fontSize: 8.5,
+        fontSize: DAYS_ORDER.length <= 3 ? 8.5 : 8,
         halign: 'center',
       },
       bodyStyles: {
         textColor: [30, 41, 59],
-        fontSize: 8,
+        fontSize: DAYS_ORDER.length <= 3 ? 8 : 7.2,
         lineColor: [226, 232, 240],
       },
       alternateRowStyles: {
         fillColor: [248, 250, 252],
       },
-      columnStyles: {
-        0: { cellWidth: 53.8 },
-        1: { cellWidth: 53.8 },
-        2: { cellWidth: 53.8 },
-        3: { cellWidth: 53.8 },
-        4: { cellWidth: 53.8 },
+      columnStyles: dynamicColumnStyles,
+      margin: { top: 35, left: 14, right: 14, bottom: 22 },
+      didDrawPage: () => {
+        const currentDocPage = (doc as any).internal.getNumberOfPages();
+        // Redraw header ONLY if autoTable created an additional page for this turma
+        if (currentDocPage > startPageForThisTurma) {
+          drawOfficialHeader(
+            doc,
+            isAll ? 'Grade Semanal Geral' : 'Grade Horária da Turma',
+            'Cronograma e Distribuição de Atividades do Integral',
+            [`Turma: ${currentTurma} (Cont.)`, `Dias: ${daysFilterLabel}`, `Ano Letivo: ${schoolYear}`],
+            'landscape'
+          );
+        }
       },
     });
 
-    // Signature line
-    const lastY = (doc as any).lastAutoTable?.finalY || 150;
-    if (lastY < 175) {
-      const sigY = Math.max(lastY + 16, 172);
+    // Signature line on this turma's page
+    const finalY = (doc as any).lastAutoTable?.finalY || 145;
+    if (finalY <= 170) {
+      const sigY = Math.max(finalY + 10, 168);
       doc.setDrawColor(203, 213, 225);
       doc.line(30, sigY, 110, sigY);
       doc.line(180, sigY, 260, sigY);
@@ -356,13 +416,58 @@ export function generateWeeklySchedulePDF({
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text('Monitora / Responsável da Turma', 70, sigY + 4, { align: 'center' });
+      doc.text('Monitora / Docente da Turma', 70, sigY + 4, { align: 'center' });
       doc.text('Coordenação Pedagógica do Integral', 220, sigY + 4, { align: 'center' });
+    } else if (finalY <= 186) {
+      const sigY = finalY + 6;
+      doc.setDrawColor(203, 213, 225);
+      doc.line(30, sigY, 110, sigY);
+      doc.line(180, sigY, 260, sigY);
+
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Monitora / Docente da Turma', 70, sigY + 3.5, { align: 'center' });
+      doc.text('Coordenação Pedagógica do Integral', 220, sigY + 3.5, { align: 'center' });
     }
   });
 
   applyPageNumbersAndFooters(doc, 'landscape');
-  doc.save(`Grade_Semanal_${turma.replace(/[\/\s]+/g, '_')}_${schoolYear}.pdf`);
+  
+  const daysSuffix = DAYS_ORDER.length === 5 ? 'Seg_a_Sex' : DAYS_ORDER.map((d) => d.short).join('_');
+  if (isAll) {
+    doc.save(`Grade_Semanal_Geral_Todas_as_Turmas_${daysSuffix}_${schoolYear}.pdf`);
+  } else {
+    doc.save(`Grade_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}_${schoolYear}.pdf`);
+  }
+}
+
+export interface GenerateAllTurmasWeeklySchedulePDFOptions {
+  turmasList: string[];
+  schedules: ScheduleBlock[];
+  activitiesList?: ActivityItem[];
+  users?: UserProfile[];
+  schoolYear?: number | string;
+  selectedDays?: DayOfWeek[];
+}
+
+export function generateAllTurmasWeeklySchedulePDF({
+  turmasList,
+  schedules,
+  activitiesList,
+  users,
+  schoolYear = new Date().getFullYear(),
+  selectedDays,
+}: GenerateAllTurmasWeeklySchedulePDFOptions) {
+  return generateWeeklySchedulePDF({
+    turma: 'ALL',
+    turmasList,
+    schedules,
+    activitiesList,
+    users,
+    schoolYear,
+    selectedDays,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +476,8 @@ export function generateWeeklySchedulePDF({
 
 export interface GenerateDailyRoutinePDFOptions {
   turma: TurmaType;
-  dayOfWeek: DayOfWeek;
+  dayOfWeek?: DayOfWeek;
+  selectedDays?: DayOfWeek[];
   schedules: ScheduleBlock[];
   activitiesList?: ActivityItem[];
   schoolYear?: number | string;
@@ -380,122 +486,134 @@ export interface GenerateDailyRoutinePDFOptions {
 export function generateDailyRoutinePDF({
   turma,
   dayOfWeek,
+  selectedDays,
   schedules,
   schoolYear = new Date().getFullYear(),
 }: GenerateDailyRoutinePDFOptions) {
+  const targetDays: DayOfWeek[] = selectedDays && selectedDays.length > 0
+    ? selectedDays
+    : [dayOfWeek || 'segunda'];
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
   });
 
-  const dayLabel = getDayOfWeekLabel(dayOfWeek);
-  const dayBlocks = schedules
-    .filter((s) => s.turma === turma && s.dayOfWeek === dayOfWeek)
-    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  targetDays.forEach((currentDay, index) => {
+    if (index > 0) {
+      doc.addPage('a4', 'portrait');
+    }
 
-  // Header
-  drawOfficialHeader(
-    doc,
-    `Rotina Diária - ${dayLabel}`,
-    'Cronograma Detalhado de Horários e Orientações',
-    [`Turma: ${turma}`, `Dia: ${dayLabel}`],
-    'portrait'
-  );
+    const dayLabel = getDayOfWeekLabel(currentDay);
+    const dayBlocks = schedules
+      .filter((s) => s.turma === turma && s.dayOfWeek === currentDay)
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  let startY = 38;
+    // Header
+    drawOfficialHeader(
+      doc,
+      `Rotina Diária - ${dayLabel}`,
+      'Cronograma Detalhado de Horários e Orientações',
+      [`Turma: ${turma}`, `Dia: ${dayLabel}`],
+      'portrait'
+    );
 
-  // Turma & Day Info Card
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(14, startY, 182, 20, 2.5, 2.5, 'FD');
+    let startY = 38;
 
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Turma: ${turma}`, 18, startY + 7);
+    // Turma & Day Info Card
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(14, startY, 182, 20, 2.5, 2.5, 'FD');
 
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Dia da Semana: ${dayLabel}  •  Ano Letivo: ${schoolYear}`, 18, startY + 14);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Turma: ${turma}`, 18, startY + 7);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(79, 70, 229);
-  doc.text(`${dayBlocks.length} Atividades`, 190, startY + 11, { align: 'right' });
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Dia da Semana: ${dayLabel}  •  Ano Letivo: ${schoolYear}`, 18, startY + 14);
 
-  startY += 26;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(79, 70, 229);
+    doc.text(`${dayBlocks.length} Atividades`, 190, startY + 11, { align: 'right' });
 
-  // Detailed Table
-  const tableData = dayBlocks.map((b) => [
-    `${b.startTime} - ${b.endTime}`,
-    b.activityId,
-    b.location || 'Sala / Padrão',
-    b.guidelines || 'Sem orientações adicionais',
-  ]);
+    startY += 26;
 
-  autoTable(doc, {
-    startY: startY,
-    head: [['Horário', 'Atividade / Oficina', 'Local / Espaço', 'Orientações Pedagógicas / Observações']],
-    body: tableData.length > 0 ? tableData : [['-', 'Nenhum horário cadastrado para este dia', '-', '-']],
-    theme: 'grid',
-    headStyles: {
-      fillColor: [15, 23, 42],
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 8.5,
-    },
-    bodyStyles: {
-      fontSize: 8,
-      textColor: [30, 41, 59],
-      cellPadding: 3.5,
-    },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252],
-    },
-    columnStyles: {
-      0: { cellWidth: 28, fontStyle: 'bold', halign: 'center' },
-      1: { cellWidth: 38, fontStyle: 'bold' },
-      2: { cellWidth: 34 },
-      3: { cellWidth: 'auto' },
-    },
+    // Detailed Table
+    const tableData = dayBlocks.map((b) => [
+      `${b.startTime} - ${b.endTime}`,
+      b.activityId,
+      b.location || 'Sala / Padrão',
+      b.guidelines || 'Sem orientações adicionais',
+    ]);
+
+    autoTable(doc, {
+      startY: startY,
+      head: [['Horário', 'Atividade / Oficina', 'Local / Espaço', 'Orientações Pedagógicas / Observações']],
+      body: tableData.length > 0 ? tableData : [['-', 'Nenhum horário cadastrado para este dia', '-', '-']],
+      theme: 'grid',
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: [30, 41, 59],
+        cellPadding: 3.5,
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 28, fontStyle: 'bold', halign: 'center' },
+        1: { cellWidth: 38, fontStyle: 'bold' },
+        2: { cellWidth: 34 },
+        3: { cellWidth: 'auto' },
+      },
+    });
+
+    // Notes Box & Signature
+    const finalY = (doc as any).lastAutoTable?.finalY || 160;
+    if (finalY < 235) {
+      const notesY = finalY + 10;
+      doc.setFillColor(254, 252, 232); // amber-50
+      doc.setDrawColor(254, 240, 138); // amber-200
+      doc.roundedRect(14, notesY, 182, 22, 2, 2, 'FD');
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(180, 83, 9); // amber-700
+      doc.text('ORIENTAÇÕES GERAIS PARA A MONITORA / PROFESSOR:', 18, notesY + 6);
+
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(113, 63, 18);
+      doc.text('• Realize a chamada pontualmente no início das oficinas extracurriculares que exigem roll call.', 18, notesY + 11);
+      doc.text('• Registre saídas antecipadas informando o horário exato e o motivo informado pela recepção.', 18, notesY + 15);
+      doc.text('• Em caso de indisposição ou falta de material obrigatório, lance a ocorrência imediatamente no sistema.', 18, notesY + 19);
+
+      const sigY = notesY + 36;
+      doc.setDrawColor(203, 213, 225);
+      doc.line(20, sigY, 90, sigY);
+      doc.line(120, sigY, 190, sigY);
+
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Monitora / Educador Responsável', 55, sigY + 4, { align: 'center' });
+      doc.text('Coordenação do Programa Integral', 155, sigY + 4, { align: 'center' });
+    }
   });
 
-  // Notes Box & Signature
-  const finalY = (doc as any).lastAutoTable?.finalY || 160;
-  if (finalY < 235) {
-    const notesY = finalY + 10;
-    doc.setFillColor(254, 252, 232); // amber-50
-    doc.setDrawColor(254, 240, 138); // amber-200
-    doc.roundedRect(14, notesY, 182, 22, 2, 2, 'FD');
-
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(180, 83, 9); // amber-700
-    doc.text('ORIENTAÇÕES GERAIS PARA A MONITORA / PROFESSOR:', 18, notesY + 6);
-
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(113, 63, 18);
-    doc.text('• Realize a chamada pontualmente no início das oficinas extracurriculares que exigem roll call.', 18, notesY + 11);
-    doc.text('• Registre saídas antecipadas informando o horário exato e o motivo informado pela recepção.', 18, notesY + 15);
-    doc.text('• Em caso de indisposição ou falta de material obrigatório, lance a ocorrência imediatamente no sistema.', 18, notesY + 19);
-
-    const sigY = notesY + 36;
-    doc.setDrawColor(203, 213, 225);
-    doc.line(20, sigY, 90, sigY);
-    doc.line(120, sigY, 190, sigY);
-
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Monitora / Educador Responsável', 55, sigY + 4, { align: 'center' });
-    doc.text('Coordenação do Programa Integral', 155, sigY + 4, { align: 'center' });
-  }
-
   applyPageNumbersAndFooters(doc, 'portrait');
-  doc.save(`Rotina_${turma.replace(/[\/\s]+/g, '_')}_${dayOfWeek}.pdf`);
+  const daysSuffix = targetDays.length === 1 ? targetDays[0] : targetDays.map((d) => d.substring(0, 3)).join('_');
+  doc.save(`Rotina_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}.pdf`);
 }
 
 // ---------------------------------------------------------------------------
@@ -764,11 +882,18 @@ export function generateStudentPeriodPDFReport({
     .filter((r) => r.studentId === student.id && r.date >= startDate && r.date <= endDate)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const total = studentRecords.length;
-  const pres = studentRecords.filter((r) => r.status === 'presente').length;
-  const saidaAnt = studentRecords.filter((r) => r.status === 'saida_antecipada').length;
-  const falta = studentRecords.filter((r) => r.status === 'falta').length;
-  const saude = studentRecords.filter((r) => r.status === 'saude').length;
+  const routineRecords = studentRecords.filter(
+    (r) => r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina')
+  );
+
+  const baseRecords = routineRecords.length > 0 ? routineRecords : studentRecords;
+  const isRoutineBased = routineRecords.length > 0;
+
+  const total = baseRecords.length;
+  const pres = baseRecords.filter((r) => r.status === 'presente').length;
+  const saidaAnt = baseRecords.filter((r) => r.status === 'saida_antecipada').length;
+  const falta = baseRecords.filter((r) => r.status === 'falta').length;
+  const saude = baseRecords.filter((r) => r.status === 'saude').length;
   const semEquip = studentRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 

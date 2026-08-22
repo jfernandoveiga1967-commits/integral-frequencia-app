@@ -36,7 +36,12 @@ import {
 import { ScheduleBlock, DayOfWeek, TurmaType, ActivityItem, ActivityType, UserProfile } from '../types';
 import { ActivityBadge, renderActivityIcon } from './ActivityBadge';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { generateWeeklySchedulePDF, generateDailyRoutinePDF, generateActivitySchedulePDF } from '../utils/pdfGenerator';
+import {
+  generateWeeklySchedulePDF,
+  generateAllTurmasWeeklySchedulePDF,
+  generateDailyRoutinePDF,
+  generateActivitySchedulePDF,
+} from '../utils/pdfGenerator';
 import { findResponsibleCollaborator } from '../utils/whatsappUtils';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
 import { ActivityScheduleView } from './ActivityScheduleView';
@@ -200,7 +205,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState(false);
   const [pdfReportType, setPdfReportType] = useState<'weekly' | 'daily' | 'activity'>('weekly');
   const [pdfTargetTurma, setPdfTargetTurma] = useState<TurmaType | 'ALL'>(sortedTurmas[0] || '1º Ano Azul');
-  const [pdfTargetDay, setPdfTargetDay] = useState<DayOfWeek>('segunda');
+  const [pdfSelectedDays, setPdfSelectedDays] = useState<DayOfWeek[]>([
+    'segunda',
+    'terca',
+    'quarta',
+    'quinta',
+    'sexta',
+  ]);
   const [pdfTargetActivity, setPdfTargetActivity] = useState<string>(activitiesList[0]?.id || 'Natação');
 
   // Toast feedback
@@ -216,33 +227,93 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     setIsExportPdfModalOpen(true);
   };
 
+  const handleTogglePdfDay = (dayId: DayOfWeek) => {
+    setPdfSelectedDays((prev) => {
+      if (prev.includes(dayId)) {
+        if (prev.length === 1) {
+          showToast('Mantenha ao menos um dia da semana selecionado para a emissão.', 'error');
+          return prev;
+        }
+        return prev.filter((d) => d !== dayId);
+      } else {
+        const order: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+        return order.filter((d) => prev.includes(d) || d === dayId);
+      }
+    });
+  };
+
+  const handleSelectAllPdfDays = () => {
+    const allDays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+    if (pdfSelectedDays.length === 5) {
+      // Keep first selected or 'segunda'
+      setPdfSelectedDays(['segunda']);
+    } else {
+      setPdfSelectedDays(allDays);
+    }
+  };
+
+  const handleExportAllTurmasPDF = () => {
+    try {
+      generateAllTurmasWeeklySchedulePDF({
+        turmasList: sortedTurmas,
+        schedules,
+        activitiesList,
+        users,
+        schoolYear: new Date().getFullYear(),
+        selectedDays: pdfSelectedDays,
+      });
+      showToast(
+        `✓ PDF Geral da Grade Semanal gerado com sucesso para todas as ${sortedTurmas.length} turmas!`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Error generating general PDF:', err);
+      showToast('Ocorreu um erro ao gerar o PDF geral de todas as turmas. Tente novamente.', 'error');
+    }
+  };
+
   const handleExecuteExportPdf = () => {
     try {
+      if (pdfSelectedDays.length === 0) {
+        showToast('Selecione ao menos um dia da semana para emitir o relatório.', 'error');
+        return;
+      }
+
       if (pdfReportType === 'weekly') {
         generateWeeklySchedulePDF({
           turma: pdfTargetTurma,
           turmasList: sortedTurmas,
           schedules,
           activitiesList,
+          users,
           schoolYear: new Date().getFullYear(),
+          selectedDays: pdfSelectedDays,
         });
+        const daysLabel = pdfSelectedDays.length === 5 
+          ? 'Segunda a Sexta' 
+          : pdfSelectedDays.map((d) => DAYS_OF_WEEK.find((x) => x.id === d)?.short).join(', ');
+
         showToast(
           pdfTargetTurma === 'ALL'
-            ? 'PDF da Grade Semanal de todas as turmas gerado com sucesso!'
-            : `PDF da Grade Semanal (${pdfTargetTurma}) gerado com sucesso!`,
+            ? `✓ PDF da Grade de todas as ${sortedTurmas.length} turmas (${daysLabel}) gerado com sucesso!`
+            : `✓ PDF da Grade (${pdfTargetTurma} • ${daysLabel}) gerado com sucesso!`,
           'success'
         );
       } else if (pdfReportType === 'daily') {
         const targetTurma = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
         generateDailyRoutinePDF({
           turma: targetTurma,
-          dayOfWeek: pdfTargetDay,
+          selectedDays: pdfSelectedDays,
           schedules,
           activitiesList,
           schoolYear: new Date().getFullYear(),
         });
+        const daysLabel = pdfSelectedDays.length === 1
+          ? (DAYS_OF_WEEK.find((d) => d.id === pdfSelectedDays[0])?.label || '')
+          : `${pdfSelectedDays.length} dias (${pdfSelectedDays.map((d) => DAYS_OF_WEEK.find((x) => x.id === d)?.short).join(', ')})`;
+
         showToast(
-          `PDF da Rotina Diária (${targetTurma} - ${DAYS_OF_WEEK.find((d) => d.id === pdfTargetDay)?.label}) gerado com sucesso!`,
+          `✓ PDF da Rotina Diária (${targetTurma} • ${daysLabel}) gerado com sucesso!`,
           'success'
         );
       } else if (pdfReportType === 'activity') {
@@ -254,7 +325,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           schoolYear: new Date().getFullYear(),
         });
         showToast(
-          `PDF da Grade de Horários (${pdfTargetActivity}) gerado com sucesso!`,
+          `✓ PDF da Grade de Horários (${pdfTargetActivity}) gerado com sucesso!`,
           'success'
         );
       }
@@ -855,13 +926,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             </div>
           </div>
 
-          {/* Top Actions: Exportar PDF, Replicar Rotina & Adicionar Horário */}
+          {/* Top Actions: Exportar PDF, Exportar PDF Geral, Replicar Rotina & Adicionar Horário */}
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={handleOpenExportPdfModal}
               title="Exportar Grade Semanal ou Rotina Diária em PDF oficial"
-              className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer flex items-center space-x-2"
+              className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer flex items-center space-x-2"
             >
               <Download className="w-4 h-4 text-indigo-600" />
               <span>Exportar PDF</span>
@@ -869,12 +940,23 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
             <button
               type="button"
+              id="btn-export-pdf-all-turmas"
+              onClick={handleExportAllTurmasPDF}
+              title="Exportar PDF completo da Grade Semanal de todas as turmas cadastradas com quebras automáticas por página"
+              className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-xs transition-all cursor-pointer flex items-center space-x-2 border border-slate-900"
+            >
+              <FileText className="w-4 h-4 text-indigo-400" />
+              <span>Exportar PDF Geral - Todas as Turmas</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleOpenFullRoutineModal}
               title="Copiar toda a grade de Segunda a Sexta desta turma para outras turmas"
-              className="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-indigo-200 shadow-xs transition-all cursor-pointer flex items-center space-x-2"
+              className="px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs sm:text-sm rounded-2xl border border-indigo-200 shadow-xs transition-all cursor-pointer flex items-center space-x-2"
             >
               <Copy className="w-4 h-4 text-indigo-600" />
-              <span>Replicar Rotina para Outras Turmas</span>
+              <span>Replicar Rotina</span>
             </button>
 
             <button
@@ -2329,36 +2411,83 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </div>
               )}
 
-              {/* Day Selector (only for Daily Routine) */}
-              {pdfReportType === 'daily' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Dia da Semana:
-                  </label>
-                  <div className="grid grid-cols-5 gap-1.5">
+              {/* Multiple Days Selector (SEG a SEX) */}
+              {pdfReportType !== 'activity' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Dias da Semana a Incluir no PDF:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllPdfDays}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold transition-colors cursor-pointer flex items-center space-x-1.5 border border-indigo-200/60"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>
+                        {pdfSelectedDays.length === 5 ? 'Desmarcar Todos' : 'Selecionar Todos Os Dias (SEG a SEX)'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-2">
                     {DAYS_OF_WEEK.map((d) => {
-                      const isSelected = pdfTargetDay === d.id;
+                      const isSelected = pdfSelectedDays.includes(d.id);
                       const targetTurmaName = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
-                      const dayCount = schedules.filter((s) => s.turma === targetTurmaName && s.dayOfWeek === d.id).length;
+                      const dayCount = pdfTargetTurma === 'ALL'
+                        ? schedules.filter((s) => s.dayOfWeek === d.id).length
+                        : schedules.filter((s) => s.turma === targetTurmaName && s.dayOfWeek === d.id).length;
 
                       return (
                         <button
                           key={d.id}
                           type="button"
-                          onClick={() => setPdfTargetDay(d.id)}
-                          className={`py-2 px-1 rounded-xl border text-center transition-all cursor-pointer ${
+                          onClick={() => handleTogglePdfDay(d.id)}
+                          className={`py-2.5 px-1.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-between select-none ${
                             isSelected
-                              ? 'bg-indigo-600 text-white border-indigo-600 font-extrabold shadow-sm'
-                              : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                              ? 'bg-indigo-600 text-white border-indigo-600 font-extrabold shadow-sm ring-2 ring-indigo-500/20 scale-[1.02]'
+                              : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
                           }`}
                         >
-                          <span className="block text-xs font-bold">{d.short}</span>
-                          <span className={`block text-[9px] ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
-                            {dayCount} ativ.
+                          <div className="flex items-center space-x-1 mb-1">
+                            <span
+                              className={`w-3.5 h-3.5 rounded-md flex items-center justify-center text-[9px] border transition-colors ${
+                                isSelected
+                                  ? 'bg-white text-indigo-600 border-white font-black'
+                                  : 'border-slate-300 bg-white text-transparent'
+                              }`}
+                            >
+                              ✓
+                            </span>
+                            <span className="text-xs font-black">{d.short}</span>
+                          </div>
+                          <span className={`block text-[10px] ${isSelected ? 'text-indigo-100 font-medium' : 'text-slate-400'}`}>
+                            {dayCount} {dayCount === 1 ? 'ativ.' : 'ativs.'}
                           </span>
                         </button>
                       );
                     })}
+                  </div>
+
+                  <div className="flex items-center justify-between px-1 text-[11px] text-slate-500">
+                    <span>
+                      {pdfSelectedDays.length === 5 ? (
+                        <strong className="text-indigo-700">✓ Todos os 5 dias selecionados (Segunda a Sexta)</strong>
+                      ) : (
+                        <span>
+                          Filtro ativo: <strong className="text-indigo-700">{pdfSelectedDays.length} {pdfSelectedDays.length === 1 ? 'dia' : 'dias'}</strong> ({pdfSelectedDays.map((d) => DAYS_OF_WEEK.find((x) => x.id === d)?.short).join(', ')})
+                        </span>
+                      )}
+                    </span>
+                    {pdfSelectedDays.length !== 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setPdfSelectedDays(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                        className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                      >
+                        [Todos]
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

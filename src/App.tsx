@@ -330,6 +330,12 @@ export default function App() {
             JSON.stringify(enforcedSelf.assignedActivities) !== JSON.stringify(activeSelf.assignedActivities) ||
             enforcedSelf.role !== activeSelf.role ||
             enforcedSelf.name !== activeSelf.name ||
+            enforcedSelf.phone !== activeSelf.phone ||
+            enforcedSelf.pixKey !== activeSelf.pixKey ||
+            enforcedSelf.contractSchedule !== activeSelf.contractSchedule ||
+            enforcedSelf.contractDailyHours !== activeSelf.contractDailyHours ||
+            enforcedSelf.baseSalary !== activeSelf.baseSalary ||
+            enforcedSelf.company !== activeSelf.company ||
             enforcedSelf.canManageStudents !== activeSelf.canManageStudents ||
             enforcedSelf.canMarkAttendance !== activeSelf.canMarkAttendance;
 

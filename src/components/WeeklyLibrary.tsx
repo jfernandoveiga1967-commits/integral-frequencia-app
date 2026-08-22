@@ -60,7 +60,7 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
   // Generate list of 52 weeks for the selected year
   const allWeeks: WeekInfo[] = Array.from({ length: 52 }, (_, i) => getWeekInfo(selectedYear, i + 1));
 
-  // Pre-calculate statistics per week
+  // Pre-calculate statistics per week strictly based on "Rotina" launches
   const weekStatsMap = new Map<
     number,
     {
@@ -70,30 +70,64 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
       sem_equipamento: number;
       saude: number;
       rate: number;
+      distinctDaysCount: number;
+      mediaPresente: number;
+      mediaFalta: number;
+      mediaSaude: number;
     }
   >();
 
-  // Aggregate records by week
+  // Map to store distinct dates with Rotina records per week
+  const weekDatesMap = new Map<number, Set<string>>();
+
+  // Aggregate records by week strictly for the modalidade "Rotina"
   (records || []).forEach((r) => {
-    if (r && r.year === selectedYear) {
-      const existing = weekStatsMap.get(r.weekNumber) || {
-        total: 0,
-        presente: 0,
-        falta: 0,
-        sem_equipamento: 0,
-        saude: 0,
-        rate: 100,
-      };
+    if (!r || r.year !== selectedYear) return;
 
-      existing.total += 1;
-      if (r.status === 'presente' || r.status === 'saida_antecipada') existing.presente += 1;
-      else if (r.status === 'falta') existing.falta += 1;
-      else if (r.status === 'sem_equipamento') existing.sem_equipamento += 1;
-      else if (r.status === 'saude') existing.saude += 1;
+    // Strict filter for Rotina activity
+    const isRotina = r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina');
+    if (!isRotina) return;
 
-      existing.rate = existing.total > 0 ? Math.round((existing.presente / existing.total) * 100) : 100;
-      weekStatsMap.set(r.weekNumber, existing);
+    const existing = weekStatsMap.get(r.weekNumber) || {
+      total: 0,
+      presente: 0,
+      falta: 0,
+      sem_equipamento: 0,
+      saude: 0,
+      rate: 100,
+      distinctDaysCount: 0,
+      mediaPresente: 0,
+      mediaFalta: 0,
+      mediaSaude: 0,
+    };
+
+    let datesSet = weekDatesMap.get(r.weekNumber);
+    if (!datesSet) {
+      datesSet = new Set<string>();
+      weekDatesMap.set(r.weekNumber, datesSet);
     }
+    if (r.date) {
+      datesSet.add(r.date);
+    }
+
+    existing.total += 1;
+    if (r.status === 'presente' || r.status === 'saida_antecipada') existing.presente += 1;
+    else if (r.status === 'falta') existing.falta += 1;
+    else if (r.status === 'sem_equipamento') existing.sem_equipamento += 1;
+    else if (r.status === 'saude') existing.saude += 1;
+
+    weekStatsMap.set(r.weekNumber, existing);
+  });
+
+  // Calculate daily averages and attendance rate for each week with Rotina records
+  weekStatsMap.forEach((stat, weekNum) => {
+    const datesSet = weekDatesMap.get(weekNum);
+    const distinctDays = datesSet && datesSet.size > 0 ? datesSet.size : 1;
+    stat.distinctDaysCount = distinctDays;
+    stat.mediaPresente = Math.round(stat.presente / distinctDays);
+    stat.mediaFalta = Math.round(stat.falta / distinctDays);
+    stat.mediaSaude = Math.round(stat.saude / distinctDays);
+    stat.rate = stat.total > 0 ? Math.round((stat.presente / stat.total) * 100) : 100;
   });
 
   // Filter weeks based on search and selected filter
@@ -123,7 +157,7 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
     return true;
   });
 
-  // Overall statistics for the selected year
+  // Overall statistics for the selected year (Rotina only)
   const weeksWithDataCount = Array.from(weekStatsMap.values()).filter((s) => s.total > 0).length;
   const totalYearRecords = Array.from(weekStatsMap.values()).reduce((acc, s) => acc + s.total, 0);
   const totalYearPresences = Array.from(weekStatsMap.values()).reduce((acc, s) => acc + s.presente, 0);
@@ -190,13 +224,13 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
                 Total Registros
               </span>
               <span className="text-lg md:text-xl font-bold text-white">
-                {totalYearRecords} <span className="text-xs text-slate-400 font-normal">entradas</span>
+                {totalYearRecords} <span className="text-xs text-slate-400 font-normal">Rotina</span>
               </span>
             </div>
 
             <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
               <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Frequência Médian
+                Frequência Média
               </span>
               <span className="text-lg md:text-xl font-bold text-emerald-400">
                 {globalYearRate}%
@@ -349,7 +383,7 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
                       </span>
                     ) : hasRecords ? (
                       <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                        {stats.total} chamadas
+                        {stats.distinctDaysCount} {stats.distinctDaysCount === 1 ? 'dia letivo' : 'dias letivos'}
                       </span>
                     ) : (
                       <span className="text-[11px] text-slate-400 font-medium">
@@ -371,30 +405,48 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
 
                 {/* Metrics Breakdown if records exist */}
                 {hasRecords && stats ? (
-                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-500 font-medium">Taxa de Presença:</span>
-                      <span className="font-bold text-emerald-600 bg-emerald-100/70 px-2 py-0.5 rounded-md">
+                      <span className="text-slate-500 font-medium">Taxa de Presença (Rotina):</span>
+                      <span className="font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200/60">
                         {stats.rate}%
                       </span>
                     </div>
 
+                    {/* Média Diária Highlight Card */}
+                    <div className="bg-white border border-slate-200/90 rounded-lg p-2.5 shadow-2xs">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                        Média Diária por Aluno
+                      </div>
+                      <div className="text-xs font-bold text-slate-800 flex items-center flex-wrap gap-1">
+                        <span className="text-emerald-700 font-extrabold">{stats.mediaPresente} Presentes</span>
+                        <span className="text-slate-400">•</span>
+                        <span className="text-rose-700 font-extrabold">{stats.mediaFalta} Faltas</span>
+                        {stats.mediaSaude > 0 && (
+                          <>
+                            <span className="text-slate-400">•</span>
+                            <span className="text-amber-700 font-bold">{stats.mediaSaude} Saúde</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-4 gap-1 text-center pt-1 border-t border-slate-200/60 text-[11px]">
                       <div>
-                        <span className="block text-slate-400 text-[10px]">Pres.</span>
-                        <span className="font-bold text-emerald-600">{stats.presente}</span>
+                        <span className="block text-slate-400 text-[10px]">Média Pres.</span>
+                        <span className="font-bold text-emerald-600">{stats.mediaPresente}</span>
                       </div>
                       <div>
-                        <span className="block text-slate-400 text-[10px]">Faltas</span>
-                        <span className="font-bold text-rose-600">{stats.falta}</span>
+                        <span className="block text-slate-400 text-[10px]">Média Faltas</span>
+                        <span className="font-bold text-rose-600">{stats.mediaFalta}</span>
                       </div>
                       <div>
-                        <span className="block text-slate-400 text-[10px]">Equip.</span>
-                        <span className="font-bold text-orange-600">{stats.sem_equipamento}</span>
+                        <span className="block text-slate-400 text-[10px]">Média Saúde</span>
+                        <span className="font-bold text-amber-600">{stats.mediaSaude}</span>
                       </div>
                       <div>
-                        <span className="block text-slate-400 text-[10px]">Saúde</span>
-                        <span className="font-bold text-amber-600">{stats.saude}</span>
+                        <span className="block text-slate-400 text-[10px]">Dias Lançados</span>
+                        <span className="font-bold text-indigo-600">{stats.distinctDaysCount}d</span>
                       </div>
                     </div>
                   </div>

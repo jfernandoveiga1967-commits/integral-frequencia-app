@@ -4,7 +4,12 @@ import { TURMAS_LIST } from '../data/initialData';
 import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { calculateDailyHoursFromSchedule, formatMinutesToTime } from '../utils/pontoUtils';
+import {
+  calculateDailyHoursFromSchedule,
+  formatMinutesToTime,
+  formatMinutesToHoursAndMinutes,
+  parseHoursAndMinutesStringToMinutes,
+} from '../utils/pontoUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
@@ -156,6 +161,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formPixKey, setFormPixKey] = useState('');
   const [formContractSchedule, setFormContractSchedule] = useState('');
   const [formContractDailyHours, setFormContractDailyHours] = useState<number | string>(6);
+  const [formContractDailyHoursFormatted, setFormContractDailyHoursFormatted] = useState('6h 00min');
+  const [formContractDailyMinutes, setFormContractDailyMinutes] = useState(360);
   const [formBaseSalary, setFormBaseSalary] = useState<number | string>(1200);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
 
@@ -170,8 +177,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       const calc = calculateDailyHoursFromSchedule(val);
       if (calc.workedMinutes > 0) {
         setFormContractDailyHours(calc.dailyHours);
+        setFormContractDailyHoursFormatted(calc.dailyHoursFormatted);
+        setFormContractDailyMinutes(calc.workedMinutes);
       }
     }
+  };
+
+  const handleDailyHoursChange = (val: string) => {
+    setFormContractDailyHoursFormatted(val);
+    const parsedMin = parseHoursAndMinutesStringToMinutes(val);
+    setFormContractDailyMinutes(parsedMin);
+    setFormContractDailyHours(Number((parsedMin / 60).toFixed(2)));
   };
 
   // Activity Management State
@@ -380,14 +396,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPixKey(user.pixKey || user.phone || '');
     const sched = user.contractSchedule || '';
     setFormContractSchedule(sched);
-    if (user.contractDailyHours !== undefined) {
+    const calc = calculateDailyHoursFromSchedule(sched);
+
+    if (user.contractDailyHoursFormatted) {
+      setFormContractDailyHoursFormatted(user.contractDailyHoursFormatted);
+      setFormContractDailyMinutes(user.contractDailyMinutes || parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted));
+      setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : calc.dailyHours);
+    } else if (user.contractDailyMinutes !== undefined && user.contractDailyMinutes > 0) {
+      setFormContractDailyMinutes(user.contractDailyMinutes);
+      setFormContractDailyHoursFormatted(formatMinutesToHoursAndMinutes(user.contractDailyMinutes));
+      setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : Number((user.contractDailyMinutes / 60).toFixed(2)));
+    } else if (user.contractDailyHours !== undefined) {
+      const minutes = Math.round(Number(user.contractDailyHours) * 60);
       setFormContractDailyHours(user.contractDailyHours);
-    } else if (sched) {
-      setFormContractDailyHours(calculateDailyHoursFromSchedule(sched).dailyHours);
+      setFormContractDailyMinutes(minutes);
+      setFormContractDailyHoursFormatted(formatMinutesToHoursAndMinutes(minutes));
+    } else if (sched && calc.workedMinutes > 0) {
+      setFormContractDailyHours(calc.dailyHours);
+      setFormContractDailyHoursFormatted(calc.dailyHoursFormatted);
+      setFormContractDailyMinutes(calc.workedMinutes);
     } else {
       setFormContractDailyHours(6);
+      setFormContractDailyHoursFormatted('6h 00min');
+      setFormContractDailyMinutes(360);
     }
-    setFormBaseSalary(user.baseSalary !== undefined ? user.baseSalary : 1200);
+
+    setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
     setFormCompany(user.company || 'GADAL - Gestão e Apoio');
   };
 
@@ -406,6 +440,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPixKey('');
     setFormContractSchedule('');
     setFormContractDailyHours(6);
+    setFormContractDailyHoursFormatted('6h 00min');
+    setFormContractDailyMinutes(360);
     setFormBaseSalary(1200);
     setFormCompany('GADAL - Gestão e Apoio');
     setIsNewUserModalOpen(true);
@@ -468,8 +504,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       ? (formActivities && formActivities.length >= 8 ? formActivities : ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
       : formActivities;
 
-    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Number(formBaseSalary) : 1200;
-    const parsedDailyHours = formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours)) && Number(formContractDailyHours) > 0 ? Number(formContractDailyHours) : 6;
+    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : 1200;
+    
+    // Resolve precise minutes and formatted daily hours string
+    let resolvedMinutes = formContractDailyMinutes > 0 ? formContractDailyMinutes : 360;
+    if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
+      resolvedMinutes = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
+    } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
+      resolvedMinutes = parseHoursAndMinutesStringToMinutes(Number(formContractDailyHours));
+    }
+    const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
+    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
 
     const updatedUser: UserProfile = {
       id: targetId,
@@ -488,7 +533,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
       contractSchedule: formContractSchedule.trim() || undefined,
-      contractDailyHours: parsedDailyHours,
+      contractDailyHours: decimalHours,
+      contractDailyMinutes: resolvedMinutes,
+      contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
       updatedAt: new Date().toISOString(),
@@ -1166,7 +1213,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
                               <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
-                              <span>Horário: <strong className="text-slate-900">{user.contractSchedule || 'Conforme escala'}</strong> ({user.contractDailyHours || 6}h/dia)</span>
+                              <span>
+                                Horário: <strong className="text-slate-900">{user.contractSchedule || 'Conforme escala'}</strong> ({user.contractDailyHoursFormatted || (user.contractDailyHours ? `${user.contractDailyHours}h` : '6h 00min')}/dia)
+                              </span>
                             </div>
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
@@ -1885,9 +1934,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={formBaseSalary}
-                      onChange={(e) => setFormBaseSalary(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="Ex: 1200.00"
+                      onChange={(e) => setFormBaseSalary(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                      placeholder="Ex: 1200.00 (ou 0.00)"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
@@ -1898,44 +1948,57 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span>Horário Contratual Padrão (Livre digitação):</span>
+                      <span>Horário Contratual (1 ou 2 turnos com almoço):</span>
                     </label>
                     <input
                       type="text"
                       value={formContractSchedule}
                       onChange={(e) => handleScheduleInputChange(e.target.value)}
-                      placeholder="Ex: 11:40 - 17:40 ou 08:00 - 12:00 / 13:00 - 17:00"
+                      placeholder="Ex: 11:40 - 17:40 ou 07:30 - 11:30 / 13:00 - 17:42"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Detecta automaticamente turnos divididos (ex: 07:30 - 11:30 / 13:00 - 17:42)
+                    </span>
                   </div>
 
                   <div>
-                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
-                      Horas Diárias:
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center justify-between">
+                      <span>Carga Diária:</span>
+                      <span className="text-[10px] font-mono text-indigo-600 font-extrabold">
+                        {formContractDailyMinutes} min
+                      </span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      value={formContractDailyHours}
-                      onChange={(e) => setFormContractDailyHours(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="6"
+                      type="text"
+                      value={formContractDailyHoursFormatted}
+                      onChange={(e) => handleDailyHoursChange(e.target.value)}
+                      placeholder="Ex: 8h 42min ou 6h 00min"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Formato Xh YYmin ou horas
+                    </span>
                   </div>
                 </div>
 
                 {/* Dynamic Calculation Helper Card */}
                 {scheduleCalculation.shiftsCount > 0 && (
-                  <div className="p-2.5 bg-indigo-100/70 border border-indigo-300/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-indigo-950">
-                    <div className="flex items-center space-x-1.5">
+                  <div className="p-3 bg-indigo-50/90 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-indigo-950">
+                    <div className="flex items-center space-x-2">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span className="font-bold">{scheduleCalculation.summary}</span>
+                      <span className="font-extrabold">{scheduleCalculation.summary}</span>
                     </div>
-                    {scheduleCalculation.lunchBreakMinutes > 0 && (
-                      <span className="text-[10px] bg-indigo-200/90 text-indigo-900 font-extrabold px-2 py-0.5 rounded-full border border-indigo-300 self-start sm:self-auto">
-                        Intervalo de Refeição Descontado
+                    <div className="flex items-center space-x-1.5 self-start sm:self-auto shrink-0">
+                      <span className="text-[10px] bg-white text-indigo-900 font-mono font-bold px-2 py-0.5 rounded-md border border-indigo-200">
+                        {scheduleCalculation.workedMinutes} min úteis
                       </span>
-                    )}
+                      {scheduleCalculation.lunchBreakMinutes > 0 && (
+                        <span className="text-[10px] bg-amber-100 text-amber-900 font-extrabold px-2 py-0.5 rounded-full border border-amber-300">
+                          Almoço Descontado
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

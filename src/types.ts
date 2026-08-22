@@ -124,6 +124,8 @@ export interface PontoMonthClosing {
   baseSalary: number; // default R$ 1200
   divisorDays: number; // default 30
   contractDailyHours: number; // default 6
+  contractDailyMinutes?: number; // e.g. 522 (8h 42min)
+  contractDailyHoursFormatted?: string; // e.g. "8h 42min"
   contractSchedule: string; // default "11:40 - 17:40"
   companyName: string; // default "GADAL - Gestão e Apoio"
   institutionName: string; // default "Instituto Educacional Crescer"
@@ -166,8 +168,10 @@ export interface UserProfile {
   canManageStudents?: boolean;
   canMarkAttendance?: boolean;
   pixKey?: string; // Chave PIX (CPF, Telefone, E-mail ou Aleatória)
-  contractSchedule?: string; // Horário contratual (ex: "11:40 - 17:40")
-  contractDailyHours?: number; // Horas diárias contratuais (ex: 6)
+  contractSchedule?: string; // Horário contratual (ex: "11:40 - 17:40" ou "07:30 - 11:30 / 13:00 - 17:42")
+  contractDailyHours?: number; // Horas diárias contratuais em decimal (ex: 8.7 ou 6)
+  contractDailyMinutes?: number; // Horas diárias em minutos totais exatos (ex: 522)
+  contractDailyHoursFormatted?: string; // Formato amigável (ex: "8h 42min" ou "6h 00min")
   baseSalary?: number; // Bolsa Auxílio Base (ex: 1200)
   company?: string; // Empresa conveniada (ex: "GADAL")
   updatedAt?: string;

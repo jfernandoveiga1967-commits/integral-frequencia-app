@@ -60,13 +60,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    const pingPromise = getDocFromServer(doc(db, '_connection_test', 'ping'));
+    const pingPromise = getDocFromServer(doc(db, 'test', 'connection'));
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timeout')), 3500)
+      setTimeout(() => reject(new Error('Connection timeout')), 3000)
     );
     await Promise.race([pingPromise, timeoutPromise]);
     return true;
-  } catch {
+  } catch (error) {
+    // Offline or connection in progress - Firestore will continue working in offline cache mode
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.info('Firestore is operating in offline mode.');
+    }
     return false;
   }
 }
@@ -226,6 +230,13 @@ export function subscribeUsers(
             allowedClassIds: assignedTurmas,
             canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
+            pixKey: data.pixKey || data.phone || undefined,
+            contractSchedule: data.contractSchedule || undefined,
+            contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : 6,
+            contractDailyMinutes: data.contractDailyMinutes !== undefined ? Number(data.contractDailyMinutes) : undefined,
+            contractDailyHoursFormatted: data.contractDailyHoursFormatted || undefined,
+            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : 1200,
+            company: data.company || 'GADAL - Gestão e Apoio',
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
 
@@ -302,7 +313,14 @@ export async function saveUserToFirestore(user: UserProfile) {
       allowedClassIds: assignedTurmas,
       canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
       canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
-      updatedAt: new Date().toISOString(),
+      pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
+      contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : '',
+      contractDailyHours: user.contractDailyHours !== undefined ? Number(user.contractDailyHours) : 6,
+      contractDailyMinutes: user.contractDailyMinutes !== undefined ? Number(user.contractDailyMinutes) : null,
+      contractDailyHoursFormatted: user.contractDailyHoursFormatted ? user.contractDailyHoursFormatted.trim() : null,
+      baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : 1200,
+      company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
+      updatedAt: user.updatedAt || new Date().toISOString(),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
@@ -821,9 +839,11 @@ export function subscribePontoClosings(callback: (closings: PontoMonthClosing[])
             monthKey: data.monthKey,
             year: data.year || Number(data.monthKey.split('-')[0]),
             month: data.month || Number(data.monthKey.split('-')[1]),
-            baseSalary: Number(data.baseSalary) || 1200,
+            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : 1200,
             divisorDays: Number(data.divisorDays) || 30,
             contractDailyHours: Number(data.contractDailyHours) || 6,
+            contractDailyMinutes: data.contractDailyMinutes !== undefined ? Number(data.contractDailyMinutes) : undefined,
+            contractDailyHoursFormatted: data.contractDailyHoursFormatted || undefined,
             contractSchedule: data.contractSchedule || '11:40 - 17:40',
             companyName: data.companyName || 'GADAL - Gestão e Apoio',
             institutionName: data.institutionName || 'Instituto Educacional Crescer',
@@ -871,9 +891,11 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
         monthKey: closing.monthKey,
         year: closing.year,
         month: closing.month,
-        baseSalary: Number(closing.baseSalary) || 1200,
+        baseSalary: closing.baseSalary !== undefined && closing.baseSalary !== null && !isNaN(Number(closing.baseSalary)) ? Number(closing.baseSalary) : 1200,
         divisorDays: Number(closing.divisorDays) || 30,
         contractDailyHours: Number(closing.contractDailyHours) || 6,
+        contractDailyMinutes: closing.contractDailyMinutes !== undefined ? Number(closing.contractDailyMinutes) : null,
+        contractDailyHoursFormatted: closing.contractDailyHoursFormatted || null,
         contractSchedule: closing.contractSchedule || '11:40 - 17:40',
         companyName: closing.companyName || 'GADAL - Gestão e Apoio',
         institutionName: closing.institutionName || 'Instituto Educacional Crescer',

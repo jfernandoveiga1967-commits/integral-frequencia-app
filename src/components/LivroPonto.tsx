@@ -55,6 +55,7 @@ import {
 import {
   parseTimeToMinutes,
   formatMinutesToTime,
+  formatMinutesToHoursAndMinutes,
   parseContractSchedule,
   applyTolerance,
   calculateDayWorkedMinutes,
@@ -171,13 +172,38 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
   const isMonthClosed = !!closingRecord?.isClosed;
 
-  // Month Financial Settings (Editable by admin when not closed)
-  const contractSchedule = targetUser?.contractSchedule || '11:40 - 17:40';
-  const contractDailyHours = targetUser?.contractDailyHours || 6;
-  const baseSalary = targetUser?.baseSalary || 1200;
-  const companyName = targetUser?.company || 'GADAL - Gestão e Apoio';
+  // Month Financial Settings (From closed snapshot if closed, or live targetUser profile)
+  const contractSchedule = isMonthClosed && closingRecord?.contractSchedule
+    ? closingRecord.contractSchedule
+    : (targetUser?.contractSchedule || '11:40 - 17:40');
+
+  const contractDailyHours = isMonthClosed && closingRecord?.contractDailyHours !== undefined
+    ? Number(closingRecord.contractDailyHours)
+    : (targetUser?.contractDailyHours !== undefined ? Number(targetUser.contractDailyHours) : 6);
+
+  const contractDailyMinutes = isMonthClosed && closingRecord?.contractDailyMinutes !== undefined
+    ? Number(closingRecord.contractDailyMinutes)
+    : (targetUser?.contractDailyMinutes !== undefined
+        ? Number(targetUser.contractDailyMinutes)
+        : (targetUser?.contractDailyHours !== undefined ? Math.round(Number(targetUser.contractDailyHours) * 60) : 360));
+
+  const contractDailyHoursFormatted = isMonthClosed && closingRecord?.contractDailyHoursFormatted
+    ? closingRecord.contractDailyHoursFormatted
+    : (targetUser?.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(contractDailyMinutes));
+
+  const baseSalary = isMonthClosed && closingRecord?.baseSalary !== undefined && closingRecord?.baseSalary !== null
+    ? Number(closingRecord.baseSalary)
+    : (targetUser?.baseSalary !== undefined && targetUser?.baseSalary !== null ? Number(targetUser.baseSalary) : 1200);
+
+  const companyName = isMonthClosed && closingRecord?.companyName
+    ? closingRecord.companyName
+    : (targetUser?.company || 'GADAL - Gestão e Apoio');
+
   const institutionName = 'Instituto Educacional Crescer - Colégio Crescer';
-  const pixKey = targetUser?.pixKey || targetUser?.phone || 'Não informada';
+
+  const pixKey = isMonthClosed && closingRecord?.pixKey
+    ? closingRecord.pixKey
+    : (targetUser?.pixKey || targetUser?.phone || 'Não informada');
 
   // Manual financial adjustments states (loaded from closing record or local state)
   const [manualAddition, setManualAddition] = useState<number>(() => closingRecord?.manualAddition || 0);
@@ -259,6 +285,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       baseSalary,
       divisorDays: 30,
       contractDailyHours,
+      contractDailyMinutes,
+      contractDailyHoursFormatted,
       contractSchedule,
       manualAddition,
       manualDiscount,
@@ -270,6 +298,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     selectedMonth,
     baseSalary,
     contractDailyHours,
+    contractDailyMinutes,
+    contractDailyHoursFormatted,
     contractSchedule,
     manualAddition,
     manualDiscount,
@@ -408,6 +438,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       baseSalary,
       divisorDays: 30,
       contractDailyHours,
+      contractDailyMinutes,
+      contractDailyHoursFormatted,
       contractSchedule,
       companyName,
       institutionName,
@@ -448,6 +480,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       baseSalary,
       divisorDays: 30,
       contractDailyHours,
+      contractDailyMinutes,
+      contractDailyHoursFormatted,
       contractSchedule,
       companyName,
       institutionName,
@@ -497,6 +531,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       baseSalary,
       divisorDays: 30,
       contractDailyHours,
+      contractDailyMinutes,
+      contractDailyHoursFormatted,
       contractSchedule,
       companyName,
       institutionName,
@@ -695,19 +731,20 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </button>
           </div>
 
-          {/* Collaborator Selector (Admin or Locked for standard user) */}
-          <div className="md:col-span-2 flex flex-col sm:flex-row items-center gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
-            <div className="flex items-center space-x-2 shrink-0 text-slate-400 font-medium text-xs">
-              <User className="w-4 h-4 text-indigo-400" />
-              <span>Colaborador(a):</span>
-            </div>
+          {/* Collaborator Selector (Admin or Locked for standard user) & Badges */}
+          <div className="md:col-span-2 flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+            {/* Left side: Colaborador selector */}
+            <div className="flex-1 flex items-center space-x-2.5 min-w-0">
+              <div className="flex items-center space-x-1.5 shrink-0 text-slate-400 font-medium text-xs">
+                <User className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="hidden sm:inline">Colaborador(a):</span>
+              </div>
 
-            {isAdmin ? (
-              <div className="flex-1 w-full flex items-center space-x-2">
+              {isAdmin ? (
                 <select
                   value={selectedUserId}
                   onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-semibold rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer truncate"
                 >
                   {availableUsers.map((u) => (
                     <option key={u.id} value={u.id}>
@@ -715,32 +752,32 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     </option>
                   ))}
                 </select>
-
-                <div className="shrink-0">
-                  <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 font-mono">
-                    PIX: {targetUser?.pixKey || targetUser?.phone || 'Pendente'}
+              ) : (
+                <div className="flex items-center space-x-2 text-slate-200 text-sm font-bold truncate">
+                  <span className="truncate">{targetUser?.name || currentUser?.name}</span>
+                  <span className="text-xs text-slate-400 font-normal shrink-0">
+                    ({targetUser?.cargoLabel || 'Estagiária / Monitora'})
                   </span>
                 </div>
-              </div>
-            ) : (
-              <div className="flex-1 flex items-center justify-between text-slate-200 text-sm font-bold">
-                <span>{targetUser?.name || currentUser?.name}</span>
-                <span className="text-xs text-slate-400 font-normal">
-                  ({targetUser?.cargoLabel || 'Estagiária / Monitora'})
-                </span>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Month Status Badge */}
-            <div className="shrink-0">
+            {/* Right side: PIX Key & Status Badges (Cleanly separated without any overlap) */}
+            <div className="flex items-center flex-wrap gap-2.5 shrink-0 pt-2 xl:pt-0 border-t xl:border-t-0 border-slate-800/80">
+              <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs shadow-2xs">
+                <span className="text-[10px] text-slate-500 font-sans font-bold uppercase tracking-wider">PIX:</span>
+                <span className="font-semibold text-slate-200">{targetUser?.pixKey || targetUser?.phone || 'Pendente'}</span>
+              </div>
+
+              {/* Month Status Badge */}
               {isMonthClosed ? (
-                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  <Lock className="w-3 h-3 text-emerald-400" />
+                <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shadow-2xs">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>FECHADO / PAGO</span>
                 </span>
               ) : (
-                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  <Clock className="w-3 h-3 text-amber-400" />
+                <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 whitespace-nowrap shadow-2xs">
+                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>EM ABERTO</span>
                 </span>
               )}
@@ -773,7 +810,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
             <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
               <span className="text-slate-400 block font-medium">Horário Contratual:</span>
-              <strong className="text-slate-800 font-bold">{contractSchedule} ({contractDailyHours}h/dia)</strong>
+              <strong className="text-slate-800 font-bold">{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
             </div>
             <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
               <span className="text-slate-400 block font-medium">Bolsa Auxílio Base:</span>
@@ -1262,7 +1299,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-500 uppercase font-semibold block">Horário Contratual:</span>
-                  <strong className="text-xs text-slate-900">{contractSchedule} ({contractDailyHours}h/dia)</strong>
+                  <strong className="text-xs text-slate-900">{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-500 uppercase font-semibold block">Forma de Pagamento / PIX:</span>
@@ -1447,7 +1484,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <span className="text-slate-500">Função:</span> <strong>{targetUser?.cargoLabel || 'Estagiária'}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500">Horário:</span> <strong>{contractSchedule}</strong>
+                  <span className="text-slate-500">Horário:</span> <strong>{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Empresa:</span> <strong>{companyName}</strong>

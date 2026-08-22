@@ -25,14 +25,65 @@ export function formatMinutesToTime(totalMinutes: number): string {
 }
 
 /**
+ * Converts minutes to friendly hours and minutes format (e.g. 522 -> "8h 42min", 360 -> "6h 00min")
+ */
+export function formatMinutesToHoursAndMinutes(totalMinutes: number): string {
+  if (isNaN(totalMinutes) || totalMinutes <= 0) return '0h 00min';
+  const h = Math.floor(totalMinutes / 60);
+  const m = Math.floor(totalMinutes % 60);
+  return `${h}h ${String(m).padStart(2, '0')}min`;
+}
+
+/**
+ * Parses user input string or number representing hours/minutes into exact total minutes.
+ * Supports: "8h 42min", "8h42min", "8h 42", "8:42", "8.7", "8,7", "6h", 6, 522
+ */
+export function parseHoursAndMinutesStringToMinutes(str?: string | number): number {
+  if (typeof str === 'number') {
+    if (isNaN(str) || str <= 0) return 360;
+    if (str < 24) return Math.round(str * 60);
+    return Math.round(str);
+  }
+  if (!str || !String(str).trim()) return 360;
+  const clean = String(str).trim().toLowerCase();
+
+  // Match "8h 42min", "8h 42", "8h42", "8h"
+  const hmMatch = clean.match(/^(\d+)\s*h\s*(\d+)?/);
+  if (hmMatch) {
+    const h = parseInt(hmMatch[1], 10);
+    const m = hmMatch[2] ? parseInt(hmMatch[2], 10) : 0;
+    return (h * 60) + m;
+  }
+
+  // Match "08:42"
+  const colonMatch = clean.match(/^(\d+):(\d+)/);
+  if (colonMatch) {
+    const h = parseInt(colonMatch[1], 10);
+    const m = parseInt(colonMatch[2], 10);
+    return (h * 60) + m;
+  }
+
+  // Match decimals "8.7" or "8,7" or "6"
+  const numStr = clean.replace(',', '.').replace(/[^\d.]/g, '');
+  const val = parseFloat(numStr);
+  if (!isNaN(val) && val > 0) {
+    if (val < 24) return Math.round(val * 60);
+    return Math.round(val);
+  }
+
+  return 360;
+}
+
+/**
  * Dynamically calculates contractual daily hours from a schedule string.
  * Supports:
- * - Single shift: "11:40 - 17:40" (6h), "08:00 - 14:00" (6h)
- * - Two shifts with lunch interval: "08:00 - 12:00 / 13:00 - 17:00" (4h + 4h = 8h, 1h almoço descontado)
- * - Free text variations: "08:00 às 12:00 e 13:30 às 17:30" (4h + 4h = 8h, 1h30 almoço descontado)
+ * - Single shift: "11:40 - 17:40" (6h 00min), "08:00 - 14:00" (6h 00min)
+ * - Two shifts with lunch interval: "07:30 - 11:30 / 13:00 - 17:42" (4h 00min + 4h 42min = 8h 42min, 1h30 almoço descontado)
+ * - Free text variations: "08:00 às 12:00 e 13:30 às 17:30" (4h + 4h = 8h 00min, 1h30 almoço descontado)
  */
 export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
   dailyHours: number;
+  dailyHoursFormatted: string;
   workedMinutes: number;
   lunchBreakMinutes: number;
   shiftsCount: number;
@@ -41,6 +92,7 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
   if (!scheduleStr || !scheduleStr.trim()) {
     return {
       dailyHours: 6,
+      dailyHoursFormatted: '6h 00min',
       workedMinutes: 360,
       lunchBreakMinutes: 0,
       shiftsCount: 0,
@@ -48,13 +100,14 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
     };
   }
 
-  // Extract all time patterns like "08:00", "8:00", "11:40", "17:40"
+  // Extract all time patterns like "08:00", "8:00", "07:30", "11:30", "13:00", "17:42"
   const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
   const matches = Array.from(scheduleStr.matchAll(timeRegex));
 
   if (matches.length < 2) {
     return {
       dailyHours: 6,
+      dailyHoursFormatted: '6h 00min',
       workedMinutes: 360,
       lunchBreakMinutes: 0,
       shiftsCount: 0,
@@ -71,34 +124,38 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
   let totalWorkedMinutes = 0;
   let totalLunchBreakMinutes = 0;
   let shiftsCount = 0;
+  let shift1Minutes = 0;
+  let shift2Minutes = 0;
 
   if (timesInMinutes.length >= 4) {
     // 2 shifts: Turno 1 (times[0] -> times[1]), Almoço (times[1] -> times[2]), Turno 2 (times[2] -> times[3])
-    const shift1 = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
-    const lunch = Math.max(0, timesInMinutes[2] - timesInMinutes[1]);
-    const shift2 = Math.max(0, timesInMinutes[3] - timesInMinutes[2]);
+    shift1Minutes = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
+    totalLunchBreakMinutes = Math.max(0, timesInMinutes[2] - timesInMinutes[1]);
+    shift2Minutes = Math.max(0, timesInMinutes[3] - timesInMinutes[2]);
 
-    totalWorkedMinutes = shift1 + shift2;
-    totalLunchBreakMinutes = lunch;
+    totalWorkedMinutes = shift1Minutes + shift2Minutes;
     shiftsCount = 2;
   } else if (timesInMinutes.length >= 2) {
     // 1 shift: times[0] -> times[1]
-    totalWorkedMinutes = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
+    shift1Minutes = Math.max(0, timesInMinutes[1] - timesInMinutes[0]);
+    totalWorkedMinutes = shift1Minutes;
     shiftsCount = 1;
   }
 
   const dailyHours = totalWorkedMinutes > 0 ? Number((totalWorkedMinutes / 60).toFixed(2)) : 6;
+  const dailyHoursFormatted = formatMinutesToHoursAndMinutes(totalWorkedMinutes || 360);
 
   let summary = '';
   if (shiftsCount === 2 && totalLunchBreakMinutes > 0) {
     const lunchFormatted = formatMinutesToTime(totalLunchBreakMinutes);
-    summary = `Carga Calculada: ${dailyHours}h (${timesInMinutes.length >= 4 ? `${formatMinutesToTime(timesInMinutes[1] - timesInMinutes[0])} + ${formatMinutesToTime(timesInMinutes[3] - timesInMinutes[2])}` : ''} • ${lunchFormatted} de almoço descontado)`;
+    summary = `Carga Calculada: ${dailyHoursFormatted} (${formatMinutesToHoursAndMinutes(shift1Minutes)} + ${formatMinutesToHoursAndMinutes(shift2Minutes)} • ${lunchFormatted} de almoço descontado)`;
   } else if (shiftsCount === 1) {
-    summary = `Carga Calculada: ${dailyHours}h diárias`;
+    summary = `Carga Calculada: ${dailyHoursFormatted} diárias`;
   }
 
   return {
     dailyHours,
+    dailyHoursFormatted,
     workedMinutes: totalWorkedMinutes,
     lunchBreakMinutes: totalLunchBreakMinutes,
     shiftsCount,
@@ -107,7 +164,7 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
 }
 
 /**
- * Parses contract schedule string like "11:40 - 17:40", "08:00 - 12:00 / 13:00 - 17:00"
+ * Parses contract schedule string like "11:40 - 17:40", "07:30 - 11:30 / 13:00 - 17:42"
  */
 export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
   start: string;
@@ -115,19 +172,21 @@ export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
   startMinutes: number;
   endMinutes: number;
   dailyHours: number;
+  dailyHoursFormatted: string;
+  workedMinutes: number;
   lunchBreakMinutes: number;
 } {
   const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
   const matches = Array.from(scheduleStr.matchAll(timeRegex));
 
-  const { dailyHours, lunchBreakMinutes } = calculateDailyHoursFromSchedule(scheduleStr);
+  const { dailyHours, dailyHoursFormatted, workedMinutes, lunchBreakMinutes } = calculateDailyHoursFromSchedule(scheduleStr);
 
   if (matches.length >= 4) {
     const start = matches[0][0];
     const end = matches[3][0];
     const startMinutes = (parseInt(matches[0][1], 10) * 60) + parseInt(matches[0][2], 10);
     const endMinutes = (parseInt(matches[3][1], 10) * 60) + parseInt(matches[3][2], 10);
-    return { start, end, startMinutes, endMinutes, dailyHours, lunchBreakMinutes };
+    return { start, end, startMinutes, endMinutes, dailyHours, dailyHoursFormatted, workedMinutes, lunchBreakMinutes };
   }
 
   if (matches.length >= 2) {
@@ -135,7 +194,7 @@ export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
     const end = matches[1][0];
     const startMinutes = (parseInt(matches[0][1], 10) * 60) + parseInt(matches[0][2], 10);
     const endMinutes = (parseInt(matches[1][1], 10) * 60) + parseInt(matches[1][2], 10);
-    return { start, end, startMinutes, endMinutes, dailyHours, lunchBreakMinutes };
+    return { start, end, startMinutes, endMinutes, dailyHours, dailyHoursFormatted, workedMinutes, lunchBreakMinutes };
   }
 
   return {
@@ -144,6 +203,8 @@ export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
     startMinutes: 700,
     endMinutes: 1060,
     dailyHours: 6,
+    dailyHoursFormatted: '6h 00min',
+    workedMinutes: 360,
     lunchBreakMinutes: 0,
   };
 }
@@ -192,7 +253,8 @@ export function applyTolerance(
 export function calculateDayWorkedMinutes(
   record: PontoRecord,
   contractSchedule = '11:40 - 17:40',
-  toleranceMinutes = 5
+  toleranceMinutes = 5,
+  explicitDailyMinutes?: number
 ): {
   workedMinutes: number;
   overtimeMinutes: number;
@@ -210,12 +272,16 @@ export function calculateDayWorkedMinutes(
     return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
   }
 
+  const { startMinutes: expStart, endMinutes: expEnd, dailyHours, dailyHoursFormatted, workedMinutes: parsedSchedMinutes } = parseContractSchedule(contractSchedule);
+  const expectedDailyMinutes = (explicitDailyMinutes !== undefined && explicitDailyMinutes > 0)
+    ? explicitDailyMinutes
+    : (parsedSchedMinutes > 0 ? parsedSchedMinutes : Math.round(dailyHours * 60));
+
   if (record.status === 'falta_injustificada') {
-    const { dailyHours } = parseContractSchedule(contractSchedule);
     return {
       workedMinutes: 0,
       overtimeMinutes: 0,
-      missingMinutes: Math.round(dailyHours * 60),
+      missingMinutes: expectedDailyMinutes,
       effectiveSummary: 'Falta Injustificada',
     };
   }
@@ -224,9 +290,6 @@ export function calculateDayWorkedMinutes(
   const s1 = parseTimeToMinutes(record.exit1);
   const e2 = parseTimeToMinutes(record.entry2);
   const s2 = parseTimeToMinutes(record.exit2);
-
-  const { startMinutes: expStart, endMinutes: expEnd, dailyHours } = parseContractSchedule(contractSchedule);
-  const expectedDailyMinutes = Math.round(dailyHours * 60);
 
   let period1 = 0;
   let period2 = 0;
@@ -262,7 +325,7 @@ export function calculateDayWorkedMinutes(
     workedMinutes: totalWorked,
     overtimeMinutes,
     missingMinutes,
-    effectiveSummary: `${formatMinutesToTime(totalWorked)} (${dailyHours}h contratual)`,
+    effectiveSummary: `${formatMinutesToTime(totalWorked)} (${dailyHoursFormatted || formatMinutesToHoursAndMinutes(expectedDailyMinutes)} contratual)`,
   };
 }
 
@@ -277,6 +340,8 @@ export function calculateMonthlyPontoFinancials({
   baseSalary = 1200,
   divisorDays = 30,
   contractDailyHours = 6,
+  contractDailyMinutes,
+  contractDailyHoursFormatted,
   contractSchedule = '11:40 - 17:40',
   manualAddition = 0,
   manualDiscount = 0,
@@ -288,6 +353,8 @@ export function calculateMonthlyPontoFinancials({
   baseSalary?: number;
   divisorDays?: number;
   contractDailyHours?: number;
+  contractDailyMinutes?: number;
+  contractDailyHoursFormatted?: string;
   contractSchedule?: string;
   manualAddition?: number;
   manualDiscount?: number;
@@ -295,6 +362,8 @@ export function calculateMonthlyPontoFinancials({
   baseSalary: number;
   divisorDays: number;
   contractDailyHours: number;
+  contractDailyMinutes: number;
+  contractDailyHoursFormatted: string;
   diariaRate: number;
   hourlyRate: number;
   minuteRate: number;
@@ -302,6 +371,7 @@ export function calculateMonthlyPontoFinancials({
   unjustifiedAbsencesDiscount: number;
   totalExtraMinutes: number;
   extraHoursDecimal: number;
+  extraHoursFormatted: string;
   extraHoursAmount: number;
   paidHolidaysCount: number;
   paidRecessDaysCount: number;
@@ -310,13 +380,21 @@ export function calculateMonthlyPontoFinancials({
   manualDiscount: number;
   netTotal: number;
 } {
-  const safeBase = Number(baseSalary) > 0 ? Number(baseSalary) : 1200;
+  const safeBase = (baseSalary !== undefined && baseSalary !== null && !isNaN(Number(baseSalary)))
+    ? Math.max(0, Number(baseSalary))
+    : 1200;
   const safeDivisor = Number(divisorDays) > 0 ? Number(divisorDays) : 30;
-  const safeHours = Number(contractDailyHours) > 0 ? Number(contractDailyHours) : 6;
+
+  const safeMinutes = (contractDailyMinutes !== undefined && Number(contractDailyMinutes) > 0)
+    ? Number(contractDailyMinutes)
+    : (Number(contractDailyHours) > 0 ? Math.round(Number(contractDailyHours) * 60) : 360);
+
+  const safeHours = safeMinutes / 60;
+  const formattedContractHours = contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(safeMinutes);
 
   const diariaRate = safeBase / safeDivisor; // e.g. 1200 / 30 = 40.00
-  const hourlyRate = diariaRate / safeHours; // e.g. 40 / 6 = 6.6667
-  const minuteRate = hourlyRate / 60;
+  const minuteRate = diariaRate / safeMinutes; // Exact minute rate without decimal hour approximations
+  const hourlyRate = minuteRate * 60;
 
   let unjustifiedAbsencesCount = 0;
   let totalExtraMinutes = 0;
@@ -340,13 +418,14 @@ export function calculateMonthlyPontoFinancials({
       if (rec.entry1 || rec.entry2) {
         workedDaysCount++;
       }
-      const { overtimeMinutes } = calculateDayWorkedMinutes(rec, contractSchedule);
+      const { overtimeMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
       totalExtraMinutes += overtimeMinutes;
     }
   });
 
   const unjustifiedAbsencesDiscount = unjustifiedAbsencesCount * diariaRate;
   const extraHoursDecimal = totalExtraMinutes / 60;
+  const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
   const extraHoursAmount = totalExtraMinutes * minuteRate;
 
   const netTotal = Math.max(
@@ -361,7 +440,9 @@ export function calculateMonthlyPontoFinancials({
   return {
     baseSalary: safeBase,
     divisorDays: safeDivisor,
-    contractDailyHours: safeHours,
+    contractDailyHours: Number(safeHours.toFixed(2)),
+    contractDailyMinutes: safeMinutes,
+    contractDailyHoursFormatted: formattedContractHours,
     diariaRate,
     hourlyRate,
     minuteRate,
@@ -369,6 +450,7 @@ export function calculateMonthlyPontoFinancials({
     unjustifiedAbsencesDiscount,
     totalExtraMinutes,
     extraHoursDecimal,
+    extraHoursFormatted,
     extraHoursAmount,
     paidHolidaysCount,
     paidRecessDaysCount,
