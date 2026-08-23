@@ -38,7 +38,9 @@ import {
   Flame,
   Flag,
   Bike,
+  Moon,
 } from 'lucide-react';
+import { processMarkdownAndIconsForPDF } from '../utils/markdownUtils';
 
 interface ActivityBadgeProps {
   activity: ActivityType;
@@ -162,10 +164,29 @@ export const activityConfig: Record<
     icon: <HeartHandshake className="w-4 h-4" />,
     equipmentHint: 'Recepção, acolhida e integração dos alunos',
   },
+  Soninho: {
+    name: 'Soninho',
+    bg: 'bg-indigo-50 hover:bg-indigo-100',
+    border: 'border-indigo-200',
+    text: 'text-indigo-800',
+    badgeBg: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+    icon: <Moon className="w-4 h-4" />,
+    equipmentHint: 'Momento de repouso, relaxamento e sono',
+  },
+  Sono: {
+    name: 'Soninho',
+    bg: 'bg-indigo-50 hover:bg-indigo-100',
+    border: 'border-indigo-200',
+    text: 'text-indigo-800',
+    badgeBg: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+    icon: <Moon className="w-4 h-4" />,
+    equipmentHint: 'Momento de repouso, relaxamento e sono',
+  },
 };
 
 export const BASE_AVAILABLE_ICONS = [
   { id: 'HeartHandshake', label: 'Acolhimento / Integração' },
+  { id: 'Moon', label: 'Soninho / Sono / Descanso' },
   { id: 'Waves', label: 'Natação / Piscina / Água' },
   { id: 'Sparkles', label: 'Balé / Brilho / Criativo' },
   { id: 'Music', label: 'Dança / Músicas / Ritmo' },
@@ -194,6 +215,12 @@ export function detectIconFromActivityName(name: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
+  if (clean.includes('soninho') || clean.includes('sono') || clean.includes('descans') || clean.includes('sonec') || clean.includes('repous')) {
+    return 'Moon';
+  }
+  if (clean.includes('acolh') || clean.includes('recepc') || clean.includes('integrac') || clean.includes('boas vindas') || clean.includes('cuid') || clean.includes('afeto') || clean.includes('emocion') || clean.includes('socioemoc')) {
+    return 'HeartHandshake';
+  }
   if (clean.includes('natac') || clean.includes('piscina') || clean.includes('aqua') || clean.includes('hidro')) {
     return 'Waves';
   }
@@ -239,9 +266,6 @@ export function detectIconFromActivityName(name: string): string {
   if (clean.includes('lanche') || clean.includes('merend') || clean.includes('cafe') || clean.includes('hidrat')) {
     return 'Coffee';
   }
-  if (clean.includes('acolh') || clean.includes('recepc') || clean.includes('integrac') || clean.includes('boas vindas') || clean.includes('cuid') || clean.includes('afeto') || clean.includes('emocion') || clean.includes('socioemoc')) {
-    return 'HeartHandshake';
-  }
   if (clean.includes('parquinh') || clean.includes('patio') || clean.includes('ar livre') || clean.includes('horta') || clean.includes('naturez') || clean.includes('bike') || clean.includes('patin')) {
     return 'Sun';
   }
@@ -256,6 +280,8 @@ export function renderActivityIcon(iconName?: string, className: string = 'w-4 h
   switch (iconName) {
     case 'HeartHandshake':
       return <HeartHandshake className={className} />;
+    case 'Moon':
+      return <Moon className={className} />;
     case 'HandHeart':
       return <HandHeart className={className} />;
     case 'Heart':
@@ -404,12 +430,16 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({
     equipmentHint: customEquipment || 'Material necessário para a atividade',
   };
 
+  const cleanLabel = processMarkdownAndIconsForPDF(activity)
+    .replace(/^(\p{Extended_Pictographic}|[⭐🤝🌙🍽️🥪☕💧🏊🩰💃🥋⚽🏆🤸🎪🎵♟️🎲🤖🎨✂️🎭📖📝🧼🚿🪥🌳🎈⏰])\s*/u, '')
+    .trim() || activity;
+
   return (
     <span
       className={`inline-flex items-center rounded-full border ${config.badgeBg} ${sizeClasses[size]} ${className}`}
     >
       {showIcon && <span className="flex items-center justify-center shrink-0">{iconNode}</span>}
-      <span className="truncate">{activity}</span>
+      <span className="truncate">{cleanLabel}</span>
     </span>
   );
 };

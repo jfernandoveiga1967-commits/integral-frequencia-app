@@ -45,6 +45,8 @@ import {
 import { findResponsibleCollaborator } from '../utils/whatsappUtils';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
 import { ActivityScheduleView } from './ActivityScheduleView';
+import { processMarkdownAndIconsForPDF } from '../utils/markdownUtils';
+import { PdfViewerModal, PDFPreviewModal } from './PdfViewerModal';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
@@ -214,6 +216,20 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   ]);
   const [pdfTargetActivity, setPdfTargetActivity] = useState<string>(activitiesList[0]?.id || 'Natação');
 
+  // PDF On-Screen Viewer State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    blobUrl: string | null;
+    filename: string;
+    title: string;
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    blobUrl: null,
+    filename: '',
+    title: '',
+  });
+
   // Toast feedback
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -254,7 +270,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
   const handleExportAllTurmasPDF = () => {
     try {
-      generateAllTurmasWeeklySchedulePDF({
+      const result = generateAllTurmasWeeklySchedulePDF({
         turmasList: sortedTurmas,
         schedules,
         activitiesList,
@@ -262,8 +278,17 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
         schoolYear: new Date().getFullYear(),
         selectedDays: pdfSelectedDays,
       });
+
+      setPdfPreviewState({
+        isOpen: true,
+        blobUrl: result.blobUrl,
+        filename: result.filename,
+        title: 'Grade Semanal Geral - Todas as Turmas',
+        onDownload: result.download,
+      });
+
       showToast(
-        `✓ PDF Geral da Grade Semanal gerado com sucesso para todas as ${sortedTurmas.length} turmas!`,
+        `✓ PDF Geral da Grade Semanal pronto para visualização e download!`,
         'success'
       );
     } catch (err) {
@@ -280,7 +305,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       }
 
       if (pdfReportType === 'weekly') {
-        generateWeeklySchedulePDF({
+        const result = generateWeeklySchedulePDF({
           turma: pdfTargetTurma,
           turmasList: sortedTurmas,
           schedules,
@@ -289,19 +314,30 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           schoolYear: new Date().getFullYear(),
           selectedDays: pdfSelectedDays,
         });
+
         const daysLabel = pdfSelectedDays.length === 5 
           ? 'Segunda a Sexta' 
           : pdfSelectedDays.map((d) => DAYS_OF_WEEK.find((x) => x.id === d)?.short).join(', ');
 
+        setPdfPreviewState({
+          isOpen: true,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: pdfTargetTurma === 'ALL'
+            ? `Grade Semanal Geral - Todas as Turmas (${daysLabel})`
+            : `Grade Semanal - ${pdfTargetTurma} (${daysLabel})`,
+          onDownload: result.download,
+        });
+
         showToast(
           pdfTargetTurma === 'ALL'
-            ? `✓ PDF da Grade de todas as ${sortedTurmas.length} turmas (${daysLabel}) gerado com sucesso!`
-            : `✓ PDF da Grade (${pdfTargetTurma} • ${daysLabel}) gerado com sucesso!`,
+            ? `✓ PDF da Grade de todas as ${sortedTurmas.length} turmas (${daysLabel}) pronto!`
+            : `✓ PDF da Grade (${pdfTargetTurma} • ${daysLabel}) pronto!`,
           'success'
         );
       } else if (pdfReportType === 'daily') {
         const targetTurma = pdfTargetTurma === 'ALL' ? selectedTurma : pdfTargetTurma;
-        generateDailyRoutinePDF({
+        const result = generateDailyRoutinePDF({
           turma: targetTurma,
           selectedDays: pdfSelectedDays,
           schedules,
@@ -312,20 +348,37 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           ? (DAYS_OF_WEEK.find((d) => d.id === pdfSelectedDays[0])?.label || '')
           : `${pdfSelectedDays.length} dias (${pdfSelectedDays.map((d) => DAYS_OF_WEEK.find((x) => x.id === d)?.short).join(', ')})`;
 
+        setPdfPreviewState({
+          isOpen: true,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `Rotina Diária - ${targetTurma} (${daysLabel})`,
+          onDownload: result.download,
+        });
+
         showToast(
-          `✓ PDF da Rotina Diária (${targetTurma} • ${daysLabel}) gerado com sucesso!`,
+          `✓ PDF da Rotina Diária (${targetTurma} • ${daysLabel}) pronto!`,
           'success'
         );
       } else if (pdfReportType === 'activity') {
-        generateActivitySchedulePDF({
+        const result = generateActivitySchedulePDF({
           activityName: pdfTargetActivity,
           schedules,
           activitiesList,
           users,
           schoolYear: new Date().getFullYear(),
         });
+
+        setPdfPreviewState({
+          isOpen: true,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `Grade de Horários - ${pdfTargetActivity}`,
+          onDownload: result.download,
+        });
+
         showToast(
-          `✓ PDF da Grade de Horários (${pdfTargetActivity}) gerado com sucesso!`,
+          `✓ PDF da Grade de Horários (${pdfTargetActivity}) pronto!`,
           'success'
         );
       }
@@ -1259,7 +1312,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                           {block.location && (
                             <div className="flex items-center space-x-1.5 text-[11px] text-slate-600 font-semibold bg-white/80 px-2 py-1 rounded-lg border border-slate-100">
                               <MapPin className="w-3 h-3 text-indigo-500 shrink-0" />
-                              <span className="truncate">{block.location}</span>
+                              <span className="truncate">{processMarkdownAndIconsForPDF(block.location)}</span>
                             </div>
                           )}
 
@@ -1270,7 +1323,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                                 <Info className="w-2.5 h-2.5" />
                                 <span>Orientações:</span>
                               </div>
-                              <p className="line-clamp-2">{block.guidelines}</p>
+                              <p className="line-clamp-2">{processMarkdownAndIconsForPDF(block.guidelines)}</p>
                             </div>
                           )}
 
@@ -2515,11 +2568,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
               </button>
               <button
                 type="button"
+                id="btn-confirm-export-pdf"
                 onClick={handleExecuteExportPdf}
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 transition-all cursor-pointer flex items-center space-x-2"
               >
-                <Download className="w-4 h-4" />
-                <span>Gerar e Baixar PDF</span>
+                <FileText className="w-4 h-4" />
+                <span>Gerar e Pré-visualizar PDF</span>
               </button>
             </div>
           </div>
@@ -2580,6 +2634,16 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           onUpdateUserPhone={onUpdateUserPhone}
         />
       )}
+
+      {/* On-screen PDF Preview Modal */}
+      <PDFPreviewModal
+        isOpen={pdfPreviewState.isOpen}
+        onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        blobUrl={pdfPreviewState.blobUrl}
+        filename={pdfPreviewState.filename}
+        title={pdfPreviewState.title}
+        onDownload={pdfPreviewState.onDownload}
+      />
     </div>
   );
 };

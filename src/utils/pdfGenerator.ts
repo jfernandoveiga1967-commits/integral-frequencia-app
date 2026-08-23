@@ -13,7 +13,18 @@ import {
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
-import { findAllResponsibleCollaborators } from './whatsappUtils';
+import { processMarkdownAndIconsForPDF } from './markdownUtils';
+import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
+
+export interface PDFGenerationResult {
+  doc: jsPDF;
+  blob: Blob;
+  blobUrl: string;
+  dataUri: string;
+  dataUrl: string;
+  filename: string;
+  download: () => void;
+}
 
 // Helper to format date string YYYY-MM-DD to DD/MM/YYYY
 function formatDate(dateStr: string): string {
@@ -85,37 +96,43 @@ function drawOfficialHeader(
   doc.setFillColor(79, 70, 229); // indigo-600
   doc.rect(0, 0, pageWidth, 3, 'F');
 
-  // Logo / Emblem Badge on the left
-  doc.setFillColor(79, 70, 229); // indigo-600
-  doc.setDrawColor(99, 102, 241); // indigo-500
-  doc.roundedRect(14, 5.5, 19, 20, 2.5, 2.5, 'FD');
+  // Logo image on the left (width: 35mm, height: ~17.6mm, preserving 1.99:1 proportion)
+  let logoDrawn = false;
+  const logoData = getLogoDataUrl() || LOGO_BASE64;
+  if (logoData) {
+    try {
+      // White rounded background card for optimal clarity and crisp contrast of the official logo
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(12, 5, 38, 22, 2, 2, 'F');
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.text('IEC', 23.5, 14.5, { align: 'center' });
+      // Draw official school logo image
+      doc.addImage(logoData, 'PNG', 13.5, 6.7, LOGO_WIDTH_MM, LOGO_HEIGHT_MM);
+      logoDrawn = true;
+    } catch (e) {
+      console.warn('Could not add logo image to PDF:', e);
+      logoDrawn = false;
+    }
+  }
 
-  doc.setFontSize(5);
-  doc.setTextColor(224, 231, 255);
-  doc.text('CRESCER', 23.5, 20.5, { align: 'center' });
+  const textStartX = logoDrawn ? 54 : 14;
 
   // Brand Name
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(244, 63, 94); // rose-500 badge look
-  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', 38, 10.5);
+  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 10.5);
 
   // Document Title
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  doc.setFontSize(12.5);
   doc.setTextColor(255, 255, 255);
-  doc.text(title.toUpperCase(), 38, 18);
+  doc.text(title.toUpperCase(), textStartX, 18);
 
   // Subtitle / Description
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(191, 219, 254); // blue-200
-  doc.text(subtitle, 38, 25);
+  doc.text(subtitle, textStartX, 25);
 
   // Right Side: Emission Date and Filters
   doc.setFont('helvetica', 'normal');
@@ -213,6 +230,7 @@ export interface GenerateWeeklySchedulePDFOptions {
   users?: UserProfile[];
   schoolYear?: number | string;
   selectedDays?: DayOfWeek[];
+  saveImmediately?: boolean;
 }
 
 export function generateWeeklySchedulePDF({
@@ -223,7 +241,8 @@ export function generateWeeklySchedulePDF({
   users = [],
   schoolYear = new Date().getFullYear(),
   selectedDays,
-}: GenerateWeeklySchedulePDFOptions) {
+  saveImmediately = false,
+}: GenerateWeeklySchedulePDFOptions): PDFGenerationResult {
   const isAll = turma === 'ALL';
   const targetTurmas = isAll
     ? sortTurmasPedagogical(turmasList.length > 0 ? turmasList : Array.from(new Set(schedules.map((s) => s.turma))))
@@ -247,51 +266,56 @@ export function generateWeeklySchedulePDF({
     ? ALL_DAYS_ORDER.filter((d) => selectedDays.includes(d.id))
     : ALL_DAYS_ORDER;
 
-  const daysFilterLabel = DAYS_ORDER.map((d) => d.short).join(', ');
-  const daysHeaderLabel = DAYS_ORDER.length === 5 ? 'Segunda a Sexta-feira' : DAYS_ORDER.map((d) => d.label).join(' • ');
+  const daysFilterLabel = DAYS_ORDER.length === 5 ? 'Segunda a Sexta' : DAYS_ORDER.map((d) => d.label).join(', ');
+  const daysHeaderLabel = DAYS_ORDER.length === 5 ? 'Segunda a Sexta-feira' : DAYS_ORDER.map((d) => d.short).join(' • ');
 
   targetTurmas.forEach((currentTurma, index) => {
     if (index > 0) {
       doc.addPage('a4', 'landscape');
     }
 
-    const turmaSchedules = schedules
-      .filter((s) => s.turma === currentTurma)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-    // Prepare day columns matrix
-    const dayBlocksMap: Record<DayOfWeek, ScheduleBlock[]> = {
-      segunda: turmaSchedules.filter((s) => s.dayOfWeek === 'segunda'),
-      terca: turmaSchedules.filter((s) => s.dayOfWeek === 'terca'),
-      quarta: turmaSchedules.filter((s) => s.dayOfWeek === 'quarta'),
-      quinta: turmaSchedules.filter((s) => s.dayOfWeek === 'quinta'),
-      sexta: turmaSchedules.filter((s) => s.dayOfWeek === 'sexta'),
-    };
-
-    const totalFilteredBlocks = DAYS_ORDER.reduce(
-      (acc, d) => acc + (dayBlocksMap[d.id]?.length || 0),
-      0
-    );
-
-    // Header on every page
+    // Official Header Banner
     drawOfficialHeader(
       doc,
-      isAll ? 'Grade Semanal Geral' : 'Grade Horária da Turma',
+      isAll ? 'Grade Semanal Geral - Todas as Turmas' : 'Grade Horária da Turma',
       'Cronograma e Distribuição de Atividades do Integral',
       [`Turma: ${currentTurma}`, `Dias: ${daysFilterLabel}`, `Ano Letivo: ${schoolYear}`],
       'landscape'
     );
 
-    // Sub-card with Turma Information
-    let startY = 35;
+    let startY = 38;
+
+    // Filter blocks for this turma and selected days
+    const turmaBlocks = schedules.filter(
+      (s) => s.turma === currentTurma && DAYS_ORDER.some((d) => d.id === s.dayOfWeek)
+    );
+
+    // Group blocks by day of week
+    const dayBlocksMap: Record<DayOfWeek, ScheduleBlock[]> = {
+      segunda: [],
+      terca: [],
+      quarta: [],
+      quinta: [],
+      sexta: [],
+    };
+
+    DAYS_ORDER.forEach((d) => {
+      dayBlocksMap[d.id] = turmaBlocks
+        .filter((s) => s.dayOfWeek === d.id)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    });
+
+    const totalFilteredBlocks = turmaBlocks.length;
+
+    // Turma Summary Strip Card
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(14, startY, 269, 13, 2, 2, 'FD');
+    doc.roundedRect(14, startY, 269, 14, 2, 2, 'FD');
 
-    doc.setFontSize(10);
+    doc.setFontSize(10.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(`Turma / Segmento: ${currentTurma}`, 18, startY + 5.5);
+    doc.text(`Turma: ${currentTurma}`, 18, startY + 5.5);
 
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
@@ -324,27 +348,28 @@ export function generateWeeklySchedulePDF({
           if (!block) return '-';
 
           const lines: string[] = [];
-          lines.push(`⏰ ${block.startTime} às ${block.endTime}`);
-          lines.push(`⭐ ${block.activityId.toUpperCase()}`);
+          lines.push(`${block.startTime} às ${block.endTime}`);
 
-          if (block.location && block.location.trim()) {
-            lines.push(`📍 Sala: ${block.location.trim()}`);
+          // Clean activity name from any [icon: ...] or markdown tags
+          const cleanActivity = processMarkdownAndIconsForPDF(block.activityId);
+          if (cleanActivity) {
+            lines.push(cleanActivity.toUpperCase());
           }
 
-          // Resolve instructor/collaborator
-          if (users && users.length > 0) {
-            const collabs = findAllResponsibleCollaborators({
-              users,
-              turmaName: currentTurma,
-              activityName: block.activityId,
-            });
-            if (collabs.length > 0 && collabs[0].name) {
-              lines.push(`👤 Docente: ${collabs[0].name}`);
+          if (block.location && block.location.trim()) {
+            const cleanLoc = processMarkdownAndIconsForPDF(block.location.trim());
+            if (cleanLoc && cleanLoc !== '-' && !cleanLoc.toLowerCase().includes('sala / padrao') && !cleanLoc.toLowerCase().includes('sala / padrão')) {
+              lines.push(`Sala: ${cleanLoc}`);
             }
           }
 
+          // Docente/Teacher is intentionally omitted to keep schedule cells clean and flexible
+
           if (block.guidelines && block.guidelines.trim()) {
-            lines.push(`📋 Obs: ${block.guidelines.trim()}`);
+            const cleanGuidelines = processMarkdownAndIconsForPDF(block.guidelines.trim());
+            if (cleanGuidelines && cleanGuidelines !== '-' && !cleanGuidelines.toLowerCase().includes('sem orientac') && !cleanGuidelines.toLowerCase().includes('sem orientaç')) {
+              lines.push(`Obs: ${cleanGuidelines}`);
+            }
           }
 
           return lines.join('\n');
@@ -435,11 +460,21 @@ export function generateWeeklySchedulePDF({
   applyPageNumbersAndFooters(doc, 'landscape');
   
   const daysSuffix = DAYS_ORDER.length === 5 ? 'Seg_a_Sex' : DAYS_ORDER.map((d) => d.short).join('_');
-  if (isAll) {
-    doc.save(`Grade_Semanal_Geral_Todas_as_Turmas_${daysSuffix}_${schoolYear}.pdf`);
-  } else {
-    doc.save(`Grade_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}_${schoolYear}.pdf`);
+  const filename = isAll
+    ? `Grade_Semanal_Geral_Todas_as_Turmas_${daysSuffix}_${schoolYear}.pdf`
+    : `Grade_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}_${schoolYear}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
   }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
 export interface GenerateAllTurmasWeeklySchedulePDFOptions {
@@ -449,6 +484,7 @@ export interface GenerateAllTurmasWeeklySchedulePDFOptions {
   users?: UserProfile[];
   schoolYear?: number | string;
   selectedDays?: DayOfWeek[];
+  saveImmediately?: boolean;
 }
 
 export function generateAllTurmasWeeklySchedulePDF({
@@ -458,7 +494,8 @@ export function generateAllTurmasWeeklySchedulePDF({
   users,
   schoolYear = new Date().getFullYear(),
   selectedDays,
-}: GenerateAllTurmasWeeklySchedulePDFOptions) {
+  saveImmediately = false,
+}: GenerateAllTurmasWeeklySchedulePDFOptions): PDFGenerationResult {
   return generateWeeklySchedulePDF({
     turma: 'ALL',
     turmasList,
@@ -467,6 +504,7 @@ export function generateAllTurmasWeeklySchedulePDF({
     users,
     schoolYear,
     selectedDays,
+    saveImmediately,
   });
 }
 
@@ -481,6 +519,7 @@ export interface GenerateDailyRoutinePDFOptions {
   schedules: ScheduleBlock[];
   activitiesList?: ActivityItem[];
   schoolYear?: number | string;
+  saveImmediately?: boolean;
 }
 
 export function generateDailyRoutinePDF({
@@ -489,7 +528,8 @@ export function generateDailyRoutinePDF({
   selectedDays,
   schedules,
   schoolYear = new Date().getFullYear(),
-}: GenerateDailyRoutinePDFOptions) {
+  saveImmediately = false,
+}: GenerateDailyRoutinePDFOptions): PDFGenerationResult {
   const targetDays: DayOfWeek[] = selectedDays && selectedDays.length > 0
     ? selectedDays
     : [dayOfWeek || 'segunda'];
@@ -544,12 +584,20 @@ export function generateDailyRoutinePDF({
     startY += 26;
 
     // Detailed Table
-    const tableData = dayBlocks.map((b) => [
-      `${b.startTime} - ${b.endTime}`,
-      b.activityId,
-      b.location || 'Sala / Padrão',
-      b.guidelines || 'Sem orientações adicionais',
-    ]);
+    const tableData = dayBlocks.map((b) => {
+      const cleanActivity = processMarkdownAndIconsForPDF(b.activityId);
+      const rawLoc = b.location?.trim();
+      const cleanLoc = rawLoc ? processMarkdownAndIconsForPDF(rawLoc) : '';
+      const rawGuide = b.guidelines?.trim();
+      const cleanGuide = rawGuide ? processMarkdownAndIconsForPDF(rawGuide) : '';
+
+      return [
+        `${b.startTime} - ${b.endTime}`,
+        cleanActivity,
+        cleanLoc || '-',
+        cleanGuide || '-',
+      ];
+    });
 
     autoTable(doc, {
       startY: startY,
@@ -613,7 +661,19 @@ export function generateDailyRoutinePDF({
 
   applyPageNumbersAndFooters(doc, 'portrait');
   const daysSuffix = targetDays.length === 1 ? targetDays[0] : targetDays.map((d) => d.substring(0, 3)).join('_');
-  doc.save(`Rotina_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}.pdf`);
+  const filename = `Rotina_${turma.replace(/[\/\s]+/g, '_')}_${daysSuffix}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +688,7 @@ export interface GenerateActivitySchedulePDFOptions {
   schoolYear?: number | string;
   periodLabel?: string;
   teacherName?: string;
+  saveImmediately?: boolean;
 }
 
 export function generateActivitySchedulePDF({
@@ -637,7 +698,8 @@ export function generateActivitySchedulePDF({
   users = [],
   schoolYear = new Date().getFullYear(),
   teacherName,
-}: GenerateActivitySchedulePDFOptions) {
+  saveImmediately = false,
+}: GenerateActivitySchedulePDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -756,12 +818,14 @@ export function generateActivitySchedulePDF({
   const tableData = activityBlocks.map((b) => {
     const dayLabel = DAYS_ORDER_MAP[b.dayOfWeek]?.label || b.dayOfWeek;
     const timeRange = `${b.startTime} às ${b.endTime}`;
-    const location = b.location || 'Sala / Espaço Padrão';
+    const rawLoc = b.location?.trim();
+    const location = rawLoc ? processMarkdownAndIconsForPDF(rawLoc) : '-';
     
     // Resolve teacher for this specific block or fallback to general specialist
-    const blockTeacher = resolvedTeacher || 'Docente Responsável';
+    const blockTeacher = processMarkdownAndIconsForPDF(resolvedTeacher || 'Docente Responsável');
 
-    const guidelines = b.guidelines || activityMeta?.defaultEquipment || '-';
+    const rawGuide = b.guidelines?.trim() || activityMeta?.defaultEquipment?.trim();
+    const guidelines = rawGuide ? processMarkdownAndIconsForPDF(rawGuide) : '-';
 
     return [
       dayLabel,
@@ -845,14 +909,23 @@ export function generateActivitySchedulePDF({
   }
 
   applyPageNumbersAndFooters(doc, 'portrait');
-  doc.save(
-    `Grade_Horarios_${activityName.replace(/[\/\s]+/g, '_')}_${schoolYear}.pdf`
-  );
+  const filename = `Grade_Horarios_${activityName.replace(/[\/\s]+/g, '_')}_${schoolYear}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
 // ---------------------------------------------------------------------------
 // 3. RELATÓRIO INDIVIDUAL DO ALUNO (Filtro por Período / Data Inicial e Final)
-// ---------------------------------------------------------------------------l)
 // ---------------------------------------------------------------------------
 
 export interface GenerateStudentPeriodPDFOptions {
@@ -861,6 +934,7 @@ export interface GenerateStudentPeriodPDFOptions {
   endDate: string;   // YYYY-MM-DD
   periodLabel?: string;
   records: AttendanceRecord[];
+  saveImmediately?: boolean;
 }
 
 export function generateStudentPeriodPDFReport({
@@ -869,14 +943,13 @@ export function generateStudentPeriodPDFReport({
   endDate,
   periodLabel,
   records,
-}: GenerateStudentPeriodPDFOptions) {
+  saveImmediately = false,
+}: GenerateStudentPeriodPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
   });
-
-  const periodText = periodLabel || `De ${formatDate(startDate)} até ${formatDate(endDate)}`;
 
   const studentRecords = records
     .filter((r) => r.studentId === student.id && r.date >= startDate && r.date <= endDate)
@@ -887,7 +960,6 @@ export function generateStudentPeriodPDFReport({
   );
 
   const baseRecords = routineRecords.length > 0 ? routineRecords : studentRecords;
-  const isRoutineBased = routineRecords.length > 0;
 
   const total = baseRecords.length;
   const pres = baseRecords.filter((r) => r.status === 'presente').length;
@@ -952,51 +1024,48 @@ export function generateStudentPeriodPDFReport({
   // Table of Records
   const tableData = studentRecords.map((r) => [
     formatDate(r.date),
-    r.activity,
-    r.status === 'saida_antecipada'
-      ? `Saída Antecipada (${r.exitTime || 'S/ hor.'})`
-      : getStatusText(r.status),
-    r.equipmentMissingDetails || r.observation || '-',
+    r.activity || 'Rotina',
+    getStatusText(r.status),
+    '-',
+    r.exitTime || '-',
+    r.equipmentMissingDetails
+      ? `Sem Material: ${r.equipmentMissingDetails}`
+      : r.observation || '-',
   ]);
 
   autoTable(doc, {
     startY: startY,
-    head: [['Data', 'Atividade / Oficina', 'Status do Registro', 'Detalhes / Ocorrências / Observações']],
-    body: tableData.length > 0 ? tableData : [['-', '-', 'Sem registros lançados para este período', '-']],
+    head: [['Data', 'Atividade / Oficina', 'Status', 'Entrada', 'Saída', 'Observações / Ocorrências']],
+    body: tableData.length > 0 ? tableData : [['Nenhum registro no período', '-', '-', '-', '-', '-']],
     theme: 'grid',
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8.5,
+      fontSize: 8,
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: [51, 65, 85],
-      cellPadding: 3,
+      cellPadding: 2.5,
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 26, halign: 'center' },
-      1: { cellWidth: 36, fontStyle: 'bold' },
-      2: { cellWidth: 42, fontStyle: 'bold' },
-      3: { cellWidth: 'auto' },
+      0: { cellWidth: 20, fontStyle: 'bold', halign: 'center' },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 16, halign: 'center' },
+      4: { cellWidth: 16, halign: 'center' },
+      5: { cellWidth: 'auto' },
     },
     didParseCell: (data) => {
       if (data.section === 'body' && data.column.index === 2) {
-        const val = String(data.cell.raw || '');
-        if (val === 'Presente') {
-          data.cell.styles.textColor = [22, 163, 74];
-        } else if (val.startsWith('Saída Antecipada')) {
-          data.cell.styles.textColor = [217, 119, 6];
-        } else if (val === 'Falta') {
-          data.cell.styles.textColor = [220, 38, 38];
-        } else if (val === 'Sem Equipamento') {
-          data.cell.styles.textColor = [234, 88, 12];
-        } else if (val === 'Ausência Saúde') {
-          data.cell.styles.textColor = [217, 119, 6];
+        const row = studentRecords[data.row.index];
+        if (row) {
+          data.cell.styles.textColor = getStatusColor(row.status);
+          data.cell.styles.fontStyle = 'bold';
         }
       }
     },
@@ -1018,7 +1087,19 @@ export function generateStudentPeriodPDFReport({
   }
 
   applyPageNumbersAndFooters(doc, 'portrait');
-  doc.save(`Frequencia_${student.name.replace(/\s+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`);
+  const filename = `Frequencia_${student.name.replace(/\s+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
 // Backward-compatible wrapper for single week
@@ -1026,18 +1107,19 @@ export function generateStudentPDFReport(
   student: Student,
   week: WeekInfo,
   records: AttendanceRecord[]
-) {
-  generateStudentPeriodPDFReport({
+): PDFGenerationResult {
+  return generateStudentPeriodPDFReport({
     student,
     startDate: week.startDate,
     endDate: week.endDate,
     periodLabel: week.label,
     records,
+    saveImmediately: false,
   });
 }
 
 // ---------------------------------------------------------------------------
-// 4. RELATÓRIO CONSOLIDADO DA TURMA (Filtro por Período / Data Inicial e Final)
+// 4. RELATÓRIO CONSOLIDADO POR TURMA (Filtro por Período / Data Inicial e Final)
 // ---------------------------------------------------------------------------
 
 export interface GenerateTurmaConsolidatedPeriodPDFOptions {
@@ -1047,6 +1129,7 @@ export interface GenerateTurmaConsolidatedPeriodPDFOptions {
   periodLabel?: string;
   students: Student[];
   records: AttendanceRecord[];
+  saveImmediately?: boolean;
 }
 
 export function generateTurmaConsolidatedPeriodPDFReport({
@@ -1056,7 +1139,8 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   periodLabel,
   students,
   records,
-}: GenerateTurmaConsolidatedPeriodPDFOptions) {
+  saveImmediately = false,
+}: GenerateTurmaConsolidatedPeriodPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -1066,38 +1150,24 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   const turmaStudents = students
     .filter((s) => s.turma === turma)
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
 
-  const periodRecords = records.filter(
-    (r) =>
-      r.date >= startDate &&
-      r.date <= endDate &&
-      (r.turma === turma || studentIdsInTurma.has(r.studentId))
+  const turmaRecords = records.filter(
+    (r) => r.turma === turma && r.date >= startDate && r.date <= endDate
   );
 
-  const routineRecords = periodRecords.filter(
-    (r) => r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina')
-  );
-
-  // Use routine records for base attendance calculation if available (avoids workshop overlap distortion)
-  const baseRecords = routineRecords.length > 0 ? routineRecords : periodRecords;
-  const isRoutineBased = routineRecords.length > 0;
-
-  const total = baseRecords.length;
-  const pres = baseRecords.filter((r) => r.status === 'presente').length;
-  const saidaAnt = baseRecords.filter((r) => r.status === 'saida_antecipada').length;
-  const falta = baseRecords.filter((r) => r.status === 'falta').length;
-  const saude = baseRecords.filter((r) => r.status === 'saude').length;
-  const semEquip = periodRecords.filter((r) => r.status === 'sem_equipamento').length;
+  const total = turmaRecords.length;
+  const pres = turmaRecords.filter((r) => r.status === 'presente').length;
+  const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
+  const falta = turmaRecords.filter((r) => r.status === 'falta').length;
+  const saude = turmaRecords.filter((r) => r.status === 'saude').length;
+  const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
   // Header
   drawOfficialHeader(
     doc,
     `Relatório Consolidado - ${turma}`,
-    isRoutineBased
-      ? 'Matriz de Assiduidade no Integral (Modalidade Rotina Diária)'
-      : 'Matriz de Frequência e Indicadores Gerais da Turma',
+    'Acompanhamento Geral de Frequência da Turma',
     [`Turma: ${turma}`, `Período: ${formatDate(startDate)} a ${formatDate(endDate)}`],
     'portrait'
   );
@@ -1111,21 +1181,15 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Turma / Ano Escolar: ${turma}`, 18, startY + 7);
+  doc.text(`Turma: ${turma}`, 18, startY + 7);
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(`Total de Alunos Matriculados: ${turmaStudents.length}`, 18, startY + 14);
-  doc.text(
-    isRoutineBased
-      ? `Total de Chamadas de Rotina no Período: ${total}`
-      : `Total de Registros de Chamada no Período: ${total}`,
-    18,
-    startY + 20
-  );
+  doc.text(`Total de Chamadas Realizadas no Período: ${total}`, 18, startY + 20);
 
-  // Rate Badge
+  // Taxa de Presença Badge
   doc.setFillColor(238, 242, 255);
   doc.setDrawColor(199, 210, 254);
   doc.roundedRect(140, startY + 3, 50, 20, 2, 2, 'FD');
@@ -1133,7 +1197,7 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   doc.setTextColor(67, 56, 202);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.text('MÉDIA DE PRESENÇA', 165, startY + 8.5, { align: 'center' });
+  doc.text('TAXA DE PRESENÇA', 165, startY + 8.5, { align: 'center' });
   doc.setFontSize(12);
   doc.text(`${rate}%`, 165, startY + 17.5, { align: 'center' });
 
@@ -1151,26 +1215,25 @@ export function generateTurmaConsolidatedPeriodPDFReport({
 
   startY += 19;
 
-  // Table Data
+  // Table Data: Students & Individual Rates in the Period
   const tableData = turmaStudents.map((st) => {
-    const stBaseRecords = baseRecords.filter((r) => r.studentId === st.id);
-    const stAllRecords = periodRecords.filter((r) => r.studentId === st.id);
-    const stTotal = stBaseRecords.length;
-    const stPres = stBaseRecords.filter((r) => r.status === 'presente').length;
-    const stSaidaAnt = stBaseRecords.filter((r) => r.status === 'saida_antecipada').length;
-    const stFalta = stBaseRecords.filter((r) => r.status === 'falta').length;
-    const stSaude = stBaseRecords.filter((r) => r.status === 'saude').length;
-    const stEquip = stAllRecords.filter((r) => r.status === 'sem_equipamento').length;
+    const stRecords = turmaRecords.filter((r) => r.studentId === st.id);
+    const stTotal = stRecords.length;
+    const stPres = stRecords.filter((r) => r.status === 'presente').length;
+    const stSaidaAnt = stRecords.filter((r) => r.status === 'saida_antecipada').length;
+    const stFalta = stRecords.filter((r) => r.status === 'falta').length;
+    const stSaude = stRecords.filter((r) => r.status === 'saude').length;
+    const stEquip = stRecords.filter((r) => r.status === 'sem_equipamento').length;
     const stRate = stTotal > 0 ? Math.round(((stPres + stSaidaAnt) / stTotal) * 100) : '-';
 
-    const occurrences = stAllRecords
+    const occurrences = stRecords
       .filter((r) => r.status !== 'presente')
       .map((r) => {
         const text =
           r.status === 'saida_antecipada'
-            ? `Saída ${r.exitTime || 's/h'}`
+            ? `Saída às ${r.exitTime || 's/h'}`
             : getStatusText(r.status);
-        return `${formatDate(r.date).slice(0, 5)} ${r.activity}: ${text}${
+        return `${formatDate(r.date).slice(0, 5)}: ${text}${
           r.equipmentMissingDetails ? ` (${r.equipmentMissingDetails})` : ''
         }`;
       })
@@ -1189,8 +1252,8 @@ export function generateTurmaConsolidatedPeriodPDFReport({
 
   autoTable(doc, {
     startY: startY,
-    head: [['Aluno(a)', 'Presença', 'Taxa', 'Saída Ant.', 'Sem Equip.', 'Faltas', 'Resumo de Ocorrências no Período']],
-    body: tableData.length > 0 ? tableData : [['Sem alunos matriculados nesta turma', '-', '-', '-', '-', '-', '-']],
+    head: [['Aluno(a)', 'Presença', 'Taxa', 'Saída Ant.', 'Sem Equip.', 'Faltas', 'Ocorrências no Período']],
+    body: tableData.length > 0 ? tableData : [['Nenhum aluno cadastrado nesta turma', '-', '-', '-', '-', '-', '-']],
     theme: 'grid',
     headStyles: {
       fillColor: [15, 23, 42],
@@ -1233,7 +1296,19 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   }
 
   applyPageNumbersAndFooters(doc, 'portrait');
-  doc.save(`Consolidado_Turma_${turma.replace(/[\/\s]+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`);
+  const filename = `Consolidado_Turma_${turma.replace(/[\/\s]+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
 // Backward-compatible wrapper for single week
@@ -1242,14 +1317,15 @@ export function generateTurmaPDFReport(
   week: WeekInfo,
   students: Student[],
   records: AttendanceRecord[]
-) {
-  generateTurmaConsolidatedPeriodPDFReport({
+): PDFGenerationResult {
+  return generateTurmaConsolidatedPeriodPDFReport({
     turma,
     startDate: week.startDate,
     endDate: week.endDate,
     periodLabel: week.label,
     students,
     records,
+    saveImmediately: false,
   });
 }
 
@@ -1265,6 +1341,7 @@ export interface GenerateActivityModalityPeriodPDFOptions {
   students: Student[];
   records: AttendanceRecord[];
   teacherName?: string;
+  saveImmediately?: boolean;
 }
 
 export function generateActivityModalityPeriodPDFReport({
@@ -1275,7 +1352,8 @@ export function generateActivityModalityPeriodPDFReport({
   students,
   records,
   teacherName,
-}: GenerateActivityModalityPeriodPDFOptions) {
+  saveImmediately = false,
+}: GenerateActivityModalityPeriodPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -1290,8 +1368,6 @@ export function generateActivityModalityPeriodPDFReport({
       if (turmaComp !== 0) return turmaComp;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-
-  const enrolledStudentIds = new Set(enrolledStudents.map((s) => s.id));
 
   // Records for this activity in this date range
   const activityRecords = records.filter(
@@ -1441,5 +1517,17 @@ export function generateActivityModalityPeriodPDFReport({
   }
 
   applyPageNumbersAndFooters(doc, 'portrait');
-  doc.save(`Oficina_${activityName.replace(/[\/\s]+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`);
+  const filename = `Oficina_${activityName.replace(/[\/\s]+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }

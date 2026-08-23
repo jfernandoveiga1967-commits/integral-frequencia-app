@@ -19,6 +19,7 @@ import {
   generateStudentPDFReport,
   generateTurmaPDFReport,
 } from '../utils/pdfGenerator';
+import { PdfViewerModal } from './PdfViewerModal';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays } from '../utils/dateUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
@@ -383,6 +384,20 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   });
   const [pdfModalityStartDate, setPdfModalityStartDate] = useState<string>(effectiveStartDate);
   const [pdfModalityEndDate, setPdfModalityEndDate] = useState<string>(effectiveEndDate);
+
+  // On-screen PDF Viewer State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    blobUrl: string | null;
+    filename: string;
+    title: string;
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    blobUrl: null,
+    filename: '',
+    title: '',
+  });
 
   // Quick Open Modal Handlers
   const handleOpenStudentModal = (studentId?: string) => {
@@ -946,7 +961,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <td className="px-4 py-3 text-center">
                     <button
                       onClick={() => {
-                        generateTurmaConsolidatedPeriodPDFReport({
+                        const result = generateTurmaConsolidatedPeriodPDFReport({
                           turma: stat.turma as TurmaType,
                           startDate: effectiveStartDate,
                           endDate: effectiveEndDate,
@@ -954,9 +969,16 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                           students,
                           records,
                         });
+                        setPdfPreviewState({
+                          isOpen: true,
+                          blobUrl: result.blobUrl,
+                          filename: result.filename,
+                          title: `Relatório Consolidado - ${stat.turma}`,
+                          onDownload: result.download,
+                        });
                       }}
                       className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer inline-flex items-center space-x-1"
-                      title="Baixar PDF consolidado desta turma"
+                      title="Visualizar e baixar PDF consolidado desta turma"
                     >
                       <Download className="w-3 h-3 text-indigo-600" />
                       <span>PDF Turma</span>
@@ -1063,13 +1085,20 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  generateTurmaConsolidatedPeriodPDFReport({
+                  const result = generateTurmaConsolidatedPeriodPDFReport({
                     turma: selectedPdfTurma,
                     startDate: pdfTurmaStartDate,
                     endDate: pdfTurmaEndDate,
                     periodLabel: `De ${formatDateBR(pdfTurmaStartDate)} a ${formatDateBR(pdfTurmaEndDate)}`,
                     students,
                     records,
+                  });
+                  setPdfPreviewState({
+                    isOpen: true,
+                    blobUrl: result.blobUrl,
+                    filename: result.filename,
+                    title: `Relatório Consolidado - ${selectedPdfTurma}`,
+                    onDownload: result.download,
                   });
                   setShowTurmaModal(false);
                 }}
@@ -1175,12 +1204,19 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 onClick={() => {
                   const targetStudent = students.find((s) => s.id === selectedPdfStudentId);
                   if (targetStudent) {
-                    generateStudentPeriodPDFReport({
+                    const result = generateStudentPeriodPDFReport({
                       student: targetStudent,
                       startDate: pdfStudentStartDate,
                       endDate: pdfStudentEndDate,
                       periodLabel: `De ${formatDateBR(pdfStudentStartDate)} a ${formatDateBR(pdfStudentEndDate)}`,
                       records,
+                    });
+                    setPdfPreviewState({
+                      isOpen: true,
+                      blobUrl: result.blobUrl,
+                      filename: result.filename,
+                      title: `Ficha Individual de Frequência - ${targetStudent.name}`,
+                      onDownload: result.download,
                     });
                   }
                   setShowStudentModal(false);
@@ -1312,7 +1348,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  generateActivityModalityPeriodPDFReport({
+                  const result = generateActivityModalityPeriodPDFReport({
                     activityName: selectedPdfModality,
                     startDate: pdfModalityStartDate,
                     endDate: pdfModalityEndDate,
@@ -1320,6 +1356,13 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     students,
                     records,
                     teacherName: pdfModalityTeacher,
+                  });
+                  setPdfPreviewState({
+                    isOpen: true,
+                    blobUrl: result.blobUrl,
+                    filename: result.filename,
+                    title: `Relatório de Modalidade - ${selectedPdfModality}`,
+                    onDownload: result.download,
                   });
                   setShowModalityModal(false);
                 }}
@@ -1332,6 +1375,16 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           </div>
         </div>
       )}
+
+      {/* On-screen PDF Viewer Modal */}
+      <PdfViewerModal
+        isOpen={pdfPreviewState.isOpen}
+        onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        blobUrl={pdfPreviewState.blobUrl}
+        filename={pdfPreviewState.filename}
+        title={pdfPreviewState.title}
+        onDownload={pdfPreviewState.onDownload}
+      />
     </div>
   );
 };

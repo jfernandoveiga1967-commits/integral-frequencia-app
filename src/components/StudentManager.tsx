@@ -3,6 +3,7 @@ import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfi
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
+import { PdfViewerModal } from './PdfViewerModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
@@ -181,6 +182,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
   const [targetTransferTurma, setTargetTransferTurma] = useState<string>('');
   const [isSavingTransfer, setIsSavingTransfer] = useState(false);
+
+  // On-screen PDF Viewer State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    blobUrl: string | null;
+    filename: string;
+    title: string;
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    blobUrl: null,
+    filename: '',
+    title: '',
+  });
 
   const handleOpenEdit = (student: Student) => {
     if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
@@ -1013,9 +1028,18 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
                 <div className="flex flex-wrap items-center gap-1.5 self-end md:self-center">
                   <button
-                    onClick={() => generateStudentPDFReport(student, currentWeek, records)}
+                    onClick={() => {
+                      const result = generateStudentPDFReport(student, currentWeek, records);
+                      setPdfPreviewState({
+                        isOpen: true,
+                        blobUrl: result.blobUrl,
+                        filename: result.filename,
+                        title: `Ficha Individual - ${student.name}`,
+                        onDownload: result.download,
+                      });
+                    }}
                     className="p-2 rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
-                    title="Baixar relatório de frequência em PDF deste aluno"
+                    title="Visualizar e baixar relatório de frequência em PDF deste aluno"
                   >
                     <Download className="w-3.5 h-3.5 text-blue-600" />
                     <span className="hidden sm:inline">Relatório PDF</span>
@@ -1443,6 +1467,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           </div>
         </div>
       )}
+      {/* On-screen PDF Viewer Modal */}
+      <PdfViewerModal
+        isOpen={pdfPreviewState.isOpen}
+        onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        blobUrl={pdfPreviewState.blobUrl}
+        filename={pdfPreviewState.filename}
+        title={pdfPreviewState.title}
+        onDownload={pdfPreviewState.onDownload}
+      />
     </div>
   );
 };

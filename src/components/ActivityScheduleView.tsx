@@ -36,6 +36,7 @@ import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateActivitySchedulePDF } from '../utils/pdfGenerator';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { isCoordenador } from '../utils/authUtils';
+import { PdfViewerModal } from './PdfViewerModal';
 
 interface ActivityScheduleViewProps {
   activitiesList: ActivityItem[];
@@ -82,6 +83,20 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDayFilter, setSelectedDayFilter] = useState<'TODOS' | DayOfWeek>('TODOS');
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // PDF Preview State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    blobUrl: string | null;
+    filename: string;
+    title: string;
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    blobUrl: null,
+    filename: '',
+    title: '',
+  });
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMsg({ text, type });
@@ -205,10 +220,10 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
     return { name: 'Professor(a) da Modalidade' };
   };
 
-  // Direct PDF Download Handler
+  // Direct PDF Download Handler (Opens preview on screen first)
   const handleDownloadPDF = () => {
     try {
-      generateActivitySchedulePDF({
+      const result = generateActivitySchedulePDF({
         activityName: currentActivity.name || currentActivity.id,
         schedules,
         activitiesList,
@@ -216,7 +231,16 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
         schoolYear: new Date().getFullYear(),
         teacherName: teacherNameString,
       });
-      showToast(`PDF oficial da Grade de ${currentActivity.name} gerado com sucesso!`, 'success');
+
+      setPdfPreviewState({
+        isOpen: true,
+        blobUrl: result.blobUrl,
+        filename: result.filename,
+        title: `Grade Oficial - ${currentActivity.name || currentActivity.id}`,
+        onDownload: result.download,
+      });
+
+      showToast(`PDF oficial da Grade de ${currentActivity.name} pronto para visualização!`, 'success');
     } catch (err) {
       console.error('Error generating activity schedule PDF:', err);
       showToast('Ocorreu um erro ao gerar o PDF. Verifique os dados e tente novamente.', 'error');
@@ -802,6 +826,16 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* On-screen PDF Viewer Modal */}
+      <PdfViewerModal
+        isOpen={pdfPreviewState.isOpen}
+        onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        blobUrl={pdfPreviewState.blobUrl}
+        filename={pdfPreviewState.filename}
+        title={pdfPreviewState.title}
+        onDownload={pdfPreviewState.onDownload}
+      />
     </div>
   );
 };

@@ -7,6 +7,7 @@ import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess } from '../utils/dateUtils';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
+import { PdfViewerModal } from './PdfViewerModal';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -125,6 +126,20 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     studentName: '',
     activity: 'Natação',
     date: selectedDate,
+  });
+
+  // PDF Preview State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    blobUrl: string | null;
+    filename: string;
+    title: string;
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    blobUrl: null,
+    filename: '',
+    title: '',
   });
 
   // Observations edit state map (studentId_activity_date -> string)
@@ -659,9 +674,18 @@ function getCurrentHHMM(): string {
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             {selectedTurma !== 'TODAS' && (
               <button
-                onClick={() => generateTurmaPDFReport(selectedTurma, currentWeek, students, records)}
+                onClick={() => {
+                  const result = generateTurmaPDFReport(selectedTurma, currentWeek, students, records);
+                  setPdfPreviewState({
+                    isOpen: true,
+                    blobUrl: result.blobUrl,
+                    filename: result.filename,
+                    title: `Relatório da Turma - ${selectedTurma}`,
+                    onDownload: result.download,
+                  });
+                }}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs"
-                title="Baixar relatório em PDF formatado desta turma"
+                title="Visualizar e baixar relatório em PDF formatado desta turma"
               >
                 <Download className="w-4 h-4 text-indigo-600" />
                 <span>PDF da Turma</span>
@@ -963,6 +987,15 @@ function getCurrentHHMM(): string {
           </div>
         </div>
       )}
+      {/* On-screen PDF Viewer Modal */}
+      <PdfViewerModal
+        isOpen={pdfPreviewState.isOpen}
+        onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        blobUrl={pdfPreviewState.blobUrl}
+        filename={pdfPreviewState.filename}
+        title={pdfPreviewState.title}
+        onDownload={pdfPreviewState.onDownload}
+      />
     </div>
   );
 };
