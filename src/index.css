@@ -1,1 +1,131 @@
 @import "tailwindcss";
+
+/* ========================================================================= */
+/* ESTILOS DE IMPRESSÃO PROFISSIONAL (@media print) - PADRÃO FOLHA A4        */
+/* ========================================================================= */
+@media print {
+  /* Configuração de página A4 retrato com margens padronizadas */
+  @page {
+    size: A4 portrait;
+    margin: 8mm 8mm 10mm 8mm;
+  }
+
+  /* Reset global para impressão limpa de alto contraste */
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11px !important;
+    line-height: 1.3 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ocultar elementos desnecessários na folha impressa:
+     Cabeçalho do sistema, navegação, abas, botões de ação, filtros, banners e toasts */
+  header,
+  nav,
+  .print\:hidden,
+  [data-print="hidden"],
+  button:not(.print-include) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Desativar sombras, bordas escuras e backgrounds pesados no print */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Expansão limpa de modais e contêineres de espelho de ponto */
+  .fixed.inset-0,
+  .overflow-y-auto,
+  .overflow-x-auto {
+    position: static !important;
+    overflow: visible !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+  }
+
+  /* Formatação limpa de tabelas do espelho e frequências */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  th, td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 4px 6px !important;
+    color: #0f172a !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    font-weight: bold !important;
+  }
+
+  /* Cores de badges nítidas para impressão */
+  .bg-emerald-50, .bg-emerald-100, .bg-emerald-500\/15 {
+    background-color: #ecfdf5 !important;
+    color: #065f46 !important;
+    border-color: #a7f3d0 !important;
+  }
+
+  .bg-rose-50, .bg-rose-100, .bg-rose-500\/15 {
+    background-color: #fff1f2 !important;
+    color: #9f1239 !important;
+    border-color: #fecdd3 !important;
+  }
+
+  .bg-amber-50, .bg-amber-100, .bg-amber-500\/15 {
+    background-color: #fffbeb !important;
+    color: #92400e !important;
+    border-color: #fde68a !important;
+  }
+
+  .bg-indigo-50, .bg-indigo-100, .bg-indigo-500\/15 {
+    background-color: #eef2ff !important;
+    color: #3730a3 !important;
+    border-color: #c7d2fe !important;
+  }
+
+  .bg-slate-50, .bg-slate-100 {
+    background-color: #f8fafc !important;
+  }
+
+  /* Evitar quebra no meio do bloco de assinaturas ou fechamento financeiro */
+  .print-avoid-break,
+  .print-signatures,
+  .print-summary {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+

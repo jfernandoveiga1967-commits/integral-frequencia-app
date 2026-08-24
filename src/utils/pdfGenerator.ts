@@ -10,11 +10,15 @@ import {
   ActivityItem,
   ActivityType,
   UserProfile,
+  PontoRecord,
+  PontoMonthClosing,
+  HolidayItem,
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
+import { formatCurrencyBR, getMonthNameBR, formatMinutesToHoursAndMinutes } from './pontoUtils';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -124,15 +128,18 @@ function drawOfficialHeader(
 
   // Document Title
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12.5);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text(title.toUpperCase(), textStartX, 18);
+  const titleY = subtitle && subtitle.trim().length > 0 ? 18 : 20.5;
+  doc.text(title.toUpperCase(), textStartX, titleY);
 
   // Subtitle / Description
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(191, 219, 254); // blue-200
-  doc.text(subtitle, textStartX, 25);
+  if (subtitle && subtitle.trim().length > 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(191, 219, 254); // blue-200
+    doc.text(subtitle, textStartX, 25);
+  }
 
   // Right Side: Emission Date and Filters
   doc.setFont('helvetica', 'normal');
@@ -208,13 +215,20 @@ function drawMetricBoxes(
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(100, 116, 139);
-    doc.text(m.label.toUpperCase(), x + 3, startY + 5);
+    doc.text(m.label.toUpperCase(), x + 2.5, startY + 4.5);
 
-    // Value
-    doc.setFontSize(11);
+    // Value - Auto-scale font size so text never overflows the box boundaries
+    const textVal = String(m.value);
+    let fontSize = 8.5;
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(fontSize);
+    while (doc.getTextWidth(textVal) > (boxWidth - 4.5) && fontSize > 5.5) {
+      fontSize -= 0.4;
+      doc.setFontSize(fontSize);
+    }
+    doc.setFontSize(fontSize);
     doc.setTextColor(m.color[0], m.color[1], m.color[2]);
-    doc.text(String(m.value), x + 3, startY + 11.5);
+    doc.text(textVal, x + 2.5, startY + 10.5);
   });
 }
 
@@ -1518,6 +1532,500 @@ export function generateActivityModalityPeriodPDFReport({
 
   applyPageNumbersAndFooters(doc, 'portrait');
   const filename = `Oficina_${activityName.replace(/[\/\s]+/g, '_')}_${formatDate(startDate).replace(/\//g, '-')}_a_${formatDate(endDate).replace(/\//g, '-')}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Generates an Official Livro Ponto & Timesheet PDF Report (Folha de Frequência & Fechamento Financeiro)
+ */
+export interface GenerateLivroPontoPDFOptions {
+  user: UserProfile | null;
+  month: number; // 1 to 12
+  year: number;
+  monthDaysGrid: Array<{
+    dayNumber: number;
+    dateStr: string;
+    dayOfWeekLabel?: string;
+    dayOfWeekName?: string;
+    dayOfWeekShort?: string;
+    isWeekend?: boolean;
+    isWk?: boolean;
+    isSat?: boolean;
+    isSun?: boolean;
+    defaultStatus?: string;
+    holidayRecessName?: string;
+    holidayItem?: HolidayItem;
+    record?: PontoRecord;
+  }>;
+  financials: {
+    baseSalary: number;
+    paidHolidaysCount: number;
+    paidRecessDaysCount: number;
+    unjustifiedAbsencesCount: number;
+    unjustifiedAbsencesDiscount: number;
+    totalExtraMinutes: number;
+    extraHoursAmount: number;
+    manualAddition: number;
+    manualAdditionNote?: string;
+    manualDiscount: number;
+    manualDiscountNote?: string;
+    netTotal: number;
+  };
+  closingRecord?: PontoMonthClosing | null;
+  companyName?: string;
+  institutionName?: string;
+  pixKey?: string;
+  contractSchedule?: string;
+  contractDailyHoursFormatted?: string;
+  saveImmediately?: boolean;
+}
+
+export function generateLivroPontoPDFReport({
+  user,
+  month,
+  year,
+  monthDaysGrid,
+  financials,
+  closingRecord,
+  companyName = 'GADAL - Gestão e Apoio',
+  institutionName = 'Instituto Educacional Crescer',
+  pixKey = 'Pendente',
+  contractSchedule = '11:40 - 17:40',
+  contractDailyHoursFormatted = '6h 00min',
+  saveImmediately = false,
+}: GenerateLivroPontoPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const monthName = getMonthNameBR(month);
+  const userName = user?.name || closingRecord?.userName || 'Colaborador';
+  const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
+
+  // Draw Header - Strictly "ESPELHO DE PONTO"
+  drawOfficialHeader(
+    doc,
+    'ESPELHO DE PONTO',
+    '',
+    [`Colaborador(a): ${userName}`, `Competência: ${monthName}/${year}`],
+    'portrait'
+  );
+
+  let startY = 36;
+
+  // Collaborator & Contract Details Card
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, startY, 182, 22, 2, 2, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})`, 18, startY + 5.5);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Empresa Conveniada: ${companyName}   |   Instituição: ${institutionName}`, 18, startY + 11.5);
+  doc.text(
+    `Jornada Contratual: ${contractSchedule} (${contractDailyHoursFormatted}/dia)   |   Chave PIX: ${pixKey}   |   Status: ${
+      closingRecord?.isClosed ? 'FECHADO / PAGO' : 'ABERTO / EM APONTAMENTO'
+    }`,
+    18,
+    startY + 17
+  );
+
+  startY += 26;
+
+  // Financial & Performance Summary Metrics
+  const metrics = [
+    { label: 'Bolsa Base', value: formatCurrencyBR(financials.baseSalary), color: [15, 23, 42] as [number, number, number] },
+    {
+      label: 'Feriados/Recessos',
+      value: `${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias`,
+      color: [22, 163, 74] as [number, number, number],
+    },
+    {
+      label: 'Faltas Injust.',
+      value: `${financials.unjustifiedAbsencesCount} (${formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})`,
+      color: [220, 38, 38] as [number, number, number],
+    },
+    {
+      label: 'Horas Extras',
+      value: `${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)} (${formatCurrencyBR(financials.extraHoursAmount)})`,
+      color: [79, 70, 229] as [number, number, number],
+    },
+    {
+      label: 'Líquido a Pagar',
+      value: formatCurrencyBR(financials.netTotal),
+      color: [16, 185, 129] as [number, number, number],
+    },
+  ];
+  drawMetricBoxes(doc, 14, startY, 34, 13.5, 3, metrics);
+
+  startY += 17.5;
+
+  // Timesheet Table Data
+  const tableData = monthDaysGrid.map((item) => {
+    const rec = item.record;
+    const status = rec?.status || item.defaultStatus || 'normal';
+    const holidayName = item.holidayItem?.name || item.holidayRecessName || '';
+
+    let statusText = 'Normal / Regular';
+    if (status === 'feriado') {
+      statusText = holidayName ? `Feriado (${holidayName})` : 'Feriado Oficial';
+    } else if (status === 'recesso') {
+      statusText = holidayName ? `Recesso (${holidayName})` : 'Recesso Escolar';
+    } else if (status === 'falta_injustificada') {
+      statusText = 'FALTA INJUSTIFICADA';
+    } else if (status === 'falta_justificada' || status === 'atestado') {
+      statusText = status === 'atestado' ? 'Atestado Médico' : 'Falta Justificada';
+    } else if (item.isSun) {
+      statusText = 'Domingo / DSR';
+    } else if (item.isSat) {
+      statusText = 'Sábado';
+    } else if (status === 'dispensado') {
+      statusText = 'Dispensado(a)';
+    }
+
+    const dayStr = String(item.dayNumber).padStart(2, '0');
+    const dayLabel = item.dayOfWeekLabel || item.dayOfWeekName || item.dayOfWeekShort || '';
+    const dayName = dayLabel.split('-')[0];
+
+    return [
+      dayStr,
+      dayName,
+      rec?.entry1 || '-',
+      rec?.exit1 || '-',
+      rec?.entry2 || '-',
+      rec?.exit2 || '-',
+      statusText,
+      rec?.note || holidayName || '-',
+    ];
+  });
+
+  autoTable(doc, {
+    startY: startY,
+    head: [['Dia', 'Semana', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Status / Ocorrência', 'Observações']],
+    body: tableData,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'center',
+    },
+    bodyStyles: {
+      fontSize: 7,
+      textColor: [51, 65, 85],
+      cellPadding: 1.6,
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 18, halign: 'left' },
+      2: { cellWidth: 17, halign: 'center' },
+      3: { cellWidth: 17, halign: 'center' },
+      4: { cellWidth: 17, halign: 'center' },
+      5: { cellWidth: 17, halign: 'center' },
+      6: { cellWidth: 42, halign: 'left' },
+      7: { cellWidth: 'auto', halign: 'left' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body') {
+        const rawRow = monthDaysGrid[data.row.index];
+        if (rawRow) {
+          const status = rawRow.record?.status || rawRow.defaultStatus;
+          if (status === 'falta_injustificada') {
+            data.cell.styles.fillColor = [254, 226, 226]; // light red
+            data.cell.styles.textColor = [153, 27, 27];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (status === 'feriado' || status === 'recesso') {
+            data.cell.styles.fillColor = [236, 253, 245]; // light green
+            data.cell.styles.textColor = [6, 95, 70];
+          } else if (rawRow.isWeekend) {
+            data.cell.styles.fillColor = [241, 245, 249]; // slate-100
+            data.cell.styles.textColor = [100, 116, 139];
+          }
+        }
+      }
+    },
+  });
+
+  // Signatures Section
+  const finalY = (doc as any).lastAutoTable?.finalY || 240;
+  const pageHeight = 297;
+  const requiredSigSpace = 32;
+
+  if (finalY + requiredSigSpace > pageHeight - 15) {
+    doc.addPage();
+    drawOfficialHeader(
+      doc,
+      'ESPELHO DE PONTO',
+      '',
+      [`Colaborador(a): ${userName}`, `Competência: ${monthName}/${year}`],
+      'portrait'
+    );
+  }
+
+  const sigY = (finalY + requiredSigSpace > pageHeight - 15) ? 65 : Math.max(finalY + 14, 252);
+
+  // Digital Signature banner if present
+  if (closingRecord?.signedDigitally) {
+    doc.setFillColor(236, 253, 245);
+    doc.setDrawColor(167, 243, 208);
+    doc.roundedRect(14, sigY - 10, 182, 7.5, 1.5, 1.5, 'FD');
+
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(6, 95, 70);
+    doc.text(
+      `✓ DOCUMENTO ASSINADO DIGITALMENTE POR: ${closingRecord.signedBy?.toUpperCase()} em ${new Date(
+        closingRecord.signedAt || ''
+      ).toLocaleString('pt-BR')}  |  Hash: ${closingRecord.digitalSignatureHash || 'AUTÊNTICO'}`,
+      18,
+      sigY - 5.5
+    );
+  }
+
+  // Signature lines
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.3);
+  doc.line(20, sigY + 12, 90, sigY + 12);
+  doc.line(120, sigY + 12, 190, sigY + 12);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(51, 65, 85);
+  doc.text(userName, 55, sigY + 16, { align: 'center' });
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Colaborador(a) / ${userCargo}`, 55, sigY + 19.5, { align: 'center' });
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(companyName, 155, sigY + 16, { align: 'center' });
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Coordenação Pedagógica / DP GADAL', 155, sigY + 19.5, { align: 'center' });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+  const filename = `Espelho_Ponto_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Generates an Official Daily Attendance Sheet PDF Report
+ */
+export interface GenerateAttendanceDailyPDFOptions {
+  date: string; // YYYY-MM-DD
+  activityName: string;
+  turma: string;
+  students: Student[];
+  records: AttendanceRecord[];
+  teacherName?: string;
+  saveImmediately?: boolean;
+}
+
+export function generateAttendanceDailyPDFReport({
+  date,
+  activityName,
+  turma,
+  students,
+  records,
+  teacherName,
+  saveImmediately = false,
+}: GenerateAttendanceDailyPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const dateFormatted = formatDate(date);
+
+  // Filter students for this activity/turma
+  const relevantStudents = students
+    .filter((st) => {
+      const acts = Array.isArray(st.activities) ? st.activities : [];
+      const matchAct = activityName === 'TODAS' || acts.includes(activityName as ActivityType);
+      const matchTurma = turma === 'TODAS' || st.turma === turma;
+      return matchAct && matchTurma;
+    })
+    .sort((a, b) => {
+      const turmaComp = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
+      if (turmaComp !== 0) return turmaComp;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+
+  // Calculate stats
+  let pres = 0;
+  let saidaAnt = 0;
+  let falta = 0;
+  let saude = 0;
+  let semEquip = 0;
+  let pendente = 0;
+
+  relevantStudents.forEach((st) => {
+    const rec = records.find((r) => r.studentId === st.id && r.date === date);
+    if (!rec) {
+      pendente++;
+    } else {
+      if (rec.status === 'presente') pres++;
+      else if (rec.status === 'saida_antecipada') saidaAnt++;
+      else if (rec.status === 'falta') falta++;
+      else if (rec.status === 'saude') saude++;
+      else if (rec.status === 'sem_equipamento') semEquip++;
+    }
+  });
+
+  const total = relevantStudents.length;
+  const presenceRate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
+
+  // Header
+  drawOfficialHeader(
+    doc,
+    'Lista de Chamada & Frequência Diária',
+    `Controle de Frequência do Programa Integral - Data: ${dateFormatted}`,
+    [`Atividade: ${activityName}`, `Turma: ${turma}`, `Data: ${dateFormatted}`],
+    'portrait'
+  );
+
+  let startY = 36;
+
+  // Info Card
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, startY, 182, 20, 2, 2, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Atividade: ${activityName}   |   Turma: ${turma}`, 18, startY + 5.5);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Professor(a) Responsável: ${teacherName || 'Docente'}   |   Total de Alunos: ${total}   |   Taxa de Presença: ${presenceRate}%`,
+    18,
+    startY + 12
+  );
+
+  startY += 24;
+
+  // Metrics
+  const metrics = [
+    { label: 'Presentes', value: pres, color: [22, 163, 74] as [number, number, number] },
+    { label: 'Saída Ant.', value: saidaAnt, color: [217, 119, 6] as [number, number, number] },
+    { label: 'Faltas', value: falta, color: [220, 38, 38] as [number, number, number] },
+    { label: 'Saúde', value: saude, color: [217, 119, 6] as [number, number, number] },
+    { label: 'Sem Equip.', value: semEquip, color: [234, 88, 12] as [number, number, number] },
+  ];
+  drawMetricBoxes(doc, 14, startY, 34, 13.5, 3, metrics);
+
+  startY += 18;
+
+  // Table Data
+  const tableData = relevantStudents.map((st, index) => {
+    const rec = records.find((r) => r.studentId === st.id && r.date === date);
+    let statusText = 'Pendente';
+    if (rec) {
+      if (rec.status === 'saida_antecipada') {
+        statusText = `Saída às ${rec.exitTime || 's/h'}`;
+      } else {
+        statusText = getStatusText(rec.status);
+      }
+    }
+
+    const obs = [
+      rec?.equipmentMissingDetails ? `Equip: ${rec.equipmentMissingDetails}` : '',
+      rec?.observation || '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    return [
+      String(index + 1).padStart(2, '0'),
+      st.name,
+      st.turma,
+      statusText,
+      obs || '-',
+    ];
+  });
+
+  autoTable(doc, {
+    startY: startY,
+    head: [['Nº', 'Nome do Aluno(a)', 'Turma', 'Status de Frequência', 'Observações / Ocorrências']],
+    body: tableData.length > 0 ? tableData : [['-', 'Nenhum aluno cadastrado no filtro selecionado', '-', '-', '-']],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+    },
+    bodyStyles: {
+      fontSize: 7.5,
+      textColor: [51, 65, 85],
+      cellPadding: 2,
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 55, fontStyle: 'bold' },
+      2: { cellWidth: 25, halign: 'center' },
+      3: { cellWidth: 40, halign: 'center' },
+      4: { cellWidth: 'auto' },
+    },
+  });
+
+  // Signatures
+  const finalY = (doc as any).lastAutoTable?.finalY || 220;
+  if (finalY < 250) {
+    const sigY = Math.max(finalY + 16, 245);
+    doc.setDrawColor(203, 213, 225);
+    doc.line(20, sigY, 90, sigY);
+    doc.line(120, sigY, 190, sigY);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Professor(a) / Monitor(a) Responsável`, 55, sigY + 4, { align: 'center' });
+    doc.text('Coordenação do Programa Integral', 155, sigY + 4, { align: 'center' });
+  }
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+  const filename = `Chamada_${activityName.replace(/[\/\s]+/g, '_')}_${turma.replace(/[\/\s]+/g, '_')}_${dateFormatted.replace(/\//g, '-')}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

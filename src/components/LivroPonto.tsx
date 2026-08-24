@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Save,
   PenTool,
+  Download,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -65,6 +66,8 @@ import {
   getMonthNameBR,
   numberToWordsBRL,
 } from '../utils/pontoUtils';
+import { generateLivroPontoPDFReport } from '../utils/pdfGenerator';
+import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
 interface LivroPontoProps {
@@ -136,6 +139,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [showTimesheetPrintModal, setShowTimesheetPrintModal] = useState(false);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
   const [showEditDayModal, setShowEditDayModal] = useState<PontoRecord | null>(null);
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    doc: any;
+    dataUrl: string;
+    blobUrl: string;
+    filename: string;
+    title: string;
+    onDownload: () => void;
+  } | null>(null);
 
   // Quick punch feedback
   const [punchFeedback, setPunchFeedback] = useState<{
@@ -155,6 +167,37 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Lock background scroll when any modal is open & handle Escape key
+  useEffect(() => {
+    const isAnyModalOpen = Boolean(
+      showTimesheetPrintModal ||
+      showReceiptModal ||
+      showHolidayModal ||
+      showEditDayModal ||
+      pdfPreviewState?.isOpen
+    );
+    if (isAnyModalOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          setShowTimesheetPrintModal(false);
+          setShowReceiptModal(false);
+          setShowHolidayModal(false);
+          setShowEditDayModal(null);
+          setPdfPreviewState(null);
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, pdfPreviewState?.isOpen]);
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -572,6 +615,51 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     setTimeout(() => setPunchFeedback(null), 3000);
   };
 
+  // Generate Official PDF Report for Timesheet & Financial Summary
+  const handleGeneratePontoPDF = (saveImmediately = false) => {
+    try {
+      const result = generateLivroPontoPDFReport({
+        user: targetUser,
+        month: selectedMonth,
+        year: selectedYear,
+        monthDaysGrid,
+        financials,
+        closingRecord,
+        companyName,
+        institutionName,
+        pixKey,
+        contractSchedule,
+        contractDailyHoursFormatted,
+        saveImmediately,
+      });
+
+      if (!saveImmediately) {
+        setPdfPreviewState({
+          isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `ESPELHO DE PONTO — ${targetUser?.name || 'Colaborador'} (${getMonthNameBR(selectedMonth)}/${selectedYear})`,
+          onDownload: result.download,
+        });
+      } else {
+        setPunchFeedback({
+          text: `PDF "${result.filename}" gerado e baixado com sucesso!`,
+          type: 'success',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+      }
+    } catch (err) {
+      console.error('Erro ao gerar PDF do Livro Ponto:', err);
+      setPunchFeedback({
+        text: 'Não foi possível gerar o PDF. Verifique os dados e tente novamente.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Notification Toast */}
@@ -861,26 +949,50 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
       {/* Espelho de Ponto Table (01 a 31) */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           <div>
             <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
               <FileText className="w-4 h-4 text-indigo-600" />
-              Espelho de Frequência Individual — {getMonthNameBR(selectedMonth)} de {selectedYear}
+              <span>ESPELHO DE PONTO</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Tolerância de 5 minutos aplicada. Sábados, Domingos, Feriados e Recessos são garantidos integralmente.
             </p>
           </div>
 
-          <div className="flex items-center space-x-2 text-xs">
-            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>Feriado/Recesso Pago</span>
-            </span>
-            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-              <span>Falta Injustificada</span>
-            </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status indicators */}
+            <div className="hidden sm:flex items-center space-x-2 text-xs mr-1">
+              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Feriado/Recesso</span>
+              </span>
+              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                <span>Falta Injustificada</span>
+              </span>
+            </div>
+
+            {/* Print & PDF Action Buttons at the Top of Timesheet */}
+            <button
+              type="button"
+              onClick={() => setShowTimesheetPrintModal(true)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer border border-slate-700 active:scale-95"
+              title="Imprimir Espelho de Frequência Mensal em folha A4"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Imprimir Espelho</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleGeneratePontoPDF(false)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer shadow-indigo-900/20 active:scale-95"
+              title="Salvar Espelho de Ponto em PDF Oficial e Enviar ao Departamento Pessoal"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Salvar PDF / DP</span>
+            </button>
           </div>
         </div>
 
@@ -1072,28 +1184,30 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
           {/* Grid of calculations */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-              <span className="text-slate-400 font-medium block">Bolsa Auxílio Base:</span>
-              <span className="text-base font-black text-slate-800">{formatCurrencyBR(financials.baseSalary)}</span>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-slate-500 font-medium block truncate text-[11px]">Bolsa Auxílio Base:</span>
+              <span className="text-sm sm:text-base font-black text-slate-800 truncate mt-1">
+                {formatCurrencyBR(financials.baseSalary)}
+              </span>
             </div>
 
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-              <span className="text-emerald-700 font-medium block">Dias Pagos / Feriados:</span>
-              <span className="text-base font-black text-emerald-900">
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-emerald-700 font-medium block truncate text-[11px]">Dias Pagos / Feriados:</span>
+              <span className="text-xs sm:text-sm font-black text-emerald-900 break-words mt-1 leading-snug">
                 {financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Remunerados)
               </span>
             </div>
 
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
-              <span className="text-rose-700 font-medium block">Faltas Injustificadas:</span>
-              <span className="text-base font-black text-rose-900">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas Injustificadas:</span>
+              <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
                 {financials.unjustifiedAbsencesCount} dias ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})
               </span>
             </div>
 
-            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
-              <span className="text-indigo-700 font-medium block">Horas Extras / Adicionais:</span>
-              <span className="text-base font-black text-indigo-900">
+            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras / Adicionais:</span>
+              <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis">
                 {formatMinutesToTime(financials.totalExtraMinutes)} ({formatCurrencyBR(financials.extraHoursAmount)})
               </span>
             </div>
@@ -1228,9 +1342,29 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowTimesheetPrintModal(true)}
+                className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition shadow-sm cursor-pointer active:scale-95"
+                title="Imprimir Espelho de Frequência e Resumo Financeiro"
+              >
+                <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Imprimir Espelho</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGeneratePontoPDF(false)}
+                className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
+                title="Salvar em PDF Oficial e Enviar para o Departamento Pessoal (DP)"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Salvar PDF / Enviar DP</span>
+              </button>
+            </div>
             <button
               onClick={() => setShowReceiptModal(true)}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-md shadow-indigo-900/30"
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-md shadow-indigo-900/30 cursor-pointer"
             >
               <FileCheck2 className="w-4 h-4" />
               <span>Gerar Recibo Oficial com Quitação</span>
@@ -1244,32 +1378,36 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       {/* ========================================================================= */}
       {showReceiptModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white text-slate-900 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden my-6 border border-slate-300">
-            {/* Modal Control Header (Hidden in print) */}
-            <div className="bg-slate-900 text-white p-4 flex items-center justify-between print:hidden">
+          <div className="bg-white text-slate-900 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden my-6 border border-slate-300 max-h-[92vh] flex flex-col">
+            {/* Modal Control Header (Sticky and Hidden in print) */}
+            <div className="sticky top-0 z-30 bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800 shadow-md print:hidden">
               <div className="flex items-center space-x-2">
                 <FileCheck2 className="w-5 h-5 text-indigo-400" />
                 <h3 className="font-bold text-sm">Recibo de Bolsa Auxílio & Termo de Quitação</h3>
               </div>
               <div className="flex items-center space-x-2">
                 <button
+                  type="button"
                   onClick={() => window.print()}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition"
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
                   <span>Imprimir (A4)</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setShowReceiptModal(false)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer active:scale-95"
+                  title="Fechar recibo e voltar ao painel"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-3.5 h-3.5" />
+                  <span>Fechar e Voltar</span>
                 </button>
               </div>
             </div>
 
             {/* Printable Document Area */}
-            <div className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs font-sans">
+            <div className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs font-sans overflow-y-auto">
               {/* Institutional Header */}
               <div className="border-b-2 border-slate-900 pb-4 text-center space-y-1">
                 <h2 className="text-base font-black tracking-wide uppercase text-slate-900">
@@ -1441,37 +1579,51 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       {/* ========================================================================= */}
       {showTimesheetPrintModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white text-slate-900 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden my-6 border border-slate-300">
-            <div className="bg-slate-900 text-white p-4 flex items-center justify-between print:hidden">
+          <div className="bg-white text-slate-900 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden my-6 border border-slate-300 max-h-[92vh] flex flex-col">
+            {/* Modal Control Header (Sticky and Hidden in print) */}
+            <div className="sticky top-0 z-30 bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800 shadow-md print:hidden">
               <div className="flex items-center space-x-2">
                 <Printer className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-bold text-sm">Espelho de Ponto Individual Mensal (Folha de Frequência)</h3>
+                <h3 className="font-bold text-sm">ESPELHO DE PONTO</h3>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => window.print()}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition"
+                  type="button"
+                  onClick={() => handleGeneratePontoPDF(false)}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
+                  title="Salvar em PDF Oficial"
                 >
-                  <Printer className="w-4 h-4" />
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Salvar PDF / DP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
+                >
+                  <Printer className="w-3.5 h-3.5" />
                   <span>Imprimir Espelho</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setShowTimesheetPrintModal(false)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer active:scale-95"
+                  title="Fechar espelho e voltar ao painel"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-3.5 h-3.5" />
+                  <span>Fechar e Voltar</span>
                 </button>
               </div>
             </div>
 
-            <div className="p-8 space-y-4 text-slate-800 text-xs">
+            <div className="p-8 space-y-4 text-slate-800 text-xs overflow-y-auto">
               {/* Timesheet Printable Header */}
               <div className="border-b-2 border-slate-900 pb-3 text-center space-y-0.5">
                 <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">
                   INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
                 </h2>
-                <h3 className="text-xs font-bold text-slate-700">
-                  ESPELHO DE REGISTRO ELETRÔNICO DE PONTO — {getMonthNameBR(selectedMonth).toUpperCase()} / {selectedYear}
+                <h3 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                  ESPELHO DE PONTO
                 </h3>
               </div>
 
@@ -1569,6 +1721,31 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <span className="text-[10px] text-slate-500 font-semibold block mt-1">
                     {targetUser?.name?.toUpperCase()} (ASSINATURA DA COLABORADORA)
                   </span>
+                </div>
+              </div>
+
+              {/* Bottom return bar (screen only) */}
+              <div className="pt-4 border-t border-slate-200 flex items-center justify-between print:hidden">
+                <span className="text-[11px] text-slate-500">
+                  Documento gerado em conformidade com os registros de ponto do sistema.
+                </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Imprimir</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTimesheetPrintModal(false)}
+                    className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs shadow-sm transition cursor-pointer active:scale-95"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Fechar e Voltar</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1729,6 +1906,152 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* PDF Preview & Download Modal */}
+      {pdfPreviewState?.isOpen && (
+        <PdfViewerModal
+          isOpen={pdfPreviewState.isOpen}
+          doc={pdfPreviewState.doc}
+          dataUrl={pdfPreviewState.dataUrl}
+          blobUrl={pdfPreviewState.blobUrl}
+          filename={pdfPreviewState.filename}
+          title={pdfPreviewState.title}
+          onClose={() => setPdfPreviewState(null)}
+          onDownload={pdfPreviewState.onDownload}
+        >
+          <div className="space-y-4 text-slate-800 text-xs">
+            {/* Header */}
+            <div className="border-b-2 border-slate-900 pb-3 text-center space-y-0.5">
+              <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
+              </h2>
+              <h3 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                ESPELHO DE PONTO
+              </h3>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Competência: {getMonthNameBR(selectedMonth)} de {selectedYear} • Emissão: {new Date().toLocaleDateString('pt-BR')}
+              </p>
+            </div>
+
+            {/* Worker Metadata Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px]">
+              <div>
+                <span className="text-slate-500">Colaborador(a):</span> <strong>{targetUser?.name}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Função:</span> <strong>{targetUser?.cargoLabel || 'Estagiária'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Horário Contratual:</span> <strong>{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Empresa:</span> <strong>{companyName}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">PIX:</span> <strong className="font-mono">{pixKey}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Faltas Injustificadas:</span>{' '}
+                <strong className={financials.unjustifiedAbsencesCount > 0 ? 'text-rose-600' : 'text-slate-900'}>
+                  {financials.unjustifiedAbsencesCount} {financials.unjustifiedAbsencesCount === 1 ? 'dia' : 'dias'}
+                </strong>
+              </div>
+            </div>
+
+            {/* Timesheet Table */}
+            <div className="border border-slate-300 rounded-lg overflow-hidden">
+              <table className="w-full text-left text-[10px] border-collapse">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-bold uppercase text-center">
+                    <th className="p-1.5 w-10">Dia</th>
+                    <th className="p-1.5 w-24">Semana</th>
+                    <th className="p-1.5 w-16">Entrada 1</th>
+                    <th className="p-1.5 w-16">Saída 1</th>
+                    <th className="p-1.5 w-16">Entrada 2</th>
+                    <th className="p-1.5 w-16">Saída 2</th>
+                    <th className="p-1.5 w-32">Status</th>
+                    <th className="p-1.5">Rubrica / Assinatura</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {monthDaysGrid.map((item) => {
+                    const rec = item.record;
+                    const status = rec?.status || item.defaultStatus;
+                    return (
+                      <tr key={item.dateStr} className={item.isWk ? 'bg-slate-50 text-slate-400' : ''}>
+                        <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
+                        <td className="p-1 text-center">{item.dayOfWeekShort}</td>
+                        {item.isWk ? (
+                          <td colSpan={4} className="p-1 text-center italic font-semibold">
+                            {item.isSat ? 'SÁBADO' : 'DOMINGO'}
+                          </td>
+                        ) : status === 'feriado' || status === 'recesso' ? (
+                          <td colSpan={4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
+                            {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
+                          </td>
+                        ) : (
+                          <>
+                            <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
+                            <td className="p-1 text-center font-mono">{rec?.exit1 || '—'}</td>
+                            <td className="p-1 text-center font-mono">{rec?.entry2 || '—'}</td>
+                            <td className="p-1 text-center font-mono">{rec?.exit2 || '—'}</td>
+                          </>
+                        )}
+                        <td className="p-1 text-center font-semibold">
+                          {status === 'normal'
+                            ? rec?.entry1
+                              ? 'PRESENTE'
+                              : '—'
+                            : status.toUpperCase()}
+                        </td>
+                        <td className="p-1 text-center text-slate-400 font-mono text-[9px]">
+                          {closingRecord?.signedDigitally ? `[Digital ${closingRecord.digitalSignatureHash?.substring(0, 10)}]` : '__________________'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Financial Summary Box */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div>
+                <span className="text-slate-500 block text-[10px]">Bolsa Base:</span>
+                <strong className="text-slate-900">{formatCurrencyBR(financials.baseSalary)}</strong>
+              </div>
+              <div>
+                <span className="text-emerald-700 block text-[10px]">Feriados / Recessos:</span>
+                <strong className="text-emerald-800">{financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Pagos)</strong>
+              </div>
+              <div>
+                <span className="text-rose-700 block text-[10px]">Faltas Injustificadas:</span>
+                <strong className="text-rose-800">{financials.unjustifiedAbsencesCount} ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})</strong>
+              </div>
+              <div>
+                <span className="text-indigo-700 block text-[10px]">Horas Extras / Adicionais:</span>
+                <strong className="text-indigo-900">{formatMinutesToTime(financials.totalExtraMinutes)} ({formatCurrencyBR(financials.extraHoursAmount)})</strong>
+              </div>
+            </div>
+
+            {/* Signatures */}
+            <div className="grid grid-cols-2 gap-8 pt-6">
+              <div className="text-center">
+                <div className="border-b border-slate-900 pb-1 w-full"></div>
+                <span className="text-[10px] text-slate-500 font-semibold block mt-1">
+                  COORDENAÇÃO DO INTEGRAL • COLÉGIO CRESCER
+                </span>
+              </div>
+              <div className="text-center">
+                <div className="border-b border-slate-900 pb-1 w-full"></div>
+                <span className="text-[10px] text-slate-500 font-semibold block mt-1">
+                  {targetUser?.name?.toUpperCase()} (ASSINATURA DA COLABORADORA)
+                </span>
+              </div>
+            </div>
+          </div>
+        </PdfViewerModal>
       )}
     </div>
   );
