@@ -186,12 +186,16 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // On-screen PDF Viewer State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
+    doc?: any;
+    dataUrl: string | null;
     blobUrl: string | null;
     filename: string;
     title: string;
     onDownload?: () => void;
   }>({
     isOpen: false,
+    doc: null,
+    dataUrl: null,
     blobUrl: null,
     filename: '',
     title: '',
@@ -1032,6 +1036,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       const result = generateStudentPDFReport(student, currentWeek, records);
                       setPdfPreviewState({
                         isOpen: true,
+                        doc: result.doc,
+                        dataUrl: result.dataUrl || result.dataUri,
                         blobUrl: result.blobUrl,
                         filename: result.filename,
                         title: `Ficha Individual - ${student.name}`,
@@ -1471,6 +1477,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       <PdfViewerModal
         isOpen={pdfPreviewState.isOpen}
         onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        doc={pdfPreviewState.doc}
+        dataUrl={pdfPreviewState.dataUrl}
+        pdfDataUrl={pdfPreviewState.dataUrl}
         blobUrl={pdfPreviewState.blobUrl}
         filename={pdfPreviewState.filename}
         title={pdfPreviewState.title}

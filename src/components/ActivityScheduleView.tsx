@@ -87,12 +87,16 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
   // PDF Preview State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
+    doc?: any;
+    dataUrl: string | null;
     blobUrl: string | null;
     filename: string;
     title: string;
     onDownload?: () => void;
   }>({
     isOpen: false,
+    doc: null,
+    dataUrl: null,
     blobUrl: null,
     filename: '',
     title: '',
@@ -234,6 +238,8 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
 
       setPdfPreviewState({
         isOpen: true,
+        doc: result.doc,
+        dataUrl: result.dataUrl || result.dataUri,
         blobUrl: result.blobUrl,
         filename: result.filename,
         title: `Grade Oficial - ${currentActivity.name || currentActivity.id}`,
@@ -831,6 +837,9 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
       <PdfViewerModal
         isOpen={pdfPreviewState.isOpen}
         onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        doc={pdfPreviewState.doc}
+        dataUrl={pdfPreviewState.dataUrl}
+        pdfDataUrl={pdfPreviewState.dataUrl}
         blobUrl={pdfPreviewState.blobUrl}
         filename={pdfPreviewState.filename}
         title={pdfPreviewState.title}

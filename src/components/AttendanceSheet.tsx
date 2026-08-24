@@ -131,12 +131,16 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // PDF Preview State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
+    doc?: any;
+    dataUrl: string | null;
     blobUrl: string | null;
     filename: string;
     title: string;
     onDownload?: () => void;
   }>({
     isOpen: false,
+    doc: null,
+    dataUrl: null,
     blobUrl: null,
     filename: '',
     title: '',
@@ -678,6 +682,8 @@ function getCurrentHHMM(): string {
                   const result = generateTurmaPDFReport(selectedTurma, currentWeek, students, records);
                   setPdfPreviewState({
                     isOpen: true,
+                    doc: result.doc,
+                    dataUrl: result.dataUrl || result.dataUri,
                     blobUrl: result.blobUrl,
                     filename: result.filename,
                     title: `Relatório da Turma - ${selectedTurma}`,
@@ -991,6 +997,9 @@ function getCurrentHHMM(): string {
       <PdfViewerModal
         isOpen={pdfPreviewState.isOpen}
         onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        doc={pdfPreviewState.doc}
+        dataUrl={pdfPreviewState.dataUrl}
+        pdfDataUrl={pdfPreviewState.dataUrl}
         blobUrl={pdfPreviewState.blobUrl}
         filename={pdfPreviewState.filename}
         title={pdfPreviewState.title}

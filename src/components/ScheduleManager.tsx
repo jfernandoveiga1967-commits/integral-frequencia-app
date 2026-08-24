@@ -219,12 +219,16 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   // PDF On-Screen Viewer State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
+    doc?: any;
+    dataUrl: string | null;
     blobUrl: string | null;
     filename: string;
     title: string;
     onDownload?: () => void;
   }>({
     isOpen: false,
+    doc: null,
+    dataUrl: null,
     blobUrl: null,
     filename: '',
     title: '',
@@ -281,6 +285,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
       setPdfPreviewState({
         isOpen: true,
+        doc: result.doc,
+        dataUrl: result.dataUrl || result.dataUri,
         blobUrl: result.blobUrl,
         filename: result.filename,
         title: 'Grade Semanal Geral - Todas as Turmas',
@@ -321,6 +327,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
         setPdfPreviewState({
           isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
           blobUrl: result.blobUrl,
           filename: result.filename,
           title: pdfTargetTurma === 'ALL'
@@ -328,7 +336,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             : `Grade Semanal - ${pdfTargetTurma} (${daysLabel})`,
           onDownload: result.download,
         });
-
         showToast(
           pdfTargetTurma === 'ALL'
             ? `✓ PDF da Grade de todas as ${sortedTurmas.length} turmas (${daysLabel}) pronto!`
@@ -350,6 +357,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
         setPdfPreviewState({
           isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
           blobUrl: result.blobUrl,
           filename: result.filename,
           title: `Rotina Diária - ${targetTurma} (${daysLabel})`,
@@ -371,6 +380,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
 
         setPdfPreviewState({
           isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
           blobUrl: result.blobUrl,
           filename: result.filename,
           title: `Grade de Horários - ${pdfTargetActivity}`,
@@ -2639,6 +2650,9 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       <PDFPreviewModal
         isOpen={pdfPreviewState.isOpen}
         onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        doc={pdfPreviewState.doc}
+        dataUrl={pdfPreviewState.dataUrl}
+        pdfDataUrl={pdfPreviewState.dataUrl}
         blobUrl={pdfPreviewState.blobUrl}
         filename={pdfPreviewState.filename}
         title={pdfPreviewState.title}

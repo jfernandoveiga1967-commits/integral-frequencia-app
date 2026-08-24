@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Download,
   Printer,
@@ -8,16 +8,21 @@ import {
   Minimize2,
   Check,
   ArrowLeft,
+  RefreshCw,
+  Eye,
 } from 'lucide-react';
+import type { jsPDF } from 'jspdf';
 
 export interface PdfViewerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  doc?: jsPDF | null;
   pdfDataUrl?: string | null;
   dataUrl?: string | null;
   dataUri?: string | null;
   pdfBlobUrl?: string | null;
   blobUrl?: string | null;
+  blob?: Blob | null;
   filename: string;
   title: string;
   onDownload?: () => void;
@@ -26,28 +31,90 @@ export interface PdfViewerModalProps {
 export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   isOpen,
   onClose,
+  doc,
   pdfDataUrl,
   dataUrl,
   dataUri,
   pdfBlobUrl,
   blobUrl,
+  blob,
   filename,
   title,
   onDownload,
 }) => {
-  const activePdfSource = pdfDataUrl || dataUrl || dataUri || pdfBlobUrl || blobUrl;
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+  const [activeUrl, setActiveUrl] = useState<string | null>(null);
 
-  if (!isOpen || !activePdfSource) return null;
+  // Generate robust display URL whenever modal opens
+  useEffect(() => {
+    if (!isOpen) {
+      if (activeUrl && activeUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(activeUrl);
+      }
+      setActiveUrl(null);
+      return;
+    }
+
+    try {
+      if (doc) {
+        const b = doc.output('blob');
+        const url = URL.createObjectURL(b);
+        setActiveUrl(url);
+        return () => {
+          URL.revokeObjectURL(url);
+        };
+      }
+
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        setActiveUrl(url);
+        return () => {
+          URL.revokeObjectURL(url);
+        };
+      }
+
+      const rawSource = pdfDataUrl || dataUrl || dataUri || pdfBlobUrl || blobUrl;
+      if (rawSource) {
+        if (rawSource.startsWith('data:application/pdf;base64,')) {
+          try {
+            const base64Data = rawSource.split(',')[1];
+            const binaryString = atob(base64Data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const b = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(b);
+            setActiveUrl(url);
+            return () => {
+              URL.revokeObjectURL(url);
+            };
+          } catch (e) {
+            console.warn('Failed converting base64 to blob, using raw URL:', e);
+            setActiveUrl(rawSource);
+          }
+        } else {
+          setActiveUrl(rawSource);
+        }
+      }
+    } catch (err) {
+      console.error('Error generating PDF preview URL:', err);
+    }
+  }, [isOpen, doc, blob, pdfDataUrl, dataUrl, dataUri, pdfBlobUrl, blobUrl]);
+
+  if (!isOpen) return null;
 
   const handleDownload = () => {
     if (onDownload) {
       onDownload();
-    } else {
+    } else if (doc) {
+      doc.save(filename || 'relatorio.pdf');
+    } else if (activeUrl) {
       const link = document.createElement('a');
-      link.href = activePdfSource;
-      link.download = filename || 'documento.pdf';
+      link.href = activeUrl;
+      link.download = filename || 'relatorio.pdf';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -57,78 +124,57 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   };
 
   const handlePrint = () => {
-    try {
-      // Create hidden iframe for direct native browser print dialog
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.src = activePdfSource;
-      document.body.appendChild(iframe);
-      
-      iframe.onload = () => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (err) {
-          console.warn('Direct print failed, opening print window:', err);
-          window.print();
-        }
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        }, 2000);
-      };
-    } catch (err) {
-      console.warn('Print initiation error:', err);
-      window.print();
+    if (doc) {
+      doc.autoPrint();
+      const printBlob = doc.output('blob');
+      const printUrl = URL.createObjectURL(printBlob);
+      const win = window.open(printUrl, '_blank');
+      if (win) {
+        win.focus();
+        return;
+      }
     }
+
+    if (activeUrl) {
+      const win = window.open(activeUrl, '_blank');
+      if (win) {
+        win.focus();
+        win.print();
+        return;
+      }
+    }
+
+    window.print();
   };
 
   const handleOpenNewTab = () => {
-    if (!activePdfSource) return;
-    if (activePdfSource.startsWith('data:')) {
-      try {
-        const arr = activePdfSource.split(',');
-        const mimeMatch = arr[0].match(/:(.*?);/);
-        const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-        const bstr = atob(arr[1]);
-        let n = bstr.length;
-        const u8arr = new Uint8Array(n);
-        while (n--) {
-          u8arr[n] = bstr.charCodeAt(n);
-        }
-        const blob = new Blob([u8arr], { type: mime });
-        const tempUrl = URL.createObjectURL(blob);
-        window.open(tempUrl, '_blank');
-        return;
-      } catch (e) {
-        console.warn('Blob conversion failed:', e);
-      }
+    if (doc) {
+      const b = doc.output('blob');
+      const tempUrl = URL.createObjectURL(b);
+      window.open(tempUrl, '_blank');
+      return;
     }
-    window.open(activePdfSource, '_blank');
+    if (activeUrl) {
+      window.open(activeUrl, '_blank');
+    }
   };
 
   return (
     <div
       id="pdf-viewer-modal-backdrop"
-      className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 animate-fadeIn"
+      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 animate-fadeIn"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         id="pdf-viewer-modal-container"
-        className={`bg-white rounded-2xl shadow-2xl flex flex-col transition-all duration-300 border border-slate-200 overflow-hidden ${
-          isFullscreen ? 'w-full h-full rounded-none' : 'w-full max-w-6xl h-[90vh]'
+        className={`bg-slate-900 rounded-2xl shadow-2xl flex flex-col transition-all duration-300 border border-slate-700 overflow-hidden ${
+          isFullscreen ? 'w-full h-full rounded-none' : 'w-full max-w-6xl h-[92vh]'
         }`}
       >
-        {/* Fixed Control Header Bar */}
-        <div className="bg-slate-900 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 shrink-0 border-b border-slate-800 sticky top-0 z-10">
+        {/* Fixed Header Toolbar */}
+        <div className="bg-slate-900 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 shrink-0 border-b border-slate-800 sticky top-0 z-20 shadow-md">
           <div className="flex items-center space-x-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 shrink-0">
               <FileText className="w-5 h-5" />
@@ -145,8 +191,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
             </div>
           </div>
 
-          {/* Action buttons bar: [Baixar PDF], [Imprimir], [Fechar / Voltar] */}
-          <div className="flex items-center space-x-2 shrink-0">
+          {/* Action buttons bar */}
+          <div className="flex items-center flex-wrap gap-2 shrink-0">
+            {/* Download PDF Button */}
             <button
               type="button"
               id="btn-pdf-modal-download"
@@ -162,27 +209,31 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
               <span>{downloaded ? 'Baixado!' : 'Baixar PDF'}</span>
             </button>
 
+            {/* Print Button */}
             <button
               type="button"
               id="btn-pdf-modal-print"
               onClick={handlePrint}
               className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
-              title="Abrir caixa de diálogo de impressão nativa"
+              title="Imprimir documento oficial"
             >
               <Printer className="w-4 h-4 text-slate-300" />
               <span>Imprimir</span>
             </button>
 
+            {/* Open in New Tab Button */}
             <button
               type="button"
               id="btn-pdf-modal-newtab"
               onClick={handleOpenNewTab}
-              className="p-1.5 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
               title="Abrir em Nova Aba"
             >
               <ExternalLink className="w-4 h-4" />
+              <span className="hidden sm:inline">Nova Aba</span>
             </button>
 
+            {/* Fullscreen Button */}
             <button
               type="button"
               id="btn-pdf-modal-fullscreen"
@@ -193,12 +244,13 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
 
+            {/* Close / Return Button */}
             <button
               type="button"
               id="btn-pdf-modal-close"
               onClick={onClose}
               className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-rose-600 border border-slate-700 transition cursor-pointer"
-              title="Fechar visualização e voltar para a Grade Semanal"
+              title="Fechar visualização e voltar"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Fechar / Voltar</span>
@@ -207,62 +259,65 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         </div>
 
         {/* Sub-bar filename info */}
-        <div className="bg-slate-100 px-4 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs text-slate-600">
-          <span className="truncate font-mono text-[11px] text-slate-600">
-            Arquivo: <strong className="text-slate-800">{filename}</strong>
+        <div className="bg-slate-950/60 px-4 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <span className="truncate font-mono text-[11px]">
+            Arquivo: <strong className="text-indigo-300">{filename}</strong>
           </span>
-          <span className="text-[11px] text-indigo-700 font-semibold hidden sm:inline">
-            Confira a pré-visualização antes de baixar ou imprimir
+          <span className="text-[11px] text-slate-400 hidden sm:inline">
+            Visualizador de Documento Oficial • Colégio Crescer
           </span>
         </div>
 
-        {/* PDF Object Viewer with Chrome security-safe Base64 Data URL */}
-        <div className="flex-1 w-full h-full bg-slate-200 relative overflow-hidden flex flex-col items-center justify-center">
-          <object
-            id="pdf-preview-object"
-            data={activePdfSource}
-            type="application/pdf"
-            width="100%"
-            height="100%"
-            className="w-full h-full border-0"
-            title="Pré-visualização da Grade"
-          >
-            {/* Fallback iframe inside object to support maximum browser compatibility */}
-            <iframe
-              id="pdf-preview-iframe"
-              src={activePdfSource}
-              className="w-full h-full border-0"
-              title="Pré-visualização da Grade"
+        {/* PDF Frame Container */}
+        <div
+          id="pdf-frame-wrapper"
+          className="flex-1 w-full h-full bg-slate-950/90 relative flex flex-col items-center justify-center p-2 sm:p-4 overflow-hidden"
+        >
+          {activeUrl ? (
+            <object
+              data={`${activeUrl}#toolbar=1&navpanes=0&view=FitH`}
+              type="application/pdf"
+              className="w-full h-full rounded-xl bg-white shadow-2xl border border-slate-700"
             >
-              <div className="flex flex-col items-center justify-center p-8 text-center h-full bg-white">
-                <FileText className="w-16 h-16 text-indigo-500 mb-4" />
-                <h3 className="text-lg font-bold text-slate-800 mb-2">
-                  Pré-visualização do Documento PDF
-                </h3>
-                <p className="text-sm text-slate-600 mb-6 max-w-md">
-                  Seu navegador não oferece suporte à visualização direta embutida deste arquivo PDF.
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleDownload}
-                    className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-sm hover:bg-indigo-700 transition flex items-center space-x-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Baixar Arquivo PDF</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenNewTab}
-                    className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-sm hover:bg-slate-200 border border-slate-300 transition flex items-center space-x-2"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>Abrir em Nova Aba</span>
-                  </button>
+              {/* Fallback iframe for browsers without native object plugin support */}
+              <iframe
+                src={`${activeUrl}#toolbar=1&navpanes=0&view=FitH`}
+                className="w-full h-full rounded-xl bg-white shadow-2xl border border-slate-700"
+                title={title || 'Visualização do PDF'}
+              >
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-900 text-white rounded-xl">
+                  <FileText className="w-16 h-16 text-indigo-400 mb-4" />
+                  <h3 className="text-lg font-bold mb-2">Relatório PDF Gerado com Sucesso!</h3>
+                  <p className="text-sm text-slate-400 mb-6 max-w-md">
+                    Seu navegador não oferece suporte à visualização embutida direta. Você pode baixar o arquivo ou visualizá-lo em uma nova guia.
+                  </p>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={handleDownload}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center space-x-2 transition"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Baixar PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenNewTab}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-xl text-xs flex items-center space-x-2 transition"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>Abrir em Nova Guia</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </iframe>
-          </object>
+              </iframe>
+            </object>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-slate-400">
+              <RefreshCw className="w-8 h-8 animate-spin text-indigo-400 mb-3" />
+              <p className="text-sm font-semibold">Preparando documento...</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

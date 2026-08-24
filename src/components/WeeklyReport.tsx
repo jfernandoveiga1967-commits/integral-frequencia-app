@@ -388,12 +388,16 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   // On-screen PDF Viewer State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
+    doc?: any;
+    dataUrl: string | null;
     blobUrl: string | null;
     filename: string;
     title: string;
     onDownload?: () => void;
   }>({
     isOpen: false,
+    doc: null,
+    dataUrl: null,
     blobUrl: null,
     filename: '',
     title: '',
@@ -971,6 +975,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                         });
                         setPdfPreviewState({
                           isOpen: true,
+                          doc: result.doc,
+                          dataUrl: result.dataUrl || result.dataUri,
                           blobUrl: result.blobUrl,
                           filename: result.filename,
                           title: `Relatório Consolidado - ${stat.turma}`,
@@ -1095,6 +1101,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   });
                   setPdfPreviewState({
                     isOpen: true,
+                    doc: result.doc,
+                    dataUrl: result.dataUrl || result.dataUri,
                     blobUrl: result.blobUrl,
                     filename: result.filename,
                     title: `Relatório Consolidado - ${selectedPdfTurma}`,
@@ -1213,6 +1221,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     });
                     setPdfPreviewState({
                       isOpen: true,
+                      doc: result.doc,
+                      dataUrl: result.dataUrl || result.dataUri,
                       blobUrl: result.blobUrl,
                       filename: result.filename,
                       title: `Ficha Individual de Frequência - ${targetStudent.name}`,
@@ -1359,6 +1369,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   });
                   setPdfPreviewState({
                     isOpen: true,
+                    doc: result.doc,
+                    dataUrl: result.dataUrl || result.dataUri,
                     blobUrl: result.blobUrl,
                     filename: result.filename,
                     title: `Relatório de Modalidade - ${selectedPdfModality}`,
@@ -1380,6 +1392,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       <PdfViewerModal
         isOpen={pdfPreviewState.isOpen}
         onClose={() => setPdfPreviewState((prev) => ({ ...prev, isOpen: false }))}
+        doc={pdfPreviewState.doc}
+        dataUrl={pdfPreviewState.dataUrl}
+        pdfDataUrl={pdfPreviewState.dataUrl}
         blobUrl={pdfPreviewState.blobUrl}
         filename={pdfPreviewState.filename}
         title={pdfPreviewState.title}
