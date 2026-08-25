@@ -417,7 +417,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setFormContractDailyMinutes(calc.workedMinutes);
     } else {
       setFormContractDailyHours(6);
-      setFormContractDailyHoursFormatted('6h 00min');
+      setFormContractDailyHoursFormatted('6h00min');
       setFormContractDailyMinutes(360);
     }
 
@@ -440,7 +440,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPixKey('');
     setFormContractSchedule('');
     setFormContractDailyHours(6);
-    setFormContractDailyHoursFormatted('6h 00min');
+    setFormContractDailyHoursFormatted('6h00min');
     setFormContractDailyMinutes(360);
     setFormBaseSalary(1200);
     setFormCompany('GADAL - Gestão e Apoio');

@@ -281,19 +281,27 @@ export default function App() {
           return u;
         });
 
-      // Strictly deduplicate by email
+      // Strictly deduplicate by ID and email (Firestore users always take absolute precedence over hardcoded presets)
       const dedupMap = new Map<string, UserProfile>();
       cleanFsUsers.forEach((u) => {
-        const key = (u.email || '').trim().toLowerCase() || u.id;
-        if (!dedupMap.has(key)) {
-          dedupMap.set(key, u);
+        const idKey = u.id;
+        const emailKey = (u.email || '').trim().toLowerCase();
+        const primaryKey = idKey || emailKey;
+        if (primaryKey && !dedupMap.has(primaryKey)) {
+          dedupMap.set(primaryKey, u);
         }
       });
 
       PRESET_USERS.forEach((pu) => {
-        const key = (pu.email || '').trim().toLowerCase() || pu.id;
-        if (!dedupMap.has(key)) {
-          dedupMap.set(key, pu);
+        const emailKey = (pu.email || '').trim().toLowerCase();
+        const alreadyExists = Array.from(dedupMap.values()).some(
+          (existing) =>
+            existing.id === pu.id ||
+            (emailKey && existing.email && existing.email.trim().toLowerCase() === emailKey)
+        );
+        if (!alreadyExists) {
+          const key = pu.id || emailKey;
+          if (key) dedupMap.set(key, pu);
         }
       });
 
@@ -1072,6 +1080,7 @@ export default function App() {
             onSaveHoliday={handleSaveHoliday}
             onDeleteHoliday={handleDeleteHoliday}
             onBatchSaveHolidays={handleBatchSaveHolidays}
+            onSaveUser={handleSaveUser}
           />
         )}
       </main>

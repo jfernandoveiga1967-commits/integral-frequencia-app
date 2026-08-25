@@ -57,6 +57,8 @@ import {
   parseTimeToMinutes,
   formatMinutesToTime,
   formatMinutesToHoursAndMinutes,
+  parseHoursAndMinutesStringToMinutes,
+  calculateDailyHoursFromSchedule,
   parseContractSchedule,
   applyTolerance,
   calculateDayWorkedMinutes,
@@ -82,6 +84,7 @@ interface LivroPontoProps {
   onSaveHoliday?: (holiday: HolidayItem) => void;
   onDeleteHoliday?: (id: string) => void;
   onBatchSaveHolidays?: (holidays: HolidayItem[]) => void;
+  onSaveUser?: (user: UserProfile) => void;
 }
 
 export const LivroPonto: React.FC<LivroPontoProps> = ({
@@ -96,6 +99,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   onSaveHoliday,
   onDeleteHoliday,
   onBatchSaveHolidays,
+  onSaveUser,
 }) => {
   const isAdmin = isCoordenador(currentUser);
   const now = new Date();
@@ -139,6 +143,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [showTimesheetPrintModal, setShowTimesheetPrintModal] = useState(false);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
   const [showEditDayModal, setShowEditDayModal] = useState<PontoRecord | null>(null);
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
     doc: any;
@@ -175,6 +180,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       showReceiptModal ||
       showHolidayModal ||
       showEditDayModal ||
+      showEditUserModal ||
       pdfPreviewState?.isOpen
     );
     if (isAnyModalOpen) {
@@ -187,6 +193,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           setShowReceiptModal(false);
           setShowHolidayModal(false);
           setShowEditDayModal(null);
+          setShowEditUserModal(false);
           setPdfPreviewState(null);
         }
       };
@@ -197,7 +204,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         window.removeEventListener('keydown', handleKeyDown);
       };
     }
-  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, pdfPreviewState?.isOpen]);
+  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen]);
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -253,6 +260,73 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [manualAdditionNote, setManualAdditionNote] = useState<string>(() => closingRecord?.manualAdditionNote || '');
   const [manualDiscount, setManualDiscount] = useState<number>(() => closingRecord?.manualDiscount || 0);
   const [manualDiscountNote, setManualDiscountNote] = useState<string>(() => closingRecord?.manualDiscountNote || '');
+
+  // User contract editing state (inside Livro Ponto)
+  const [userEditName, setUserEditName] = useState('');
+  const [userEditCargo, setUserEditCargo] = useState('');
+  const [userEditPhone, setUserEditPhone] = useState('');
+  const [userEditPixKey, setUserEditPixKey] = useState('');
+  const [userEditContractSchedule, setUserEditContractSchedule] = useState('');
+  const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('8h40min');
+  const [userEditBaseSalary, setUserEditBaseSalary] = useState<number | string>(1200);
+  const [userEditCompany, setUserEditCompany] = useState('');
+
+  // Sync form when targetUser changes or when opening modal
+  useEffect(() => {
+    if (targetUser) {
+      setUserEditName(targetUser.name || '');
+      setUserEditCargo(targetUser.cargoLabel || 'Estagiária / Monitora');
+      setUserEditPhone(targetUser.phone || '');
+      setUserEditPixKey(targetUser.pixKey || targetUser.phone || '');
+      setUserEditContractSchedule(targetUser.contractSchedule || '11:40 - 17:40');
+      setUserEditContractDailyHoursFormatted(
+        targetUser.contractDailyHoursFormatted ||
+        formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || 360)
+      );
+      setUserEditBaseSalary(targetUser.baseSalary !== undefined && targetUser.baseSalary !== null ? targetUser.baseSalary : 1200);
+      setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
+    }
+  }, [targetUser, showEditUserModal]);
+
+  const handleSaveUserContractSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetUser) return;
+
+    let resolvedMinutes = 360;
+    if (userEditContractDailyHoursFormatted && userEditContractDailyHoursFormatted.trim()) {
+      resolvedMinutes = parseHoursAndMinutesStringToMinutes(userEditContractDailyHoursFormatted);
+    } else if (userEditContractSchedule && userEditContractSchedule.includes('-')) {
+      resolvedMinutes = calculateDailyHoursFromSchedule(userEditContractSchedule).workedMinutes;
+    }
+    const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
+    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
+    const parsedSalary = userEditBaseSalary !== '' && !isNaN(Number(userEditBaseSalary)) ? Math.max(0, Number(userEditBaseSalary)) : 1200;
+
+    const updatedUser: UserProfile = {
+      ...targetUser,
+      name: userEditName.trim() || targetUser.name,
+      cargoLabel: userEditCargo.trim() || targetUser.cargoLabel,
+      phone: userEditPhone.trim() || undefined,
+      pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
+      contractSchedule: userEditContractSchedule.trim() || undefined,
+      contractDailyHours: decimalHours,
+      contractDailyMinutes: resolvedMinutes,
+      contractDailyHoursFormatted: formattedHoursStr,
+      baseSalary: parsedSalary,
+      company: userEditCompany.trim() || 'GADAL - Gestão e Apoio',
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (onSaveUser) {
+      onSaveUser(updatedUser);
+    }
+    setShowEditUserModal(false);
+    setPunchFeedback({
+      text: `Dados contratuais de ${updatedUser.name} salvos com sucesso no Livro Ponto e sincronizados com todos os dispositivos!`,
+      type: 'success',
+    });
+    setTimeout(() => setPunchFeedback(null), 4000);
+  };
 
   // Keep state in sync with closingRecord when switching month/user
   useEffect(() => {
@@ -908,6 +982,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <span className="text-slate-400 block font-medium">Chave PIX:</span>
               <strong className="text-slate-800 font-mono font-semibold">{pixKey}</strong>
             </div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowEditUserModal(true)}
+                className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 transition text-xs shadow-sm cursor-pointer"
+                title="Editar jornada de trabalho, horários contratuais, bolsa e chave PIX"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Editar Dados Contratuais</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1000,15 +1085,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-100/80 text-slate-600 uppercase tracking-wider text-[11px] font-bold border-b border-slate-200">
-                <th className="py-2.5 px-3 w-16 text-center">Dia</th>
+                <th className="py-2.5 px-3 w-14 text-center">Dia</th>
                 <th className="py-2.5 px-3 w-28">Dia da Semana</th>
-                <th className="py-2.5 px-3 text-center w-24">Entrada 1</th>
-                <th className="py-2.5 px-3 text-center w-24">Saída 1</th>
-                <th className="py-2.5 px-3 text-center w-24">Entrada 2</th>
-                <th className="py-2.5 px-3 text-center w-24">Saída 2</th>
+                <th className="py-2.5 px-3 text-center w-20">Entrada 1</th>
+                <th className="py-2.5 px-3 text-center w-20">Saída 1</th>
+                <th className="py-2.5 px-3 text-center w-20">Entrada 2</th>
+                <th className="py-2.5 px-3 text-center w-20">Saída 2</th>
+                <th className="py-2.5 px-3 text-center w-24">Horas Trab.</th>
                 <th className="py-2.5 px-3 text-center w-36">Status / Ocorrência</th>
-                <th className="py-2.5 px-3 w-40">Observações</th>
-                {isAdmin && !isMonthClosed && <th className="py-2.5 px-3 w-16 text-center">Editar</th>}
+                <th className="py-2.5 px-3 w-36">Observações</th>
+                {isAdmin && !isMonthClosed && <th className="py-2.5 px-3 w-14 text-center">Editar</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1043,23 +1129,43 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       {item.dayOfWeekName}
                     </td>
 
-                    {/* Time Punches */}
+                    {/* Time Punches & Worked Hours */}
                     {status === 'sabado' || status === 'domingo' ? (
-                      <td colSpan={4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-100/40">
-                        {status === 'sabado' ? 'SÁBADO — DESCANSO SEMANAL' : 'DOMINGO — REPOUSO REMUNERADO'}
-                      </td>
+                      <>
+                        <td colSpan={4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-100/40">
+                          {status === 'sabado' ? 'SÁBADO — DESCANSO SEMANAL' : 'DOMINGO — REPOUSO REMUNERADO'}
+                        </td>
+                        <td className="py-2 px-3 text-center text-slate-400 font-mono font-medium">
+                          —
+                        </td>
+                      </>
                     ) : status === 'feriado' || status === 'recesso' ? (
-                      <td colSpan={4} className="py-2 px-3 text-center font-bold text-emerald-700 bg-emerald-100/30">
-                        ⭐ {status === 'feriado' ? 'FERIADO' : 'RECESSO ESCOLAR'} — {item.holidayItem?.name || 'Abonado / Remunerado'}
-                      </td>
+                      <>
+                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-emerald-700 bg-emerald-100/30">
+                          {status === 'feriado' ? 'FERIADO' : 'RECESSO ESCOLAR'} — {item.holidayItem?.name || 'Abonado / Remunerado'}
+                        </td>
+                        <td className="py-2 px-3 text-center text-emerald-700 font-black font-mono">
+                          {contractDailyHoursFormatted}
+                        </td>
+                      </>
                     ) : status === 'falta_injustificada' ? (
-                      <td colSpan={4} className="py-2 px-3 text-center font-bold text-rose-600 bg-rose-100/40">
-                        ❌ FALTA INJUSTIFICADA (Desconto de 1 Diária)
-                      </td>
+                      <>
+                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-rose-600 bg-rose-100/40">
+                          FALTA INJUSTIFICADA (Desconto de 1 Diária)
+                        </td>
+                        <td className="py-2 px-3 text-center text-rose-600 font-black font-mono">
+                          0h00min
+                        </td>
+                      </>
                     ) : status === 'falta_justificada' || status === 'atestado' ? (
-                      <td colSpan={4} className="py-2 px-3 text-center font-bold text-indigo-700 bg-indigo-100/30">
-                        📋 {status === 'atestado' ? 'ATESTADO MÉDICO' : 'FALTA JUSTIFICADA / ABONADA'}
-                      </td>
+                      <>
+                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-indigo-700 bg-indigo-100/30">
+                          {status === 'atestado' ? 'ATESTADO MÉDICO' : 'FALTA JUSTIFICADA / ABONADA'}
+                        </td>
+                        <td className="py-2 px-3 text-center text-indigo-700 font-black font-mono">
+                          {contractDailyHoursFormatted}
+                        </td>
+                      </>
                     ) : (
                       <>
                         <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
@@ -1073,6 +1179,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                         </td>
                         <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
                           {rec?.exit2 || '—'}
+                        </td>
+                        <td className="py-2 px-3 text-center font-mono">
+                          {(() => {
+                            if (!rec?.entry1 && !rec?.entry2) {
+                              return <span className="text-slate-400 font-normal">{item.isWk ? '—' : '0h00min'}</span>;
+                            }
+                            const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
+                            return (
+                              <div className="flex flex-col items-center">
+                                <span className={`font-black ${dayCalc.overtimeMinutes > 0 ? 'text-indigo-600' : 'text-slate-900'}`}>
+                                  {formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
+                                </span>
+                                {dayCalc.overtimeMinutes > 0 && (
+                                  <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">
+                                    +{formatMinutesToHoursAndMinutes(dayCalc.overtimeMinutes)}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </>
                     )}
@@ -1183,7 +1309,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           {/* Grid of calculations */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
               <span className="text-slate-500 font-medium block truncate text-[11px]">Bolsa Auxílio Base:</span>
               <span className="text-sm sm:text-base font-black text-slate-800 truncate mt-1">
@@ -1191,10 +1317,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </span>
             </div>
 
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-blue-700 font-medium block truncate text-[11px]">Total Horas Trabalhadas:</span>
+              <span className="text-sm sm:text-base font-black text-blue-900 truncate mt-1 font-mono">
+                {financials.totalWorkedFormatted}
+              </span>
+            </div>
+
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
               <span className="text-emerald-700 font-medium block truncate text-[11px]">Dias Pagos / Feriados:</span>
               <span className="text-xs sm:text-sm font-black text-emerald-900 break-words mt-1 leading-snug">
-                {financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Remunerados)
+                {financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Pagos)
               </span>
             </div>
 
@@ -1207,8 +1340,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
             <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
               <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras / Adicionais:</span>
-              <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis">
-                {formatMinutesToTime(financials.totalExtraMinutes)} ({formatCurrencyBR(financials.extraHoursAmount)})
+              <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis font-mono">
+                {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
               </span>
             </div>
           </div>
@@ -1966,11 +2099,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <tr className="bg-slate-800 text-white font-bold uppercase text-center">
                     <th className="p-1.5 w-10">Dia</th>
                     <th className="p-1.5 w-24">Semana</th>
-                    <th className="p-1.5 w-16">Entrada 1</th>
-                    <th className="p-1.5 w-16">Saída 1</th>
-                    <th className="p-1.5 w-16">Entrada 2</th>
-                    <th className="p-1.5 w-16">Saída 2</th>
-                    <th className="p-1.5 w-32">Status</th>
+                    <th className="p-1.5 w-14">Entrada 1</th>
+                    <th className="p-1.5 w-14">Saída 1</th>
+                    <th className="p-1.5 w-14">Entrada 2</th>
+                    <th className="p-1.5 w-14">Saída 2</th>
+                    <th className="p-1.5 w-16">Horas</th>
+                    <th className="p-1.5 w-28">Status</th>
                     <th className="p-1.5">Rubrica / Assinatura</th>
                   </tr>
                 </thead>
@@ -1978,24 +2112,45 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   {monthDaysGrid.map((item) => {
                     const rec = item.record;
                     const status = rec?.status || item.defaultStatus;
+                    const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
                     return (
                       <tr key={item.dateStr} className={item.isWk ? 'bg-slate-50 text-slate-400' : ''}>
                         <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
                         <td className="p-1 text-center">{item.dayOfWeekShort}</td>
                         {item.isWk ? (
-                          <td colSpan={4} className="p-1 text-center italic font-semibold">
-                            {item.isSat ? 'SÁBADO' : 'DOMINGO'}
-                          </td>
+                          <>
+                            <td colSpan={4} className="p-1 text-center italic font-semibold">
+                              {item.isSat ? 'SÁBADO' : 'DOMINGO'}
+                            </td>
+                            <td className="p-1 text-center text-slate-400 font-mono">—</td>
+                          </>
                         ) : status === 'feriado' || status === 'recesso' ? (
-                          <td colSpan={4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
-                            {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
-                          </td>
+                          <>
+                            <td colSpan={4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
+                              {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
+                            </td>
+                            <td className="p-1 text-center font-bold text-emerald-800 font-mono">
+                              {contractDailyHoursFormatted}
+                            </td>
+                          </>
+                        ) : status === 'falta_injustificada' ? (
+                          <>
+                            <td colSpan={4} className="p-1 text-center font-bold text-rose-800 bg-rose-50">
+                              FALTA INJUSTIFICADA
+                            </td>
+                            <td className="p-1 text-center font-bold text-rose-800 font-mono">
+                              0h00min
+                            </td>
+                          </>
                         ) : (
                           <>
                             <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
                             <td className="p-1 text-center font-mono">{rec?.exit1 || '—'}</td>
                             <td className="p-1 text-center font-mono">{rec?.entry2 || '—'}</td>
                             <td className="p-1 text-center font-mono">{rec?.exit2 || '—'}</td>
+                            <td className="p-1 text-center font-mono font-bold text-slate-900">
+                              {!rec?.entry1 && !rec?.entry2 ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
+                            </td>
                           </>
                         )}
                         <td className="p-1 text-center font-semibold">
@@ -2016,10 +2171,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
 
             {/* Financial Summary Box */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
               <div>
                 <span className="text-slate-500 block text-[10px]">Bolsa Base:</span>
                 <strong className="text-slate-900">{formatCurrencyBR(financials.baseSalary)}</strong>
+              </div>
+              <div>
+                <span className="text-blue-700 block text-[10px]">Total Horas Trabalhadas:</span>
+                <strong className="text-blue-900 font-mono">{financials.totalWorkedFormatted}</strong>
               </div>
               <div>
                 <span className="text-emerald-700 block text-[10px]">Feriados / Recessos:</span>
@@ -2030,8 +2189,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <strong className="text-rose-800">{financials.unjustifiedAbsencesCount} ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})</strong>
               </div>
               <div>
-                <span className="text-indigo-700 block text-[10px]">Horas Extras / Adicionais:</span>
-                <strong className="text-indigo-900">{formatMinutesToTime(financials.totalExtraMinutes)} ({formatCurrencyBR(financials.extraHoursAmount)})</strong>
+                <span className="text-indigo-700 block text-[10px]">Horas Extras:</span>
+                <strong className="text-indigo-900 font-mono">{financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})</strong>
               </div>
             </div>
 
@@ -2052,6 +2211,143 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
           </div>
         </PdfViewerModal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: EDIÇÃO DE DADOS CONTRATUAIS DO USUÁRIO NO LIVRO PONTO */}
+      {/* ========================================================================= */}
+      {showEditUserModal && targetUser && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 text-white rounded-2xl w-full max-w-lg border border-slate-800 shadow-2xl p-6 my-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2 text-indigo-400">
+                <Edit3 className="w-5 h-5" />
+                <h3 className="font-bold text-base text-white">Editar Dados Contratuais e Horários</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditUserModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveUserContractSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Nome do(a) Colaborador(a)</label>
+                <input
+                  type="text"
+                  required
+                  value={userEditName}
+                  onChange={(e) => setUserEditName(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Cargo / Função</label>
+                  <input
+                    type="text"
+                    value={userEditCargo}
+                    onChange={(e) => setUserEditCargo(e.target.value)}
+                    placeholder="Ex: Estagiária / Monitora"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Empresa Conveniada</label>
+                  <input
+                    type="text"
+                    value={userEditCompany}
+                    onChange={(e) => setUserEditCompany(e.target.value)}
+                    placeholder="Ex: GADAL - Gestão e Apoio"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Horário Contratual (Entrada - Saída)</label>
+                  <input
+                    type="text"
+                    value={userEditContractSchedule}
+                    onChange={(e) => setUserEditContractSchedule(e.target.value)}
+                    placeholder="Ex: 11:40 - 17:40"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Ex: 11:40 - 17:40 ou 07:00 - 13:00</span>
+                </div>
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Carga Horária Diária (Modelo: 8h40min)</label>
+                  <input
+                    type="text"
+                    value={userEditContractDailyHoursFormatted}
+                    onChange={(e) => setUserEditContractDailyHoursFormatted(e.target.value)}
+                    placeholder="Ex: 8h40min ou 6h00min"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-indigo-300 font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-indigo-400 mt-0.5 block">Modelo oficial: 8h40min, 6h00min</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Bolsa Auxílio Mensal (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={userEditBaseSalary}
+                    onChange={(e) => setUserEditBaseSalary(e.target.value)}
+                    placeholder="1200.00"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-emerald-300 font-bold focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Chave PIX</label>
+                  <input
+                    type="text"
+                    value={userEditPixKey}
+                    onChange={(e) => setUserEditPixKey(e.target.value)}
+                    placeholder="CPF, Celular, E-mail ou Aleatória"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Telefone / WhatsApp</label>
+                <input
+                  type="text"
+                  value={userEditPhone}
+                  onChange={(e) => setUserEditPhone(e.target.value)}
+                  placeholder="(11) 98765-4321"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditUserModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg text-xs transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs shadow-md transition cursor-pointer flex items-center space-x-1.5"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Salvar Dados no Livro Ponto & Nuvem</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

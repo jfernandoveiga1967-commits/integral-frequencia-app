@@ -18,7 +18,7 @@ import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
-import { formatCurrencyBR, getMonthNameBR, formatMinutesToHoursAndMinutes } from './pontoUtils';
+import { formatCurrencyBR, getMonthNameBR, formatMinutesToHoursAndMinutes, calculateDayWorkedMinutes } from './pontoUtils';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -1701,6 +1701,16 @@ export function generateLivroPontoPDFReport({
       statusText = 'Dispensado(a)';
     }
 
+    let workedHoursStr = '-';
+    if (status === 'normal' && (rec?.entry1 || rec?.entry2)) {
+      const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5);
+      workedHoursStr = formatMinutesToHoursAndMinutes(dayCalc.workedMinutes);
+    } else if (status === 'feriado' || status === 'recesso') {
+      workedHoursStr = contractDailyHoursFormatted;
+    } else if (status === 'falta_injustificada') {
+      workedHoursStr = '0h00min';
+    }
+
     const dayStr = String(item.dayNumber).padStart(2, '0');
     const dayLabel = item.dayOfWeekLabel || item.dayOfWeekName || item.dayOfWeekShort || '';
     const dayName = dayLabel.split('-')[0];
@@ -1712,6 +1722,7 @@ export function generateLivroPontoPDFReport({
       rec?.exit1 || '-',
       rec?.entry2 || '-',
       rec?.exit2 || '-',
+      workedHoursStr,
       statusText,
       rec?.note || holidayName || '-',
     ];
@@ -1719,7 +1730,7 @@ export function generateLivroPontoPDFReport({
 
   autoTable(doc, {
     startY: startY,
-    head: [['Dia', 'Semana', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Status / Ocorrência', 'Observações']],
+    head: [['Dia', 'Semana', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas Trab.', 'Status / Ocorrência', 'Observações']],
     body: tableData,
     theme: 'grid',
     headStyles: {
@@ -1738,14 +1749,15 @@ export function generateLivroPontoPDFReport({
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
-      1: { cellWidth: 18, halign: 'left' },
-      2: { cellWidth: 17, halign: 'center' },
-      3: { cellWidth: 17, halign: 'center' },
-      4: { cellWidth: 17, halign: 'center' },
-      5: { cellWidth: 17, halign: 'center' },
-      6: { cellWidth: 42, halign: 'left' },
-      7: { cellWidth: 'auto', halign: 'left' },
+      0: { cellWidth: 9, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 16, halign: 'left' },
+      2: { cellWidth: 15, halign: 'center' },
+      3: { cellWidth: 15, halign: 'center' },
+      4: { cellWidth: 15, halign: 'center' },
+      5: { cellWidth: 15, halign: 'center' },
+      6: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+      7: { cellWidth: 38, halign: 'left' },
+      8: { cellWidth: 'auto', halign: 'left' },
     },
     didParseCell: (data) => {
       if (data.section === 'body') {

@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
+import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes } from './utils/pontoUtils';
 
 export { doc, deleteDoc };
 
@@ -215,6 +216,13 @@ export function subscribeUsers(
             assignedTurmas = MASTER_ADMIN_TURMAS;
           }
 
+          const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
+            ? Number(data.contractDailyMinutes)
+            : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours)) ? Math.round(Number(data.contractDailyHours) * 60) : 360);
+          const formattedHours = data.contractDailyHoursFormatted
+            ? formatMinutesToHoursAndMinutes(parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted))
+            : formatMinutesToHoursAndMinutes(rawMinutes);
+
           const profile: UserProfile = {
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
             name: isMasterAdmin ? 'Fernando Veiga' : (data.name || ''),
@@ -232,9 +240,9 @@ export function subscribeUsers(
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             pixKey: data.pixKey || data.phone || undefined,
             contractSchedule: data.contractSchedule || undefined,
-            contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : 6,
-            contractDailyMinutes: data.contractDailyMinutes !== undefined ? Number(data.contractDailyMinutes) : undefined,
-            contractDailyHoursFormatted: data.contractDailyHoursFormatted || undefined,
+            contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
+            contractDailyMinutes: rawMinutes,
+            contractDailyHoursFormatted: formattedHours,
             baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : 1200,
             company: data.company || 'GADAL - Gestão e Apoio',
             updatedAt: data.updatedAt || new Date().toISOString(),
@@ -244,25 +252,17 @@ export function subscribeUsers(
         }
       });
 
-      // Deduplicate by normalized email to guarantee single card per user
-      const emailMap = new Map<string, { docId: string; user: UserProfile }>();
-      const finalUsers: UserProfile[] = [];
+      // Deduplicate by normalized email or ID
+      const userMap = new Map<string, UserProfile>();
 
       rawList.forEach(({ docId, user }) => {
-        const key = user.email.toLowerCase().trim() || user.id;
-        if (!emailMap.has(key)) {
-          emailMap.set(key, { docId, user });
-          finalUsers.push(user);
-        } else {
-          // If we encountered a duplicate doc with the same email, delete the duplicate from Firestore
-          const existing = emailMap.get(key)!;
-          if (existing.docId !== docId) {
-            deleteDoc(doc(db, 'users', docId)).catch(() => {});
-          }
+        const key = user.id || docId;
+        if (!userMap.has(key)) {
+          userMap.set(key, user);
         }
       });
 
-      onData(finalUsers);
+      onData(Array.from(userMap.values()));
     },
     (error) => {
       if (onError) onError(error);
@@ -278,7 +278,7 @@ export async function saveUserToFirestore(user: UserProfile) {
       user.id === 'usr_coord_1' ||
       (user.name && user.name.toLowerCase().includes('fernando veiga'));
 
-    const canonicalId = isMasterAdmin ? 'usr_coord_1' : user.id;
+    const canonicalId = isMasterAdmin ? 'usr_coord_1' : (user.id || 'usr_' + Date.now());
 
     // If previously saved under a different ID, clean up old doc
     if (user.id && user.id !== canonicalId) {
@@ -297,31 +297,41 @@ export async function saveUserToFirestore(user: UserProfile) {
       ? (user.allowedClassIds && user.allowedClassIds.length > 0 ? user.allowedClassIds : MASTER_ADMIN_TURMAS)
       : (user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []));
 
+    const resolvedMinutes = user.contractDailyMinutes !== undefined && Number(user.contractDailyMinutes) > 0
+      ? Number(user.contractDailyMinutes)
+      : (user.contractDailyHoursFormatted ? parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted) : (user.contractDailyHours ? Math.round(Number(user.contractDailyHours) * 60) : 360));
+    const formattedHours = formatMinutesToHoursAndMinutes(resolvedMinutes);
+    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
+
     const docRef = doc(db, 'users', canonicalId);
-    await setDoc(docRef, {
-      id: canonicalId,
-      name: isMasterAdmin ? 'Fernando Veiga' : user.name,
-      email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (user.email || '').trim().toLowerCase(),
-      phone: user.phone ? user.phone.trim() : '',
-      role,
-      cargoLabel,
-      avatarColor,
-      birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
-      pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-      assignedActivities,
-      assignedTurmas,
-      allowedClassIds: assignedTurmas,
-      canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
-      canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
-      pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
-      contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : '',
-      contractDailyHours: user.contractDailyHours !== undefined ? Number(user.contractDailyHours) : 6,
-      contractDailyMinutes: user.contractDailyMinutes !== undefined ? Number(user.contractDailyMinutes) : null,
-      contractDailyHoursFormatted: user.contractDailyHoursFormatted ? user.contractDailyHoursFormatted.trim() : null,
-      baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : 1200,
-      company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
-      updatedAt: user.updatedAt || new Date().toISOString(),
-    });
+    await setDoc(
+      docRef,
+      {
+        id: canonicalId,
+        name: isMasterAdmin ? 'Fernando Veiga' : user.name,
+        email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (user.email || '').trim().toLowerCase(),
+        phone: user.phone ? user.phone.trim() : '',
+        role,
+        cargoLabel,
+        avatarColor,
+        birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
+        pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+        assignedActivities,
+        assignedTurmas,
+        allowedClassIds: assignedTurmas,
+        canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
+        canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
+        pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
+        contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : '',
+        contractDailyHours: decimalHours,
+        contractDailyMinutes: resolvedMinutes,
+        contractDailyHoursFormatted: formattedHours,
+        baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : 1200,
+        company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
+        updatedAt: user.updatedAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
   }

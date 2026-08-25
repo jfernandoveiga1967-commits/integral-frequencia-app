@@ -25,13 +25,16 @@ export function formatMinutesToTime(totalMinutes: number): string {
 }
 
 /**
- * Converts minutes to friendly hours and minutes format (e.g. 522 -> "8h 42min", 360 -> "6h 00min")
+ * Converts minutes to friendly hours and minutes format (e.g. 520 -> "8h40min", 360 -> "6h00min")
  */
 export function formatMinutesToHoursAndMinutes(totalMinutes: number): string {
-  if (isNaN(totalMinutes) || totalMinutes <= 0) return '0h 00min';
-  const h = Math.floor(totalMinutes / 60);
-  const m = Math.floor(totalMinutes % 60);
-  return `${h}h ${String(m).padStart(2, '0')}min`;
+  if (isNaN(totalMinutes) || totalMinutes === 0) return '0h00min';
+  const isNegative = totalMinutes < 0;
+  const abs = Math.abs(totalMinutes);
+  const h = Math.floor(abs / 60);
+  const m = Math.floor(abs % 60);
+  const formatted = `${h}h${String(m).padStart(2, '0')}min`;
+  return isNegative ? `-${formatted}` : formatted;
 }
 
 /**
@@ -203,7 +206,7 @@ export function parseContractSchedule(scheduleStr = '11:40 - 17:40'): {
     startMinutes: 700,
     endMinutes: 1060,
     dailyHours: 6,
-    dailyHoursFormatted: '6h 00min',
+    dailyHoursFormatted: '6h00min',
     workedMinutes: 360,
     lunchBreakMinutes: 0,
   };
@@ -325,7 +328,7 @@ export function calculateDayWorkedMinutes(
     workedMinutes: totalWorked,
     overtimeMinutes,
     missingMinutes,
-    effectiveSummary: `${formatMinutesToTime(totalWorked)} (${dailyHoursFormatted || formatMinutesToHoursAndMinutes(expectedDailyMinutes)} contratual)`,
+    effectiveSummary: `${formatMinutesToHoursAndMinutes(totalWorked)} (${dailyHoursFormatted || formatMinutesToHoursAndMinutes(expectedDailyMinutes)} contratual)`,
   };
 }
 
@@ -369,6 +372,8 @@ export function calculateMonthlyPontoFinancials({
   minuteRate: number;
   unjustifiedAbsencesCount: number;
   unjustifiedAbsencesDiscount: number;
+  totalWorkedMinutes: number;
+  totalWorkedFormatted: string;
   totalExtraMinutes: number;
   extraHoursDecimal: number;
   extraHoursFormatted: string;
@@ -397,6 +402,7 @@ export function calculateMonthlyPontoFinancials({
   const hourlyRate = minuteRate * 60;
 
   let unjustifiedAbsencesCount = 0;
+  let totalWorkedMinutes = 0;
   let totalExtraMinutes = 0;
   let paidHolidaysCount = 0;
   let paidRecessDaysCount = 0;
@@ -418,12 +424,14 @@ export function calculateMonthlyPontoFinancials({
       if (rec.entry1 || rec.entry2) {
         workedDaysCount++;
       }
-      const { overtimeMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
+      const { workedMinutes, overtimeMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
+      totalWorkedMinutes += workedMinutes;
       totalExtraMinutes += overtimeMinutes;
     }
   });
 
   const unjustifiedAbsencesDiscount = unjustifiedAbsencesCount * diariaRate;
+  const totalWorkedFormatted = formatMinutesToHoursAndMinutes(totalWorkedMinutes);
   const extraHoursDecimal = totalExtraMinutes / 60;
   const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
   const extraHoursAmount = totalExtraMinutes * minuteRate;
@@ -448,6 +456,8 @@ export function calculateMonthlyPontoFinancials({
     minuteRate,
     unjustifiedAbsencesCount,
     unjustifiedAbsencesDiscount,
+    totalWorkedMinutes,
+    totalWorkedFormatted,
     totalExtraMinutes,
     extraHoursDecimal,
     extraHoursFormatted,
