@@ -18,7 +18,14 @@ import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
-import { formatCurrencyBR, getMonthNameBR, formatMinutesToHoursAndMinutes, calculateDayWorkedMinutes } from './pontoUtils';
+import {
+  formatCurrencyBR,
+  getMonthNameBR,
+  formatMinutesToHoursAndMinutes,
+  calculateDayWorkedMinutes,
+  numberToWordsBRL,
+  calculateMonthlyPontoFinancials,
+} from './pontoUtils';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -157,6 +164,81 @@ function drawOfficialHeader(
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
   doc.text('Documento Oficial de Registro Escolar', pageWidth - 14, 25, { align: 'right' });
+}
+
+/**
+ * Compact Official Header for 1-Page Documents (Espelho de Ponto & Recibo de Bolsa)
+ */
+function drawCompactOfficialHeader(
+  doc: jsPDF,
+  title: string,
+  subtitle: string,
+  filterDetails: string[],
+  orientation: 'portrait' | 'landscape' = 'portrait'
+) {
+  const pageWidth = orientation === 'landscape' ? 297 : 210;
+
+  // Header Banner Background (Height 20mm)
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, pageWidth, 20, 'F');
+
+  // Accent line
+  doc.setFillColor(79, 70, 229); // indigo-600
+  doc.rect(0, 0, pageWidth, 2.5, 'F');
+
+  // Logo
+  let logoDrawn = false;
+  const logoData = getLogoDataUrl() || LOGO_BASE64;
+  if (logoData) {
+    try {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(12, 4, 28, 13.5, 1.5, 1.5, 'F');
+      doc.addImage(logoData, 'PNG', 13, 4.8, 26, 11.8);
+      logoDrawn = true;
+    } catch {
+      logoDrawn = false;
+    }
+  }
+
+  const textStartX = logoDrawn ? 43 : 14;
+
+  // Brand Name
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(244, 63, 94); // rose-500 badge look
+  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 7.5);
+
+  // Document Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(255, 255, 255);
+  doc.text(title.toUpperCase(), textStartX, 13);
+
+  // Subtitle
+  if (subtitle && subtitle.trim().length > 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(191, 219, 254);
+    doc.text(subtitle, textStartX, 17.5);
+  }
+
+  // Right Side: Emission & Details
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(203, 213, 225);
+  doc.text(`Emissão: ${getCurrentDateTimeString()}`, pageWidth - 14, 7.5, { align: 'right' });
+
+  if (filterDetails.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(224, 231, 255);
+    doc.text(filterDetails.join('  |  '), pageWidth - 14, 13, { align: 'right' });
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Documento Oficial de Registro Escolar', pageWidth - 14, 17.5, { align: 'right' });
 }
 
 /**
@@ -1615,8 +1697,8 @@ export function generateLivroPontoPDFReport({
   const userName = user?.name || closingRecord?.userName || 'Colaborador';
   const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
 
-  // Draw Header - Strictly "ESPELHO DE PONTO"
-  drawOfficialHeader(
+  // 1. Compact Header (Height: 20mm) - Guarantee 1 single page
+  drawCompactOfficialHeader(
     doc,
     'ESPELHO DE PONTO',
     '',
@@ -1624,33 +1706,32 @@ export function generateLivroPontoPDFReport({
     'portrait'
   );
 
-  let startY = 36;
+  let startY = 23;
 
-  // Collaborator & Contract Details Card
+  // 2. Collaborator & Contract Details Card (Height: 11mm)
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(14, startY, 182, 22, 2, 2, 'FD');
+  doc.roundedRect(14, startY, 182, 11, 1.5, 1.5, 'FD');
 
   doc.setTextColor(15, 23, 42);
-  doc.setFontSize(10);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})`, 18, startY + 5.5);
+  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})   |   Competência: ${monthName}/${year}`, 17, startY + 4.2);
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(6.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text(`Empresa Conveniada: ${companyName}   |   Instituição: ${institutionName}`, 18, startY + 11.5);
   doc.text(
-    `Jornada Contratual: ${contractSchedule} (${contractDailyHoursFormatted}/dia)   |   Chave PIX: ${pixKey}   |   Status: ${
-      closingRecord?.isClosed ? 'FECHADO / PAGO' : 'ABERTO / EM APONTAMENTO'
+    `Empresa: ${companyName}   |   Jornada: ${contractSchedule} (${contractDailyHoursFormatted})   |   PIX: ${pixKey}   |   Status: ${
+      closingRecord?.isClosed ? 'FECHADO / PAGO' : 'ABERTO'
     }`,
-    18,
-    startY + 17
+    17,
+    startY + 8.5
   );
 
-  startY += 26;
+  startY += 13;
 
-  // Financial & Performance Summary Metrics
+  // 3. Financial & Performance Summary Metrics (Height: 8.5mm)
   const metrics = [
     { label: 'Bolsa Base', value: formatCurrencyBR(financials.baseSalary), color: [15, 23, 42] as [number, number, number] },
     {
@@ -1674,17 +1755,17 @@ export function generateLivroPontoPDFReport({
       color: [16, 185, 129] as [number, number, number],
     },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 13.5, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 34, 8.5, 3, metrics);
 
-  startY += 17.5;
+  startY += 10.5;
 
-  // Timesheet Table Data
+  // 4. Timesheet Table Data (Compact cell padding to ensure 100% single page)
   const tableData = monthDaysGrid.map((item) => {
     const rec = item.record;
     const status = rec?.status || item.defaultStatus || 'normal';
     const holidayName = item.holidayItem?.name || item.holidayRecessName || '';
 
-    let statusText = 'Normal / Regular';
+    let statusText = 'Normal';
     if (status === 'feriado') {
       statusText = holidayName ? `Feriado (${holidayName})` : 'Feriado Oficial';
     } else if (status === 'recesso') {
@@ -1730,33 +1811,35 @@ export function generateLivroPontoPDFReport({
 
   autoTable(doc, {
     startY: startY,
-    head: [['Dia', 'Semana', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas Trab.', 'Status / Ocorrência', 'Observações']],
+    head: [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']],
     body: tableData,
     theme: 'grid',
+    pageBreak: 'avoid',
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 7.5,
+      fontSize: 6.5,
+      cellPadding: 0.65,
       halign: 'center',
     },
     bodyStyles: {
-      fontSize: 7,
+      fontSize: 5.8,
       textColor: [51, 65, 85],
-      cellPadding: 1.6,
+      cellPadding: 0.55,
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 9, halign: 'center', fontStyle: 'bold' },
-      1: { cellWidth: 16, halign: 'left' },
-      2: { cellWidth: 15, halign: 'center' },
-      3: { cellWidth: 15, halign: 'center' },
-      4: { cellWidth: 15, halign: 'center' },
-      5: { cellWidth: 15, halign: 'center' },
-      6: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
-      7: { cellWidth: 38, halign: 'left' },
+      0: { cellWidth: 8, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 15, halign: 'left' },
+      2: { cellWidth: 14, halign: 'center' },
+      3: { cellWidth: 14, halign: 'center' },
+      4: { cellWidth: 14, halign: 'center' },
+      5: { cellWidth: 14, halign: 'center' },
+      6: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+      7: { cellWidth: 42, halign: 'left' },
       8: { cellWidth: 'auto', halign: 'left' },
     },
     didParseCell: (data) => {
@@ -1780,65 +1863,333 @@ export function generateLivroPontoPDFReport({
     },
   });
 
-  // Signatures Section
-  const finalY = (doc as any).lastAutoTable?.finalY || 240;
-  const pageHeight = 297;
-  const requiredSigSpace = 32;
-
-  if (finalY + requiredSigSpace > pageHeight - 15) {
-    doc.addPage();
-    drawOfficialHeader(
-      doc,
-      'ESPELHO DE PONTO',
-      '',
-      [`Colaborador(a): ${userName}`, `Competência: ${monthName}/${year}`],
-      'portrait'
-    );
-  }
-
-  const sigY = (finalY + requiredSigSpace > pageHeight - 15) ? 65 : Math.max(finalY + 14, 252);
+  // 5. Signatures Section on the SAME Page
+  const finalY = (doc as any).lastAutoTable?.finalY || 165;
+  const sigY = finalY + 4;
 
   // Digital Signature banner if present
   if (closingRecord?.signedDigitally) {
     doc.setFillColor(236, 253, 245);
     doc.setDrawColor(167, 243, 208);
-    doc.roundedRect(14, sigY - 10, 182, 7.5, 1.5, 1.5, 'FD');
+    doc.roundedRect(14, sigY, 182, 6, 1, 1, 'FD');
 
-    doc.setFontSize(6.5);
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(6, 95, 70);
     doc.text(
-      `✓ DOCUMENTO ASSINADO DIGITALMENTE POR: ${closingRecord.signedBy?.toUpperCase()} em ${new Date(
+      `✓ ASSINADO DIGITALMENTE: ${closingRecord.signedBy?.toUpperCase()} em ${new Date(
         closingRecord.signedAt || ''
       ).toLocaleString('pt-BR')}  |  Hash: ${closingRecord.digitalSignatureHash || 'AUTÊNTICO'}`,
-      18,
-      sigY - 5.5
+      17,
+      sigY + 4
     );
   }
 
   // Signature lines
+  const lineY = sigY + (closingRecord?.signedDigitally ? 16 : 12);
   doc.setDrawColor(148, 163, 184);
   doc.setLineWidth(0.3);
-  doc.line(20, sigY + 12, 90, sigY + 12);
-  doc.line(120, sigY + 12, 190, sigY + 12);
+  doc.line(20, lineY, 90, lineY);
+  doc.line(120, lineY, 190, lineY);
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  doc.text(userName, 55, sigY + 16, { align: 'center' });
-  doc.setFontSize(6.5);
+  doc.text(userName, 55, lineY + 4, { align: 'center' });
+  doc.setFontSize(5.8);
   doc.setTextColor(100, 116, 139);
-  doc.text(`Colaborador(a) / ${userCargo}`, 55, sigY + 19.5, { align: 'center' });
+  doc.text(`Colaborador(a) / ${userCargo}`, 55, lineY + 7.5, { align: 'center' });
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(51, 65, 85);
-  doc.text(companyName, 155, sigY + 16, { align: 'center' });
-  doc.setFontSize(6.5);
+  doc.text(companyName, 155, lineY + 4, { align: 'center' });
+  doc.setFontSize(5.8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Coordenação Pedagógica / DP GADAL', 155, sigY + 19.5, { align: 'center' });
+  doc.text('Coordenação Pedagógica / DP GADAL', 155, lineY + 7.5, { align: 'center' });
 
   applyPageNumbersAndFooters(doc, 'portrait');
   const filename = `Espelho_Ponto_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Generates an Official Receipt of Allowance & Full Quittance PDF Report (Single Page A4)
+ */
+export interface GenerateReciboBolsaPDFOptions {
+  user?: UserProfile | null;
+  month: number;
+  year: number;
+  financials: ReturnType<typeof calculateMonthlyPontoFinancials>;
+  closingRecord?: PontoMonthClosing | null;
+  companyName?: string;
+  institutionName?: string;
+  pixKey?: string;
+  contractSchedule?: string;
+  contractDailyHoursFormatted?: string;
+  saveImmediately?: boolean;
+}
+
+export function generateReciboBolsaPDF({
+  user,
+  month,
+  year,
+  financials,
+  closingRecord,
+  companyName = 'GADAL - Gestão e Apoio',
+  institutionName = 'Instituto Educacional Crescer',
+  pixKey = 'Pendente',
+  contractSchedule = '11:40 - 17:40',
+  contractDailyHoursFormatted = '6h 00min',
+  saveImmediately = false,
+}: GenerateReciboBolsaPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const monthName = getMonthNameBR(month);
+  const userName = user?.name || closingRecord?.userName || 'Colaborador';
+  const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
+
+  // 1. Compact Header
+  drawCompactOfficialHeader(
+    doc,
+    'RECIBO DE BOLSA AUXÍLIO & QUITAÇÃO',
+    'PROGRAMA INTEGRAL • COMPROVANTE OFICIAL DE PAGAMENTO',
+    [`Competência: ${monthName}/${year}`, `Emissão: ${getCurrentDateTimeString()}`],
+    'portrait'
+  );
+
+  let startY = 24;
+
+  // 2. Beneficiary Info Card
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, startY, 182, 21, 2, 2, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`BENEFICIÁRIA / ESTAGIÁRIA: ${userName.toUpperCase()} (${userCargo})`, 18, startY + 5.5);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Empresa Conveniada: ${companyName}   |   Instituição: ${institutionName}`,
+    18,
+    startY + 11
+  );
+  doc.text(
+    `Jornada: ${contractSchedule} (${contractDailyHoursFormatted}/dia)   |   Chave PIX: ${pixKey}   |   Base (30d): ${formatCurrencyBR(
+      financials.baseSalary
+    )}`,
+    18,
+    startY + 16.5
+  );
+
+  startY += 25;
+
+  // 3. Breakdown Table
+  const tableData: any[] = [
+    [
+      'Bolsa Auxílio Estágio / Monitoria Integral (30 dias)',
+      '30 dias',
+      formatCurrencyBR(financials.baseSalary),
+      '-',
+    ],
+    [
+      `Feriados e Recessos Escolares Garantidos e Abonados (${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias)`,
+      `${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias`,
+      'Incluso na Bolsa',
+      '-',
+    ],
+  ];
+
+  if (financials.unjustifiedAbsencesCount > 0) {
+    tableData.push([
+      `Desconto de Faltas Injustificadas no Período (${financials.unjustifiedAbsencesCount} falta(s))`,
+      `${financials.unjustifiedAbsencesCount} dia(s)`,
+      '-',
+      formatCurrencyBR(financials.unjustifiedAbsencesDiscount),
+    ]);
+  }
+
+  if (financials.totalExtraMinutes > 0) {
+    tableData.push([
+      `Horas Extras / Reposições Apuradas (${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)})`,
+      formatMinutesToHoursAndMinutes(financials.totalExtraMinutes),
+      formatCurrencyBR(financials.extraHoursAmount),
+      '-',
+    ]);
+  }
+
+  if (financials.manualAddition && financials.manualAddition > 0) {
+    tableData.push([
+      `Adicional Especial / Bonificação (${financials.manualAdditionReason || 'Ajuste Autorizado'})`,
+      'Evento Avulso',
+      formatCurrencyBR(financials.manualAddition),
+      '-',
+    ]);
+  }
+
+  if (financials.manualDiscount && financials.manualDiscount > 0) {
+    tableData.push([
+      `Desconto Especial (${financials.manualDiscountReason || 'Ajuste Autorizado'})`,
+      'Evento Avulso',
+      '-',
+      formatCurrencyBR(financials.manualDiscount),
+    ]);
+  }
+
+  const totalGross =
+    financials.baseSalary +
+    financials.extraHoursAmount +
+    (financials.manualAddition || 0);
+  const totalDiscounts =
+    financials.unjustifiedAbsencesDiscount + (financials.manualDiscount || 0);
+
+  tableData.push([
+    'TOTAL GERAL DE PROVENTOS E DESCONTOS',
+    '-',
+    formatCurrencyBR(totalGross),
+    formatCurrencyBR(totalDiscounts),
+  ]);
+
+  autoTable(doc, {
+    startY: startY,
+    head: [['Descrição do Evento / Verba', 'Referência', 'Proventos (R$)', 'Descontos (R$)']],
+    body: tableData,
+    theme: 'grid',
+    pageBreak: 'avoid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'center',
+    },
+    bodyStyles: {
+      fontSize: 7,
+      textColor: [51, 65, 85],
+      cellPadding: 1.8,
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 95, halign: 'left' },
+      1: { cellWidth: 28, halign: 'center' },
+      2: { cellWidth: 30, halign: 'right', textColor: [16, 185, 129], fontStyle: 'bold' },
+      3: { cellWidth: 29, halign: 'right', textColor: [220, 38, 38], fontStyle: 'bold' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.row.index === tableData.length - 1) {
+        data.cell.styles.fillColor = [241, 245, 249];
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.textColor = [15, 23, 42];
+      }
+    },
+  });
+
+  const finalTableY = (doc as any).lastAutoTable?.finalY || 105;
+
+  // 4. Net Value Box
+  const netY = finalTableY + 4;
+  doc.setFillColor(236, 253, 245);
+  doc.setDrawColor(52, 211, 153);
+  doc.roundedRect(14, netY, 182, 13, 2, 2, 'FD');
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(6, 95, 70);
+  doc.text('TOTAL LÍQUIDO A RECEBER:', 18, netY + 5.5);
+  doc.setFontSize(11.5);
+  doc.text(formatCurrencyBR(financials.netTotal), 190, netY + 6.5, { align: 'right' });
+
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(4, 120, 87);
+  doc.text(`Valor por extenso: ${numberToWordsBRL(financials.netTotal).toUpperCase()}`, 18, netY + 10.5);
+
+  // 5. Legal Quittance Declaration
+  const declY = netY + 16;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, declY, 182, 24, 2, 2, 'FD');
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('DECLARAÇÃO DE RECEBIMENTO & TERMO DE QUITAÇÃO PLENA', 18, declY + 5);
+
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  const legalText = `Declaro para os devidos fins de direito que recebi de ${institutionName} e ${companyName} a importância líquida supra de ${formatCurrencyBR(
+    financials.netTotal
+  )} (${numberToWordsBRL(
+    financials.netTotal
+  )}), referente ao pagamento de Bolsa Auxílio da competência de ${monthName}/${year}, conferindo plena, geral e irrevogável quitação de todas as obrigações para nada mais reclamar a qualquer título.`;
+  const splitLegalText = doc.splitTextToSize(legalText, 174);
+  doc.text(splitLegalText, 18, declY + 9.5);
+
+  const sigStartY = declY + 28;
+
+  // Digital Signature Banner
+  if (closingRecord?.signedDigitally) {
+    doc.setFillColor(236, 253, 245);
+    doc.setDrawColor(167, 243, 208);
+    doc.roundedRect(14, sigStartY, 182, 7, 1.5, 1.5, 'FD');
+
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(6, 95, 70);
+    doc.text(
+      `✓ TERMO ASSINADO DIGITALMENTE POR: ${closingRecord.signedBy?.toUpperCase()} em ${new Date(
+        closingRecord.signedAt || ''
+      ).toLocaleString('pt-BR')}  |  Autenticação: ${closingRecord.digitalSignatureHash || 'AUTÊNTICO'}`,
+      18,
+      sigStartY + 4.5
+    );
+  }
+
+  // Signature Lines
+  const lineY = sigStartY + (closingRecord?.signedDigitally ? 17 : 12);
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.3);
+  doc.line(20, lineY, 90, lineY);
+  doc.line(120, lineY, 190, lineY);
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(51, 65, 85);
+  doc.text(userName, 55, lineY + 4, { align: 'center' });
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Beneficiária / ${userCargo}`, 55, lineY + 7.5, { align: 'center' });
+
+  doc.setFontSize(7);
+  doc.setTextColor(51, 65, 85);
+  doc.text(institutionName, 155, lineY + 4, { align: 'center' });
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Coordenação Pedagógica / ${companyName}`, 155, lineY + 7.5, { align: 'center' });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+  const filename = `Recibo_Bolsa_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

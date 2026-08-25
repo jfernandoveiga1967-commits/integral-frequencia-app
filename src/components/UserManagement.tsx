@@ -465,14 +465,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const handleSaveFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formEmail.trim()) {
-      showToast('Preencha o nome e o e-mail do usuário.', 'error');
+    if (!formName.trim()) {
+      showToast('Preencha o nome do usuário.', 'error');
       return;
     }
-    if (!formBirthDate) {
-      showToast('Informe a data de nascimento do usuário.', 'error');
-      return;
-    }
+
+    const effectiveBirthDate = formBirthDate || (editingUser?.birthDate) || '1995-01-01';
+    const rawEmail = formEmail.trim().toLowerCase();
+    const fallbackEmail = `${formName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'usuario'}${Date.now().toString().slice(-4)}@crescer.local`;
+    const normalizedEmail = rawEmail || (editingUser?.email) || fallbackEmail;
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -484,16 +485,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       professor: 'bg-indigo-600',
     };
 
-    const formattedPass = formatBirthDateToDisplay(formBirthDate);
+    const formattedPass = formatBirthDateToDisplay(effectiveBirthDate);
 
     const isMasterAdmin =
-      (formEmail || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+      normalizedEmail === 'jfernandoveiga1967@gmail.com' ||
       (editingUser && editingUser.id === 'usr_coord_1');
     const effectiveRole = isMasterAdmin ? 'coordenador' : formRole;
 
-    const normalizedEmail = formEmail.trim().toLowerCase();
     const existingUserWithEmail = (users || []).find(
-      (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail
+      (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail && (!editingUser || u.id !== editingUser.id)
     );
 
     const targetId = isMasterAdmin
@@ -506,7 +506,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : 1200;
     
-    // Resolve precise minutes and formatted daily hours string
+    // Resolve precise minutes and formatted daily hours string (Model: 8h40min)
     let resolvedMinutes = formContractDailyMinutes > 0 ? formContractDailyMinutes : 360;
     if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
       resolvedMinutes = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
@@ -524,8 +524,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       role: effectiveRole,
       cargoLabel: roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
-      birthDate: formBirthDate,
-      pin: formattedPass || formBirthDate,
+      birthDate: effectiveBirthDate,
+      pin: formattedPass || effectiveBirthDate,
       assignedActivities: effectiveActivities,
       assignedTurmas: formTurmas,
       allowedClassIds: formTurmas,

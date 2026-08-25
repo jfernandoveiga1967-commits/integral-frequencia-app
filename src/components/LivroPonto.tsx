@@ -68,7 +68,8 @@ import {
   getMonthNameBR,
   numberToWordsBRL,
 } from '../utils/pontoUtils';
-import { generateLivroPontoPDFReport } from '../utils/pdfGenerator';
+import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
+import { triggerPrint } from '../utils/printUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
@@ -270,6 +271,32 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('8h40min');
   const [userEditBaseSalary, setUserEditBaseSalary] = useState<number | string>(1200);
   const [userEditCompany, setUserEditCompany] = useState('');
+
+  // Dynamic calculation for schedule input in user edit modal
+  const userEditScheduleCalculation = useMemo(() => {
+    return calculateDailyHoursFromSchedule(userEditContractSchedule);
+  }, [userEditContractSchedule]);
+
+  const handleUserEditScheduleChange = (val: string) => {
+    setUserEditContractSchedule(val);
+    if (val.trim()) {
+      const calc = calculateDailyHoursFromSchedule(val);
+      if (calc.workedMinutes > 0) {
+        setUserEditContractDailyHoursFormatted(calc.dailyHoursFormatted);
+      }
+    }
+  };
+
+  const handleUserEditDailyHoursChange = (val: string) => {
+    setUserEditContractDailyHoursFormatted(val);
+  };
+
+  const handleUserEditDailyHoursBlur = () => {
+    if (userEditContractDailyHoursFormatted && userEditContractDailyHoursFormatted.trim()) {
+      const min = parseHoursAndMinutesStringToMinutes(userEditContractDailyHoursFormatted);
+      setUserEditContractDailyHoursFormatted(formatMinutesToHoursAndMinutes(min));
+    }
+  };
 
   // Sync form when targetUser changes or when opening modal
   useEffect(() => {
@@ -728,6 +755,50 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       console.error('Erro ao gerar PDF do Livro Ponto:', err);
       setPunchFeedback({
         text: 'Não foi possível gerar o PDF. Verifique os dados e tente novamente.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
+    }
+  };
+
+  // Generate Official PDF Report for Receipt & Quittance
+  const handleGenerateReceiptPDF = (saveImmediately = true) => {
+    try {
+      const result = generateReciboBolsaPDF({
+        user: targetUser,
+        month: selectedMonth,
+        year: selectedYear,
+        financials,
+        closingRecord,
+        companyName,
+        institutionName,
+        pixKey,
+        contractSchedule,
+        contractDailyHoursFormatted,
+        saveImmediately,
+      });
+
+      if (!saveImmediately) {
+        setPdfPreviewState({
+          isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `RECIBO DE BOLSA — ${targetUser?.name || 'Colaborador'} (${getMonthNameBR(selectedMonth)}/${selectedYear})`,
+          onDownload: result.download,
+        });
+      } else {
+        setPunchFeedback({
+          text: `Recibo PDF "${result.filename}" baixado com sucesso!`,
+          type: 'success',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+      }
+    } catch (err) {
+      console.error('Erro ao gerar PDF do Recibo de Bolsa:', err);
+      setPunchFeedback({
+        text: 'Não foi possível gerar o PDF do recibo. Tente novamente.',
         type: 'error',
       });
       setTimeout(() => setPunchFeedback(null), 4000);
@@ -1521,8 +1592,39 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer"
+                  id="btn-receipt-modal-download-pdf"
+                  onClick={() => handleGenerateReceiptPDF(true)}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
+                  title="Baixar arquivo PDF oficial do Recibo e Quitação"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Baixar PDF</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-receipt-modal-print"
+                  onClick={() => {
+                    try {
+                      const result = generateReciboBolsaPDF({
+                        user: targetUser,
+                        month: selectedMonth,
+                        year: selectedYear,
+                        financials,
+                        closingRecord,
+                        companyName,
+                        institutionName,
+                        pixKey,
+                        contractSchedule,
+                        contractDailyHoursFormatted,
+                        saveImmediately: false,
+                      });
+                      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
+                    } catch (e) {
+                      triggerPrint();
+                    }
+                  }}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
+                  title="Direcionar para a impressora do computador"
                 >
                   <Printer className="w-4 h-4" />
                   <span>Imprimir (A4)</span>
@@ -1722,17 +1824,40 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleGeneratePontoPDF(false)}
+                  id="btn-timesheet-modal-download-pdf"
+                  onClick={() => handleGeneratePontoPDF(true)}
                   className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
-                  title="Salvar em PDF Oficial"
+                  title="Baixar em PDF Oficial (1 página)"
                 >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Salvar PDF / DP</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Baixar PDF</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  id="btn-timesheet-modal-print"
+                  onClick={() => {
+                    try {
+                      const result = generateLivroPontoPDFReport({
+                        user: targetUser,
+                        month: selectedMonth,
+                        year: selectedYear,
+                        monthDaysGrid,
+                        financials,
+                        closingRecord,
+                        companyName,
+                        institutionName,
+                        pixKey,
+                        contractSchedule,
+                        contractDailyHoursFormatted,
+                        saveImmediately: false,
+                      });
+                      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
+                    } catch (e) {
+                      triggerPrint();
+                    }
+                  }}
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
+                  title="Direcionar para a caixa de impressão do computador"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Imprimir Espelho</span>
@@ -1953,6 +2078,39 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Real-time Calculation Box */}
+              {(() => {
+                if (!showEditDayModal) return null;
+                const previewDayCalc = calculateDayWorkedMinutes(
+                  showEditDayModal,
+                  contractSchedule,
+                  5,
+                  contractDailyMinutes
+                );
+                return (
+                  <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 font-medium">Total de Horas Trabalhadas:</span>
+                      <strong className="text-indigo-300 font-mono text-xs font-black">
+                        {(!showEditDayModal?.entry1 && !showEditDayModal?.entry2) ? '0h00min' : formatMinutesToHoursAndMinutes(previewDayCalc.workedMinutes)}
+                      </strong>
+                    </div>
+                    {previewDayCalc.overtimeMinutes > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold">
+                        <span>Horas Extras Apuradas:</span>
+                        <span className="font-mono font-bold">+{formatMinutesToHoursAndMinutes(previewDayCalc.overtimeMinutes)}</span>
+                      </div>
+                    )}
+                    {previewDayCalc.missingMinutes > 0 && showEditDayModal?.status === 'normal' && (showEditDayModal?.entry1 || showEditDayModal?.entry2) && (
+                      <div className="flex items-center justify-between text-[11px] text-rose-400 font-semibold">
+                        <span>Débito / Atraso Apurado:</span>
+                        <span className="font-mono font-bold">-{formatMinutesToHoursAndMinutes(previewDayCalc.missingMinutes)}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Status Selector */}
               <div>
@@ -2274,24 +2432,45 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <input
                     type="text"
                     value={userEditContractSchedule}
-                    onChange={(e) => setUserEditContractSchedule(e.target.value)}
-                    placeholder="Ex: 11:40 - 17:40"
+                    onChange={(e) => handleUserEditScheduleChange(e.target.value)}
+                    placeholder="Ex: 11:40 - 17:40 ou 07:30 - 11:30 / 13:00 - 17:42"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                   />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">Ex: 11:40 - 17:40 ou 07:00 - 13:00</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Ex: 11:40 - 17:40 ou 07:30 - 11:30 / 13:00 - 17:42</span>
                 </div>
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">Carga Horária Diária (Modelo: 8h40min)</label>
                   <input
                     type="text"
                     value={userEditContractDailyHoursFormatted}
-                    onChange={(e) => setUserEditContractDailyHoursFormatted(e.target.value)}
+                    onChange={(e) => handleUserEditDailyHoursChange(e.target.value)}
+                    onBlur={handleUserEditDailyHoursBlur}
                     placeholder="Ex: 8h40min ou 6h00min"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-indigo-300 font-mono font-bold focus:border-indigo-500 focus:outline-none"
                   />
                   <span className="text-[10px] text-indigo-400 mt-0.5 block">Modelo oficial: 8h40min, 6h00min</span>
                 </div>
               </div>
+
+              {/* Dynamic Calculation Helper Card */}
+              {userEditScheduleCalculation.shiftsCount > 0 && (
+                <div className="p-2.5 bg-slate-800/90 border border-indigo-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-200">
+                  <div className="flex items-center space-x-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-white text-[11px]">{userEditScheduleCalculation.summary}</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 self-start sm:self-auto shrink-0">
+                    <span className="text-[10px] bg-slate-900 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded-md border border-indigo-500/30">
+                      {userEditScheduleCalculation.workedMinutes} min úteis ({userEditScheduleCalculation.dailyHoursFormatted})
+                    </span>
+                    {userEditScheduleCalculation.lunchBreakMinutes > 0 && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 font-semibold px-2 py-0.5 rounded-full border border-amber-500/30">
+                        Almoço Descontado
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

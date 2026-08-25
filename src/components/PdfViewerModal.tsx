@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { jsPDF } from 'jspdf';
+import { triggerPrint } from '../utils/printUtils';
 
 export interface PdfViewerModalProps {
   isOpen: boolean;
@@ -107,9 +108,14 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     setTimeout(() => setDownloaded(false), 3500);
   };
 
-  // Direct print action
+  // Direct print action to native printer dialog
   const handlePrint = () => {
-    window.print();
+    triggerPrint({
+      doc,
+      blobUrl: blobUrl || pdfBlobUrl,
+      dataUrl: dataUrl || dataUri || pdfDataUrl,
+      elementId: 'pdf-viewer-modal-container',
+    });
   };
 
   const activeContent = children || htmlContent;

@@ -61,17 +61,22 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    const pingPromise = getDocFromServer(doc(db, 'test', 'connection'));
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timeout')), 3000)
-    );
-    await Promise.race([pingPromise, timeoutPromise]);
-    return true;
-  } catch (error) {
-    // Offline or connection in progress - Firestore will continue working in offline cache mode
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.info('Firestore is operating in offline mode.');
-    }
+    const pingPromise = getDocFromServer(doc(db, 'test', 'connection'))
+      .then(() => true)
+      .catch((err) => {
+        // Offline or connection in progress - Firestore will continue working in offline cache mode
+        if (err instanceof Error && (err.message.includes('the client is offline') || err.message.includes('unavailable'))) {
+          console.info('Firestore is operating in offline mode.');
+        }
+        return false;
+      });
+
+    const timeoutPromise = new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), 2500);
+    });
+
+    return await Promise.race([pingPromise, timeoutPromise]);
+  } catch {
     return false;
   }
 }

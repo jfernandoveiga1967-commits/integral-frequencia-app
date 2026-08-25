@@ -30,9 +30,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'email', 'role'])
-        && isNonEmptyString(request.resource.data.name, 128)
-        && isNonEmptyString(request.resource.data.email, 128);
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'role'])
+        && isNonEmptyString(request.resource.data.name, 128);
       allow delete: if true;
     }
 

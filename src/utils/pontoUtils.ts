@@ -95,7 +95,7 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
   if (!scheduleStr || !scheduleStr.trim()) {
     return {
       dailyHours: 6,
-      dailyHoursFormatted: '6h 00min',
+      dailyHoursFormatted: '6h00min',
       workedMinutes: 360,
       lunchBreakMinutes: 0,
       shiftsCount: 0,
@@ -110,7 +110,7 @@ export function calculateDailyHoursFromSchedule(scheduleStr = ''): {
   if (matches.length < 2) {
     return {
       dailyHours: 6,
-      dailyHoursFormatted: '6h 00min',
+      dailyHoursFormatted: '6h00min',
       workedMinutes: 360,
       lunchBreakMinutes: 0,
       shiftsCount: 0,
@@ -254,7 +254,7 @@ export function applyTolerance(
  * Calculates total worked minutes for a single day record and identifies overtime/missing minutes
  */
 export function calculateDayWorkedMinutes(
-  record: PontoRecord,
+  record?: Partial<PontoRecord> | null,
   contractSchedule = '11:40 - 17:40',
   toleranceMinutes = 5,
   explicitDailyMinutes?: number
@@ -264,13 +264,19 @@ export function calculateDayWorkedMinutes(
   missingMinutes: number;
   effectiveSummary: string;
 } {
+  if (!record) {
+    return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
+  }
+
+  const recStatus = record.status || 'normal';
+
   if (
-    record.status === 'feriado' ||
-    record.status === 'recesso' ||
-    record.status === 'sabado' ||
-    record.status === 'domingo' ||
-    record.status === 'falta_justificada' ||
-    record.status === 'atestado'
+    recStatus === 'feriado' ||
+    recStatus === 'recesso' ||
+    recStatus === 'sabado' ||
+    recStatus === 'domingo' ||
+    recStatus === 'falta_justificada' ||
+    recStatus === 'atestado'
   ) {
     return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
   }
@@ -280,7 +286,7 @@ export function calculateDayWorkedMinutes(
     ? explicitDailyMinutes
     : (parsedSchedMinutes > 0 ? parsedSchedMinutes : Math.round(dailyHours * 60));
 
-  if (record.status === 'falta_injustificada') {
+  if (recStatus === 'falta_injustificada') {
     return {
       workedMinutes: 0,
       overtimeMinutes: 0,
@@ -411,16 +417,17 @@ export function calculateMonthlyPontoFinancials({
   const monthStr = String(month).padStart(2, '0');
   const monthKey = `${year}-${monthStr}`;
 
-  records.forEach((rec) => {
-    if (!rec.date.startsWith(monthKey)) return;
+  (records || []).forEach((rec) => {
+    if (!rec || !rec.date || !rec.date.startsWith(monthKey)) return;
 
-    if (rec.status === 'falta_injustificada') {
+    const recStatus = rec.status || 'normal';
+    if (recStatus === 'falta_injustificada') {
       unjustifiedAbsencesCount++;
-    } else if (rec.status === 'feriado') {
+    } else if (recStatus === 'feriado') {
       paidHolidaysCount++;
-    } else if (rec.status === 'recesso') {
+    } else if (recStatus === 'recesso') {
       paidRecessDaysCount++;
-    } else if (rec.status === 'normal') {
+    } else if (recStatus === 'normal') {
       if (rec.entry1 || rec.entry2) {
         workedDaysCount++;
       }
