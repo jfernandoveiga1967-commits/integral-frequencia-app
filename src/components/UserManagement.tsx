@@ -9,6 +9,7 @@ import {
   formatMinutesToTime,
   formatMinutesToHoursAndMinutes,
   parseHoursAndMinutesStringToMinutes,
+  isContinuousShift,
 } from '../utils/pontoUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
@@ -159,6 +160,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
   const [formPixKey, setFormPixKey] = useState('');
+  const [formWorkShiftType, setFormWorkShiftType] = useState<'continua_6h' | 'padrao_8h' | 'personalizada'>('continua_6h');
   const [formContractSchedule, setFormContractSchedule] = useState('');
   const [formContractDailyHours, setFormContractDailyHours] = useState<number | string>(6);
   const [formContractDailyHoursFormatted, setFormContractDailyHoursFormatted] = useState('6h 00min');
@@ -394,7 +396,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
     setFormPixKey(user.pixKey || user.phone || '');
-    const sched = user.contractSchedule || '';
+
+    const shiftType = user.workShiftType || (isContinuousShift(user, user.contractSchedule) ? 'continua_6h' : 'padrao_8h');
+    setFormWorkShiftType(shiftType);
+
+    const sched = user.contractSchedule || (shiftType === 'continua_6h' ? '11:40 - 17:40' : '');
     setFormContractSchedule(sched);
     const calc = calculateDailyHoursFromSchedule(sched);
 
@@ -438,7 +444,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setFormPixKey('');
-    setFormContractSchedule('');
+    setFormWorkShiftType('continua_6h');
+    setFormContractSchedule('11:40 - 17:40');
     setFormContractDailyHours(6);
     setFormContractDailyHoursFormatted('6h00min');
     setFormContractDailyMinutes(360);
@@ -538,6 +545,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
+      workShiftType: formWorkShiftType,
       updatedAt: new Date().toISOString(),
     };
 
@@ -1123,6 +1131,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               <Sparkles className="w-3 h-3 text-indigo-600" />
                               <span>{userActivities.length} modalidades</span>
                             </span>
+
+                            {isContinuousShift(user, user.contractSchedule) ? (
+                              <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                <span>Contínua (6h)</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                                <Clock className="w-3 h-3 text-slate-500" />
+                                <span>Padrão ({user.contractDailyHoursFormatted || '8h+'})</span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1940,6 +1960,102 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       placeholder="Ex: 1200.00 (ou 0.00)"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
+                  </div>
+                </div>
+
+                {/* Tipo de Jornada Selector */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider text-[11px] flex items-center justify-between">
+                    <span>Tipo de Jornada de Trabalho:</span>
+                    <span className="text-[10px] text-indigo-600 font-bold">
+                      {formWorkShiftType === 'continua_6h'
+                        ? '2 Batidas (Entrada e Saída Direta • Sem Almoço)'
+                        : formWorkShiftType === 'padrao_8h'
+                        ? '4 Batidas (Com Intervalo de Almoço)'
+                        : 'Horário Livre'}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormWorkShiftType('continua_6h');
+                        setFormContractSchedule('11:40 - 17:40');
+                        setFormContractDailyHoursFormatted('6h00min');
+                        setFormContractDailyMinutes(360);
+                        setFormContractDailyHours(6);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formWorkShiftType === 'continua_6h'
+                          ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-500/20 text-indigo-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs flex items-center gap-1.5">
+                          <span>⚡</span>
+                          <span>Jornada Contínua (6h)</span>
+                        </span>
+                        {formWorkShiftType === 'continua_6h' && (
+                          <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        Exige apenas 2 batidas diárias. Sem intervalo de almoço obrigatório (11:40 - 17:40).
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormWorkShiftType('padrao_8h');
+                        setFormContractSchedule('07:30 - 11:30 / 13:00 - 17:42');
+                        setFormContractDailyHoursFormatted('8h42min');
+                        setFormContractDailyMinutes(522);
+                        setFormContractDailyHours(8.7);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formWorkShiftType === 'padrao_8h'
+                          ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-500/20 text-indigo-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs flex items-center gap-1.5">
+                          <span>🍴</span>
+                          <span>Jornada Padrão (8h+)</span>
+                        </span>
+                        {formWorkShiftType === 'padrao_8h' && (
+                          <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        4 batidas (Entrada 1, Almoço, Retorno, Saída 2). Desconta intervalo (8h42min).
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormWorkShiftType('personalizada')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formWorkShiftType === 'personalizada'
+                          ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-500/20 text-indigo-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs flex items-center gap-1.5">
+                          <span>⚙️</span>
+                          <span>Personalizada</span>
+                        </span>
+                        {formWorkShiftType === 'personalizada' && (
+                          <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        Defina livremente qualquer formato e carga horária específica.
+                      </p>
+                    </button>
                   </div>
                 </div>
 

@@ -251,6 +251,53 @@ export function applyTolerance(
 }
 
 /**
+ * Determines if a user/schedule is configured for continuous shift (e.g. 6 hours straight without mandatory lunch punch)
+ * - Returns true ONLY for 'continua_6h' (2 punches: Entrada and Saida)
+ * - Returns false for 'padrao_8h' and 'personalizada' (4 punches: Entrada 1, Saida 1, Entrada 2, Saida 2)
+ */
+export function isContinuousShift(
+  user?: Partial<UserProfile> | null,
+  contractSchedule?: string
+): boolean {
+  // If explicitly set to Standard (8h+) or Custom -> ALWAYS false (must show 4 punch columns: Entrada 1, Saída 1, Entrada 2, Saída 2)
+  if (user?.workShiftType === 'padrao_8h' || user?.workShiftType === 'personalizada') {
+    return false;
+  }
+
+  // If explicitly set to Continuous 6h -> true (shows 2 punch columns: Entrada, Saída)
+  if (user?.workShiftType === 'continua_6h') {
+    return true;
+  }
+
+  // Fallback for legacy records or undefined workShiftType:
+  const sched = (contractSchedule || user?.contractSchedule || '').trim();
+  if (sched) {
+    // If it contains a lunch interval separator (/ or ;) or mentions almoço / intervalo -> 4 punch columns
+    if (sched.includes('/') || sched.includes(';') || sched.toLowerCase().includes('alm') || sched.toLowerCase().includes('intervalo')) {
+      return false;
+    }
+    const { shiftsCount, dailyHours } = calculateDailyHoursFromSchedule(sched);
+    if (shiftsCount > 1 || dailyHours > 6) {
+      return false;
+    }
+    // Only if it is explicitly a single continuous 6-hour shift (e.g. 11:40 - 17:40)
+    if (shiftsCount === 1 && dailyHours === 6 && (sched === '11:40 - 17:40' || sched === '11:40-17:40')) {
+      return true;
+    }
+  }
+
+  if (user?.contractDailyHours !== undefined && user.contractDailyHours > 6) {
+    return false;
+  }
+  if (user?.contractDailyMinutes !== undefined && user.contractDailyMinutes > 360) {
+    return false;
+  }
+
+  // Default standard: show all 4 columns for full clarity
+  return false;
+}
+
+/**
  * Calculates total worked minutes for a single day record and identifies overtime/missing minutes
  */
 export function calculateDayWorkedMinutes(
@@ -303,17 +350,20 @@ export function calculateDayWorkedMinutes(
   let period1 = 0;
   let period2 = 0;
 
-  // Single shift (e.g. Entrada 1 + Saída 2 or Entrada 1 + Saída 1)
-  if (e1 !== null && s2 !== null && s1 === null && e2 === null) {
-    // Tolerances on start and end
+  // Case 1: Continuous Shift (Direct Entrada 1 and Saída 2, or Entrada 1 and Saída 1 without interval)
+  if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
+    const punchOut = s2 !== null ? s2 : s1!;
+    
+    // Apply tolerance to entrance and exit against contractual schedule
     const startDiff = e1 - expStart;
     const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
 
-    const endDiff = s2 - expEnd;
-    const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : s2;
+    const endDiff = punchOut - expEnd;
+    const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : punchOut;
 
     period1 = Math.max(0, effectiveEnd - effectiveStart);
   } else {
+    // Case 2: Split Shift with Lunch Interval
     if (e1 !== null && s1 !== null) {
       period1 = Math.max(0, s1 - e1);
     }
@@ -322,9 +372,14 @@ export function calculateDayWorkedMinutes(
     }
   }
 
-  const totalWorked = period1 + period2;
+  let totalWorked = period1 + period2;
   if (totalWorked === 0) {
     return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
+  }
+
+  // Tolerance check on total daily hours (e.g. within tolerance of expectedDailyMinutes)
+  if (Math.abs(totalWorked - expectedDailyMinutes) <= toleranceMinutes) {
+    totalWorked = expectedDailyMinutes;
   }
 
   const overtimeMinutes = totalWorked > expectedDailyMinutes ? totalWorked - expectedDailyMinutes : 0;

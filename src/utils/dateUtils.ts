@@ -1,4 +1,35 @@
-import { WeekInfo, HolidayItem } from '../types';
+import { WeekInfo, HolidayItem, DayOfWeek } from '../types';
+
+export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+
+export function formatDiasFrequencia(dias?: DayOfWeek[]): string {
+  if (!dias || dias.length === 0 || dias.length === 5) {
+    return 'Integral Completo (Seg a Sex)';
+  }
+  const map: Record<DayOfWeek, string> = {
+    segunda: 'Seg',
+    terca: 'Ter',
+    quarta: 'Qua',
+    quinta: 'Qui',
+    sexta: 'Sex',
+  };
+  return dias.map((d) => map[d] || d).join(', ');
+}
+
+export function isStudentScheduledForDay(student: { diasFrequencia?: DayOfWeek[] } | null | undefined, dayOfWeek: DayOfWeek | null): boolean {
+  if (!student) return false;
+  if (!dayOfWeek) return false;
+  if (!student.diasFrequencia || !Array.isArray(student.diasFrequencia) || student.diasFrequencia.length === 0) {
+    return true; // Default: enrolled for all weekdays
+  }
+  return student.diasFrequencia.includes(dayOfWeek);
+}
+
+export function isStudentScheduledForDate(student: { diasFrequencia?: DayOfWeek[] } | null | undefined, date: Date | string): boolean {
+  if (!student) return false;
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  return isStudentScheduledForDay(student, dayOfWeek);
+}
 
 export function getISOWeekNumber(date: Date): { year: number; weekNumber: number } {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));

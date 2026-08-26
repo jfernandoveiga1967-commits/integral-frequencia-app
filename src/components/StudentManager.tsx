@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
+import { formatDiasFrequencia, ALL_DAYS_OF_WEEK } from '../utils/dateUtils';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare } from 'lucide-react';
 
 interface StudentManagerProps {
   students: Student[];
@@ -16,7 +17,7 @@ interface StudentManagerProps {
   currentWeek?: WeekInfo;
   currentUser?: UserProfile | null;
   onAddStudent: (student: Omit<Student, 'id'>) => void | Promise<void>;
-  onBatchAddStudents: (names: string[], turma: TurmaType, activities: ActivityType[]) => void | Promise<void>;
+  onBatchAddStudents: (names: string[], turma: TurmaType, activities: ActivityType[], diasFrequencia?: DayOfWeek[]) => void | Promise<void>;
   onUpdateStudent: (student: Student) => void | Promise<void>;
   onDeleteStudent: (id: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;

@@ -67,6 +67,7 @@ import {
   generateDigitalSignatureHash,
   getMonthNameBR,
   numberToWordsBRL,
+  isContinuousShift,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint } from '../utils/printUtils';
@@ -256,6 +257,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     ? closingRecord.pixKey
     : (targetUser?.pixKey || targetUser?.phone || 'Não informada');
 
+  // Identifies whether the current employee has a continuous 6-hour shift (2 punches, no mandatory lunch break)
+  const isUserContinuous = useMemo(() => {
+    const effectiveUser = closingRecord?.workShiftType
+      ? { ...targetUser, workShiftType: closingRecord.workShiftType }
+      : targetUser;
+    return isContinuousShift(effectiveUser, contractSchedule);
+  }, [targetUser, contractSchedule, closingRecord]);
+
   // Manual financial adjustments states (loaded from closing record or local state)
   const [manualAddition, setManualAddition] = useState<number>(() => closingRecord?.manualAddition || 0);
   const [manualAdditionNote, setManualAdditionNote] = useState<string>(() => closingRecord?.manualAdditionNote || '');
@@ -267,8 +276,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [userEditCargo, setUserEditCargo] = useState('');
   const [userEditPhone, setUserEditPhone] = useState('');
   const [userEditPixKey, setUserEditPixKey] = useState('');
+  const [userEditWorkShiftType, setUserEditWorkShiftType] = useState<'continua_6h' | 'padrao_8h' | 'personalizada'>('continua_6h');
   const [userEditContractSchedule, setUserEditContractSchedule] = useState('');
-  const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('8h40min');
+  const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('6h00min');
   const [userEditBaseSalary, setUserEditBaseSalary] = useState<number | string>(1200);
   const [userEditCompany, setUserEditCompany] = useState('');
 
@@ -305,10 +315,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       setUserEditCargo(targetUser.cargoLabel || 'Estagiária / Monitora');
       setUserEditPhone(targetUser.phone || '');
       setUserEditPixKey(targetUser.pixKey || targetUser.phone || '');
-      setUserEditContractSchedule(targetUser.contractSchedule || '11:40 - 17:40');
+      const shift = targetUser.workShiftType || (isContinuousShift(targetUser, targetUser.contractSchedule) ? 'continua_6h' : 'padrao_8h');
+      setUserEditWorkShiftType(shift);
+      setUserEditContractSchedule(targetUser.contractSchedule || (shift === 'continua_6h' ? '11:40 - 17:40' : '07:30 - 11:30 / 13:00 - 17:42'));
       setUserEditContractDailyHoursFormatted(
         targetUser.contractDailyHoursFormatted ||
-        formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || 360)
+        formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || (shift === 'continua_6h' ? 360 : 522))
       );
       setUserEditBaseSalary(targetUser.baseSalary !== undefined && targetUser.baseSalary !== null ? targetUser.baseSalary : 1200);
       setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
@@ -319,7 +331,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     e.preventDefault();
     if (!targetUser) return;
 
-    let resolvedMinutes = 360;
+    let resolvedMinutes = userEditWorkShiftType === 'continua_6h' ? 360 : 522;
     if (userEditContractDailyHoursFormatted && userEditContractDailyHoursFormatted.trim()) {
       resolvedMinutes = parseHoursAndMinutesStringToMinutes(userEditContractDailyHoursFormatted);
     } else if (userEditContractSchedule && userEditContractSchedule.includes('-')) {
@@ -335,6 +347,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       cargoLabel: userEditCargo.trim() || targetUser.cargoLabel,
       phone: userEditPhone.trim() || undefined,
       pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
+      workShiftType: userEditWorkShiftType,
       contractSchedule: userEditContractSchedule.trim() || undefined,
       contractDailyHours: decimalHours,
       contractDailyMinutes: resolvedMinutes,
@@ -480,61 +493,104 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const startTol = applyTolerance(currentHoursMinutes, start, 5);
     const endTol = applyTolerance(currentHoursMinutes, end, 5);
 
-    if (!dayRecord || !dayRecord.entry1) {
-      // Slot 1: Entrada 1
-      punchSlotName = 'Entrada (Início da Jornada)';
-      const effectivePunch = startTol.isWithinTolerance ? start : currentHoursMinutes;
-      updatedRecord = {
-        id: `${selectedUserId}_${todayStr}`,
-        userId: selectedUserId,
-        userName: targetUser?.name || '',
-        date: todayStr,
-        monthKey,
-        dayNumber: now.getDate(),
-        entry1: effectivePunch,
-        exit1: dayRecord?.exit1 || '',
-        entry2: dayRecord?.entry2 || '',
-        exit2: dayRecord?.exit2 || '',
-        status: 'normal',
-        createdAt: dayRecord?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser?.name || 'Sistema',
-      };
-    } else if (!dayRecord.exit2 && !dayRecord.exit1) {
-      // Slot 2: Saída
-      punchSlotName = 'Saída (Fim da Jornada)';
-      const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
-      updatedRecord = {
-        ...dayRecord,
-        exit2: effectivePunch,
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser?.name || 'Sistema',
-      };
-    } else if (dayRecord.exit1 && !dayRecord.entry2) {
-      // Retorno do Intervalo
-      punchSlotName = 'Retorno do Intervalo (Entrada 2)';
-      updatedRecord = {
-        ...dayRecord,
-        entry2: currentHoursMinutes,
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser?.name || 'Sistema',
-      };
-    } else if (dayRecord.entry2 && !dayRecord.exit2) {
-      punchSlotName = 'Saída Final';
-      const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
-      updatedRecord = {
-        ...dayRecord,
-        exit2: effectivePunch,
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser?.name || 'Sistema',
-      };
+    if (isUserContinuous) {
+      // 6h Continuous Shift: strictly 2 punches (Entrada and Saída)
+      if (!dayRecord || !dayRecord.entry1) {
+        punchSlotName = 'Entrada (Início da Jornada - 6h)';
+        const effectivePunch = startTol.isWithinTolerance ? start : currentHoursMinutes;
+        updatedRecord = {
+          id: `${selectedUserId}_${todayStr}`,
+          userId: selectedUserId,
+          userName: targetUser?.name || '',
+          date: todayStr,
+          monthKey,
+          dayNumber: now.getDate(),
+          entry1: effectivePunch,
+          exit1: '',
+          entry2: '',
+          exit2: '',
+          status: 'normal',
+          createdAt: dayRecord?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else if (!dayRecord.exit2 && !dayRecord.exit1) {
+        punchSlotName = 'Saída (Fim da Jornada - 6h)';
+        const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
+        updatedRecord = {
+          ...dayRecord,
+          exit1: '',
+          entry2: '',
+          exit2: effectivePunch,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else {
+        const finalExit = dayRecord.exit2 || dayRecord.exit1 || '';
+        setPunchFeedback({
+          text: `Todas as 2 batidas da jornada contínua (6h) de hoje já foram preenchidas (Entrada: ${dayRecord.entry1} • Saída: ${finalExit}).`,
+          type: 'info',
+        });
+        setTimeout(() => setPunchFeedback(null), 4500);
+        return;
+      }
     } else {
-      setPunchFeedback({
-        text: 'Todas as batidas de hoje já foram preenchidas. Use o botão de editar caso precise ajustar.',
-        type: 'info',
-      });
-      setTimeout(() => setPunchFeedback(null), 4000);
-      return;
+      // Standard 8h+ Shift (4 punches with lunch break)
+      if (!dayRecord || !dayRecord.entry1) {
+        // Slot 1: Entrada 1
+        punchSlotName = 'Entrada 1 (Início da Jornada)';
+        const effectivePunch = startTol.isWithinTolerance ? start : currentHoursMinutes;
+        updatedRecord = {
+          id: `${selectedUserId}_${todayStr}`,
+          userId: selectedUserId,
+          userName: targetUser?.name || '',
+          date: todayStr,
+          monthKey,
+          dayNumber: now.getDate(),
+          entry1: effectivePunch,
+          exit1: dayRecord?.exit1 || '',
+          entry2: dayRecord?.entry2 || '',
+          exit2: dayRecord?.exit2 || '',
+          status: 'normal',
+          createdAt: dayRecord?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else if (!dayRecord.exit1 && !dayRecord.entry2 && !dayRecord.exit2) {
+        // Slot 2: Saída 1 (Almoço)
+        punchSlotName = 'Saída 1 (Intervalo de Almoço)';
+        updatedRecord = {
+          ...dayRecord,
+          exit1: currentHoursMinutes,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else if (dayRecord.exit1 && !dayRecord.entry2) {
+        // Retorno do Intervalo
+        punchSlotName = 'Entrada 2 (Retorno do Almoço)';
+        updatedRecord = {
+          ...dayRecord,
+          entry2: currentHoursMinutes,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else if (dayRecord.entry2 && !dayRecord.exit2) {
+        punchSlotName = 'Saída 2 (Fim da Jornada)';
+        const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
+        updatedRecord = {
+          ...dayRecord,
+          exit2: effectivePunch,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'Sistema',
+        };
+      } else {
+        setPunchFeedback({
+          text: 'Todas as batidas de hoje já foram preenchidas. Use o botão de editar caso precise ajustar.',
+          type: 'info',
+        });
+        setTimeout(() => setPunchFeedback(null), 4000);
+        return;
+      }
     }
 
     onSavePontoRecord(updatedRecord);
@@ -585,6 +641,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       contractDailyMinutes,
       contractDailyHoursFormatted,
       contractSchedule,
+      workShiftType: targetUser?.workShiftType || (isUserContinuous ? 'continua_6h' : 'padrao_8h'),
       companyName,
       institutionName,
       pixKey,
@@ -627,6 +684,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       contractDailyMinutes,
       contractDailyHoursFormatted,
       contractSchedule,
+      workShiftType: targetUser?.workShiftType || (isUserContinuous ? 'continua_6h' : 'padrao_8h'),
       companyName,
       institutionName,
       pixKey,
@@ -678,6 +736,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       contractDailyMinutes,
       contractDailyHoursFormatted,
       contractSchedule,
+      workShiftType: targetUser?.workShiftType || (isUserContinuous ? 'continua_6h' : 'padrao_8h'),
       companyName,
       institutionName,
       pixKey,
@@ -1158,10 +1217,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <tr className="bg-slate-100/80 text-slate-600 uppercase tracking-wider text-[11px] font-bold border-b border-slate-200">
                 <th className="py-2.5 px-3 w-14 text-center">Dia</th>
                 <th className="py-2.5 px-3 w-28">Dia da Semana</th>
-                <th className="py-2.5 px-3 text-center w-20">Entrada 1</th>
-                <th className="py-2.5 px-3 text-center w-20">Saída 1</th>
-                <th className="py-2.5 px-3 text-center w-20">Entrada 2</th>
-                <th className="py-2.5 px-3 text-center w-20">Saída 2</th>
+                {isUserContinuous ? (
+                  <>
+                    <th className="py-2.5 px-3 text-center w-24">Entrada</th>
+                    <th className="py-2.5 px-3 text-center w-24">Saída</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="py-2.5 px-3 text-center w-20">Entrada 1</th>
+                    <th className="py-2.5 px-3 text-center w-20">Saída 1</th>
+                    <th className="py-2.5 px-3 text-center w-20">Entrada 2</th>
+                    <th className="py-2.5 px-3 text-center w-20">Saída 2</th>
+                  </>
+                )}
                 <th className="py-2.5 px-3 text-center w-24">Horas Trab.</th>
                 <th className="py-2.5 px-3 text-center w-36">Status / Ocorrência</th>
                 <th className="py-2.5 px-3 w-36">Observações</th>
@@ -1203,7 +1271,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {/* Time Punches & Worked Hours */}
                     {status === 'sabado' || status === 'domingo' ? (
                       <>
-                        <td colSpan={4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-100/40">
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-100/40">
                           {status === 'sabado' ? 'SÁBADO — DESCANSO SEMANAL' : 'DOMINGO — REPOUSO REMUNERADO'}
                         </td>
                         <td className="py-2 px-3 text-center text-slate-400 font-mono font-medium">
@@ -1212,7 +1280,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </>
                     ) : status === 'feriado' || status === 'recesso' ? (
                       <>
-                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-emerald-700 bg-emerald-100/30">
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center font-bold text-emerald-700 bg-emerald-100/30">
                           {status === 'feriado' ? 'FERIADO' : 'RECESSO ESCOLAR'} — {item.holidayItem?.name || 'Abonado / Remunerado'}
                         </td>
                         <td className="py-2 px-3 text-center text-emerald-700 font-black font-mono">
@@ -1221,7 +1289,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </>
                     ) : status === 'falta_injustificada' ? (
                       <>
-                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-rose-600 bg-rose-100/40">
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center font-bold text-rose-600 bg-rose-100/40">
                           FALTA INJUSTIFICADA (Desconto de 1 Diária)
                         </td>
                         <td className="py-2 px-3 text-center text-rose-600 font-black font-mono">
@@ -1230,7 +1298,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </>
                     ) : status === 'falta_justificada' || status === 'atestado' ? (
                       <>
-                        <td colSpan={4} className="py-2 px-3 text-center font-bold text-indigo-700 bg-indigo-100/30">
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center font-bold text-indigo-700 bg-indigo-100/30">
                           {status === 'atestado' ? 'ATESTADO MÉDICO' : 'FALTA JUSTIFICADA / ABONADA'}
                         </td>
                         <td className="py-2 px-3 text-center text-indigo-700 font-black font-mono">
@@ -1239,18 +1307,31 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </>
                     ) : (
                       <>
-                        <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
-                          {rec?.entry1 || '—'}
-                        </td>
-                        <td className="py-2 px-3 text-center font-mono text-slate-700">
-                          {rec?.exit1 || '—'}
-                        </td>
-                        <td className="py-2 px-3 text-center font-mono text-slate-700">
-                          {rec?.entry2 || '—'}
-                        </td>
-                        <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
-                          {rec?.exit2 || '—'}
-                        </td>
+                        {isUserContinuous ? (
+                          <>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
+                              {rec?.entry1 || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
+                              {rec?.exit2 || rec?.exit1 || '—'}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
+                              {rec?.entry1 || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center font-mono text-slate-700">
+                              {rec?.exit1 || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center font-mono text-slate-700">
+                              {rec?.entry2 || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
+                              {rec?.exit2 || '—'}
+                            </td>
+                          </>
+                        )}
                         <td className="py-2 px-3 text-center font-mono">
                           {(() => {
                             if (!rec?.entry1 && !rec?.entry2) {
@@ -1917,10 +1998,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     <tr className="bg-slate-800 text-white font-bold uppercase text-center">
                       <th className="p-1.5 w-10">Dia</th>
                       <th className="p-1.5 w-24">Semana</th>
-                      <th className="p-1.5 w-16">Entrada 1</th>
-                      <th className="p-1.5 w-16">Saída 1</th>
-                      <th className="p-1.5 w-16">Entrada 2</th>
-                      <th className="p-1.5 w-16">Saída 2</th>
+                      {isUserContinuous ? (
+                        <>
+                          <th className="p-1.5 w-20">Entrada</th>
+                          <th className="p-1.5 w-20">Saída</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="p-1.5 w-16">Entrada 1</th>
+                          <th className="p-1.5 w-16">Saída 1</th>
+                          <th className="p-1.5 w-16">Entrada 2</th>
+                          <th className="p-1.5 w-16">Saída 2</th>
+                        </>
+                      )}
                       <th className="p-1.5 w-32">Status</th>
                       <th className="p-1.5">Assinatura / Rubrica</th>
                     </tr>
@@ -1934,13 +2024,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
                           <td className="p-1 text-center">{item.dayOfWeekShort}</td>
                           {item.isWk ? (
-                            <td colSpan={4} className="p-1 text-center italic font-semibold">
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center italic font-semibold">
                               {item.isSat ? 'SÁBADO' : 'DOMINGO'}
                             </td>
                           ) : status === 'feriado' || status === 'recesso' ? (
-                            <td colSpan={4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
                               {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
                             </td>
+                          ) : isUserContinuous ? (
+                            <>
+                              <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
+                              <td className="p-1 text-center font-mono">{rec?.exit2 || rec?.exit1 || '—'}</td>
+                            </>
                           ) : (
                             <>
                               <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
@@ -2032,52 +2127,83 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
             <div className="space-y-3 text-xs">
               {/* Punches Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1 font-medium">Entrada 1 (Manhã / Início)</label>
-                  <input
-                    type="time"
-                    value={showEditDayModal.entry1 || ''}
-                    onChange={(e) =>
-                      setShowEditDayModal({ ...showEditDayModal, entry1: e.target.value })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
-                  />
+              {isUserContinuous ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2 p-2.5 bg-indigo-950/50 border border-indigo-500/40 rounded-xl text-indigo-200 text-[11px] flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Jornada Contínua de 6h (Apenas 2 batidas: Entrada e Saída Direta, sem intervalo de almoço obrigatório).</span>
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Entrada (Início)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.entry1 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, entry1: e.target.value })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída (Fim)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.exit2 || showEditDayModal.exit1 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, exit2: e.target.value, exit1: '', entry2: '' })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-slate-400 block mb-1 font-medium">Saída 1 (Almoço / Saída)</label>
-                  <input
-                    type="time"
-                    value={showEditDayModal.exit1 || ''}
-                    onChange={(e) =>
-                      setShowEditDayModal({ ...showEditDayModal, exit1: e.target.value })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Entrada 1 (Manhã / Início)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.entry1 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, entry1: e.target.value })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída 1 (Almoço / Saída)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.exit1 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, exit1: e.target.value })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Entrada 2 (Retorno Almoço)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.entry2 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, entry2: e.target.value })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída 2 (Fim da Jornada)</label>
+                    <input
+                      type="time"
+                      value={showEditDayModal.exit2 || ''}
+                      onChange={(e) =>
+                        setShowEditDayModal({ ...showEditDayModal, exit2: e.target.value })
+                      }
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-slate-400 block mb-1 font-medium">Entrada 2 (Retorno Almoço)</label>
-                  <input
-                    type="time"
-                    value={showEditDayModal.entry2 || ''}
-                    onChange={(e) =>
-                      setShowEditDayModal({ ...showEditDayModal, entry2: e.target.value })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1 font-medium">Saída 2 (Fim da Jornada)</label>
-                  <input
-                    type="time"
-                    value={showEditDayModal.exit2 || ''}
-                    onChange={(e) =>
-                      setShowEditDayModal({ ...showEditDayModal, exit2: e.target.value })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-              </div>
+              )}
 
               {/* Real-time Calculation Box */}
               {(() => {
@@ -2257,10 +2383,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <tr className="bg-slate-800 text-white font-bold uppercase text-center">
                     <th className="p-1.5 w-10">Dia</th>
                     <th className="p-1.5 w-24">Semana</th>
-                    <th className="p-1.5 w-14">Entrada 1</th>
-                    <th className="p-1.5 w-14">Saída 1</th>
-                    <th className="p-1.5 w-14">Entrada 2</th>
-                    <th className="p-1.5 w-14">Saída 2</th>
+                    {isUserContinuous ? (
+                      <>
+                        <th className="p-1.5 w-20">Entrada</th>
+                        <th className="p-1.5 w-20">Saída</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="p-1.5 w-14">Entrada 1</th>
+                        <th className="p-1.5 w-14">Saída 1</th>
+                        <th className="p-1.5 w-14">Entrada 2</th>
+                        <th className="p-1.5 w-14">Saída 2</th>
+                      </>
+                    )}
                     <th className="p-1.5 w-16">Horas</th>
                     <th className="p-1.5 w-28">Status</th>
                     <th className="p-1.5">Rubrica / Assinatura</th>
@@ -2277,14 +2412,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                         <td className="p-1 text-center">{item.dayOfWeekShort}</td>
                         {item.isWk ? (
                           <>
-                            <td colSpan={4} className="p-1 text-center italic font-semibold">
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center italic font-semibold">
                               {item.isSat ? 'SÁBADO' : 'DOMINGO'}
                             </td>
                             <td className="p-1 text-center text-slate-400 font-mono">—</td>
                           </>
                         ) : status === 'feriado' || status === 'recesso' ? (
                           <>
-                            <td colSpan={4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
                               {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
                             </td>
                             <td className="p-1 text-center font-bold text-emerald-800 font-mono">
@@ -2293,11 +2428,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           </>
                         ) : status === 'falta_injustificada' ? (
                           <>
-                            <td colSpan={4} className="p-1 text-center font-bold text-rose-800 bg-rose-50">
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-rose-800 bg-rose-50">
                               FALTA INJUSTIFICADA
                             </td>
                             <td className="p-1 text-center font-bold text-rose-800 font-mono">
                               0h00min
+                            </td>
+                          </>
+                        ) : isUserContinuous ? (
+                          <>
+                            <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
+                            <td className="p-1 text-center font-mono">{rec?.exit2 || rec?.exit1 || '—'}</td>
+                            <td className="p-1 text-center font-mono font-bold text-slate-900">
+                              {!rec?.entry1 && !rec?.exit2 && !rec?.exit1 ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
                             </td>
                           </>
                         ) : (
@@ -2401,6 +2544,29 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   onChange={(e) => setUserEditName(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Tipo de Jornada</label>
+                <select
+                  value={userEditWorkShiftType}
+                  onChange={(e) => {
+                    const st = e.target.value as 'continua_6h' | 'padrao_8h' | 'personalizada';
+                    setUserEditWorkShiftType(st);
+                    if (st === 'continua_6h') {
+                      setUserEditContractSchedule('11:40 - 17:40');
+                      setUserEditContractDailyHoursFormatted('6h00min');
+                    } else if (st === 'padrao_8h') {
+                      setUserEditContractSchedule('07:30 - 11:30 / 13:00 - 17:42');
+                      setUserEditContractDailyHoursFormatted('8h40min');
+                    }
+                  }}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-semibold focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="continua_6h">Jornada Contínua (6 horas - Entrada e Saída Direta)</option>
+                  <option value="padrao_8h">Jornada Padrão com Almoço (8h40min - 4 Batidas)</option>
+                  <option value="personalizada">Jornada Personalizada</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -499,13 +499,15 @@ export default function App() {
   const handleBatchAddStudents = async (
     names: string[],
     turma: TurmaType,
-    activities: ActivityType[]
+    activities: ActivityType[],
+    diasFrequencia?: DayOfWeek[]
   ) => {
     const newStudentsList: Student[] = names.map((name, idx) => ({
       id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
       name,
       turma,
       activities,
+      diasFrequencia: diasFrequencia && diasFrequencia.length > 0 ? diasFrequencia : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
     }));
 
     setStudents((prev) => {

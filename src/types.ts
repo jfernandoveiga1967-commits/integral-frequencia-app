@@ -25,6 +25,7 @@ export interface Student {
   name: string;
   turma: TurmaType;
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
+  diasFrequencia?: DayOfWeek[]; // Dias da semana em que o aluno frequenta o Integral (ex: ['segunda', 'quarta', 'sexta'])
   notes?: string;
 }
 
@@ -127,6 +128,7 @@ export interface PontoMonthClosing {
   contractDailyMinutes?: number; // e.g. 522 (8h 42min)
   contractDailyHoursFormatted?: string; // e.g. "8h 42min"
   contractSchedule: string; // default "11:40 - 17:40"
+  workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada';
   companyName: string; // default "GADAL - Gestão e Apoio"
   institutionName: string; // default "Instituto Educacional Crescer"
   pixKey?: string;
@@ -174,5 +176,6 @@ export interface UserProfile {
   contractDailyHoursFormatted?: string; // Formato amigável (ex: "8h 42min" ou "6h 00min")
   baseSalary?: number; // Bolsa Auxílio Base (ex: 1200)
   company?: string; // Empresa conveniada (ex: "GADAL")
+  workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
   updatedAt?: string;
 }

@@ -25,6 +25,7 @@ import {
   calculateDayWorkedMinutes,
   numberToWordsBRL,
   calculateMonthlyPontoFinancials,
+  isContinuousShift,
 } from './pontoUtils';
 
 export interface PDFGenerationResult {
@@ -1759,6 +1760,12 @@ export function generateLivroPontoPDFReport({
 
   startY += 10.5;
 
+  // Check if target user has a continuous 6h shift
+  const isContinuous = isContinuousShift(
+    closingRecord?.workShiftType ? { ...user, workShiftType: closingRecord.workShiftType } : user,
+    contractSchedule
+  );
+
   // 4. Timesheet Table Data (Compact cell padding to ensure 100% single page)
   const tableData = monthDaysGrid.map((item) => {
     const rec = item.record;
@@ -1796,6 +1803,18 @@ export function generateLivroPontoPDFReport({
     const dayLabel = item.dayOfWeekLabel || item.dayOfWeekName || item.dayOfWeekShort || '';
     const dayName = dayLabel.split('-')[0];
 
+    if (isContinuous) {
+      return [
+        dayStr,
+        dayName,
+        rec?.entry1 || '-',
+        rec?.exit2 || rec?.exit1 || '-',
+        workedHoursStr,
+        statusText,
+        rec?.note || holidayName || '-',
+      ];
+    }
+
     return [
       dayStr,
       dayName,
@@ -1809,9 +1828,35 @@ export function generateLivroPontoPDFReport({
     ];
   });
 
+  const tableHead = isContinuous
+    ? [['Dia', 'Sem.', 'Entrada', 'Saída', 'Horas', 'Status / Ocorrência', 'Observações']]
+    : [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']];
+
+  const columnStyles = isContinuous
+    ? {
+        0: { cellWidth: 8, halign: 'center' as const, fontStyle: 'bold' as const },
+        1: { cellWidth: 15, halign: 'left' as const },
+        2: { cellWidth: 18, halign: 'center' as const },
+        3: { cellWidth: 18, halign: 'center' as const },
+        4: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const },
+        5: { cellWidth: 46, halign: 'left' as const },
+        6: { cellWidth: 'auto' as const, halign: 'left' as const },
+      }
+    : {
+        0: { cellWidth: 8, halign: 'center' as const, fontStyle: 'bold' as const },
+        1: { cellWidth: 15, halign: 'left' as const },
+        2: { cellWidth: 14, halign: 'center' as const },
+        3: { cellWidth: 14, halign: 'center' as const },
+        4: { cellWidth: 14, halign: 'center' as const },
+        5: { cellWidth: 14, halign: 'center' as const },
+        6: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const },
+        7: { cellWidth: 42, halign: 'left' as const },
+        8: { cellWidth: 'auto' as const, halign: 'left' as const },
+      };
+
   autoTable(doc, {
     startY: startY,
-    head: [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']],
+    head: tableHead,
     body: tableData,
     theme: 'grid',
     pageBreak: 'avoid',
@@ -1831,17 +1876,7 @@ export function generateLivroPontoPDFReport({
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
-    columnStyles: {
-      0: { cellWidth: 8, halign: 'center', fontStyle: 'bold' },
-      1: { cellWidth: 15, halign: 'left' },
-      2: { cellWidth: 14, halign: 'center' },
-      3: { cellWidth: 14, halign: 'center' },
-      4: { cellWidth: 14, halign: 'center' },
-      5: { cellWidth: 14, halign: 'center' },
-      6: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-      7: { cellWidth: 42, halign: 'left' },
-      8: { cellWidth: 'auto', halign: 'left' },
-    },
+    columnStyles: columnStyles,
     didParseCell: (data) => {
       if (data.section === 'body') {
         const rawRow = monthDaysGrid[data.row.index];
@@ -2038,7 +2073,7 @@ export function generateReciboBolsaPDF({
 
   if (financials.manualAddition && financials.manualAddition > 0) {
     tableData.push([
-      `Adicional Especial / Bonificação (${financials.manualAdditionReason || 'Ajuste Autorizado'})`,
+      `Adicional Especial / Bonificação (${closingRecord?.manualAdditionNote || 'Ajuste Autorizado'})`,
       'Evento Avulso',
       formatCurrencyBR(financials.manualAddition),
       '-',
@@ -2047,7 +2082,7 @@ export function generateReciboBolsaPDF({
 
   if (financials.manualDiscount && financials.manualDiscount > 0) {
     tableData.push([
-      `Desconto Especial (${financials.manualDiscountReason || 'Ajuste Autorizado'})`,
+      `Desconto Especial (${closingRecord?.manualDiscountNote || 'Ajuste Autorizado'})`,
       'Evento Avulso',
       '-',
       formatCurrencyBR(financials.manualDiscount),
