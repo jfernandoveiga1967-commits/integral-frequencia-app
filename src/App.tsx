@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
-import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS, isCoordenador } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { CurrentActivities } from './components/CurrentActivities';
@@ -90,12 +90,29 @@ export default function App() {
       : user;
     setCurrentUser(finalUser);
     saveStoredUser(finalUser);
+
+    // Redirect user to appropriate initial tab:
+    // Non-admin / non-coordenador users (Monitor / Professor) are directed to 'momento' (or 'frequencia')
+    if (finalUser.role !== 'coordenador') {
+      setActiveTab('momento');
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     saveStoredUser(null);
+    setActiveTab('momento');
   };
+
+  // Route protection: ensure non-coordenador cannot stay on restricted management tabs
+  useEffect(() => {
+    if (currentUser && !isCoordenador(currentUser)) {
+      const restrictedTabs: TabType[] = ['alunos', 'relatorio', 'biblioteca', 'usuarios'];
+      if (restrictedTabs.includes(activeTab)) {
+        setActiveTab('momento');
+      }
+    }
+  }, [currentUser, activeTab]);
 
   // Initial week and date setup
   const initialDateObj = new Date();
@@ -1003,8 +1020,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Alunos e Turmas */}
-        {activeTab === 'alunos' && (
+        {/* Tab 3: Alunos e Turmas (Apenas Coordenador/Admin) */}
+        {activeTab === 'alunos' && isCoordenador(currentUser) && (
           <StudentManager
             students={students}
             records={records}
@@ -1021,8 +1038,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 4: Relatório Semanal */}
-        {activeTab === 'relatorio' && (
+        {/* Tab 4: Relatório Semanal (Apenas Coordenador/Admin) */}
+        {activeTab === 'relatorio' && isCoordenador(currentUser) && (
           <WeeklyReport
             students={students}
             records={records}
@@ -1036,8 +1053,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 5: Biblioteca de Semanas */}
-        {activeTab === 'biblioteca' && (
+        {/* Tab 5: Biblioteca de Semanas (Apenas Coordenador/Admin) */}
+        {activeTab === 'biblioteca' && isCoordenador(currentUser) && (
           <WeeklyLibrary
             students={students}
             records={records}
@@ -1046,8 +1063,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 5: Gerenciamento de Usuários (Apenas Coordenador/Admin) */}
-        {activeTab === 'usuarios' && (
+        {/* Tab 6: Gerenciamento de Usuários (Apenas Coordenador/Admin) */}
+        {activeTab === 'usuarios' && isCoordenador(currentUser) && (
           <UserManagement
             currentUser={currentUser}
             users={users}

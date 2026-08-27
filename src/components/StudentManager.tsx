@@ -137,6 +137,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+  const [newDiasFrequencia, setNewDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [isSavingSingle, setIsSavingSingle] = useState(false);
 
   // Batch Add state
@@ -144,7 +145,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [batchNamesText, setBatchNamesText] = useState('');
   const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
+  const [batchDiasFrequencia, setBatchDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
+
+  const toggleDayInList = (currentDays: DayOfWeek[] | undefined, day: DayOfWeek): DayOfWeek[] => {
+    const allWeekdays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+    const current: DayOfWeek[] = currentDays && currentDays.length > 0 ? currentDays : allWeekdays;
+    if (current.includes(day)) {
+      const next = current.filter((d) => d !== day);
+      return next.length > 0 ? next : [day]; // Keep at least 1 day
+    } else {
+      const next = [...current, day];
+      return allWeekdays.filter((d) => next.includes(d));
+    }
+  };
 
   // Keep selectedTurma and form turmas aligned with allowed turmas for non-coordenador
   React.useEffect(() => {
@@ -207,7 +221,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       return;
     }
     setEditFormError(null);
-    setEditingStudent({ ...student });
+    setEditingStudent({
+      ...student,
+      diasFrequencia:
+        student.diasFrequencia && student.diasFrequencia.length > 0
+          ? student.diasFrequencia
+          : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+    });
   };
 
   const handleOpenDelete = (student: Student) => {
@@ -311,9 +331,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           name: trimmedName,
           turma: newTurma,
           activities: finalActivities,
+          diasFrequencia: newDiasFrequencia,
         })
       );
       setNewName('');
+      setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setShowAddForm(false);
       setSingleFormError(null);
     } catch (err: any) {
@@ -346,8 +368,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         ? Array.from(new Set(batchActivities))
         : ['Rotina', ...Array.from(new Set(batchActivities))];
 
-      await Promise.resolve(onBatchAddStudents(names, batchTurma, finalActivities));
+      await Promise.resolve(
+        onBatchAddStudents(names, batchTurma, finalActivities, batchDiasFrequencia)
+      );
       setBatchNamesText('');
+      setBatchDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setShowBatchForm(false);
       setBatchFormError(null);
     } catch (err: any) {
@@ -384,6 +409,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         name: trimmedName,
         turma: editingStudent.turma,
         activities: finalActivities,
+        diasFrequencia:
+          editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+            ? editingStudent.diasFrequencia
+            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
       };
 
       await Promise.resolve(onUpdateStudent(studentToSave));
@@ -575,6 +604,69 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
           </div>
 
+          {/* Dias de Frequência no Programa Integral */}
+          <div className="bg-indigo-50/60 border border-indigo-100 rounded-2xl p-3.5 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                <CalendarDays className="w-4 h-4 text-indigo-600" />
+                <span>Dias de Frequência no Integral (Grade Flexível):</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                  className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 shadow-2xs"
+                >
+                  Seg a Sex
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewDiasFrequencia(['segunda', 'quarta', 'sexta'])}
+                  className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
+                >
+                  Seg / Qua / Sex
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewDiasFrequencia(['terca', 'quinta'])}
+                  className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
+                >
+                  Ter / Qui
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+              ].map((d) => {
+                const isSelected = newDiasFrequencia.includes(d.id);
+                return (
+                  <button
+                    type="button"
+                    key={d.id}
+                    onClick={() => setNewDiasFrequencia(toggleDayInList(newDiasFrequencia, d.id))}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="hidden sm:inline">{d.label}</span>
+                    <span className="sm:hidden">{d.short}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10.5px] text-slate-500 font-medium">
+              💡 O aluno constará na chamada diária e totais de frequência exclusivamente nos dias marcados.
+            </p>
+          </div>
+
           <div className="flex justify-end space-x-2 pt-2 border-t border-indigo-100">
             <button
               type="button"
@@ -689,6 +781,66 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   );
                 })}
               </div>
+            </div>
+          </div>
+
+          {/* Batch Dias de Frequência */}
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <label className="block text-xs font-bold text-slate-200 flex items-center space-x-1.5">
+                <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Dias de Frequência para os Alunos do Lote:</span>
+              </label>
+              <div className="flex items-center space-x-1">
+                <button
+                  type="button"
+                  onClick={() => setBatchDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                  className="text-[10px] font-bold text-indigo-300 bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded border border-slate-600"
+                >
+                  Seg a Sex
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBatchDiasFrequencia(['segunda', 'quarta', 'sexta'])}
+                  className="text-[10px] font-bold text-slate-300 bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded border border-slate-600"
+                >
+                  Seg/Qua/Sex
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBatchDiasFrequencia(['terca', 'quinta'])}
+                  className="text-[10px] font-bold text-slate-300 bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded border border-slate-600"
+                >
+                  Ter/Qui
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+              ].map((d) => {
+                const isSelected = batchDiasFrequencia.includes(d.id);
+                return (
+                  <button
+                    type="button"
+                    key={d.id}
+                    onClick={() => setBatchDiasFrequencia(toggleDayInList(batchDiasFrequencia, d.id))}
+                    className={`py-1 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-500'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="hidden sm:inline">{d.label}</span>
+                    <span className="sm:hidden">{d.short}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -863,6 +1015,94 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </div>
             </div>
 
+            {/* Dias de Frequência in Edit Modal */}
+            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3.5 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                  <CalendarDays className="w-4 h-4 text-indigo-600" />
+                  <span>Dias de Frequência no Integral:</span>
+                </label>
+                <div className="flex items-center space-x-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingStudent({
+                        ...editingStudent,
+                        diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+                      })
+                    }
+                    className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200"
+                  >
+                    Seg a Sex
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingStudent({
+                        ...editingStudent,
+                        diasFrequencia: ['segunda', 'quarta', 'sexta'],
+                      })
+                    }
+                    className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
+                  >
+                    Seg/Qua/Sex
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingStudent({
+                        ...editingStudent,
+                        diasFrequencia: ['terca', 'quinta'],
+                      })
+                    }
+                    className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
+                  >
+                    Ter/Qui
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-5 gap-1.5">
+                {[
+                  { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                  { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                  { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                  { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                  { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+                ].map((d) => {
+                  const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+                    ? editingStudent.diasFrequencia
+                    : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+                  const isSelected = currentDays.includes(d.id);
+
+                  return (
+                    <button
+                      type="button"
+                      key={d.id}
+                      disabled={isSavingEdit}
+                      onClick={() =>
+                        setEditingStudent({
+                          ...editingStudent,
+                          diasFrequencia: toggleDayInList(editingStudent.diasFrequencia, d.id),
+                        })
+                      }
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="hidden sm:inline">{d.label}</span>
+                      <span className="sm:hidden">{d.short}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10.5px] text-slate-500 font-medium">
+                💡 Altere para marcar a frequência parcial ou flexível deste aluno durante a semana.
+              </p>
+            </div>
+
             <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
@@ -1011,6 +1251,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     </span>
                     <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                       {student.turma}
+                    </span>
+                    <span
+                      className={`text-[10.5px] font-bold px-2 py-0.5 rounded-md border flex items-center space-x-1 ${
+                        student.diasFrequencia && student.diasFrequencia.length < 5
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                      title={`Dias de Frequência: ${formatDiasFrequencia(student.diasFrequencia)}`}
+                    >
+                      <CalendarDays className="w-3 h-3 shrink-0" />
+                      <span>{formatDiasFrequencia(student.diasFrequencia)}</span>
                     </span>
                   </div>
 

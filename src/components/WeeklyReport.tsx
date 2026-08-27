@@ -18,9 +18,10 @@ import {
   generateActivityModalityPeriodPDFReport,
   generateStudentPDFReport,
   generateTurmaPDFReport,
+  generateNumericAttendanceConsolidatedPDFReport,
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
-import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays } from '../utils/dateUtils';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
   BarChart3,
@@ -385,6 +386,94 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const [pdfModalityStartDate, setPdfModalityStartDate] = useState<string>(effectiveStartDate);
   const [pdfModalityEndDate, setPdfModalityEndDate] = useState<string>(effectiveEndDate);
 
+  // 4. Numerical Consolidated Report State & Table Calculation
+  const [numericTurmaFilter, setNumericTurmaFilter] = useState<string>('all');
+  const [showNumericModal, setShowNumericModal] = useState(false);
+  const [pdfNumericTurma, setPdfNumericTurma] = useState<string>('all');
+  const [pdfNumericStartDate, setPdfNumericStartDate] = useState<string>(effectiveStartDate);
+  const [pdfNumericEndDate, setPdfNumericEndDate] = useState<string>(effectiveEndDate);
+
+  const numericTargetStudents = useMemo(() => {
+    if (numericTurmaFilter === 'all') {
+      return isCoordenador || !currentUser
+        ? students
+        : students.filter((s) => s && turmasList.includes(s.turma));
+    }
+    return students.filter((s) => s.turma === numericTurmaFilter);
+  }, [students, numericTurmaFilter, isCoordenador, currentUser, turmasList]);
+
+  const numericDailyStats = useMemo(() => {
+    const effectiveDays = schoolDaysInfo.effectiveDays;
+    const targetStudentIdSet = new Set(numericTargetStudents.map((s) => s.id));
+
+    const targetRoutineRecords = activeRecords.filter(
+      (r) =>
+        (r.activity === 'Rotina' || r.activity?.trim().toLowerCase() === 'rotina') &&
+        (numericTurmaFilter === 'all' || r.turma === numericTurmaFilter || targetStudentIdSet.has(r.studentId))
+    );
+
+    let totalEsperadosAcum = 0;
+    let totalPresencasAcum = 0;
+    let totalFaltasAcum = 0;
+    let totalSaudeAcum = 0;
+
+    const days = effectiveDays.map((day) => {
+      const dateStr = day.dateStr;
+      const dayScheduled = numericTargetStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
+      const expectedCount = dayScheduled.length;
+
+      const dayRecords = targetRoutineRecords.filter((r) => r.date === dateStr);
+      const pres = dayRecords.filter((r) => r.status === 'presente' || r.status === 'saida_antecipada').length;
+      const saidaAnt = dayRecords.filter((r) => r.status === 'saida_antecipada').length;
+      const faltas = dayRecords.filter((r) => r.status === 'falta').length;
+      const saude = dayRecords.filter((r) => r.status === 'saude').length;
+      const totalChamadas = pres + faltas + saude;
+
+      totalEsperadosAcum += expectedCount;
+      totalPresencasAcum += pres;
+      totalFaltasAcum += faltas;
+      totalSaudeAcum += saude;
+
+      let rate = 0;
+      if (expectedCount > 0 && totalChamadas > 0) {
+        rate = Math.round((pres / expectedCount) * 100);
+      } else if (totalChamadas > 0) {
+        rate = Math.round((pres / totalChamadas) * 100);
+      }
+
+      return {
+        dateStr,
+        dayName: day.dayName,
+        dayShort: day.dayShort,
+        expectedCount,
+        pres,
+        saidaAnt,
+        faltas,
+        saude,
+        totalChamadas,
+        rate,
+      };
+    });
+
+    const taxaGeral =
+      totalEsperadosAcum > 0 && totalPresencasAcum + totalFaltasAcum + totalSaudeAcum > 0
+        ? Math.round((totalPresencasAcum / totalEsperadosAcum) * 100)
+        : totalPresencasAcum + totalFaltasAcum + totalSaudeAcum > 0
+        ? Math.round(
+            (totalPresencasAcum / (totalPresencasAcum + totalFaltasAcum + totalSaudeAcum)) * 100
+          )
+        : 0;
+
+    return {
+      days,
+      totalEsperadosAcum,
+      totalPresencasAcum,
+      totalFaltasAcum,
+      totalSaudeAcum,
+      taxaGeral,
+    };
+  }, [schoolDaysInfo.effectiveDays, numericTargetStudents, activeRecords, numericTurmaFilter]);
+
   // On-screen PDF Viewer State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
     isOpen: boolean;
@@ -426,6 +515,46 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     setPdfModalityStartDate(effectiveStartDate);
     setPdfModalityEndDate(effectiveEndDate);
     setShowModalityModal(true);
+  };
+
+  const handleOpenNumericModal = (turma?: string) => {
+    setPdfNumericTurma(turma || numericTurmaFilter || 'all');
+    setPdfNumericStartDate(effectiveStartDate);
+    setPdfNumericEndDate(effectiveEndDate);
+    setShowNumericModal(true);
+  };
+
+  const handleGenerateNumericPDF = (
+    turmaParam?: string,
+    startParam?: string,
+    endParam?: string
+  ) => {
+    const targetTurma = turmaParam !== undefined ? turmaParam : pdfNumericTurma;
+    const targetStart = startParam || pdfNumericStartDate || effectiveStartDate;
+    const targetEnd = endParam || pdfNumericEndDate || effectiveEndDate;
+
+    const result = generateNumericAttendanceConsolidatedPDFReport({
+      startDate: targetStart,
+      endDate: targetEnd,
+      turma: targetTurma,
+      periodLabel: `De ${formatDateBR(targetStart)} a ${formatDateBR(targetEnd)}`,
+      students,
+      records,
+      holidays,
+    });
+
+    const isAll = !targetTurma || targetTurma === 'all' || targetTurma === 'Todas as Turmas';
+    setPdfPreviewState({
+      isOpen: true,
+      doc: result.doc,
+      dataUrl: result.dataUrl || result.dataUri,
+      blobUrl: result.blobUrl,
+      filename: result.filename,
+      title: `Relatório Numérico de Frequência - ${isAll ? 'Todas as Turmas' : targetTurma}`,
+      onDownload: result.download,
+    });
+
+    setShowNumericModal(false);
   };
 
   // Printing & CSV
@@ -522,6 +651,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             >
               <Award className="w-4 h-4 text-violet-600" />
               <span>PDF Oficina</span>
+            </button>
+
+            <button
+              onClick={() => handleOpenNumericModal()}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              title="Gerar Relatório Numérico Consolidado de Frequência em PDF"
+            >
+              <BarChart3 className="w-4 h-4 text-emerald-600" />
+              <span>PDF Numérico</span>
             </button>
 
             <button
@@ -823,6 +961,214 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           </div>
         </div>
       )}
+
+      {/* Section: Relatório Numérico de Frequência dos Alunos (Consolidado Sintético Diário) */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                Consolidado Sintético
+              </span>
+              <span className="text-xs text-slate-400 font-medium">
+                {schoolDaysInfo.effectiveDaysCount} dias letivos no período
+              </span>
+            </div>
+            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2 mt-1">
+              <BarChart3 className="w-5 h-5 text-emerald-600" />
+              Relatório Numérico de Frequência dos Alunos (Consolidado Sintético)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Estatísticas quantitativas diárias de alunos esperados, presenças, faltas e atestados (sem exibição de nomes individuais).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+            {/* Turma Filter Selector */}
+            <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-2xl">
+              <span className="text-[11px] font-bold text-slate-500">Turma:</span>
+              <select
+                value={numericTurmaFilter}
+                onChange={(e) => setNumericTurmaFilter(e.target.value)}
+                className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+              >
+                <option value="all">Todas as Turmas (Geral)</option>
+                {turmasList.map((t) => (
+                  <option key={t} value={t}>
+                    Turma {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={() => handleOpenNumericModal(numericTurmaFilter)}
+              className="px-3.5 py-1.5 rounded-2xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1"
+              title="Ajustar período personalizado e emitir PDF"
+            >
+              <Calendar className="w-3.5 h-3.5 text-slate-600" />
+              <span>Período Personalizado</span>
+            </button>
+
+            <button
+              onClick={() => handleGenerateNumericPDF(numericTurmaFilter, effectiveStartDate, effectiveEndDate)}
+              className="px-3.5 py-1.5 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
+              title="Gerar e pré-visualizar PDF do Relatório Numérico Consolidado"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Exportar Relatório Numérico</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mini Summary Banner */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Dias Letivos</span>
+            <span className="text-sm font-extrabold text-slate-800">{schoolDaysInfo.effectiveDaysCount} dias</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Matrículas Ativas</span>
+            <span className="text-sm font-extrabold text-slate-800">{numericTargetStudents.length} alunos</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Esperados Acumulados</span>
+            <span className="text-sm font-extrabold text-indigo-700">{numericDailyStats.totalEsperadosAcum}</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Presenças Totais</span>
+            <span className="text-sm font-extrabold text-emerald-700">{numericDailyStats.totalPresencasAcum}</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Faltas Totais</span>
+            <span className="text-sm font-extrabold text-rose-600">{numericDailyStats.totalFaltasAcum}</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Taxa Geral do Período</span>
+            <span className="text-sm font-extrabold text-emerald-800">{numericDailyStats.taxaGeral}%</span>
+          </div>
+        </div>
+
+        {/* Daily Numerical Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Data / Dia da Semana</th>
+                <th className="px-4 py-3 text-center">Total Esperados (Ativos)</th>
+                <th className="px-4 py-3 text-center text-emerald-700">Presenças</th>
+                <th className="px-4 py-3 text-center text-rose-700">Faltas</th>
+                <th className="px-4 py-3 text-center text-amber-800">Atestados / Saúde</th>
+                <th className="px-4 py-3 text-center">% Assiduidade</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {numericDailyStats.days.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-medium">
+                    Nenhum dia letivo encontrado no período selecionado.
+                  </td>
+                </tr>
+              ) : (
+                numericDailyStats.days.map((d) => {
+                  const hasRollCall = d.totalChamadas > 0;
+                  return (
+                    <tr key={d.dateStr} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-4 py-3 font-bold text-slate-900">
+                        <div className="flex items-center space-x-2">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          <span>
+                            {formatDateBR(d.dateStr)} <span className="text-slate-500 font-medium">({d.dayName})</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center font-bold text-slate-700">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-extrabold">
+                          {d.expectedCount}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-extrabold border border-emerald-200">
+                          {d.pres}
+                          {d.saidaAnt > 0 && (
+                            <span className="text-[10px] font-normal text-emerald-600 ml-1">
+                              ({d.saidaAnt} saída ant.)
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 font-extrabold border border-rose-200">
+                          {d.faltas}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-extrabold border border-amber-200">
+                          {d.saude}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-extrabold">
+                        {hasRollCall ? (
+                          <div className="inline-flex items-center space-x-1.5">
+                            <div className="w-12 bg-slate-200 rounded-full h-2 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  d.rate >= 90
+                                    ? 'bg-emerald-500'
+                                    : d.rate >= 75
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(0, d.rate))}%` }}
+                              />
+                            </div>
+                            <span
+                              className={`text-xs ${
+                                d.rate >= 90
+                                  ? 'text-emerald-700'
+                                  : d.rate >= 75
+                                  ? 'text-amber-700'
+                                  : 'text-rose-700'
+                              }`}
+                            >
+                              {d.rate}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-normal">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+            {/* Linha de Totais do Período */}
+            <tfoot className="bg-slate-900 text-white font-extrabold border-t-2 border-slate-800">
+              <tr>
+                <td className="px-4 py-3.5 text-white">
+                  TOTAIS DO PERÍODO ({schoolDaysInfo.effectiveDaysCount} dias letivos)
+                </td>
+                <td className="px-4 py-3.5 text-center text-indigo-200">
+                  {numericDailyStats.totalEsperadosAcum}
+                </td>
+                <td className="px-4 py-3.5 text-center text-emerald-300">
+                  {numericDailyStats.totalPresencasAcum}
+                </td>
+                <td className="px-4 py-3.5 text-center text-rose-300">
+                  {numericDailyStats.totalFaltasAcum}
+                </td>
+                <td className="px-4 py-3.5 text-center text-amber-300">
+                  {numericDailyStats.totalSaudeAcum}
+                </td>
+                <td className="px-4 py-3.5 text-center text-emerald-300 text-sm">
+                  {numericDailyStats.taxaGeral}%
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
 
       {/* Section: Frequência por Modalidade / Oficina (Professores Especialistas) */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -1382,6 +1728,169 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               >
                 <Download className="w-4 h-4" />
                 <span>Gerar PDF da Oficina</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Modal: Download Relatório Numérico Consolidado PDF */}
+      {showNumericModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white flex items-center justify-between border-b border-emerald-900/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Relatório Numérico de Frequência
+                  </h3>
+                  <p className="text-xs text-emerald-200">
+                    Consolidado Sintético Diário • Colégio Crescer
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Turma Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Escopo / Turma:
+                </label>
+                <select
+                  value={pdfNumericTurma}
+                  onChange={(e) => setPdfNumericTurma(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  <option value="all">Todas as Turmas (Geral do Integral)</option>
+                  {turmasList.map((t) => (
+                    <option key={t} value={t}>
+                      Turma {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Period Presets */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Atalhos de Período Rápido:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      const y = now.getFullYear();
+                      const m = now.getMonth();
+                      const first = new Date(y, m, 1);
+                      const last = new Date(y, m + 1, 0);
+                      setPdfNumericStartDate(first.toISOString().split('T')[0]);
+                      setPdfNumericEndDate(last.toISOString().split('T')[0]);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all cursor-pointer"
+                  >
+                    Mês Cheio (Este Mês)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      const y = now.getFullYear();
+                      const m = now.getMonth() - 1;
+                      const first = new Date(y, m, 1);
+                      const last = new Date(y, m + 1, 0);
+                      setPdfNumericStartDate(first.toISOString().split('T')[0]);
+                      setPdfNumericEndDate(last.toISOString().split('T')[0]);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
+                  >
+                    Mês Anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPdfNumericStartDate(currentWeek.startDate);
+                      setPdfNumericEndDate(currentWeek.endDate);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
+                  >
+                    Semana Atual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const endD = new Date();
+                      const startD = new Date();
+                      startD.setDate(endD.getDate() - 30);
+                      setPdfNumericStartDate(startD.toISOString().split('T')[0]);
+                      setPdfNumericEndDate(endD.toISOString().split('T')[0]);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
+                  >
+                    Últimos 30 Dias
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Range Inputs */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Intervalo de Datas:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
+                    <input
+                      type="date"
+                      value={pdfNumericStartDate}
+                      onChange={(e) => setPdfNumericStartDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
+                    <input
+                      type="date"
+                      value={pdfNumericEndDate}
+                      onChange={(e) => setPdfNumericEndDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                <p className="font-bold text-slate-800">Especificações do Relatório Sintético:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-500 text-[11px]">
+                  <li>Tabela quantitativa pura com lista de cada dia letivo do intervalo</li>
+                  <li>Contabilização estrita de alunos esperados, presenças, faltas e atestados</li>
+                  <li>Linha de Totais Acumulados do Período no rodapé</li>
+                  <li>Cabeçalho institucional e campo oficial para assinatura da coordenação</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowNumericModal(false)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGenerateNumericPDF(pdfNumericTurma, pdfNumericStartDate, pdfNumericEndDate)}
+                className="px-5 py-2.5 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Download className="w-4 h-4" />
+                <span>Gerar Relatório Numérico</span>
               </button>
             </div>
           </div>

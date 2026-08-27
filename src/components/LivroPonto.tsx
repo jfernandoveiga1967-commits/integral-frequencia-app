@@ -68,6 +68,8 @@ import {
   getMonthNameBR,
   numberToWordsBRL,
   isContinuousShift,
+  calcularHorasDia,
+  processSequentialPunch,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint } from '../utils/printUtils';
@@ -473,7 +475,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    const todayStr = toISODateString(new Date());
+    const currentNow = new Date();
+    const todayStr = toISODateString(currentNow);
     if (!todayStr.startsWith(monthKey)) {
       setPunchFeedback({
         text: `Atenção: A data de hoje (${formatDateBR(todayStr)}) não pertence ao mês visualizado (${getMonthNameBR(selectedMonth)}/${selectedYear}). Navegue para o mês atual para bater ponto.`,
@@ -483,119 +486,40 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    const currentHoursMinutes = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
     const dayRecord = monthUserRecords.find((r) => r.date === todayStr);
 
-    let updatedRecord: PontoRecord;
-    let punchSlotName = '';
+    const result = processSequentialPunch({
+      existingRecord: dayRecord,
+      userId: selectedUserId,
+      userName: targetUser?.name || 'Colaborador',
+      dateStr: todayStr,
+      monthKey,
+      dayNumber: currentNow.getDate(),
+      currentTime: currentHoursMinutes,
+      isContinuousShift: isUserContinuous,
+      contractSchedule,
+      toleranceMinutes: 5,
+      updatedByName: currentUser?.name || 'Sistema',
+    });
 
-    const { start, end } = parseContractSchedule(contractSchedule);
-    const startTol = applyTolerance(currentHoursMinutes, start, 5);
-    const endTol = applyTolerance(currentHoursMinutes, end, 5);
-
-    if (isUserContinuous) {
-      // 6h Continuous Shift: strictly 2 punches (Entrada and Saída)
-      if (!dayRecord || !dayRecord.entry1) {
-        punchSlotName = 'Entrada (Início da Jornada - 6h)';
-        const effectivePunch = startTol.isWithinTolerance ? start : currentHoursMinutes;
-        updatedRecord = {
-          id: `${selectedUserId}_${todayStr}`,
-          userId: selectedUserId,
-          userName: targetUser?.name || '',
-          date: todayStr,
-          monthKey,
-          dayNumber: now.getDate(),
-          entry1: effectivePunch,
-          exit1: '',
-          entry2: '',
-          exit2: '',
-          status: 'normal',
-          createdAt: dayRecord?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else if (!dayRecord.exit2 && !dayRecord.exit1) {
-        punchSlotName = 'Saída (Fim da Jornada - 6h)';
-        const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
-        updatedRecord = {
-          ...dayRecord,
-          exit1: '',
-          entry2: '',
-          exit2: effectivePunch,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else {
-        const finalExit = dayRecord.exit2 || dayRecord.exit1 || '';
-        setPunchFeedback({
-          text: `Todas as 2 batidas da jornada contínua (6h) de hoje já foram preenchidas (Entrada: ${dayRecord.entry1} • Saída: ${finalExit}).`,
-          type: 'info',
-        });
-        setTimeout(() => setPunchFeedback(null), 4500);
-        return;
-      }
-    } else {
-      // Standard 8h+ Shift (4 punches with lunch break)
-      if (!dayRecord || !dayRecord.entry1) {
-        // Slot 1: Entrada 1
-        punchSlotName = 'Entrada 1 (Início da Jornada)';
-        const effectivePunch = startTol.isWithinTolerance ? start : currentHoursMinutes;
-        updatedRecord = {
-          id: `${selectedUserId}_${todayStr}`,
-          userId: selectedUserId,
-          userName: targetUser?.name || '',
-          date: todayStr,
-          monthKey,
-          dayNumber: now.getDate(),
-          entry1: effectivePunch,
-          exit1: dayRecord?.exit1 || '',
-          entry2: dayRecord?.entry2 || '',
-          exit2: dayRecord?.exit2 || '',
-          status: 'normal',
-          createdAt: dayRecord?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else if (!dayRecord.exit1 && !dayRecord.entry2 && !dayRecord.exit2) {
-        // Slot 2: Saída 1 (Almoço)
-        punchSlotName = 'Saída 1 (Intervalo de Almoço)';
-        updatedRecord = {
-          ...dayRecord,
-          exit1: currentHoursMinutes,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else if (dayRecord.exit1 && !dayRecord.entry2) {
-        // Retorno do Intervalo
-        punchSlotName = 'Entrada 2 (Retorno do Almoço)';
-        updatedRecord = {
-          ...dayRecord,
-          entry2: currentHoursMinutes,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else if (dayRecord.entry2 && !dayRecord.exit2) {
-        punchSlotName = 'Saída 2 (Fim da Jornada)';
-        const effectivePunch = endTol.isWithinTolerance ? end : currentHoursMinutes;
-        updatedRecord = {
-          ...dayRecord,
-          exit2: effectivePunch,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser?.name || 'Sistema',
-        };
-      } else {
-        setPunchFeedback({
-          text: 'Todas as batidas de hoje já foram preenchidas. Use o botão de editar caso precise ajustar.',
-          type: 'info',
-        });
-        setTimeout(() => setPunchFeedback(null), 4000);
-        return;
-      }
+    if (!result.success || !result.updatedRecord) {
+      setPunchFeedback({
+        text: result.error || 'Não foi possível registrar a batida.',
+        type: 'info',
+      });
+      setTimeout(() => setPunchFeedback(null), 5000);
+      return;
     }
 
-    onSavePontoRecord(updatedRecord);
+    // Immediately trigger state update and save
+    onSavePontoRecord(result.updatedRecord);
+
+    const hoursSummary = result.calculatedHours?.effectiveSummary
+      ? ` • Total calculado: ${result.calculatedHours.effectiveSummary}`
+      : '';
     setPunchFeedback({
-      text: `Batida de ${punchSlotName} registrada com sucesso às ${currentHoursMinutes}! (Tolerância contratual de 5 min aplicada)`,
+      text: `Batida de ${result.slotName} registrada com sucesso às ${currentHoursMinutes}!${hoursSummary}`,
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 4500);

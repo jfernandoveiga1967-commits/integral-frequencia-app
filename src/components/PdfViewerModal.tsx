@@ -7,11 +7,7 @@ import {
   Minimize2,
   Check,
   X,
-  Building2,
   ShieldCheck,
-  Calendar,
-  CheckCircle2,
-  Sparkles,
 } from 'lucide-react';
 import type { jsPDF } from 'jspdf';
 import { triggerPrint } from '../utils/printUtils';
@@ -220,13 +216,22 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         {/* Document Content Scroll Container */}
         <div
           id="pdf-frame-wrapper"
-          className="flex-1 w-full h-full bg-slate-950/90 overflow-y-auto p-3 sm:p-6 md:p-8 flex justify-center print:p-0 print:bg-white print:overflow-visible"
+          className="flex-1 w-full h-full bg-slate-950/90 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center print:p-0 print:bg-white print:overflow-visible"
         >
           {/* Official A4 Sheet Canvas */}
-          <div className="w-full max-w-4xl bg-white text-slate-900 shadow-2xl rounded-xl p-6 sm:p-10 border border-slate-200 print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none">
+          <div className="w-full max-w-4xl bg-white text-slate-900 shadow-2xl rounded-xl p-5 sm:p-8 md:p-10 border border-slate-200 print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none">
             {activeContent ? (
               // If custom children/HTML is supplied, render it directly inside the A4 sheet
               <div className="space-y-4">{activeContent}</div>
+            ) : (pdfBlobUrl || blobUrl || dataUrl || dataUri || pdfDataUrl) ? (
+              // Render native PDF embedded preview if dataUrl / blobUrl is present
+              <div className="w-full h-[78vh] rounded-lg overflow-hidden border border-slate-200">
+                <iframe
+                  src={pdfBlobUrl || blobUrl || dataUrl || dataUri || pdfDataUrl || ''}
+                  title={title || 'Documento PDF'}
+                  className="w-full h-full border-none"
+                />
+              </div>
             ) : (
               // Default Native Official A4 Document View
               <div className="space-y-6">
@@ -267,70 +272,8 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
                   </p>
                 </div>
 
-                {/* Document Status & Information Card */}
-                <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 sm:p-5">
-                  <div className="flex items-start space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 min-w-0 text-xs">
-                      <h4 className="font-bold text-indigo-950 text-sm mb-1">
-                        Relatório Compilado com Sucesso
-                      </h4>
-                      <p className="text-indigo-900/80 leading-relaxed mb-3">
-                        O arquivo oficial <strong>{filename}</strong> está pronto e formatado para impressão direta em folha A4 ou arquivamento em PDF pelo Departamento Pessoal (DP).
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                        <div className="p-2 bg-white/80 border border-indigo-100 rounded-lg">
-                          <span className="text-slate-500 block">Padrão de Folha:</span>
-                          <strong className="text-slate-900">A4 Retrato (210 × 297mm)</strong>
-                        </div>
-                        <div className="p-2 bg-white/80 border border-indigo-100 rounded-lg">
-                          <span className="text-slate-500 block">Processamento:</span>
-                          <strong className="text-slate-900">Vetor de Alta Resolução</strong>
-                        </div>
-                        <div className="p-2 bg-white/80 border border-indigo-100 rounded-lg">
-                          <span className="text-slate-500 block">Validação DP:</span>
-                          <strong className="text-emerald-700">Aprovado para DP / Folha</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Direct Action Box (Hidden in Print) */}
-                <div className="p-5 bg-slate-900 text-white rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 print:hidden">
-                  <div>
-                    <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-emerald-400" />
-                      Ações Imediatas do Documento
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Escolha imprimir diretamente na impressora ou salvar o arquivo em seu dispositivo.
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handlePrint}
-                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 border border-slate-700 transition cursor-pointer shadow-sm active:scale-95"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Imprimir em A4</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownload}
-                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-sm shadow-indigo-900/30 active:scale-95"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Baixar Arquivo PDF</span>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Signatures & Institutional Seal */}
-                <div className="pt-8 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
+                <div className="pt-16 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
                   <div>
                     <div className="border-b border-slate-900 pb-1 w-full"></div>
                     <span className="text-[11px] font-bold text-slate-800 block mt-1.5 uppercase">

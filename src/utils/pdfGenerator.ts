@@ -14,7 +14,7 @@ import {
   PontoMonthClosing,
   HolidayItem,
 } from '../types';
-import { formatDateBR, getDayOfWeekLabel } from './dateUtils';
+import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
@@ -2269,13 +2269,14 @@ export function generateAttendanceDailyPDFReport({
 
   const dateFormatted = formatDate(date);
 
-  // Filter students for this activity/turma
+  // Filter students for this activity/turma and scheduled for this date
   const relevantStudents = students
     .filter((st) => {
       const acts = Array.isArray(st.activities) ? st.activities : [];
       const matchAct = activityName === 'TODAS' || acts.includes(activityName as ActivityType);
       const matchTurma = turma === 'TODAS' || st.turma === turma;
-      return matchAct && matchTurma;
+      const matchSchedule = isStudentScheduledForDate(st, date);
+      return matchAct && matchTurma && matchSchedule;
     })
     .sort((a, b) => {
       const turmaComp = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
@@ -2424,6 +2425,246 @@ export function generateAttendanceDailyPDFReport({
 
   applyPageNumbersAndFooters(doc, 'portrait');
   const filename = `Chamada_${activityName.replace(/[\/\s]+/g, '_')}_${turma.replace(/[\/\s]+/g, '_')}_${dateFormatted.replace(/\//g, '-')}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+// ---------------------------------------------------------------------------
+// 9. RELATÓRIO NUMÉRICO DE FREQUÊNCIA DOS ALUNOS (CONSOLIDADO SINTÉTICO DIÁRIO)
+// ---------------------------------------------------------------------------
+
+export interface GenerateNumericAttendancePDFOptions {
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  turma?: string;    // 'Todas as Turmas' or specific Turma
+  periodLabel?: string;
+  students: Student[];
+  records: AttendanceRecord[];
+  holidays?: HolidayItem[];
+  saveImmediately?: boolean;
+}
+
+export function generateNumericAttendanceConsolidatedPDFReport({
+  startDate,
+  endDate,
+  turma = 'Todas as Turmas',
+  periodLabel,
+  students,
+  records,
+  holidays = [],
+  saveImmediately = false,
+}: GenerateNumericAttendancePDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const isAllTurmas = !turma || turma === 'Todas as Turmas' || turma === 'all';
+  const targetStudents = isAllTurmas ? students : students.filter((s) => s.turma === turma);
+
+  // Filter routine records for target students in the date range
+  const targetStudentIdSet = new Set(targetStudents.map((s) => s.id));
+  const periodRoutineRecords = records.filter(
+    (r) =>
+      (r.activity === 'Rotina' || r.activity?.trim().toLowerCase() === 'rotina') &&
+      r.date >= startDate &&
+      r.date <= endDate &&
+      (isAllTurmas || r.turma === turma || targetStudentIdSet.has(r.studentId))
+  );
+
+  // School days calculation
+  const schoolDaysInfo = getEffectiveSchoolDays(startDate, endDate, holidays);
+  const effectiveDays = schoolDaysInfo.effectiveDays;
+
+  // Header
+  const subtitle = isAllTurmas
+    ? 'Consolidado Sintético Diário de Todas as Turmas • Programa Integral'
+    : `Consolidado Sintético Diário - Turma ${turma} • Programa Integral`;
+
+  const periodDisplay = periodLabel || `De ${formatDateBR(startDate)} a ${formatDateBR(endDate)}`;
+
+  drawOfficialHeader(
+    doc,
+    'Relatório Numérico de Frequência',
+    subtitle,
+    [`Escopo: ${isAllTurmas ? 'Geral (Todas as Turmas)' : turma}`, `Período: ${formatDateBR(startDate)} a ${formatDateBR(endDate)}`],
+    'portrait'
+  );
+
+  let startY = 38;
+
+  // Overview Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, startY, 182, 24, 2.5, 2.5, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(10.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Escopo: ${isAllTurmas ? 'Todas as Turmas do Integral' : `Turma ${turma}`}`, 18, startY + 6.5);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Período de Apuração: ${periodDisplay}`, 18, startY + 13);
+  doc.text(
+    `Dias Úteis Letivos: ${schoolDaysInfo.effectiveDaysCount} dias ${
+      schoolDaysInfo.holidaysCount > 0 ? `(${schoolDaysInfo.holidaysCount} feriados/recessos descontados)` : ''
+    } • Matrículas Ativas no Escopo: ${targetStudents.length} alunos`,
+    18,
+    startY + 19
+  );
+
+  startY += 28;
+
+  // Compute daily totals and period accumulations
+  let totalEsperadosAcumulados = 0;
+  let totalPresencasAcumuladas = 0;
+  let totalFaltasAcumuladas = 0;
+  let totalSaudeAcumuladas = 0;
+
+  const tableData = effectiveDays.map((day) => {
+    const dayDate = day.dateStr;
+    const dayScheduledStudents = targetStudents.filter((s) => isStudentScheduledForDate(s, dayDate));
+    const expectedCount = dayScheduledStudents.length;
+
+    const dayRecords = periodRoutineRecords.filter((r) => r.date === dayDate);
+    const presCount = dayRecords.filter((r) => r.status === 'presente' || r.status === 'saida_antecipada').length;
+    const faltaCount = dayRecords.filter((r) => r.status === 'falta').length;
+    const saudeCount = dayRecords.filter((r) => r.status === 'saude').length;
+
+    totalEsperadosAcumulados += expectedCount;
+    totalPresencasAcumuladas += presCount;
+    totalFaltasAcumuladas += faltaCount;
+    totalSaudeAcumuladas += saudeCount;
+
+    const totalRegistrado = presCount + faltaCount + saudeCount;
+    let rateStr = '-';
+    if (expectedCount > 0 && totalRegistrado > 0) {
+      const rate = Math.round((presCount / expectedCount) * 100);
+      rateStr = `${rate}%`;
+    } else if (totalRegistrado > 0) {
+      const rate = Math.round((presCount / totalRegistrado) * 100);
+      rateStr = `${rate}%`;
+    }
+
+    return [
+      `${formatDateBR(dayDate)} (${day.dayName})`,
+      String(expectedCount),
+      String(presCount),
+      String(faltaCount),
+      String(saudeCount),
+      rateStr,
+    ];
+  });
+
+  const taxaGeral =
+    totalEsperadosAcumulados > 0 && (totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas > 0)
+      ? Math.round((totalPresencasAcumuladas / totalEsperadosAcumulados) * 100)
+      : totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas > 0
+      ? Math.round(
+          (totalPresencasAcumuladas / (totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas)) * 100
+        )
+      : 0;
+
+  // Metric Cards
+  const metrics = [
+    { label: 'Dias Letivos', value: `${schoolDaysInfo.effectiveDaysCount} d`, color: [15, 23, 42] as [number, number, number] },
+    { label: 'Alunos Esperados', value: totalEsperadosAcumulados, color: [79, 70, 229] as [number, number, number] },
+    { label: 'Presenças', value: totalPresencasAcumuladas, color: [22, 163, 74] as [number, number, number] },
+    { label: 'Faltas', value: totalFaltasAcumuladas, color: [220, 38, 38] as [number, number, number] },
+    { label: 'Atestados/Saúde', value: totalSaudeAcumuladas, color: [217, 119, 6] as [number, number, number] },
+  ];
+  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+
+  startY += 18;
+
+  // Main Numerical Table with Foot Row
+  autoTable(doc, {
+    startY,
+    head: [['Data / Dia da Semana', 'Alunos Esperados', 'Presenças', 'Faltas', 'Atestados / Saúde', '% Assiduidade']],
+    body:
+      tableData.length > 0
+        ? tableData
+        : [['Nenhum dia letivo encontrado para o período selecionado', '-', '-', '-', '-', '-']],
+    foot: [
+      [
+        'TOTAIS DO PERÍODO',
+        String(totalEsperadosAcumulados),
+        String(totalPresencasAcumuladas),
+        String(totalFaltasAcumuladas),
+        String(totalSaudeAcumuladas),
+        `${taxaGeral}%`,
+      ],
+    ],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'center',
+    },
+    bodyStyles: {
+      fontSize: 7.5,
+      textColor: [51, 65, 85],
+      cellPadding: 2.5,
+    },
+    footStyles: {
+      fillColor: [30, 41, 59],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'center',
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 'auto', fontStyle: 'bold' },
+      1: { cellWidth: 32, halign: 'center' },
+      2: { cellWidth: 26, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
+      3: { cellWidth: 24, halign: 'center', textColor: [220, 38, 38] },
+      4: { cellWidth: 32, halign: 'center', textColor: [217, 119, 6] },
+      5: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'foot' && data.column.index === 0) {
+        data.cell.styles.halign = 'left';
+      }
+    },
+  });
+
+  // Signatures
+  const finalY = (doc as any).lastAutoTable?.finalY || 210;
+  if (finalY < 250) {
+    const sigY = Math.max(finalY + 18, 242);
+    doc.setDrawColor(203, 213, 225);
+    doc.line(20, sigY, 90, sigY);
+    doc.line(120, sigY, 190, sigY);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Coordenação do Programa Integral', 55, sigY + 4, { align: 'center' });
+    doc.text('Direção Escolar • Colégio Crescer', 155, sigY + 4, { align: 'center' });
+  }
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+  const filename = `Relatorio_Numerico_Frequencia_${isAllTurmas ? 'Geral' : turma.replace(/[\/\s]+/g, '_')}_${formatDateBR(
+    startDate
+  ).replace(/\//g, '-')}_a_${formatDateBR(endDate).replace(/\//g, '-')}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

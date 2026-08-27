@@ -5,7 +5,7 @@ import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, formatDiasFrequencia } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
@@ -181,13 +181,19 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const weekDays = useMemo(() => getWeekDays(currentWeek.startDate), [currentWeek.startDate]);
 
-  // Filter students who are enrolled in the allowed activities and allowed turmas
+  // Filter students who are enrolled in the allowed activities, allowed turmas, and scheduled for the current selectedDate
   const filteredStudents = useMemo(() => {
     return (students || [])
       .filter((student) => {
         if (!student) return false;
         // Turma permission filter for professors/monitors
         if (!isCoordenador && !allowedTurmas.includes(student.turma)) {
+          return false;
+        }
+
+        // Partial / Flexible attendance schedule filter:
+        // Only include students who are scheduled to attend on the selectedDate!
+        if (!isStudentScheduledForDate(student, selectedDate)) {
           return false;
         }
 
@@ -215,7 +221,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
-  }, [students, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
+  }, [students, selectedDate, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
 
   // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`
   const recordMap = useMemo(() => {
@@ -870,6 +876,11 @@ function getCurrentHHMM(): string {
                           <span className="font-medium px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
                             {student.turma}
                           </span>
+                          {student.diasFrequencia && student.diasFrequencia.length < 5 && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200" title="Grade parcial de frequência semanal">
+                              {formatDiasFrequencia(student.diasFrequencia)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -394,6 +394,246 @@ export function calculateDayWorkedMinutes(
 }
 
 /**
+ * Calculates worked hours for a single day record (Portuguese alias for calculateDayWorkedMinutes).
+ */
+export function calcularHorasDia(
+  record?: Partial<PontoRecord> | null,
+  contractSchedule = '11:40 - 17:40',
+  toleranceMinutes = 5,
+  explicitDailyMinutes?: number
+) {
+  return calculateDayWorkedMinutes(record, contractSchedule, toleranceMinutes, explicitDailyMinutes);
+}
+
+/**
+ * Sequential and deterministic punch processing logic.
+ *
+ * Standard shift (4 punches):
+ * 1. If ENTRADA 1 is empty -> records in entry1
+ * 2. If ENTRADA 1 is filled & SAÍDA 1 is empty -> records in exit1 (Saída Almoço)
+ * 3. If SAÍDA 1 is filled & ENTRADA 2 is empty -> records in entry2 (Retorno Almoço)
+ * 4. If ENTRADA 2 is filled & SAÍDA 2 is empty -> records in exit2 (Saída Final)
+ * 5. If all 4 are filled -> blocks overwrite and returns warning
+ *
+ * Continuous 6h shift (2 punches):
+ * 1. 1st punch -> records in entry1
+ * 2. 2nd punch -> records in exit2 (skipping intermediate lunch intervals)
+ * 3. If both are filled -> blocks overwrite and returns warning
+ */
+export function processSequentialPunch({
+  existingRecord,
+  userId,
+  userName,
+  dateStr,
+  monthKey,
+  dayNumber,
+  currentTime,
+  isContinuousShift,
+  contractSchedule = '11:40 - 17:40',
+  toleranceMinutes = 5,
+  updatedByName = 'Sistema',
+}: {
+  existingRecord?: PontoRecord | null;
+  userId: string;
+  userName: string;
+  dateStr: string;
+  monthKey: string;
+  dayNumber: number;
+  currentTime: string;
+  isContinuousShift: boolean;
+  contractSchedule?: string;
+  toleranceMinutes?: number;
+  updatedByName?: string;
+}): {
+  success: boolean;
+  error?: string;
+  slotName?: string;
+  slotKey?: 'entry1' | 'exit1' | 'entry2' | 'exit2';
+  updatedRecord?: PontoRecord;
+  calculatedHours?: ReturnType<typeof calculateDayWorkedMinutes>;
+} {
+  const nowIso = new Date().toISOString();
+  const { start, end } = parseContractSchedule(contractSchedule);
+  const startTol = applyTolerance(currentTime, start, toleranceMinutes);
+  const endTol = applyTolerance(currentTime, end, toleranceMinutes);
+
+  let updatedRecord: PontoRecord;
+  let slotName = '';
+  let slotKey: 'entry1' | 'exit1' | 'entry2' | 'exit2';
+
+  if (isContinuousShift) {
+    // 6h Continuous Shift: strictly 2 punches (Entrada and Saída)
+    const e1 = (existingRecord?.entry1 || '').trim();
+    const s_final = (existingRecord?.exit2 || existingRecord?.exit1 || '').trim();
+
+    if (!e1) {
+      // 1ª Batida: ENTRADA
+      slotKey = 'entry1';
+      slotName = 'Entrada (Início da Jornada - 6h)';
+      const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
+      updatedRecord = {
+        id: existingRecord?.id || `${userId}_${dateStr}`,
+        userId,
+        userName,
+        date: dateStr,
+        monthKey,
+        dayNumber,
+        entry1: effectivePunch,
+        exit1: '',
+        entry2: '',
+        exit2: '',
+        status: existingRecord?.status || 'normal',
+        createdAt: existingRecord?.createdAt || nowIso,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else if (!s_final) {
+      // 2ª Batida: SAÍDA
+      slotKey = 'exit2';
+      slotName = 'Saída (Fim da Jornada - 6h)';
+      const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
+      updatedRecord = {
+        ...(existingRecord || {
+          id: `${userId}_${dateStr}`,
+          userId,
+          userName,
+          date: dateStr,
+          monthKey,
+          dayNumber,
+          entry1: e1,
+          status: 'normal',
+          createdAt: nowIso,
+        }),
+        entry1: e1,
+        exit1: '',
+        entry2: '',
+        exit2: effectivePunch,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else {
+      return {
+        success: false,
+        error: `Todas as 2 batidas da jornada contínua (6h) de hoje já foram preenchidas (Entrada: ${e1} • Saída: ${s_final}). Impossível sobrescrever. Utilize a edição manual se desejar ajustar.`,
+      };
+    }
+  } else {
+    // Standard Shift (4 Batidas)
+    const e1 = (existingRecord?.entry1 || '').trim();
+    const s1 = (existingRecord?.exit1 || '').trim();
+    const e2 = (existingRecord?.entry2 || '').trim();
+    const s2 = (existingRecord?.exit2 || '').trim();
+
+    if (!e1) {
+      // 1. Se ENTRADA 1 estiver vazia -> Grave em ENTRADA 1
+      slotKey = 'entry1';
+      slotName = 'Entrada 1 (Início da Jornada)';
+      const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
+      updatedRecord = {
+        id: existingRecord?.id || `${userId}_${dateStr}`,
+        userId,
+        userName,
+        date: dateStr,
+        monthKey,
+        dayNumber,
+        entry1: effectivePunch,
+        exit1: s1,
+        entry2: e2,
+        exit2: s2,
+        status: existingRecord?.status || 'normal',
+        createdAt: existingRecord?.createdAt || nowIso,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else if (!s1) {
+      // 2. Se ENTRADA 1 estiver preenchida e SAÍDA 1 vazia -> Grave em SAÍDA 1 (Saída Almoço)
+      slotKey = 'exit1';
+      slotName = 'Saída 1 (Saída Almoço)';
+      updatedRecord = {
+        ...(existingRecord || {
+          id: `${userId}_${dateStr}`,
+          userId,
+          userName,
+          date: dateStr,
+          monthKey,
+          dayNumber,
+          status: 'normal',
+          createdAt: nowIso,
+        }),
+        entry1: e1,
+        exit1: currentTime,
+        entry2: e2,
+        exit2: s2,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else if (!e2) {
+      // 3. Se SAÍDA 1 estiver preenchida e ENTRADA 2 vazia -> Grave em ENTRADA 2 (Retorno Almoço)
+      slotKey = 'entry2';
+      slotName = 'Entrada 2 (Retorno Almoço)';
+      updatedRecord = {
+        ...(existingRecord || {
+          id: `${userId}_${dateStr}`,
+          userId,
+          userName,
+          date: dateStr,
+          monthKey,
+          dayNumber,
+          status: 'normal',
+          createdAt: nowIso,
+        }),
+        entry1: e1,
+        exit1: s1,
+        entry2: currentTime,
+        exit2: s2,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else if (!s2) {
+      // 4. Se ENTRADA 2 estiver preenchida e SAÍDA 2 vazia -> Grave em SAÍDA 2 (Saída Final)
+      slotKey = 'exit2';
+      slotName = 'Saída 2 (Saída Final)';
+      const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
+      updatedRecord = {
+        ...(existingRecord || {
+          id: `${userId}_${dateStr}`,
+          userId,
+          userName,
+          date: dateStr,
+          monthKey,
+          dayNumber,
+          status: 'normal',
+          createdAt: nowIso,
+        }),
+        entry1: e1,
+        exit1: s1,
+        entry2: e2,
+        exit2: effectivePunch,
+        updatedAt: nowIso,
+        updatedBy: updatedByName,
+      };
+    } else {
+      // 5. Todas as 4 batidas já preenchidas
+      return {
+        success: false,
+        error: `Todas as 4 batidas da jornada padrão de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Impossível sobrescrever. Utilize a edição manual se desejar ajustar.`,
+      };
+    }
+  }
+
+  // Recalculate daily worked hours immediately
+  const calculatedHours = calcularHorasDia(updatedRecord, contractSchedule, toleranceMinutes);
+
+  return {
+    success: true,
+    slotName,
+    slotKey,
+    updatedRecord,
+    calculatedHours,
+  };
+}
+
+/**
  * Calculates complete financial breakdown for the monthly closing
  */
 export function calculateMonthlyPontoFinancials({

@@ -53,6 +53,7 @@ import {
   isHolidayOrRecess,
   formatDateBR,
   toISODateString,
+  isStudentScheduledForDay,
 } from '../utils/dateUtils';
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -213,9 +214,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         const actObj = activityMap.get(activeBlock.activityId);
         const requiresRollCall = actObj ? actObj.requiresRollCall !== false : true;
 
-        // Enrolled students in this turma for this activity
+        // Enrolled students in this turma for this activity who are scheduled to attend on this day
         const enrolledStudents = students.filter(
-          (s) => s.turma === turmaName && (s.activities || []).includes(activeBlock.activityId)
+          (s) =>
+            s.turma === turmaName &&
+            (s.activities || []).includes(activeBlock.activityId) &&
+            isStudentScheduledForDay(s, effectiveDayOfWeek)
         );
 
         // Attendance records today for this turma & activity
@@ -358,9 +362,10 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     return students.filter(
       (s) =>
         s.turma === quickRollCallModal.turma &&
-        (s.activities || []).includes(quickRollCallModal.activityId)
+        (s.activities || []).includes(quickRollCallModal.activityId) &&
+        isStudentScheduledForDay(s, effectiveDayOfWeek)
     );
-  }, [quickRollCallModal, students]);
+  }, [quickRollCallModal, students, effectiveDayOfWeek]);
 
   const quickModalRecordsMap = useMemo(() => {
     if (!quickRollCallModal) return new Map<string, AttendanceRecord>();
