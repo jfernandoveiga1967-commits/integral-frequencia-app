@@ -995,12 +995,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
       {/* Edit Student Modal */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
           <form
             onSubmit={handleEditSave}
-            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-4 animate-in fade-in duration-150"
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col animate-in fade-in duration-150 overflow-hidden"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            {/* Modal Header (Fixed at top) */}
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 sm:p-5 shrink-0 bg-white">
               <h3 className="font-bold text-slate-900 text-base flex items-center space-x-2">
                 <Edit3 className="w-5 h-5 text-indigo-600" />
                 <span>Editar Cadastro do Aluno</span>
@@ -1012,362 +1013,366 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   setEditingStudent(null);
                   setEditFormError(null);
                 }}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50"
+                className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 p-1 rounded-lg hover:bg-slate-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {editFormError && (
-              <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-semibold">
-                ⚠️ {editFormError}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Nome do Aluno:
-              </label>
-              <input
-                type="text"
-                value={editingStudent.name}
-                disabled={isSavingEdit}
-                onChange={(e) =>
-                  setEditingStudent({ ...editingStudent, name: e.target.value })
-                }
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Turma:
-              </label>
-              <select
-                value={editingStudent.turma}
-                onChange={(e) =>
-                  setEditingStudent({ ...editingStudent, turma: e.target.value as TurmaType })
-                }
-                disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1)}
-                className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
-                  !isCoordenador && allowedTurmas.length === 1
-                    ? 'bg-slate-100 cursor-not-allowed text-slate-600'
-                    : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
-                }`}
-              >
-                {turmasList.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              {!isCoordenador && allowedTurmas.length === 1 && (
-                <p className="text-[11px] text-slate-500 mt-1 font-medium">
-                  🔒 Turma fixada conforme suas permissões de acesso.
-                </p>
-              )}
-              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
-                <div className="flex items-center space-x-1.5 font-bold text-blue-800">
-                  <Info className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Preservação de Histórico ao Transferir:</span>
+            {/* Modal Scrollable Body */}
+            <div className="flex-1 overflow-y-auto max-h-[75vh] p-4 sm:p-6 space-y-4">
+              {editFormError && (
+                <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-semibold">
+                  ⚠️ {editFormError}
                 </div>
-                <p className="text-slate-600 leading-relaxed pl-5">
-                  Ao trocar a turma do aluno, todas as chamadas e lançamentos anteriores de frequência, presenças e ocorrências são <strong>mantidos integralmente</strong> associados ao histórico individual dele.
-                </p>
-              </div>
-            </div>
+              )}
 
-            {/* Status do Aluno: Ativo / Inativo / Cancelado */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
-              <label className="block text-xs font-bold text-slate-800">
-                Situação da Matrícula (Status do Aluno):
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'ativo' as StudentStatus, label: 'Ativo', desc: 'Frequência regular', color: 'bg-emerald-500 text-white border-emerald-600', activeBg: 'bg-emerald-50 text-emerald-800 border-emerald-300' },
-                  { id: 'inativo' as StudentStatus, label: 'Inativo', desc: 'Afastamento temporário', color: 'bg-slate-600 text-white border-slate-700', activeBg: 'bg-slate-100 text-slate-800 border-slate-300' },
-                  { id: 'cancelado' as StudentStatus, label: 'Cancelado', desc: 'Matrícula cancelada', color: 'bg-rose-600 text-white border-rose-700', activeBg: 'bg-rose-50 text-rose-800 border-rose-300' },
-                ].map((st) => {
-                  const currentStatus = editingStudent.status || 'ativo';
-                  const isSelected = currentStatus === st.id;
-                  return (
-                    <button
-                      type="button"
-                      key={st.id}
-                      disabled={isSavingEdit}
-                      onClick={() =>
-                        setEditingStudent({
-                          ...editingStudent,
-                          status: st.id,
-                          inactivationDate:
-                            st.id !== 'ativo' && !editingStudent.inactivationDate
-                              ? toISODateString(new Date())
-                              : editingStudent.inactivationDate,
-                        })
-                      }
-                      className={`p-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer flex flex-col items-center justify-center ${
-                        isSelected
-                          ? `${st.color} shadow-xs`
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-xs font-extrabold">{st.label}</span>
-                      <span className={`text-[10px] font-normal mt-0.5 ${isSelected ? 'opacity-90 text-white' : 'text-slate-400'}`}>
-                        {st.desc}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nome do Aluno:
+                </label>
+                <input
+                  type="text"
+                  value={editingStudent.name}
+                  disabled={isSavingEdit}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, name: e.target.value })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+                  required
+                />
               </div>
 
-              {(editingStudent.status === 'inativo' || editingStudent.status === 'cancelado') && (
-                <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2 mt-2">
-                  <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Detalhes da Inativação / Cancelamento:</span>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Turma:
+                </label>
+                <select
+                  value={editingStudent.turma}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, turma: e.target.value as TurmaType })
+                  }
+                  disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1)}
+                  className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
+                    !isCoordenador && allowedTurmas.length === 1
+                      ? 'bg-slate-100 cursor-not-allowed text-slate-600'
+                      : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
+                  }`}
+                >
+                  {turmasList.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                {!isCoordenador && allowedTurmas.length === 1 && (
+                  <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                    🔒 Turma fixada conforme suas permissões de acesso.
+                  </p>
+                )}
+                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+                  <div className="flex items-center space-x-1.5 font-bold text-blue-800">
+                    <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>Preservação de Histórico ao Transferir:</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Data de Inativação / Saída:
-                      </label>
-                      <input
-                        type="date"
-                        value={editingStudent.inactivationDate || toISODateString(new Date())}
-                        onChange={(e) =>
-                          setEditingStudent({
-                            ...editingStudent,
-                            inactivationDate: e.target.value,
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Motivo / Observação:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ex: Mudança de escola, ajuste de grade..."
-                        value={editingStudent.inactivationReason || ''}
-                        onChange={(e) =>
-                          setEditingStudent({
-                            ...editingStudent,
-                            inactivationReason: e.target.value,
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[10.5px] text-amber-800 leading-relaxed">
-                    ℹ️ O aluno não aparecerá na chamada a partir desta data. Todo o histórico anterior será <strong>preservado integralmente</strong> para relatórios passados.
+                  <p className="text-slate-600 leading-relaxed pl-5">
+                    Ao trocar a turma do aluno, todas as chamadas e lançamentos anteriores de frequência, presenças e ocorrências são <strong>mantidos integralmente</strong> associados ao histórico individual dele.
                   </p>
                 </div>
-              )}
-            </div>
+              </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-semibold text-slate-700">
-                  Atividades Extracurriculares (Apenas com Chamada):
+              {/* Status do Aluno: Ativo / Inativo / Cancelado */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  Situação da Matrícula (Status do Aluno):
                 </label>
-                <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                  {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1">
-                {extracurricularRollCallActivities.map((act) => {
-                  const isChecked = (editingStudent.activities || []).includes(act.id);
-                  const isRotina = act.id === 'Rotina';
-                  return (
-                    <button
-                      type="button"
-                      key={act.id}
-                      disabled={isSavingEdit}
-                      onClick={() =>
-                        setEditingStudent({
-                          ...editingStudent,
-                          activities: toggleActivityInList(editingStudent.activities, act.id),
-                        })
-                      }
-                      className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all cursor-pointer ${
-                        isChecked
-                          ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold shadow-2xs'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                      } ${isRotina ? 'border-rose-300 bg-rose-50/50' : ''}`}
-                    >
-                      <div className="flex items-center space-x-1.5 truncate">
-                        <ActivityBadge activity={act.id} size="sm" iconName={act.icon} customIconUrl={act.customIconUrl} />
-                        {isRotina && <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded-full font-bold">Obrigatória</span>}
-                      </div>
-                      <span className="text-indigo-600 font-bold ml-1">{isChecked ? '✓' : ''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Dias de Frequência in Edit Modal */}
-            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3.5 space-y-2.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
-                  <CalendarDays className="w-4 h-4 text-indigo-600" />
-                  <span>Dias de Frequência e Horários de Saída:</span>
-                </label>
-                <div className="flex items-center space-x-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingStudent({
-                        ...editingStudent,
-                        diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-                      })
-                    }
-                    className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200"
-                  >
-                    Seg a Sex
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingStudent({
-                        ...editingStudent,
-                        diasFrequencia: ['segunda', 'quarta', 'sexta'],
-                      })
-                    }
-                    className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
-                  >
-                    Seg/Qua/Sex
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingStudent({
-                        ...editingStudent,
-                        diasFrequencia: ['terca', 'quinta'],
-                      })
-                    }
-                    className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
-                  >
-                    Ter/Qui
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick time fill buttons for Edit Modal */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-indigo-100/60">
-                <span className="text-[10px] font-semibold text-slate-600 flex items-center space-x-1">
-                  <Clock className="w-3 h-3 text-indigo-500" />
-                  <span>Atalho de Saída (dias marcados):</span>
-                </span>
-                {['17:00', '17:30', '18:00', '18:30', '19:00'].map((presetTime) => (
-                  <button
-                    key={presetTime}
-                    type="button"
-                    disabled={isSavingEdit}
-                    onClick={() => {
-                      const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
-                        ? editingStudent.diasFrequencia
-                        : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
-                      const updatedHorarios: Partial<Record<DayOfWeek, string>> = {
-                        ...(editingStudent.horariosSaida || {}),
-                      };
-                      currentDays.forEach((day) => {
-                        updatedHorarios[day] = presetTime;
-                      });
-                      setEditingStudent({
-                        ...editingStudent,
-                        horariosSaida: updatedHorarios,
-                      });
-                    }}
-                    className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs cursor-pointer"
-                    title={`Definir saída às ${presetTime} para os dias selecionados`}
-                  >
-                    {presetTime}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-5 gap-2 pt-1">
-                {[
-                  { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
-                  { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
-                  { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
-                  { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
-                  { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
-                ].map((d) => {
-                  const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
-                    ? editingStudent.diasFrequencia
-                    : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
-                  const isSelected = currentDays.includes(d.id);
-
-                  return (
-                    <div key={d.id} className="flex flex-col space-y-1.5">
-                      {/* Day of Week Button */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'ativo' as StudentStatus, label: 'Ativo', desc: 'Frequência regular', color: 'bg-emerald-500 text-white border-emerald-600', activeBg: 'bg-emerald-50 text-emerald-800 border-emerald-300' },
+                    { id: 'inativo' as StudentStatus, label: 'Inativo', desc: 'Afastamento temporário', color: 'bg-slate-600 text-white border-slate-700', activeBg: 'bg-slate-100 text-slate-800 border-slate-300' },
+                    { id: 'cancelado' as StudentStatus, label: 'Cancelado', desc: 'Matrícula cancelada', color: 'bg-rose-600 text-white border-rose-700', activeBg: 'bg-rose-50 text-rose-800 border-rose-300' },
+                  ].map((st) => {
+                    const currentStatus = editingStudent.status || 'ativo';
+                    const isSelected = currentStatus === st.id;
+                    return (
                       <button
                         type="button"
+                        key={st.id}
                         disabled={isSavingEdit}
                         onClick={() =>
                           setEditingStudent({
                             ...editingStudent,
-                            diasFrequencia: toggleDayInList(editingStudent.diasFrequencia, d.id),
+                            status: st.id,
+                            inactivationDate:
+                              st.id !== 'ativo' && !editingStudent.inactivationDate
+                                ? toISODateString(new Date())
+                                : editingStudent.inactivationDate,
                           })
                         }
-                        className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
+                        className={`p-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer flex flex-col items-center justify-center ${
                           isSelected
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                            : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                            ? `${st.color} shadow-xs`
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
-                        <span className="hidden sm:inline">{d.label}</span>
-                        <span className="sm:hidden">{d.short}</span>
+                        <span className="text-xs font-extrabold">{st.label}</span>
+                        <span className={`text-[10px] font-normal mt-0.5 ${isSelected ? 'opacity-90 text-white' : 'text-slate-400'}`}>
+                          {st.desc}
+                        </span>
                       </button>
+                    );
+                  })}
+                </div>
 
-                      {/* Individual Departure Time Input below day button */}
-                      {isSelected ? (
-                        <div className="flex flex-col bg-white border border-indigo-200 rounded-xl p-1 shadow-2xs focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
-                          <span className="text-[9px] font-extrabold uppercase tracking-tight text-indigo-700 text-center block mb-0.5">
-                            Saída
-                          </span>
-                          <input
-                            type="time"
-                            value={editingStudent.horariosSaida?.[d.id] || ''}
-                            disabled={isSavingEdit}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setEditingStudent({
-                                ...editingStudent,
-                                horariosSaida: {
-                                  ...(editingStudent.horariosSaida || {}),
-                                  [d.id]: val,
-                                },
-                              });
-                            }}
-                            className="w-full text-center text-xs font-bold text-slate-900 bg-transparent outline-none p-0 cursor-pointer"
-                            title={`Horário de saída na ${d.label}`}
-                          />
-                        </div>
-                      ) : (
-                        <div
-                          className="flex flex-col items-center justify-center py-2.5 rounded-xl border border-dashed border-slate-200 bg-slate-100/60 text-slate-400 select-none"
-                          title="Não frequenta neste dia"
-                        >
-                          <span className="text-[9px] font-medium text-slate-400">Folga</span>
-                        </div>
-                      )}
+                {(editingStudent.status === 'inativo' || editingStudent.status === 'cancelado') && (
+                  <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2 mt-2">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Detalhes da Inativação / Cancelamento:</span>
                     </div>
-                  );
-                })}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Data de Inativação / Saída:
+                        </label>
+                        <input
+                          type="date"
+                          value={editingStudent.inactivationDate || toISODateString(new Date())}
+                          onChange={(e) =>
+                            setEditingStudent({
+                              ...editingStudent,
+                              inactivationDate: e.target.value,
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Motivo / Observação:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Mudança de escola, ajuste de grade..."
+                          value={editingStudent.inactivationReason || ''}
+                          onChange={(e) =>
+                            setEditingStudent({
+                              ...editingStudent,
+                              inactivationReason: e.target.value,
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10.5px] text-amber-800 leading-relaxed">
+                      ℹ️ O aluno não aparecerá na chamada a partir desta data. Todo o histórico anterior será <strong>preservado integralmente</strong> para relatórios passados.
+                    </p>
+                  </div>
+                )}
               </div>
-              <p className="text-[10.5px] text-slate-500 font-medium">
-                💡 O horário de saída individual cadastrado para cada dia será exibido em destaque para a monitora na Lista de Chamada.
-              </p>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Atividades Extracurriculares (Apenas com Chamada):
+                  </label>
+                  <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                    {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1">
+                  {extracurricularRollCallActivities.map((act) => {
+                    const isChecked = (editingStudent.activities || []).includes(act.id);
+                    const isRotina = act.id === 'Rotina';
+                    return (
+                      <button
+                        type="button"
+                        key={act.id}
+                        disabled={isSavingEdit}
+                        onClick={() =>
+                          setEditingStudent({
+                            ...editingStudent,
+                            activities: toggleActivityInList(editingStudent.activities, act.id),
+                          })
+                        }
+                        className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all cursor-pointer ${
+                          isChecked
+                            ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        } ${isRotina ? 'border-rose-300 bg-rose-50/50' : ''}`}
+                      >
+                        <div className="flex items-center space-x-1.5 truncate">
+                          <ActivityBadge activity={act.id} size="sm" iconName={act.icon} customIconUrl={act.customIconUrl} />
+                          {isRotina && <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded-full font-bold">Obrigatória</span>}
+                        </div>
+                        <span className="text-indigo-600 font-bold ml-1">{isChecked ? '✓' : ''}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Dias de Frequência in Edit Modal */}
+              <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3.5 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                  <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                    <CalendarDays className="w-4 h-4 text-indigo-600" />
+                    <span>Dias de Frequência e Horários de Saída:</span>
+                  </label>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingStudent({
+                          ...editingStudent,
+                          diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+                        })
+                      }
+                      className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200"
+                    >
+                      Seg a Sex
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingStudent({
+                          ...editingStudent,
+                          diasFrequencia: ['segunda', 'quarta', 'sexta'],
+                        })
+                      }
+                      className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
+                    >
+                      Seg/Qua/Sex
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingStudent({
+                          ...editingStudent,
+                          diasFrequencia: ['terca', 'quinta'],
+                        })
+                      }
+                      className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
+                    >
+                      Ter/Qui
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick time fill buttons for Edit Modal */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-indigo-100/60">
+                  <span className="text-[10px] font-semibold text-slate-600 flex items-center space-x-1">
+                    <Clock className="w-3 h-3 text-indigo-500" />
+                    <span>Atalho de Saída (dias marcados):</span>
+                  </span>
+                  {['17:00', '17:30', '18:00', '18:30', '19:00'].map((presetTime) => (
+                    <button
+                      key={presetTime}
+                      type="button"
+                      disabled={isSavingEdit}
+                      onClick={() => {
+                        const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+                          ? editingStudent.diasFrequencia
+                          : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+                        const updatedHorarios: Partial<Record<DayOfWeek, string>> = {
+                          ...(editingStudent.horariosSaida || {}),
+                        };
+                        currentDays.forEach((day) => {
+                          updatedHorarios[day] = presetTime;
+                        });
+                        setEditingStudent({
+                          ...editingStudent,
+                          horariosSaida: updatedHorarios,
+                        });
+                      }}
+                      className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs cursor-pointer"
+                      title={`Definir saída às ${presetTime} para os dias selecionados`}
+                    >
+                      {presetTime}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-5 gap-2 pt-1">
+                  {[
+                    { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                    { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                    { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                    { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                    { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+                  ].map((d) => {
+                    const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+                      ? editingStudent.diasFrequencia
+                      : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+                    const isSelected = currentDays.includes(d.id);
+
+                    return (
+                      <div key={d.id} className="flex flex-col space-y-1.5">
+                        {/* Day of Week Button */}
+                        <button
+                          type="button"
+                          disabled={isSavingEdit}
+                          onClick={() =>
+                            setEditingStudent({
+                              ...editingStudent,
+                              diasFrequencia: toggleDayInList(editingStudent.diasFrequencia, d.id),
+                            })
+                          }
+                          className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                              : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="hidden sm:inline">{d.label}</span>
+                          <span className="sm:hidden">{d.short}</span>
+                        </button>
+
+                        {/* Individual Departure Time Input below day button */}
+                        {isSelected ? (
+                          <div className="flex flex-col bg-white border border-indigo-200 rounded-xl p-1 shadow-2xs focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
+                            <span className="text-[9px] font-extrabold uppercase tracking-tight text-indigo-700 text-center block mb-0.5">
+                              Saída
+                            </span>
+                            <input
+                              type="time"
+                              value={editingStudent.horariosSaida?.[d.id] || ''}
+                              disabled={isSavingEdit}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setEditingStudent({
+                                  ...editingStudent,
+                                  horariosSaida: {
+                                    ...(editingStudent.horariosSaida || {}),
+                                    [d.id]: val,
+                                  },
+                                });
+                              }}
+                              className="w-full text-center text-xs font-bold text-slate-900 bg-transparent outline-none p-0 cursor-pointer"
+                              title={`Horário de saída na ${d.label}`}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            className="flex flex-col items-center justify-center py-2.5 rounded-xl border border-dashed border-slate-200 bg-slate-100/60 text-slate-400 select-none"
+                            title="Não frequenta neste dia"
+                          >
+                            <span className="text-[9px] font-medium text-slate-400">Folga</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10.5px] text-slate-500 font-medium">
+                  💡 O horário de saída individual cadastrado para cada dia será exibido em destaque para a monitora na Lista de Chamada.
+                </p>
+              </div>
             </div>
 
-            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+            {/* Modal Fixed/Sticky Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex justify-end space-x-2 shrink-0 shadow-xs">
               <button
                 type="button"
                 disabled={isSavingEdit}
@@ -1729,8 +1734,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       {/* Delete Confirmation Modal */}
       {/* Transfer Student Modal */}
       {transferringStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center space-x-2.5 text-amber-700">
                 <div className="p-2.5 bg-amber-100 rounded-xl">
@@ -1827,8 +1832,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
       {/* Delete Student Confirmation Modal */}
       {studentToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center space-x-3 text-rose-600">
               <div className="p-3 bg-rose-100 rounded-xl">
                 <Trash2 className="w-6 h-6 text-rose-600" />
