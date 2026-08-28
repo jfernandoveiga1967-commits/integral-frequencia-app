@@ -269,7 +269,7 @@ export function isContinuousShift(
     return true;
   }
 
-  // Fallback for legacy records or undefined workShiftType:
+  // Fallback for contract schedule:
   const sched = (contractSchedule || user?.contractSchedule || '').trim();
   if (sched) {
     // If it contains a lunch interval separator (/ or ;) or mentions almoço / intervalo -> 4 punch columns
@@ -280,8 +280,8 @@ export function isContinuousShift(
     if (shiftsCount > 1 || dailyHours > 6) {
       return false;
     }
-    // Only if it is explicitly a single continuous 6-hour shift (e.g. 11:40 - 17:40)
-    if (shiftsCount === 1 && dailyHours === 6 && (sched === '11:40 - 17:40' || sched === '11:40-17:40')) {
+    // Single continuous shift with 1 entrance and 1 exit (e.g. 11:40 - 17:40)
+    if (shiftsCount === 1) {
       return true;
     }
   }
@@ -293,8 +293,8 @@ export function isContinuousShift(
     return false;
   }
 
-  // Default standard: show all 4 columns for full clarity
-  return false;
+  // Default: true (2 punches: Entrada e Saída) for standard single shifts in the school
+  return true;
 }
 
 /**
@@ -323,7 +323,8 @@ export function calculateDayWorkedMinutes(
     recStatus === 'sabado' ||
     recStatus === 'domingo' ||
     recStatus === 'falta_justificada' ||
-    recStatus === 'atestado'
+    recStatus === 'atestado' ||
+    recStatus === 'compensado'
   ) {
     return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
   }
@@ -350,7 +351,7 @@ export function calculateDayWorkedMinutes(
   let period1 = 0;
   let period2 = 0;
 
-  // Case 1: Continuous Shift (Direct Entrada 1 and Saída 2, or Entrada 1 and Saída 1 without interval)
+  // Case 1: Continuous / 2-Punch Shift (Direct Entrada 1 and Saída (exit2 or exit1), no second entrance e2)
   if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
     const punchOut = s2 !== null ? s2 : s1!;
     
@@ -363,7 +364,7 @@ export function calculateDayWorkedMinutes(
 
     period1 = Math.max(0, effectiveEnd - effectiveStart);
   } else {
-    // Case 2: Split Shift with Lunch Interval
+    // Case 2: Split Shift with Lunch Interval (or 4 punches)
     if (e1 !== null && s1 !== null) {
       period1 = Math.max(0, s1 - e1);
     }
@@ -462,14 +463,14 @@ export function processSequentialPunch({
   let slotKey: 'entry1' | 'exit1' | 'entry2' | 'exit2';
 
   if (isContinuousShift) {
-    // 6h Continuous Shift: strictly 2 punches (Entrada and Saída)
+    // Continuous Shift: strictly 2 punches (Entrada and Saída)
     const e1 = (existingRecord?.entry1 || '').trim();
     const s_final = (existingRecord?.exit2 || existingRecord?.exit1 || '').trim();
 
     if (!e1) {
-      // 1ª Batida: ENTRADA
+      // 1ª Batida do dia: ENTRADA
       slotKey = 'entry1';
-      slotName = 'Entrada (Início da Jornada - 6h)';
+      slotName = 'Entrada (Início da Jornada)';
       const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
       updatedRecord = {
         id: existingRecord?.id || `${userId}_${dateStr}`,
@@ -488,9 +489,9 @@ export function processSequentialPunch({
         updatedBy: updatedByName,
       };
     } else if (!s_final) {
-      // 2ª Batida: SAÍDA
+      // 2ª Batida do dia: SAÍDA (A Entrada já está preenchida, então obrigatoriamente grava em Saída)
       slotKey = 'exit2';
-      slotName = 'Saída (Fim da Jornada - 6h)';
+      slotName = 'Saída (Fim da Jornada)';
       const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
       updatedRecord = {
         ...(existingRecord || {
@@ -501,20 +502,22 @@ export function processSequentialPunch({
           monthKey,
           dayNumber,
           entry1: e1,
-          status: 'normal',
           createdAt: nowIso,
         }),
         entry1: e1,
         exit1: '',
         entry2: '',
         exit2: effectivePunch,
+        status: 'normal',
         updatedAt: nowIso,
         updatedBy: updatedByName,
       };
     } else {
+      // Ambas as batidas do dia já foram preenchidas
+      const calc = calcularHorasDia(existingRecord, contractSchedule, toleranceMinutes);
       return {
         success: false,
-        error: `Todas as 2 batidas da jornada contínua (6h) de hoje já foram preenchidas (Entrada: ${e1} • Saída: ${s_final}). Impossível sobrescrever. Utilize a edição manual se desejar ajustar.`,
+        error: `Todas as batidas de hoje já foram registradas (Entrada: ${e1} • Saída: ${s_final} • Total: ${formatMinutesToHoursAndMinutes(calc.workedMinutes)}). Para editar horários, clique no botão de edição na tabela.`,
       };
     }
   } else {
@@ -564,6 +567,7 @@ export function processSequentialPunch({
         exit1: currentTime,
         entry2: e2,
         exit2: s2,
+        status: 'normal',
         updatedAt: nowIso,
         updatedBy: updatedByName,
       };
@@ -586,6 +590,7 @@ export function processSequentialPunch({
         exit1: s1,
         entry2: currentTime,
         exit2: s2,
+        status: 'normal',
         updatedAt: nowIso,
         updatedBy: updatedByName,
       };
@@ -609,6 +614,7 @@ export function processSequentialPunch({
         exit1: s1,
         entry2: e2,
         exit2: effectivePunch,
+        status: 'normal',
         updatedAt: nowIso,
         updatedBy: updatedByName,
       };
@@ -616,7 +622,7 @@ export function processSequentialPunch({
       // 5. Todas as 4 batidas já preenchidas
       return {
         success: false,
-        error: `Todas as 4 batidas da jornada padrão de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Impossível sobrescrever. Utilize a edição manual se desejar ajustar.`,
+        error: `Todas as 4 batidas da jornada padrão de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Para editar qualquer batida, utilize o botão de edição na tabela.`,
       };
     }
   }

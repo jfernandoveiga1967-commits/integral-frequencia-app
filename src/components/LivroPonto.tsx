@@ -487,7 +487,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
-    const dayRecord = monthUserRecords.find((r) => r.date === todayStr);
+    
+    // Always find latest day record from pontoRecords or monthUserRecords
+    const dayRecord =
+      pontoRecords.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
+      monthUserRecords.find((r) => r.date === todayStr);
 
     const result = processSequentialPunch({
       existingRecord: dayRecord,
@@ -516,7 +520,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     onSavePontoRecord(result.updatedRecord);
 
     const hoursSummary = result.calculatedHours?.effectiveSummary
-      ? ` • Total calculado: ${result.calculatedHours.effectiveSummary}`
+      ? ` • Total apurado: ${result.calculatedHours.effectiveSummary}`
       : '';
     setPunchFeedback({
       text: `Batida de ${result.slotName} registrada com sucesso às ${currentHoursMinutes}!${hoursSummary}`,
@@ -693,10 +697,20 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
   // Save Day Edit Modal
   const handleSaveDayEdit = (recordToSave: PontoRecord) => {
-    onSavePontoRecord(recordToSave);
+    const hasCompletePunches = Boolean(
+      (recordToSave.entry1 && (recordToSave.exit2 || recordToSave.exit1)) ||
+      (recordToSave.entry1 && recordToSave.exit1 && recordToSave.entry2 && recordToSave.exit2)
+    );
+    const finalRecord: PontoRecord = {
+      ...recordToSave,
+      status: (hasCompletePunches && (!recordToSave.status || recordToSave.status === 'normal')) ? 'normal' : (recordToSave.status || 'normal'),
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Administrador',
+    };
+    onSavePontoRecord(finalRecord);
     setShowEditDayModal(null);
-    setPunchFeedback({ text: 'Registro do dia atualizado com sucesso!', type: 'success' });
-    setTimeout(() => setPunchFeedback(null), 3000);
+    setPunchFeedback({ text: 'Registro do dia atualizado e recálculo financeiro aplicado com sucesso!', type: 'success' });
+    setTimeout(() => setPunchFeedback(null), 3500);
   };
 
   // Generate Official PDF Report for Timesheet & Financial Summary
@@ -1282,10 +1296,23 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {/* Status Badge */}
                     <td className="py-2 px-3 text-center">
                       {status === 'normal' && (rec?.entry1 || rec?.entry2) && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                          <Check className="w-3 h-3 mr-0.5 text-emerald-600" />
-                          PRESENÇA NORMAL
-                        </span>
+                        (() => {
+                          const hasExit = Boolean(rec?.exit2 || rec?.exit1);
+                          if (!hasExit) {
+                            return (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800" title="Entrada registrada, saída pendente">
+                                <Clock className="w-3 h-3 mr-0.5 text-amber-600" />
+                                {isToday ? 'EM ANDAMENTO' : 'PENDENTE SAÍDA'}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              <Check className="w-3 h-3 mr-0.5 text-emerald-600" />
+                              PRESENÇA NORMAL
+                            </span>
+                          );
+                        })()
                       )}
                       {status === 'normal' && !rec?.entry1 && !rec?.entry2 && !item.isWk && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">
@@ -2033,9 +2060,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       {/* ========================================================================= */}
       {/* MODAL 3: EDITAR REGISTRO DIÁRIO (ADMIN ONLY) */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* MODAL 3: AJUSTE MANUAL DE BATIDAS DO DIA */}
+      {/* ========================================================================= */}
       {showEditDayModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 text-white rounded-2xl w-full max-w-md border border-slate-800 shadow-2xl p-5 space-y-4">
+          <div className="bg-slate-900 text-white rounded-2xl w-full max-w-lg border border-slate-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-sm flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-indigo-400" />
@@ -2049,22 +2079,127 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </button>
             </div>
 
+            {/* Quick Actions Bar for 1-Click Correction */}
+            {(() => {
+              const { start: schedStart, end: schedEnd } = parseContractSchedule(contractSchedule);
+              const curE1 = (showEditDayModal.entry1 || '').trim();
+              const curExit = (showEditDayModal.exit2 || showEditDayModal.exit1 || '').trim();
+
+              const handleFillContractual = () => {
+                setShowEditDayModal({
+                  ...showEditDayModal,
+                  entry1: schedStart,
+                  exit1: '',
+                  entry2: '',
+                  exit2: schedEnd,
+                  status: 'normal',
+                });
+              };
+
+              const handleMoveEntryToExit = () => {
+                // If entry1 had the exit time (e.g. 17:40), move it to exit2 and set entrance to schedStart
+                const timeToMove = curE1 || schedEnd;
+                setShowEditDayModal({
+                  ...showEditDayModal,
+                  entry1: schedStart,
+                  exit1: '',
+                  entry2: '',
+                  exit2: timeToMove,
+                  status: 'normal',
+                });
+              };
+
+              const handleSwapTimes = () => {
+                setShowEditDayModal({
+                  ...showEditDayModal,
+                  entry1: curExit || schedStart,
+                  exit1: '',
+                  entry2: '',
+                  exit2: curE1 || schedEnd,
+                  status: 'normal',
+                });
+              };
+
+              const handleClearPunches = () => {
+                setShowEditDayModal({
+                  ...showEditDayModal,
+                  entry1: '',
+                  exit1: '',
+                  entry2: '',
+                  exit2: '',
+                });
+              };
+
+              return (
+                <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
+                  <div className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span>⚡ Correção Rápida em 1 Clique:</span>
+                    <span className="text-indigo-400 font-mono text-[10px]">Contrato: {contractSchedule}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleFillContractual}
+                      className="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 rounded-lg text-[11px] font-semibold transition"
+                      title="Preencher automaticamente com o horário oficial do contrato"
+                    >
+                      ✓ Preencher Contrato ({schedStart} às {schedEnd})
+                    </button>
+                    {curE1 && !curExit && (
+                      <button
+                        type="button"
+                        onClick={handleMoveEntryToExit}
+                        className="px-2.5 py-1 bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/40 rounded-lg text-[11px] font-semibold transition"
+                        title="Mover o horário digitado na entrada para a saída e preencher a entrada com o início oficial"
+                      >
+                        ↳ Mover Entrada p/ Saída ({curE1})
+                      </button>
+                    )}
+                    {curE1 && curExit && (
+                      <button
+                        type="button"
+                        onClick={handleSwapTimes}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-semibold transition"
+                        title="Inverter os horários de entrada e saída"
+                      >
+                        ⇄ Inverter Horários
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleClearPunches}
+                      className="px-2 py-1 bg-rose-950/30 hover:bg-rose-900/40 text-rose-300 border border-rose-800/40 rounded-lg text-[11px] font-semibold transition"
+                      title="Limpar todos os campos de batida deste dia"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="space-y-3 text-xs">
               {/* Punches Grid */}
               {isUserContinuous ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2 p-2.5 bg-indigo-950/50 border border-indigo-500/40 rounded-xl text-indigo-200 text-[11px] flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Jornada Contínua de 6h (Apenas 2 batidas: Entrada e Saída Direta, sem intervalo de almoço obrigatório).</span>
+                    <span>Jornada Contínua de 6h (2 batidas: Entrada e Saída Direta, com tolerância de 5 min).</span>
                   </div>
                   <div>
                     <label className="text-slate-400 block mb-1 font-medium">Entrada (Início)</label>
                     <input
                       type="time"
                       value={showEditDayModal.entry1 || ''}
-                      onChange={(e) =>
-                        setShowEditDayModal({ ...showEditDayModal, entry1: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const newEntry = e.target.value;
+                        const exitVal = showEditDayModal.exit2 || showEditDayModal.exit1 || '';
+                        setShowEditDayModal({
+                          ...showEditDayModal,
+                          entry1: newEntry,
+                          status: newEntry && exitVal && showEditDayModal.status !== 'falta_injustificada' ? 'normal' : showEditDayModal.status,
+                        });
+                      }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -2073,9 +2208,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     <input
                       type="time"
                       value={showEditDayModal.exit2 || showEditDayModal.exit1 || ''}
-                      onChange={(e) =>
-                        setShowEditDayModal({ ...showEditDayModal, exit2: e.target.value, exit1: '', entry2: '' })
-                      }
+                      onChange={(e) => {
+                        const newExit = e.target.value;
+                        const entryVal = showEditDayModal.entry1 || '';
+                        setShowEditDayModal({
+                          ...showEditDayModal,
+                          exit2: newExit,
+                          exit1: '',
+                          entry2: '',
+                          status: entryVal && newExit && showEditDayModal.status !== 'falta_injustificada' ? 'normal' : showEditDayModal.status,
+                        });
+                      }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -2138,22 +2281,44 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   5,
                   contractDailyMinutes
                 );
+                const hasPunches = Boolean(showEditDayModal.entry1 || showEditDayModal.entry2);
+                const hasCompletePair = Boolean(
+                  (showEditDayModal.entry1 && (showEditDayModal.exit2 || showEditDayModal.exit1)) ||
+                  (showEditDayModal.entry1 && showEditDayModal.exit1 && showEditDayModal.entry2 && showEditDayModal.exit2)
+                );
+
                 return (
-                  <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-1">
+                  <div className="p-3.5 bg-slate-800/90 border border-slate-700 rounded-xl space-y-2 shadow-inner">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400 font-medium">Total de Horas Trabalhadas:</span>
-                      <strong className="text-indigo-300 font-mono text-xs font-black">
-                        {(!showEditDayModal?.entry1 && !showEditDayModal?.entry2) ? '0h00min' : formatMinutesToHoursAndMinutes(previewDayCalc.workedMinutes)}
+                      <span className="text-slate-400 font-medium">Intervalo & Horas Trabalhadas:</span>
+                      <strong className="text-indigo-300 font-mono text-sm font-black">
+                        {!hasPunches ? '0h00min' : formatMinutesToHoursAndMinutes(previewDayCalc.workedMinutes)}
                       </strong>
                     </div>
+
+                    {hasCompletePair && (
+                      <div className="flex items-center space-x-1.5 text-[11px] text-emerald-400 font-bold">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>Presença completa com tolerância de 5 min aplicada.</span>
+                      </div>
+                    )}
+
+                    {hasPunches && !hasCompletePair && (
+                      <div className="flex items-center space-x-1.5 text-[11px] text-amber-300 font-semibold">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Batida incompleta (pendente horário de saída).</span>
+                      </div>
+                    )}
+
                     {previewDayCalc.overtimeMinutes > 0 && (
-                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold">
+                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold pt-1 border-t border-slate-700/60">
                         <span>Horas Extras Apuradas:</span>
                         <span className="font-mono font-bold">+{formatMinutesToHoursAndMinutes(previewDayCalc.overtimeMinutes)}</span>
                       </div>
                     )}
-                    {previewDayCalc.missingMinutes > 0 && showEditDayModal?.status === 'normal' && (showEditDayModal?.entry1 || showEditDayModal?.entry2) && (
-                      <div className="flex items-center justify-between text-[11px] text-rose-400 font-semibold">
+
+                    {previewDayCalc.missingMinutes > 0 && showEditDayModal?.status === 'normal' && hasCompletePair && (
+                      <div className="flex items-center justify-between text-[11px] text-rose-400 font-semibold pt-1 border-t border-slate-700/60">
                         <span>Débito / Atraso Apurado:</span>
                         <span className="font-mono font-bold">-{formatMinutesToHoursAndMinutes(previewDayCalc.missingMinutes)}</span>
                       </div>
