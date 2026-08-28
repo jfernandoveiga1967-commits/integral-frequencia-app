@@ -31,8 +31,12 @@ interface HeaderProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   totalStudents: number;
+  totalAtivosHoje?: number;
   presentesHoje?: number;
   faltasHoje?: number;
+  justificadosHoje?: number;
+  pendentesHoje?: number;
+  onNavigateToPending?: () => void;
   currentUser: UserProfile | null;
   onLogout: () => void;
 }
@@ -41,8 +45,12 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   totalStudents,
+  totalAtivosHoje,
   presentesHoje = 0,
   faltasHoje = 0,
+  justificadosHoje = 0,
+  pendentesHoje = 0,
+  onNavigateToPending,
   currentUser,
   onLogout,
 }) => {
@@ -229,24 +237,48 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             {/* Live Real-Time Attendance Counters (Baseado na Rotina de Hoje) */}
-            <div className="flex items-center space-x-2.5 text-xs text-slate-300 bg-slate-800/90 px-3.5 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
-              <div className="flex items-center space-x-1.5" title="Total de alunos matriculados no Integral">
-                <span className="text-slate-400 font-medium">Total:</span>
-                <span className="font-extrabold text-indigo-300">{totalStudents}</span>
+            <div className="flex items-center space-x-2 text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
+              <div className="flex items-center space-x-1.5" title="Total de alunos ativos e esperados hoje no Integral">
+                <span className="text-slate-400 font-medium">Ativos Hoje:</span>
+                <span className="font-extrabold text-indigo-300">{totalAtivosHoje !== undefined ? totalAtivosHoje : totalStudents}</span>
               </div>
               <div className="h-3.5 w-px bg-slate-700" />
-              <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (lançados na chamada da Rotina)">
+              <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (Presença normal + Saída antecipada + Sem uniforme)">
                 <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <span className="text-slate-400 font-medium">Presentes Hoje:</span>
+                <span className="text-slate-400 font-medium">Presentes:</span>
                 <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
               </div>
               <div className="h-3.5 w-px bg-slate-700" />
-              <div className="flex items-center space-x-1.5" title="Faltas registradas hoje no Integral (modalidade Rotina)">
+              <div className="flex items-center space-x-1.5" title="Faltas não justificadas hoje no Integral">
                 <span className="text-slate-400 font-medium">Faltas:</span>
                 <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                   {faltasHoje}
                 </span>
               </div>
+              {justificadosHoje > 0 && (
+                <>
+                  <div className="h-3.5 w-px bg-slate-700" />
+                  <div className="flex items-center space-x-1.5" title="Ausências justificadas / Atestados de saúde hoje">
+                    <span className="text-slate-400 font-medium">Atestados:</span>
+                    <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
+                  </div>
+                </>
+              )}
+              {pendentesHoje > 0 && (
+                <>
+                  <div className="h-3.5 w-px bg-slate-700" />
+                  <button
+                    type="button"
+                    onClick={onNavigateToPending}
+                    title="Alunos matriculados que ainda não tiveram chamada de rotina lançada hoje. Clique para conferir."
+                    className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                  >
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                    <span className="font-medium text-[11px]">Pendentes:</span>
+                    <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

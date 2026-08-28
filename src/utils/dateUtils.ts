@@ -1,4 +1,4 @@
-import { WeekInfo, HolidayItem, DayOfWeek } from '../types';
+import { WeekInfo, HolidayItem, DayOfWeek, Student } from '../types';
 
 export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
@@ -16,6 +16,32 @@ export function formatDiasFrequencia(dias?: DayOfWeek[]): string {
   return dias.map((d) => map[d] || d).join(', ');
 }
 
+/**
+ * Checks whether a student is active on a given date.
+ * - Active students return true.
+ * - Inactive / Cancelled students return true for past dates BEFORE their inactivationDate,
+ *   and false on or after their inactivationDate (or false if no inactivationDate is set).
+ */
+export function isStudentActiveOnDate(
+  student: { status?: 'ativo' | 'inativo' | 'cancelado'; inactivationDate?: string } | null | undefined,
+  date: Date | string
+): boolean {
+  if (!student) return false;
+  const status = student.status || 'ativo';
+  if (status === 'ativo') return true;
+
+  if (status === 'inativo' || status === 'cancelado') {
+    if (!student.inactivationDate) {
+      return false;
+    }
+    const dateStr = typeof date === 'string' ? date : toISODateString(date);
+    // If the check date is strictly before the inactivation date, student was still active!
+    return dateStr < student.inactivationDate;
+  }
+
+  return true;
+}
+
 export function isStudentScheduledForDay(student: { diasFrequencia?: DayOfWeek[] } | null | undefined, dayOfWeek: DayOfWeek | null): boolean {
   if (!student) return false;
   if (!dayOfWeek) return false;
@@ -29,6 +55,44 @@ export function isStudentScheduledForDate(student: { diasFrequencia?: DayOfWeek[
   if (!student) return false;
   const dayOfWeek = getDayOfWeekFromDate(date);
   return isStudentScheduledForDay(student, dayOfWeek);
+}
+
+/**
+ * Format a time string like "18:00" into "18h00" (or keeps clean string)
+ */
+export function formatHorarioSaida(timeStr?: string): string {
+  if (!timeStr) return '';
+  const trimmed = timeStr.trim();
+  if (!trimmed) return '';
+  if (trimmed.includes(':')) {
+    const [h, m] = trimmed.split(':');
+    return `${h}h${m.padStart(2, '0')}`;
+  }
+  return trimmed;
+}
+
+/**
+ * Gets student departure time configured for a specific day of the week
+ */
+export function getStudentDepartureTimeForDay(
+  student: Student | { horariosSaida?: Partial<Record<DayOfWeek, string>> } | null | undefined,
+  dayOfWeek: DayOfWeek | null | undefined
+): string | undefined {
+  if (!student || !dayOfWeek) return undefined;
+  if (!student.horariosSaida) return undefined;
+  return student.horariosSaida[dayOfWeek];
+}
+
+/**
+ * Gets student departure time configured for a specific date (YYYY-MM-DD or Date object)
+ */
+export function getStudentDepartureTimeForDate(
+  student: Student | { horariosSaida?: Partial<Record<DayOfWeek, string>> } | null | undefined,
+  date: Date | string
+): string | undefined {
+  if (!student) return undefined;
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  return getStudentDepartureTimeForDay(student, dayOfWeek);
 }
 
 export function getISOWeekNumber(date: Date): { year: number; weekNumber: number } {

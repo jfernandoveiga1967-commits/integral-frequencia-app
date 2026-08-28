@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
-import { getISOWeekNumber, getWeekInfo, toISODateString } from './utils/dateUtils';
+import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
+import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS, isCoordenador } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { AttendanceSheet } from './components/AttendanceSheet';
@@ -912,43 +913,16 @@ export default function App() {
     }, 60);
   };
 
-  // Contadores em tempo real baseados exclusivamente nos lançamentos da modalidade "Rotina" de hoje
-  const todayRoutineStats = useMemo(() => {
-    const todayStr = toISODateString(new Date());
-    const totalStudentsCount = students.length;
+  // Modal de Auditoria de Chamada / Alunos Pendentes
+  const [showPendingAuditModal, setShowPendingAuditModal] = useState<boolean>(false);
+  const [pendingFilterTurma, setPendingFilterTurma] = useState<string>('all');
+  const [pendingSearchTerm, setPendingSearchTerm] = useState<string>('');
 
-    // Mapa dos registros de Rotina do dia de hoje por studentId
-    const studentRoutineRecords = new Map<string, AttendanceRecord>();
-
-    records.forEach((r) => {
-      if (
-        r.date === todayStr &&
-        (r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina'))
-      ) {
-        studentRoutineRecords.set(r.studentId, r);
-      }
-    });
-
-    let presentesCount = 0;
-    let faltasCount = 0;
-
-    students.forEach((student) => {
-      const rec = studentRoutineRecords.get(student.id);
-      if (rec) {
-        if (rec.status === 'presente' || rec.status === 'saida_antecipada' || rec.status === 'sem_equipamento') {
-          presentesCount++;
-        } else if (rec.status === 'falta' || rec.status === 'saude') {
-          faltasCount++;
-        }
-      }
-    });
-
-    return {
-      totalStudents: totalStudentsCount,
-      presentesHoje: presentesCount,
-      faltasHoje: faltasCount,
-    };
-  }, [students, records]);
+  // Contadores em tempo real baseados estritamente na Chamada de Rotina de hoje (Fonte Única da Verdade)
+  const todayStr = toISODateString(new Date());
+  const todayConsolidated = useMemo(() => {
+    return getDailyConsolidatedMetrics(todayStr, students, records);
+  }, [todayStr, students, records]);
 
   // Web Push Notifications & Background Audio Alerts Engine
   useWebPushNotifications({
@@ -960,6 +934,18 @@ export default function App() {
     holidays,
     onNavigateToAttendance: handleNavigateToAttendance,
   });
+
+  // Filtered pending students for audit modal
+  const filteredPendingStudents = useMemo(() => {
+    return todayConsolidated.pendingStudents.filter((s) => {
+      const matchTurma = pendingFilterTurma === 'all' || s.turma === pendingFilterTurma;
+      const matchSearch =
+        !pendingSearchTerm.trim() ||
+        s.name.toLowerCase().includes(pendingSearchTerm.toLowerCase()) ||
+        s.turma.toLowerCase().includes(pendingSearchTerm.toLowerCase());
+      return matchTurma && matchSearch;
+    });
+  }, [todayConsolidated.pendingStudents, pendingFilterTurma, pendingSearchTerm]);
 
   // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
@@ -973,14 +959,64 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         totalStudents={students.length}
-        presentesHoje={todayRoutineStats.presentesHoje}
-        faltasHoje={todayRoutineStats.faltasHoje}
+        totalAtivosHoje={todayConsolidated.totalAtivos}
+        presentesHoje={todayConsolidated.presentes}
+        faltasHoje={todayConsolidated.faltas}
+        justificadosHoje={todayConsolidated.justificados}
+        pendentesHoje={todayConsolidated.pendentes}
+        onNavigateToPending={() => setShowPendingAuditModal(true)}
         currentUser={currentUser}
         onLogout={handleLogout}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
+        {/* Banner de Auditoria e Trava para Coordenação/Administração */}
+        {todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
+          <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
+            <div className="flex items-start space-x-3">
+              <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
+                <AlertTriangle className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200/90 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300">
+                    Auditoria de Chamada
+                  </span>
+                  <span className="text-xs font-bold text-amber-800">
+                    Dia {formatDateBR(todayStr)}
+                  </span>
+                </div>
+                <h4 className="text-sm font-extrabold text-amber-950 mt-1">
+                  Existem {todayConsolidated.pendentes} {todayConsolidated.pendentes === 1 ? 'aluno com chamada pendente' : 'alunos com chamada pendente/não lançada'} hoje
+                </h4>
+                <p className="text-xs text-amber-800/90 mt-0.5">
+                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} matrículas ativas</strong> esperadas. Certifique-se de preencher todos os alunos antes de gerar relatórios consolidados em PDF.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setShowPendingAuditModal(true)}
+                className="px-3.5 py-2 rounded-xl text-xs font-extrabold text-white bg-amber-600 hover:bg-amber-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
+              >
+                <UserX className="w-4 h-4" />
+                <span>Ver {todayConsolidated.pendentes} Alunos Pendentes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDate(todayStr);
+                  setActiveTab('frequencia');
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300 transition-all cursor-pointer"
+              >
+                Ir para Chamada
+              </button>
+            </div>
+          </div>
+        )}
         {/* Tab 1: Chamada de Frequência */}
         {activeTab === 'frequencia' && (
           <AttendanceSheet
@@ -1125,6 +1161,197 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Modal de Auditoria de Alunos com Chamada Pendente */}
+      {showPendingAuditModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl">
+                  <UserX className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white leading-tight">
+                    Auditoria de Chamadas Pendentes
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {todayConsolidated.pendentes} alunos matriculados sem chamada de Rotina em {formatDateBR(todayStr)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPendingAuditModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Subheader Filters & Search */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={pendingSearchTerm}
+                  onChange={(e) => setPendingSearchTerm(e.target.value)}
+                  placeholder="Buscar aluno pendente por nome..."
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                />
+              </div>
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                <span className="text-xs font-bold text-slate-600 shrink-0">Turma:</span>
+                <select
+                  value={pendingFilterTurma}
+                  onChange={(e) => setPendingFilterTurma(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 w-full sm:w-auto cursor-pointer"
+                >
+                  <option value="all">Todas as Turmas ({todayConsolidated.pendingStudents.length})</option>
+                  {turmas.map((t) => {
+                    const countInTurma = todayConsolidated.pendingStudents.filter((s) => s.turma === t).length;
+                    return (
+                      <option key={t} value={t}>
+                        Turma {t} ({countInTurma})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+
+            {/* Students List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5 max-h-[50vh]">
+              {filteredPendingStudents.length === 0 ? (
+                <div className="py-12 text-center text-slate-400">
+                  <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
+                  <p className="text-sm font-extrabold text-slate-700">Nenhum aluno pendente encontrado!</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Todos os alunos correspondentes ao filtro estão com chamada lançada.</p>
+                </div>
+              ) : (
+                filteredPendingStudents.map((student) => (
+                  <div
+                    key={student.id}
+                    className="p-3 bg-white border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-amber-300 transition-colors"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center font-extrabold text-xs text-slate-700 shrink-0">
+                        {student.name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs font-bold text-slate-900">{student.name}</span>
+                          <span className="text-[10px] font-extrabold px-2 py-0.2 bg-slate-100 text-slate-700 rounded-full border border-slate-200">
+                            Turma {student.turma}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Matrícula: #{student.id.slice(0, 6)} • Status: <span className="text-amber-600 font-bold">Pendente de Chamada</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1.5 self-end sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dateObj = new Date(todayStr + 'T12:00:00');
+                          const isoWeek = getISOWeekNumber(dateObj);
+                          handleSaveRecord({
+                            studentId: student.id,
+                            turma: student.turma,
+                            activity: 'Rotina',
+                            date: todayStr,
+                            weekNumber: currentWeek?.weekNumber || isoWeek.weekNumber,
+                            year: currentWeek?.year || isoWeek.year,
+                            status: 'presente',
+                            observation: '',
+                          });
+                        }}
+                        className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
+                        title="Lançar Presença na Rotina"
+                      >
+                        Presente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dateObj = new Date(todayStr + 'T12:00:00');
+                          const isoWeek = getISOWeekNumber(dateObj);
+                          handleSaveRecord({
+                            studentId: student.id,
+                            turma: student.turma,
+                            activity: 'Rotina',
+                            date: todayStr,
+                            weekNumber: currentWeek?.weekNumber || isoWeek.weekNumber,
+                            year: currentWeek?.year || isoWeek.year,
+                            status: 'falta',
+                            observation: '',
+                          });
+                        }}
+                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
+                        title="Lançar Falta na Rotina"
+                      >
+                        Falta
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dateObj = new Date(todayStr + 'T12:00:00');
+                          const isoWeek = getISOWeekNumber(dateObj);
+                          handleSaveRecord({
+                            studentId: student.id,
+                            turma: student.turma,
+                            activity: 'Rotina',
+                            date: todayStr,
+                            weekNumber: currentWeek?.weekNumber || isoWeek.weekNumber,
+                            year: currentWeek?.year || isoWeek.year,
+                            status: 'saude',
+                            observation: 'Atestado Médico / Ausência Justificada',
+                          });
+                        }}
+                        className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
+                        title="Lançar Atestado / Saúde"
+                      >
+                        Atestado
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <div className="text-xs text-slate-500 font-medium">
+                Fórmula de Auditoria: <span className="font-mono text-slate-700 font-bold">{todayConsolidated.presentes} Pres. + {todayConsolidated.faltas} Falt. + {todayConsolidated.justificados} Atest. + {todayConsolidated.pendentes} Pend. = {todayConsolidated.totalAtivos} Total</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPendingAuditModal(false);
+                    setSelectedDate(todayStr);
+                    setActiveTab('frequencia');
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                >
+                  Abrir Chamada Geral
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPendingAuditModal(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   HolidayItem,
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
+import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
@@ -2471,21 +2472,17 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   });
 
   const isAllTurmas = !turma || turma === 'Todas as Turmas' || turma === 'all';
-  const targetStudents = isAllTurmas ? students : students.filter((s) => s.turma === turma);
+  const targetTurmaParam = isAllTurmas ? 'all' : turma;
 
-  // Filter routine records for target students in the date range
-  const targetStudentIdSet = new Set(targetStudents.map((s) => s.id));
-  const periodRoutineRecords = records.filter(
-    (r) =>
-      (r.activity === 'Rotina' || r.activity?.trim().toLowerCase() === 'rotina') &&
-      r.date >= startDate &&
-      r.date <= endDate &&
-      (isAllTurmas || r.turma === turma || targetStudentIdSet.has(r.studentId))
+  // Single Source of Truth calculation from frequenciaUtils
+  const consolidated = getPeriodConsolidatedMetrics(
+    startDate,
+    endDate,
+    students,
+    records,
+    holidays,
+    targetTurmaParam
   );
-
-  // School days calculation
-  const schoolDaysInfo = getEffectiveSchoolDays(startDate, endDate, holidays);
-  const effectiveDays = schoolDaysInfo.effectiveDays;
 
   // Header
   const subtitle = isAllTurmas
@@ -2519,68 +2516,42 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   doc.setTextColor(71, 85, 105);
   doc.text(`Período de Apuração: ${periodDisplay}`, 18, startY + 13);
   doc.text(
-    `Dias Úteis Letivos: ${schoolDaysInfo.effectiveDaysCount} dias ${
-      schoolDaysInfo.holidaysCount > 0 ? `(${schoolDaysInfo.holidaysCount} feriados/recessos descontados)` : ''
-    } • Matrículas Ativas no Escopo: ${targetStudents.length} alunos`,
+    `Dias Úteis Letivos: ${consolidated.schoolDaysCount} dias ${
+      consolidated.holidaysCount > 0 ? `(${consolidated.holidaysCount} feriados/recessos descontados)` : ''
+    } • Matrículas Ativas no Escopo: ${consolidated.totalMatriculasAtivas} alunos`,
     18,
     startY + 19
   );
 
   startY += 28;
 
-  // Compute daily totals and period accumulations
-  let totalEsperadosAcumulados = 0;
-  let totalPresencasAcumuladas = 0;
-  let totalFaltasAcumuladas = 0;
-  let totalSaudeAcumuladas = 0;
-
-  const tableData = effectiveDays.map((day) => {
-    const dayDate = day.dateStr;
-    const dayScheduledStudents = targetStudents.filter((s) => isStudentScheduledForDate(s, dayDate));
-    const expectedCount = dayScheduledStudents.length;
-
-    const dayRecords = periodRoutineRecords.filter((r) => r.date === dayDate);
-    const presCount = dayRecords.filter((r) => r.status === 'presente' || r.status === 'saida_antecipada').length;
-    const faltaCount = dayRecords.filter((r) => r.status === 'falta').length;
-    const saudeCount = dayRecords.filter((r) => r.status === 'saude').length;
-
-    totalEsperadosAcumulados += expectedCount;
-    totalPresencasAcumuladas += presCount;
-    totalFaltasAcumuladas += faltaCount;
-    totalSaudeAcumuladas += saudeCount;
-
-    const totalRegistrado = presCount + faltaCount + saudeCount;
+  const tableData = consolidated.dailyMetrics.map((day) => {
     let rateStr = '-';
-    if (expectedCount > 0 && totalRegistrado > 0) {
-      const rate = Math.round((presCount / expectedCount) * 100);
-      rateStr = `${rate}%`;
-    } else if (totalRegistrado > 0) {
-      const rate = Math.round((presCount / totalRegistrado) * 100);
-      rateStr = `${rate}%`;
+    if (day.totalAtivos > 0 && day.apurados > 0) {
+      rateStr = `${day.taxaPresenca}%`;
+    } else if (day.apurados > 0) {
+      rateStr = `${day.taxaApurada}%`;
     }
 
     return [
-      `${formatDateBR(dayDate)} (${day.dayName})`,
-      String(expectedCount),
-      String(presCount),
-      String(faltaCount),
-      String(saudeCount),
+      `${formatDateBR(day.dateStr)} (${day.dayName})`,
+      String(day.totalAtivos),
+      String(day.presentes),
+      String(day.faltas),
+      String(day.justificados),
       rateStr,
     ];
   });
 
-  const taxaGeral =
-    totalEsperadosAcumulados > 0 && (totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas > 0)
-      ? Math.round((totalPresencasAcumuladas / totalEsperadosAcumulados) * 100)
-      : totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas > 0
-      ? Math.round(
-          (totalPresencasAcumuladas / (totalPresencasAcumuladas + totalFaltasAcumuladas + totalSaudeAcumuladas)) * 100
-        )
-      : 0;
+  const totalEsperadosAcumulados = consolidated.totalEsperadosAcumulados;
+  const totalPresencasAcumuladas = consolidated.totalPresentesAcumulados;
+  const totalFaltasAcumuladas = consolidated.totalFaltasAcumuladas;
+  const totalSaudeAcumuladas = consolidated.totalJustificadosAcumulados;
+  const taxaGeral = consolidated.taxaPresencaGeral;
 
   // Metric Cards
   const metrics = [
-    { label: 'Dias Letivos', value: `${schoolDaysInfo.effectiveDaysCount} d`, color: [15, 23, 42] as [number, number, number] },
+    { label: 'Dias Letivos', value: `${consolidated.schoolDaysCount} d`, color: [15, 23, 42] as [number, number, number] },
     { label: 'Alunos Esperados', value: totalEsperadosAcumulados, color: [79, 70, 229] as [number, number, number] },
     { label: 'Presenças', value: totalPresencasAcumuladas, color: [22, 163, 74] as [number, number, number] },
     { label: 'Faltas', value: totalFaltasAcumuladas, color: [220, 38, 38] as [number, number, number] },

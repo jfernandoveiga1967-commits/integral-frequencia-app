@@ -216,25 +216,25 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         {/* Document Content Scroll Container */}
         <div
           id="pdf-frame-wrapper"
-          className="flex-1 w-full h-full bg-slate-950/90 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center print:p-0 print:bg-white print:overflow-visible"
+          className="flex-1 w-full h-full bg-slate-950/90 overflow-y-auto p-1 sm:p-3 md:p-4 flex justify-center print:p-0 print:bg-white print:overflow-visible"
         >
           {/* Official A4 Sheet Canvas */}
-          <div className="w-full max-w-4xl bg-white text-slate-900 shadow-2xl rounded-xl p-5 sm:p-8 md:p-10 border border-slate-200 print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none">
+          <div className="w-full max-w-5xl h-full bg-white text-slate-900 shadow-2xl rounded-xl border border-slate-200 overflow-hidden print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none">
             {activeContent ? (
               // If custom children/HTML is supplied, render it directly inside the A4 sheet
-              <div className="space-y-4">{activeContent}</div>
+              <div className="p-6 sm:p-8 space-y-4">{activeContent}</div>
             ) : (pdfBlobUrl || blobUrl || dataUrl || dataUri || pdfDataUrl) ? (
-              // Render native PDF embedded preview if dataUrl / blobUrl is present
-              <div className="w-full h-[78vh] rounded-lg overflow-hidden border border-slate-200">
+              // Render native PDF embedded preview occupying the full modal area
+              <div className="w-full h-full min-h-[82vh]">
                 <iframe
                   src={pdfBlobUrl || blobUrl || dataUrl || dataUri || pdfDataUrl || ''}
                   title={title || 'Documento PDF'}
-                  className="w-full h-full border-none"
+                  className="w-full h-full min-h-[82vh] border-none"
                 />
               </div>
             ) : (
               // Default Native Official A4 Document View
-              <div className="space-y-6">
+              <div className="p-6 sm:p-10 space-y-6">
                 {/* Official Institutional Header */}
                 <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="flex items-center space-x-3 text-left">

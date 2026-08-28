@@ -22,6 +22,7 @@ import {
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
+import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
   BarChart3,
@@ -403,76 +404,22 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   }, [students, numericTurmaFilter, isCoordenador, currentUser, turmasList]);
 
   const numericDailyStats = useMemo(() => {
-    const effectiveDays = schoolDaysInfo.effectiveDays;
-    const targetStudentIdSet = new Set(numericTargetStudents.map((s) => s.id));
-
-    const targetRoutineRecords = activeRecords.filter(
-      (r) =>
-        (r.activity === 'Rotina' || r.activity?.trim().toLowerCase() === 'rotina') &&
-        (numericTurmaFilter === 'all' || r.turma === numericTurmaFilter || targetStudentIdSet.has(r.studentId))
+    return getPeriodConsolidatedMetrics(
+      effectiveStartDate,
+      effectiveEndDate,
+      numericTargetStudents,
+      activeRecords,
+      holidays,
+      numericTurmaFilter
     );
-
-    let totalEsperadosAcum = 0;
-    let totalPresencasAcum = 0;
-    let totalFaltasAcum = 0;
-    let totalSaudeAcum = 0;
-
-    const days = effectiveDays.map((day) => {
-      const dateStr = day.dateStr;
-      const dayScheduled = numericTargetStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
-      const expectedCount = dayScheduled.length;
-
-      const dayRecords = targetRoutineRecords.filter((r) => r.date === dateStr);
-      const pres = dayRecords.filter((r) => r.status === 'presente' || r.status === 'saida_antecipada').length;
-      const saidaAnt = dayRecords.filter((r) => r.status === 'saida_antecipada').length;
-      const faltas = dayRecords.filter((r) => r.status === 'falta').length;
-      const saude = dayRecords.filter((r) => r.status === 'saude').length;
-      const totalChamadas = pres + faltas + saude;
-
-      totalEsperadosAcum += expectedCount;
-      totalPresencasAcum += pres;
-      totalFaltasAcum += faltas;
-      totalSaudeAcum += saude;
-
-      let rate = 0;
-      if (expectedCount > 0 && totalChamadas > 0) {
-        rate = Math.round((pres / expectedCount) * 100);
-      } else if (totalChamadas > 0) {
-        rate = Math.round((pres / totalChamadas) * 100);
-      }
-
-      return {
-        dateStr,
-        dayName: day.dayName,
-        dayShort: day.dayShort,
-        expectedCount,
-        pres,
-        saidaAnt,
-        faltas,
-        saude,
-        totalChamadas,
-        rate,
-      };
-    });
-
-    const taxaGeral =
-      totalEsperadosAcum > 0 && totalPresencasAcum + totalFaltasAcum + totalSaudeAcum > 0
-        ? Math.round((totalPresencasAcum / totalEsperadosAcum) * 100)
-        : totalPresencasAcum + totalFaltasAcum + totalSaudeAcum > 0
-        ? Math.round(
-            (totalPresencasAcum / (totalPresencasAcum + totalFaltasAcum + totalSaudeAcum)) * 100
-          )
-        : 0;
-
-    return {
-      days,
-      totalEsperadosAcum,
-      totalPresencasAcum,
-      totalFaltasAcum,
-      totalSaudeAcum,
-      taxaGeral,
-    };
-  }, [schoolDaysInfo.effectiveDays, numericTargetStudents, activeRecords, numericTurmaFilter]);
+  }, [
+    effectiveStartDate,
+    effectiveEndDate,
+    numericTargetStudents,
+    activeRecords,
+    holidays,
+    numericTurmaFilter,
+  ]);
 
   // On-screen PDF Viewer State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
@@ -1025,27 +972,27 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Dias Letivos</span>
-            <span className="text-sm font-extrabold text-slate-800">{schoolDaysInfo.effectiveDaysCount} dias</span>
+            <span className="text-sm font-extrabold text-slate-800">{numericDailyStats.schoolDaysCount} dias</span>
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Matrículas Ativas</span>
-            <span className="text-sm font-extrabold text-slate-800">{numericTargetStudents.length} alunos</span>
+            <span className="text-sm font-extrabold text-slate-800">{numericDailyStats.totalMatriculasAtivas} alunos</span>
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Esperados Acumulados</span>
-            <span className="text-sm font-extrabold text-indigo-700">{numericDailyStats.totalEsperadosAcum}</span>
+            <span className="text-sm font-extrabold text-indigo-700">{numericDailyStats.totalEsperadosAcumulados}</span>
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Presenças Totais</span>
-            <span className="text-sm font-extrabold text-emerald-700">{numericDailyStats.totalPresencasAcum}</span>
+            <span className="text-sm font-extrabold text-emerald-700">{numericDailyStats.totalPresentesAcumulados}</span>
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Faltas Totais</span>
-            <span className="text-sm font-extrabold text-rose-600">{numericDailyStats.totalFaltasAcum}</span>
+            <span className="text-sm font-extrabold text-rose-600">{numericDailyStats.totalFaltasAcumuladas}</span>
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Taxa Geral do Período</span>
-            <span className="text-sm font-extrabold text-emerald-800">{numericDailyStats.taxaGeral}%</span>
+            <span className="text-sm font-extrabold text-emerald-800">{numericDailyStats.taxaPresencaGeral}%</span>
           </div>
         </div>
 
@@ -1063,15 +1010,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {numericDailyStats.days.length === 0 ? (
+              {numericDailyStats.dailyMetrics.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-medium">
                     Nenhum dia letivo encontrado no período selecionado.
                   </td>
                 </tr>
               ) : (
-                numericDailyStats.days.map((d) => {
-                  const hasRollCall = d.totalChamadas > 0;
+                numericDailyStats.dailyMetrics.map((d) => {
+                  const hasRollCall = d.apurados > 0;
                   return (
                     <tr key={d.dateStr} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 font-bold text-slate-900">
@@ -1084,15 +1031,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       </td>
                       <td className="px-4 py-3 text-center font-bold text-slate-700">
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-extrabold">
-                          {d.expectedCount}
+                          {d.totalAtivos}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-extrabold border border-emerald-200">
-                          {d.pres}
-                          {d.saidaAnt > 0 && (
+                          {d.presentes}
+                          {d.saidasAntecipadas > 0 && (
                             <span className="text-[10px] font-normal text-emerald-600 ml-1">
-                              ({d.saidaAnt} saída ant.)
+                              ({d.saidasAntecipadas} saída ant.)
                             </span>
                           )}
                         </span>
@@ -1104,7 +1051,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-extrabold border border-amber-200">
-                          {d.saude}
+                          {d.justificados}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center font-extrabold">
@@ -1113,25 +1060,25 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                             <div className="w-12 bg-slate-200 rounded-full h-2 overflow-hidden">
                               <div
                                 className={`h-full rounded-full ${
-                                  d.rate >= 90
+                                  d.taxaPresenca >= 90
                                     ? 'bg-emerald-500'
-                                    : d.rate >= 75
+                                    : d.taxaPresenca >= 75
                                     ? 'bg-amber-500'
                                     : 'bg-rose-500'
                                 }`}
-                                style={{ width: `${Math.min(100, Math.max(0, d.rate))}%` }}
+                                style={{ width: `${Math.min(100, Math.max(0, d.taxaPresenca))}%` }}
                               />
                             </div>
                             <span
                               className={`text-xs ${
-                                d.rate >= 90
+                                d.taxaPresenca >= 90
                                   ? 'text-emerald-700'
-                                  : d.rate >= 75
+                                  : d.taxaPresenca >= 75
                                   ? 'text-amber-700'
                                   : 'text-rose-700'
                               }`}
                             >
-                              {d.rate}%
+                              {d.taxaPresenca}%
                             </span>
                           </div>
                         ) : (
@@ -1147,22 +1094,22 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <tfoot className="bg-slate-900 text-white font-extrabold border-t-2 border-slate-800">
               <tr>
                 <td className="px-4 py-3.5 text-white">
-                  TOTAIS DO PERÍODO ({schoolDaysInfo.effectiveDaysCount} dias letivos)
+                  TOTAIS DO PERÍODO ({numericDailyStats.schoolDaysCount} dias letivos)
                 </td>
                 <td className="px-4 py-3.5 text-center text-indigo-200">
-                  {numericDailyStats.totalEsperadosAcum}
+                  {numericDailyStats.totalEsperadosAcumulados}
                 </td>
                 <td className="px-4 py-3.5 text-center text-emerald-300">
-                  {numericDailyStats.totalPresencasAcum}
+                  {numericDailyStats.totalPresentesAcumulados}
                 </td>
                 <td className="px-4 py-3.5 text-center text-rose-300">
-                  {numericDailyStats.totalFaltasAcum}
+                  {numericDailyStats.totalFaltasAcumuladas}
                 </td>
                 <td className="px-4 py-3.5 text-center text-amber-300">
-                  {numericDailyStats.totalSaudeAcum}
+                  {numericDailyStats.totalJustificadosAcumulados}
                 </td>
                 <td className="px-4 py-3.5 text-center text-emerald-300 text-sm">
-                  {numericDailyStats.taxaGeral}%
+                  {numericDailyStats.taxaPresencaGeral}%
                 </td>
               </tr>
             </tfoot>

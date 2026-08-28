@@ -5,7 +5,7 @@ import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, formatDiasFrequencia } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
@@ -188,6 +188,11 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         if (!student) return false;
         // Turma permission filter for professors/monitors
         if (!isCoordenador && !allowedTurmas.includes(student.turma)) {
+          return false;
+        }
+
+        // Active student check on the selected date (hides inactive/cancelled students from daily roll call)
+        if (!isStudentActiveOnDate(student, selectedDate)) {
           return false;
         }
 
@@ -858,6 +863,8 @@ function getCurrentHHMM(): string {
                   (selectedActivity === 'TODAS' || a === selectedActivity)
               );
 
+              const departureTimeToday = getStudentDepartureTimeForDate(student, selectedDate);
+
               return (
                 <div key={student.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -872,13 +879,22 @@ function getCurrentHHMM(): string {
                             {student.name}
                           </h3>
                         </div>
-                        <div className="flex items-center space-x-2 text-xs text-slate-500 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
                           <span className="font-medium px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
                             {student.turma}
                           </span>
                           {student.diasFrequencia && student.diasFrequencia.length < 5 && (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200" title="Grade parcial de frequência semanal">
                               {formatDiasFrequencia(student.diasFrequencia)}
+                            </span>
+                          )}
+                          {departureTimeToday && (
+                            <span
+                              className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-900 border border-indigo-200 flex items-center space-x-1 shadow-2xs"
+                              title={`Horário de saída cadastrado para ${formatDateBR(selectedDate)}: ${departureTimeToday}`}
+                            >
+                              <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              <span>⏱️ Saída às {formatHorarioSaida(departureTimeToday)}</span>
                             </span>
                           )}
                         </div>
