@@ -150,6 +150,14 @@ export interface PontoMonthClosing {
   isClosed: boolean;
   closedAt?: string;
   closedBy?: string;
+  unlockedAt?: string;
+  unlockedBy?: string;
+  auditHistory?: Array<{
+    action: 'travar' | 'destravar' | 'editar' | 'assinar';
+    performedBy: string;
+    performedAt: string;
+    note?: string;
+  }>;
   signedDigitally: boolean;
   signedAt?: string;
   signedBy?: string;

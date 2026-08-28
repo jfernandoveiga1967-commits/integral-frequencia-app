@@ -548,12 +548,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
   };
 
-  // Lock / Unlock Month Closing (Admin Only)
+  // Lock / Unlock Month Closing (Admin Only) with Full Audit Trail
   const handleToggleMonthLock = () => {
     if (!isAdmin) return;
 
     const newClosedState = !isMonthClosed;
     const closingId = `${selectedUserId}_${monthKey}`;
+    const nowIso = new Date().toISOString();
+    const adminName = currentUser?.name || 'Administrador / Coordenação';
+
+    const prevHistory = closingRecord?.auditHistory || [];
+    const newAuditEntry = {
+      action: newClosedState ? ('travar' as const) : ('destravar' as const),
+      performedBy: adminName,
+      performedAt: nowIso,
+      note: newClosedState
+        ? `Mês de competência ${getMonthNameBR(selectedMonth)}/${selectedYear} travado e consolidado pela coordenação.`
+        : `Mês de competência ${getMonthNameBR(selectedMonth)}/${selectedYear} reaberto e destravado para ajustes pela coordenação.`,
+    };
+
+    const updatedHistory = [...prevHistory, newAuditEntry];
 
     const newClosing: PontoMonthClosing = {
       id: closingId,
@@ -583,16 +597,32 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       manualDiscountNote,
       netTotal: financials.netTotal,
       isClosed: newClosedState,
-      closedAt: newClosedState ? new Date().toISOString() : '',
-      closedBy: newClosedState ? currentUser?.name || 'Coordenação' : '',
+      closedAt: newClosedState ? nowIso : (closingRecord?.closedAt || ''),
+      closedBy: newClosedState ? adminName : (closingRecord?.closedBy || ''),
+      unlockedAt: !newClosedState ? nowIso : (closingRecord?.unlockedAt || ''),
+      unlockedBy: !newClosedState ? adminName : (closingRecord?.unlockedBy || ''),
+      auditHistory: updatedHistory,
       signedDigitally: closingRecord?.signedDigitally || false,
       signedAt: closingRecord?.signedAt || '',
       signedBy: closingRecord?.signedBy || '',
       digitalSignatureHash: closingRecord?.digitalSignatureHash || '',
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
 
     onSavePontoClosing(newClosing);
+
+    if (newClosedState) {
+      setPunchFeedback({
+        text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} TRAVADA com sucesso por ${adminName}. Novos registros e edições estão bloqueados.`,
+        type: 'info',
+      });
+    } else {
+      setPunchFeedback({
+        text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} REABERTA com sucesso por ${adminName}. Edições manuais liberadas e auditadas.`,
+        type: 'success',
+      });
+    }
+    setTimeout(() => setPunchFeedback(null), 5000);
   };
 
   // Save Manual Adjustments
@@ -861,14 +891,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {/* Quick Punch Button (For Current Day) */}
             <button
+              type="button"
               onClick={handleQuickPunch}
               disabled={isMonthClosed}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all ${
                 isMonthClosed
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                  ? 'bg-slate-800/80 text-slate-500 cursor-not-allowed border border-slate-700 opacity-60'
                   : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white border border-emerald-400/40 shadow-emerald-900/30 cursor-pointer'
               }`}
-              title="Registrar batida de ponto com o horário exato de agora"
+              title={
+                isMonthClosed
+                  ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
+                  : 'Registrar batida de ponto com o horário exato de agora'
+              }
             >
               <Clock className="w-4 h-4" />
               <span>Registrar Batida Agora</span>
@@ -909,23 +944,28 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             {/* Lock / Unlock Month (Admin only) */}
             {isAdmin && (
               <button
+                type="button"
                 onClick={handleToggleMonthLock}
-                className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition cursor-pointer border ${
+                className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition cursor-pointer border shadow-sm ${
                   isMonthClosed
-                    ? 'bg-amber-600/20 text-amber-300 border-amber-500/40 hover:bg-amber-600/30'
-                    : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400/40 shadow-indigo-900/20'
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 font-black shadow-amber-900/30 active:scale-95'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400/40 shadow-rose-900/30 active:scale-95'
                 }`}
-                title={isMonthClosed ? 'Reabrir mês para permitir edições' : 'Fechar e travar folha deste mês'}
+                title={
+                  isMonthClosed
+                    ? 'Destravar e Reabrir folha para permitir ajustes pontuais pela coordenação (ação auditada)'
+                    : 'Travar mês de competência e consolidar fechamento da folha (bloqueia novas batidas)'
+                }
               >
                 {isMonthClosed ? (
                   <>
-                    <Unlock className="w-4 h-4 text-amber-400" />
-                    <span>Reabrir Mês</span>
+                    <Unlock className="w-4 h-4 text-slate-950" />
+                    <span>Destravar Mês / Reabrir</span>
                   </>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4 text-indigo-200" />
-                    <span>Fechar e Travar Mês</span>
+                    <Lock className="w-4 h-4 text-rose-200" />
+                    <span>Travar Mês / Fechar Folha</span>
                   </>
                 )}
               </button>
@@ -1063,6 +1103,50 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             )}
           </div>
         </div>
+
+        {/* Month Locked Security Notice Banner */}
+        {isMonthClosed && (
+          <div className="mt-4 p-4 bg-slate-900 border-2 border-emerald-500/50 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs text-slate-200 shadow-md">
+            <div className="flex items-start sm:items-center space-x-3">
+              <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0 border border-emerald-500/30">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-emerald-400 text-sm">
+                    Mês de competência encerrado e consolidado pela coordenação
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-mono font-bold uppercase">
+                    Folha Fechada / Travada
+                  </span>
+                </div>
+                <p className="text-slate-400 text-[11px] mt-0.5">
+                  Novos registros de ponto e edições na tabela de frequência foram bloqueados por segurança.
+                  {closingRecord?.closedBy && (
+                    <span className="ml-1 text-slate-300">
+                      Fechado por: <strong className="text-white">{closingRecord.closedBy}</strong> em{' '}
+                      {closingRecord.closedAt ? new Date(closingRecord.closedAt).toLocaleString('pt-BR') : '—'}.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {isAdmin && (
+              <div className="flex items-center gap-2 self-end md:self-auto">
+                <button
+                  type="button"
+                  onClick={handleToggleMonthLock}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition text-xs shadow-sm flex items-center space-x-1.5 cursor-pointer"
+                  title="Destravar e Reabrir mês para efetuar correções pontuais (ação registrada em auditoria)"
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Reabrir Mês / Destravar</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Digital Signature Status Banner */}
         {closingRecord?.signedDigitally ? (
@@ -1574,6 +1658,22 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   {isMonthClosed ? 'FECHADO / PAGO' : 'ABERTO / EM APONTAMENTO'}
                 </span>
               </div>
+              {closingRecord?.closedBy && (
+                <div className="flex justify-between text-[11px] pt-1 text-slate-400 border-t border-slate-800/60">
+                  <span>Fechado por:</span>
+                  <span className="text-slate-200 font-medium">
+                    {closingRecord.closedBy} ({closingRecord.closedAt ? new Date(closingRecord.closedAt).toLocaleDateString('pt-BR') : ''})
+                  </span>
+                </div>
+              )}
+              {closingRecord?.unlockedBy && !isMonthClosed && (
+                <div className="flex justify-between text-[11px] pt-1 text-amber-300 border-t border-slate-800/60">
+                  <span>Última Reabertura:</span>
+                  <span className="font-medium">
+                    {closingRecord.unlockedBy} ({closingRecord.unlockedAt ? new Date(closingRecord.unlockedAt).toLocaleDateString('pt-BR') : ''})
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
