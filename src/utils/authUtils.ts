@@ -259,6 +259,67 @@ export function canResetSystem(user: UserProfile | null): boolean {
   return isCoordenador(user);
 }
 
+export function isUserActive(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  if (isCoordenador(user)) return true;
+  const s = (user.status || 'ATIVO').toUpperCase();
+  return s === 'ATIVO';
+}
+
+export function isUserDismissed(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  const s = (user.status || '').toUpperCase();
+  return s === 'DESLIGADO';
+}
+
+export function isUserInactiveOrDismissed(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  if (isCoordenador(user)) return false;
+  const s = (user.status || 'ATIVO').toUpperCase();
+  return s === 'INATIVO' || s === 'DESLIGADO';
+}
+
+export function getUserStatus(user: UserProfile | null | undefined): 'ATIVO' | 'INATIVO' | 'DESLIGADO' {
+  if (!user) return 'ATIVO';
+  const s = (user.status || 'ATIVO').toUpperCase();
+  if (s === 'DESLIGADO') return 'DESLIGADO';
+  if (s === 'INATIVO') return 'INATIVO';
+  return 'ATIVO';
+}
+
+export function getUserStatusBadge(user: UserProfile | null | undefined): {
+  label: string;
+  bg: string;
+  text: string;
+  border: string;
+} {
+  const status = getUserStatus(user);
+  switch (status) {
+    case 'DESLIGADO':
+      return {
+        label: user?.dataDesligamento ? `Desligado(a) em ${formatBirthDateToDisplay(user.dataDesligamento)}` : 'Desligado(a)',
+        bg: 'bg-rose-500/15',
+        text: 'text-rose-400',
+        border: 'border-rose-500/30',
+      };
+    case 'INATIVO':
+      return {
+        label: 'Inativo(a)',
+        bg: 'bg-slate-500/15',
+        text: 'text-slate-400',
+        border: 'border-slate-500/30',
+      };
+    case 'ATIVO':
+    default:
+      return {
+        label: 'Ativo(a)',
+        bg: 'bg-emerald-500/15',
+        text: 'text-emerald-400',
+        border: 'border-emerald-500/30',
+      };
+  }
+}
+
 export function getRoleBadgeStyle(role: UserRole): { bg: string; text: string; border: string; label: string } {
   switch (role) {
     case 'coordenador':

@@ -685,6 +685,9 @@ export function calculateMonthlyPontoFinancials({
   extraHoursDecimal: number;
   extraHoursFormatted: string;
   extraHoursAmount: number;
+  totalMissingMinutes: number;
+  missingHoursFormatted: string;
+  missingHoursDiscount: number;
   paidHolidaysCount: number;
   paidRecessDaysCount: number;
   workedDaysCount: number;
@@ -711,6 +714,7 @@ export function calculateMonthlyPontoFinancials({
   let unjustifiedAbsencesCount = 0;
   let totalWorkedMinutes = 0;
   let totalExtraMinutes = 0;
+  let totalMissingMinutes = 0;
   let paidHolidaysCount = 0;
   let paidRecessDaysCount = 0;
   let workedDaysCount = 0;
@@ -732,9 +736,14 @@ export function calculateMonthlyPontoFinancials({
       if (rec.entry1 || rec.entry2) {
         workedDaysCount++;
       }
-      const { workedMinutes, overtimeMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
+      const { workedMinutes, overtimeMinutes, missingMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
       totalWorkedMinutes += workedMinutes;
       totalExtraMinutes += overtimeMinutes;
+      // Only deduct missing minutes on days where the employee worked partially or has unpunched hours
+      // (Full day unjustified absences are already counted in unjustifiedAbsencesCount)
+      if (missingMinutes > 0 && (rec.entry1 || rec.entry2)) {
+        totalMissingMinutes += missingMinutes;
+      }
     }
   });
 
@@ -743,11 +752,14 @@ export function calculateMonthlyPontoFinancials({
   const extraHoursDecimal = totalExtraMinutes / 60;
   const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
   const extraHoursAmount = totalExtraMinutes * minuteRate;
+  const missingHoursFormatted = formatMinutesToHoursAndMinutes(totalMissingMinutes);
+  const missingHoursDiscount = totalMissingMinutes * minuteRate;
 
   const netTotal = Math.max(
     0,
     safeBase -
-      unjustifiedAbsencesDiscount +
+      unjustifiedAbsencesDiscount -
+      missingHoursDiscount +
       extraHoursAmount +
       (Number(manualAddition) || 0) -
       (Number(manualDiscount) || 0)
@@ -770,6 +782,9 @@ export function calculateMonthlyPontoFinancials({
     extraHoursDecimal,
     extraHoursFormatted,
     extraHoursAmount,
+    totalMissingMinutes,
+    missingHoursFormatted,
+    missingHoursDiscount,
     paidHolidaysCount,
     paidRecessDaysCount,
     workedDaysCount,

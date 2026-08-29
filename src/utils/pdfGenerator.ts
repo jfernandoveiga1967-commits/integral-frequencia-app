@@ -293,26 +293,26 @@ function drawMetricBoxes(
     const x = startX + idx * (boxWidth + spacing);
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(x, startY, boxWidth, boxHeight, 2, 2, 'FD');
+    doc.roundedRect(x, startY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
 
-    // Label
-    doc.setFontSize(6.5);
+    // Label - proportionally positioned inside the top third of the card
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(100, 116, 139);
-    doc.text(m.label.toUpperCase(), x + 2.5, startY + 4.5);
+    doc.text(m.label.toUpperCase(), x + 2.0, startY + 3.4);
 
-    // Value - Auto-scale font size so text never overflows the box boundaries
+    // Value - Auto-scale font size so text sits cleanly in the lower half without spilling out
     const textVal = String(m.value);
-    let fontSize = 8.5;
+    let fontSize = 7.5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(fontSize);
-    while (doc.getTextWidth(textVal) > (boxWidth - 4.5) && fontSize > 5.5) {
-      fontSize -= 0.4;
+    while (doc.getTextWidth(textVal) > (boxWidth - 3.6) && fontSize > 4.5) {
+      fontSize -= 0.3;
       doc.setFontSize(fontSize);
     }
     doc.setFontSize(fontSize);
     doc.setTextColor(m.color[0], m.color[1], m.color[2]);
-    doc.text(textVal, x + 2.5, startY + 10.5);
+    doc.text(textVal, x + 2.0, startY + (boxHeight - 2.2));
   });
 }
 
@@ -1658,6 +1658,9 @@ export interface GenerateLivroPontoPDFOptions {
     paidRecessDaysCount: number;
     unjustifiedAbsencesCount: number;
     unjustifiedAbsencesDiscount: number;
+    totalMissingMinutes?: number;
+    missingHoursFormatted?: string;
+    missingHoursDiscount?: number;
     totalExtraMinutes: number;
     extraHoursAmount: number;
     manualAddition: number;
@@ -1682,7 +1685,7 @@ export function generateLivroPontoPDFReport({
   monthDaysGrid,
   financials,
   closingRecord,
-  companyName = 'GADAL - Gestão e Apoio',
+  companyName: companyNameProp,
   institutionName = 'Instituto Educacional Crescer',
   pixKey = 'Pendente',
   contractSchedule = '11:40 - 17:40',
@@ -1698,6 +1701,7 @@ export function generateLivroPontoPDFReport({
   const monthName = getMonthNameBR(month);
   const userName = user?.name || closingRecord?.userName || 'Colaborador';
   const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
+  const companyName = user?.company || closingRecord?.companyName || companyNameProp || 'GADAL - Gestão e Apoio';
 
   // 1. Compact Header (Height: 20mm) - Guarantee 1 single page
   drawCompactOfficialHeader(
@@ -1708,19 +1712,25 @@ export function generateLivroPontoPDFReport({
     'portrait'
   );
 
-  let startY = 23;
+  let startY = 22.5;
 
-  // 2. Collaborator & Contract Details Card (Height: 11mm)
+  // 2. Collaborator & Contract Details Card (Height: 10mm)
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(14, startY, 182, 11, 1.5, 1.5, 'FD');
+  doc.roundedRect(14, startY, 182, 10, 1.5, 1.5, 'FD');
+
+  const statusSuffix = user?.status === 'DESLIGADO'
+    ? ` [DESLIGADO(A)${user?.dataDesligamento ? ` EM ${formatDateBR(user.dataDesligamento)}` : ''}]`
+    : user?.status === 'INATIVO'
+    ? ' [INATIVO(A)]'
+    : '';
 
   doc.setTextColor(15, 23, 42);
-  doc.setFontSize(8);
+  doc.setFontSize(7.6);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})   |   Competência: ${monthName}/${year}`, 17, startY + 4.2);
+  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})${statusSuffix}   |   Competência: ${monthName}/${year}`, 17, startY + 4.0);
 
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.3);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(
@@ -1728,12 +1738,12 @@ export function generateLivroPontoPDFReport({
       closingRecord?.isClosed ? 'FECHADO / PAGO' : 'ABERTO'
     }`,
     17,
-    startY + 8.5
+    startY + 8.0
   );
 
-  startY += 13;
+  startY += 12;
 
-  // 3. Financial & Performance Summary Metrics (Height: 8.5mm)
+  // 3. Financial & Performance Summary Metrics (Height: 10mm, 6 cards fitting 182mm width)
   const metrics = [
     { label: 'Bolsa Base', value: formatCurrencyBR(financials.baseSalary), color: [15, 23, 42] as [number, number, number] },
     {
@@ -1747,6 +1757,11 @@ export function generateLivroPontoPDFReport({
       color: [220, 38, 38] as [number, number, number],
     },
     {
+      label: 'Atrasos / Faltantes',
+      value: `${financials.missingHoursFormatted || '0h00min'} (${(financials.missingHoursDiscount && financials.missingHoursDiscount > 0) ? formatCurrencyBR(-financials.missingHoursDiscount) : 'R$ 0,00'})`,
+      color: [180, 83, 9] as [number, number, number],
+    },
+    {
       label: 'Horas Extras',
       value: `${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)} (${formatCurrencyBR(financials.extraHoursAmount)})`,
       color: [79, 70, 229] as [number, number, number],
@@ -1757,9 +1772,10 @@ export function generateLivroPontoPDFReport({
       color: [16, 185, 129] as [number, number, number],
     },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 8.5, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 28, 10, 2.8, metrics);
 
-  startY += 10.5;
+  // Clear vertical margin between metric cards and table header
+  startY += 13.5;
 
   // Check if target user has a continuous 6h shift
   const isContinuous = isContinuousShift(
@@ -1835,23 +1851,23 @@ export function generateLivroPontoPDFReport({
 
   const columnStyles = isContinuous
     ? {
-        0: { cellWidth: 8, halign: 'center' as const, fontStyle: 'bold' as const },
-        1: { cellWidth: 15, halign: 'left' as const },
-        2: { cellWidth: 18, halign: 'center' as const },
-        3: { cellWidth: 18, halign: 'center' as const },
-        4: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const },
-        5: { cellWidth: 46, halign: 'left' as const },
+        0: { cellWidth: 9, halign: 'center' as const, fontStyle: 'bold' as const },
+        1: { cellWidth: 15, halign: 'center' as const },
+        2: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const },
+        3: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const },
+        4: { cellWidth: 18, halign: 'center' as const, fontStyle: 'bold' as const },
+        5: { cellWidth: 44, halign: 'left' as const },
         6: { cellWidth: 'auto' as const, halign: 'left' as const },
       }
     : {
-        0: { cellWidth: 8, halign: 'center' as const, fontStyle: 'bold' as const },
-        1: { cellWidth: 15, halign: 'left' as const },
-        2: { cellWidth: 14, halign: 'center' as const },
-        3: { cellWidth: 14, halign: 'center' as const },
-        4: { cellWidth: 14, halign: 'center' as const },
-        5: { cellWidth: 14, halign: 'center' as const },
-        6: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const },
-        7: { cellWidth: 42, halign: 'left' as const },
+        0: { cellWidth: 9, halign: 'center' as const, fontStyle: 'bold' as const },
+        1: { cellWidth: 15, halign: 'center' as const },
+        2: { cellWidth: 15, halign: 'center' as const },
+        3: { cellWidth: 15, halign: 'center' as const },
+        4: { cellWidth: 15, halign: 'center' as const },
+        5: { cellWidth: 15, halign: 'center' as const },
+        6: { cellWidth: 17, halign: 'center' as const, fontStyle: 'bold' as const },
+        7: { cellWidth: 38, halign: 'left' as const },
         8: { cellWidth: 'auto' as const, halign: 'left' as const },
       };
 
@@ -1861,18 +1877,25 @@ export function generateLivroPontoPDFReport({
     body: tableData,
     theme: 'grid',
     pageBreak: 'avoid',
+    margin: { left: 14, right: 14 },
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 6.5,
-      cellPadding: 0.65,
+      fontSize: 6.8,
+      cellPadding: { top: 1.4, bottom: 1.4, left: 1.2, right: 1.2 },
       halign: 'center',
+      valign: 'middle',
+      lineWidth: 0.15,
+      lineColor: [203, 213, 225],
     },
     bodyStyles: {
       fontSize: 5.8,
       textColor: [51, 65, 85],
-      cellPadding: 0.55,
+      cellPadding: { top: 0.9, bottom: 0.9, left: 1.2, right: 1.2 },
+      valign: 'middle',
+      lineWidth: 0.12,
+      lineColor: [226, 232, 240],
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
@@ -1941,7 +1964,9 @@ export function generateLivroPontoPDFReport({
   doc.text(companyName, 155, lineY + 4, { align: 'center' });
   doc.setFontSize(5.8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Coordenação Pedagógica / DP GADAL', 155, lineY + 7.5, { align: 'center' });
+  // Dynamic signature label reflecting companyName or institution
+  const companyShort = companyName.replace(/ - Gestão e Apoio/i, '').trim();
+  doc.text(`Coordenação do Integral / DP ${companyShort || companyName}`, 155, lineY + 7.5, { align: 'center' });
 
   applyPageNumbersAndFooters(doc, 'portrait');
   const filename = `Espelho_Ponto_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
@@ -1982,7 +2007,7 @@ export function generateReciboBolsaPDF({
   year,
   financials,
   closingRecord,
-  companyName = 'GADAL - Gestão e Apoio',
+  companyName: companyNameProp,
   institutionName = 'Instituto Educacional Crescer',
   pixKey = 'Pendente',
   contractSchedule = '11:40 - 17:40',
@@ -1998,6 +2023,7 @@ export function generateReciboBolsaPDF({
   const monthName = getMonthNameBR(month);
   const userName = user?.name || closingRecord?.userName || 'Colaborador';
   const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
+  const companyName = user?.company || closingRecord?.companyName || companyNameProp || 'GADAL - Gestão e Apoio';
 
   // 1. Compact Header
   drawCompactOfficialHeader(

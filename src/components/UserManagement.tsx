@@ -1,7 +1,19 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, UserRole, ActivityType, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
+import { UserProfile, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
-import { getRoleBadgeStyle, isCoordenador, formatBirthDateToDisplay, canManageStudents, canMarkAttendance } from '../utils/authUtils';
+import {
+  getRoleBadgeStyle,
+  isCoordenador,
+  formatBirthDateToDisplay,
+  canManageStudents,
+  canMarkAttendance,
+  isUserActive,
+  isUserDismissed,
+  isUserInactiveOrDismissed,
+  getUserStatus,
+  getUserStatusBadge,
+} from '../utils/authUtils';
+import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
@@ -142,6 +154,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('ATIVOS');
 
   // User Editing state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -154,6 +167,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formPhone, setFormPhone] = useState('');
   const [formBirthDate, setFormBirthDate] = useState('1990-01-01');
   const [formRole, setFormRole] = useState<UserRole>('professor');
+  const [formStatus, setFormStatus] = useState<UserStatus>('ATIVO');
+  const [formDataDesligamento, setFormDataDesligamento] = useState('');
+  const [formMotivoDesligamento, setFormMotivoDesligamento] = useState('');
   const [formPin, setFormPin] = useState('1234');
   const [formActivities, setFormActivities] = useState<ActivityType[]>([]);
   const [formTurmas, setFormTurmas] = useState<string[]>([]);
@@ -277,16 +293,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       if (!u) return false;
       const matchesSearch =
         (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (u.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+        (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (u.company || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
-      return matchesSearch && matchesRole;
+
+      let matchesStatus = true;
+      if (statusFilter === 'ATIVOS') {
+        matchesStatus = isUserActive(u);
+      } else if (statusFilter === 'INATIVOS') {
+        matchesStatus = isUserInactiveOrDismissed(u);
+      }
+
+      return matchesSearch && matchesRole && matchesStatus;
     })
     .sort((a, b) => {
       // 1. Coordenador/Admin fica sempre no topo
       if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
       if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;
 
-      // 2. Demais usuários ordenados por nome (A-Z)
+      // 2. Colaboradores Ativos antes de Desligados/Inativos se visualizando Todos
+      const aActive = isUserActive(a) ? 1 : 0;
+      const bActive = isUserActive(b) ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+
+      // 3. Demais usuários ordenados por nome (A-Z)
       return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
     });
 
@@ -386,6 +416,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
+    setFormStatus(getUserStatus(user));
+    setFormDataDesligamento(user.dataDesligamento || '');
+    setFormMotivoDesligamento(user.motivoDesligamento || '');
     setFormPin(user.pin || '1234');
     setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
     setFormTurmas(
@@ -438,6 +471,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPhone('');
     setFormBirthDate('1995-05-20');
     setFormRole('professor');
+    setFormStatus('ATIVO');
+    setFormDataDesligamento('');
+    setFormMotivoDesligamento('');
     setFormPin('1234');
     setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
     setFormTurmas(availableTurmas);
@@ -523,12 +559,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
     const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
 
+    const effectiveStatus: UserStatus = isMasterAdmin ? 'ATIVO' : formStatus;
+    const effectiveDataDesligamento =
+      !isMasterAdmin && (effectiveStatus === 'DESLIGADO' || effectiveStatus === 'INATIVO') && formDataDesligamento.trim()
+        ? formDataDesligamento.trim()
+        : undefined;
+    const effectiveMotivoDesligamento =
+      !isMasterAdmin && (effectiveStatus === 'DESLIGADO' || effectiveStatus === 'INATIVO') && formMotivoDesligamento.trim()
+        ? formMotivoDesligamento.trim()
+        : undefined;
+
     const updatedUser: UserProfile = {
       id: targetId,
       name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
       email: normalizedEmail,
       phone: formPhone.trim() || undefined,
       role: effectiveRole,
+      status: effectiveStatus,
+      dataDesligamento: effectiveDataDesligamento,
+      motivoDesligamento: effectiveMotivoDesligamento,
       cargoLabel: roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
       birthDate: effectiveBirthDate,
@@ -974,40 +1023,72 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           {/* Filters, Search & Expand/Collapse Controls */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="relative w-full sm:w-80">
+              <div className="relative w-full sm:w-72">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por nome ou e-mail..."
+                  placeholder="Buscar por nome, e-mail ou empresa..."
                   className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
-              <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-                {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
-                  const labels: Record<string, string> = {
-                    TODOS: 'Todos os Usuários',
-                    coordenador: 'Coordenadores',
-                    professor: 'Professores / Monitores',
-                  };
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                {/* Status Filter */}
+                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl">
+                  {(['ATIVOS', 'INATIVOS', 'TODOS'] as const).map((s) => {
+                    const statusLabels: Record<string, string> = {
+                      ATIVOS: 'Ativos',
+                      INATIVOS: 'Inativos / Desligados',
+                      TODOS: 'Todos',
+                    };
+                    const isSel = statusFilter === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setStatusFilter(s)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          isSel
+                            ? s === 'ATIVOS'
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : s === 'INATIVOS'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'bg-slate-900 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {statusLabels[s]}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                  const isSel = roleFilter === r;
-                  return (
-                    <button
-                      key={r}
-                      onClick={() => setRoleFilter(r)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                        isSel
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {labels[r]}
-                    </button>
-                  );
-                })}
+                {/* Role Filter */}
+                <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0">
+                  {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
+                    const labels: Record<string, string> = {
+                      TODOS: 'Todos os Cargos',
+                      coordenador: 'Coordenação',
+                      professor: 'Monitoras / Prof.',
+                    };
+
+                    const isSel = roleFilter === r;
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => setRoleFilter(r)}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          isSel
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {labels[r]}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -1106,6 +1187,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               )}
                               <span>{roleStyle.label}</span>
                             </span>
+
+                            {/* Status Badge */}
+                            {(() => {
+                              const badge = getUserStatusBadge(user);
+                              return (
+                                <span
+                                  className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${badge.bg} ${badge.text} ${badge.border} inline-flex items-center space-x-1`}
+                                >
+                                  {badge.label}
+                                </span>
+                              );
+                            })()}
                           </div>
 
                           <div className="flex items-center flex-wrap gap-y-1.5 gap-x-4 text-xs text-slate-500">
@@ -1202,6 +1295,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     {/* Accordion Expanded Body */}
                     {isExpanded && (
                       <div className="p-5 sm:p-6 space-y-4 bg-white animate-fade-in border-t border-slate-100">
+                        {/* Inactivity / Dismissal Notice */}
+                        {isUserInactiveOrDismissed(user) && (
+                          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-rose-950">
+                            <div className="flex items-center space-x-2.5">
+                              <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0" />
+                              <div>
+                                <p className="font-extrabold text-rose-900">
+                                  Colaborador(a) {user.status === 'DESLIGADO' ? 'DESLIGADO(A) / CONTRATO ENCERRADO' : 'INATIVO(A) / SUSPENSO(A)'}
+                                </p>
+                                <p className="text-rose-700 text-[11px] mt-0.5">
+                                  {user.dataDesligamento ? `Data do Desligamento: ${formatDateBR(user.dataDesligamento)}` : 'Data de desligamento não informada'}
+                                  {user.motivoDesligamento ? ` • Motivo: ${user.motivoDesligamento}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-extrabold bg-white text-rose-800 px-2.5 py-1 rounded-lg border border-rose-300 shrink-0">
+                              Ocultado da Lista Diária Ativa
+                            </span>
+                          </div>
+                        )}
+
                         {/* Quick User Details Bar: Password / BirthDate & Direct Edit */}
                         <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                           <div className="flex items-center space-x-2 text-amber-900">
@@ -1870,6 +1984,134 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Status do Colaborador (Situação Funcional & Livro Ponto) */}
+              {(!editingUser || (editingUser.role !== 'coordenador' && editingUser.email.toLowerCase() !== 'jfernandoveiga1967@gmail.com' && editingUser.id !== 'usr_coord_1')) && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>Situação Funcional / Status no Livro Ponto:</span>
+                    </label>
+                    <span
+                      className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${
+                        formStatus === 'ATIVO'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          : formStatus === 'DESLIGADO'
+                          ? 'bg-rose-100 text-rose-800 border-rose-300'
+                          : 'bg-slate-200 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {formStatus === 'ATIVO' ? 'Ativo (Na Escala Diária)' : formStatus === 'DESLIGADO' ? 'Desligado (Histórico Preservado)' : 'Inativo (Suspenso)'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormStatus('ATIVO');
+                        setFormDataDesligamento('');
+                        setFormMotivoDesligamento('');
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formStatus === 'ATIVO'
+                          ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 text-emerald-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-emerald-800 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>ATIVO</span>
+                        </span>
+                        {formStatus === 'ATIVO' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        Aparece na lista de batidas diárias e espelhos de ponto ativos.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormStatus('INATIVO')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formStatus === 'INATIVO'
+                          ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 text-amber-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-amber-800 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <span>INATIVO</span>
+                        </span>
+                        {formStatus === 'INATIVO' && <Check className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        Afastado/suspenso temporariamente. Oculto na lista diária.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormStatus('DESLIGADO');
+                        if (!formDataDesligamento) {
+                          setFormDataDesligamento(new Date().toISOString().split('T')[0]);
+                        }
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        formStatus === 'DESLIGADO'
+                          ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-500/20 text-rose-950 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-rose-800 flex items-center gap-1">
+                          <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                          <span>DESLIGADO</span>
+                        </span>
+                        {formStatus === 'DESLIGADO' && <Check className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        Contrato rescindido. Bloqueia novas batidas; preserva relatórios passados.
+                      </p>
+                    </button>
+                  </div>
+
+                  {/* Detalhes de Desligamento / Inativação */}
+                  {(formStatus === 'DESLIGADO' || formStatus === 'INATIVO') && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 animate-fade-in">
+                      <div>
+                        <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Data do Desligamento / Inativação:</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={formDataDesligamento}
+                          onChange={(e) => setFormDataDesligamento(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-rose-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px]">
+                          Motivo / Observações do DP:
+                        </label>
+                        <input
+                          type="text"
+                          value={formMotivoDesligamento}
+                          onChange={(e) => setFormMotivoDesligamento(e.target.value)}
+                          placeholder="Ex: Término de contrato, transferência, etc."
+                          className="w-full px-3 py-2 bg-white border border-rose-300 rounded-xl text-slate-900 font-medium text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

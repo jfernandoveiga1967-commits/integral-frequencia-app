@@ -99,8 +99,12 @@ export interface DailyConsolidatedMetrics {
   dateStr: string;
   dayName: string;
   dayShort: string;
-  /** Total active students in scope scheduled for this date (Base Esperada) */
+  /** Total de alunos matriculados ativos cadastrados no escopo */
+  totalMatriculados: number;
+  /** Total active students in scope scheduled for this date (Base Esperada Hoje por dia de frequência) */
   totalAtivos: number;
+  /** Alias explícito para Base Esperada Hoje */
+  totalEsperados: number;
   /** Total present (Presente normal + Saída antecipada + Sem equipamento) */
   presentes: number;
   /** Subset of presentes with early dismissal */
@@ -142,6 +146,10 @@ export function getDailyConsolidatedMetrics(
     ? students
     : students.filter((s) => s.turma === turmaFilter);
 
+  // Total active enrolled students in the scope
+  const activeEnrolledStudents = targetStudents.filter((s) => isStudentActiveOnDate(s, dateStr));
+  const totalMatriculados = activeEnrolledStudents.length;
+
   // Map of Routine Records on this date by studentId
   const routineRecordMap = new Map<string, AttendanceRecord>();
   records.forEach((r) => {
@@ -160,10 +168,8 @@ export function getDailyConsolidatedMetrics(
   let justificados = 0;
   let pendentes = 0;
 
-  // Filter only students who are active and scheduled to attend on this date
-  const scheduledStudents = targetStudents.filter(
-    (s) => isStudentActiveOnDate(s, dateStr) && isStudentScheduledForDate(s, dateStr)
-  );
+  // Filter only students who are active and scheduled to attend on this specific date (diasFrequencia check)
+  const scheduledStudents = activeEnrolledStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
   const totalAtivos = scheduledStudents.length;
 
   scheduledStudents.forEach((student) => {
@@ -216,7 +222,9 @@ export function getDailyConsolidatedMetrics(
     dateStr,
     dayName,
     dayShort,
+    totalMatriculados,
     totalAtivos,
+    totalEsperados: totalAtivos,
     presentes,
     saidasAntecipadas,
     semEquipamento,

@@ -140,6 +140,8 @@ export interface PontoMonthClosing {
   pixKey?: string;
   unjustifiedAbsencesCount: number;
   unjustifiedAbsencesDiscount: number;
+  missingMinutesTotal?: number;
+  missingHoursDiscount?: number;
   extraMinutesTotal: number;
   extraHoursAmount: number;
   manualAddition: number;
@@ -167,6 +169,8 @@ export interface PontoMonthClosing {
   updatedAt?: string;
 }
 
+export type UserStatus = 'ATIVO' | 'INATIVO' | 'DESLIGADO' | 'ativo' | 'inativo' | 'desligado';
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -177,6 +181,9 @@ export interface UserProfile {
   avatarColor?: string;
   birthDate?: string; // YYYY-MM-DD or DD/MM/YYYY
   pin?: string;
+  status?: UserStatus; // 'ATIVO' | 'INATIVO' | 'DESLIGADO' (padrão: 'ATIVO')
+  dataDesligamento?: string; // Data do desligamento/inativação (YYYY-MM-DD)
+  motivoDesligamento?: string; // Motivo opcional do desligamento/inativação
   assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user
   specialtyActivity?: ActivityType; // Legacy or primary specialty activity
   assignedTurmas?: string[]; // Turmas assigned to this user (optional)

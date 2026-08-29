@@ -32,6 +32,7 @@ interface HeaderProps {
   setActiveTab: (tab: TabType) => void;
   totalStudents: number;
   totalAtivosHoje?: number;
+  totalMatriculados?: number;
   presentesHoje?: number;
   faltasHoje?: number;
   justificadosHoje?: number;
@@ -46,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   totalStudents,
   totalAtivosHoje,
+  totalMatriculados,
   presentesHoje = 0,
   faltasHoje = 0,
   justificadosHoje = 0,
@@ -237,40 +239,63 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             {/* Live Real-Time Attendance Counters (Baseado na Rotina de Hoje) */}
-            <div className="flex items-center space-x-2 text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
-              <div className="flex items-center space-x-1.5" title="Total de alunos ativos e esperados hoje no Integral">
-                <span className="text-slate-400 font-medium">Ativos Hoje:</span>
-                <span className="font-extrabold text-indigo-300">{totalAtivosHoje !== undefined ? totalAtivosHoje : totalStudents}</span>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
+              {/* 1. Esperados Hoje (Alunos com frequência prevista/agendada para hoje) */}
+              <div className="flex items-center space-x-1.5" title="Alunos ativos com frequência agendada para o dia de hoje (conforme dias de frequência cadastrados)">
+                <span className="text-slate-400 font-medium">Esperados Hoje:</span>
+                <span className="font-extrabold text-indigo-300">
+                  {totalAtivosHoje !== undefined ? totalAtivosHoje : totalStudents}
+                </span>
               </div>
-              <div className="h-3.5 w-px bg-slate-700" />
+
+              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+
+              {/* 2. Total Geral Matriculados */}
+              <div className="flex items-center space-x-1.5" title="Total geral de alunos matriculados na escola">
+                <span className="text-slate-400 font-medium">Total Matriculados:</span>
+                <span className="font-bold text-slate-300">
+                  {totalMatriculados !== undefined ? totalMatriculados : totalStudents}
+                </span>
+              </div>
+
+              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+
+              {/* 3. Presentes */}
               <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (Presença normal + Saída antecipada + Sem uniforme)">
                 <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 <span className="text-slate-400 font-medium">Presentes:</span>
                 <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
               </div>
-              <div className="h-3.5 w-px bg-slate-700" />
+
+              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+
+              {/* 4. Faltas */}
               <div className="flex items-center space-x-1.5" title="Faltas não justificadas hoje no Integral">
                 <span className="text-slate-400 font-medium">Faltas:</span>
                 <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                   {faltasHoje}
                 </span>
               </div>
+
+              {/* 5. Atestados / Justificados */}
               {justificadosHoje > 0 && (
                 <>
-                  <div className="h-3.5 w-px bg-slate-700" />
+                  <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
                   <div className="flex items-center space-x-1.5" title="Ausências justificadas / Atestados de saúde hoje">
                     <span className="text-slate-400 font-medium">Atestados:</span>
                     <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
                   </div>
                 </>
               )}
+
+              {/* 6. Pendentes (Apenas alunos esperados hoje sem chamada de rotina) */}
               {pendentesHoje > 0 && (
                 <>
-                  <div className="h-3.5 w-px bg-slate-700" />
+                  <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
                   <button
                     type="button"
                     onClick={onNavigateToPending}
-                    title="Alunos matriculados que ainda não tiveram chamada de rotina lançada hoje. Clique para conferir."
+                    title="Alunos esperados hoje que ainda não receberam marcação de presença/falta na chamada de rotina. Clique para conferir."
                     className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
                   >
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />

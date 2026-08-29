@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 
@@ -8,6 +8,8 @@ const TURMAS_KEY = 'integral_frequencia_turmas_v1';
 const ACTIVITIES_KEY = 'integral_frequencia_activities_v1';
 const SCHEDULES_KEY = 'integral_frequencia_schedules_v1';
 const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
+const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
+const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 
 export function loadHolidays(): HolidayItem[] {
   try {
@@ -240,10 +242,58 @@ export function saveAttendanceRecords(records: AttendanceRecord[]): void {
   }
 }
 
+export function loadPontoRecords(): PontoRecord[] {
+  try {
+    const data = localStorage.getItem(PONTO_RECORDS_KEY);
+    if (data) {
+      const parsed: PontoRecord[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao carregar registros de ponto do LocalStorage:', e);
+  }
+  return [];
+}
+
+export function savePontoRecords(records: PontoRecord[]): void {
+  try {
+    localStorage.setItem(PONTO_RECORDS_KEY, JSON.stringify(records));
+  } catch (e) {
+    console.error('Erro ao salvar registros de ponto:', e);
+  }
+}
+
+export function loadPontoClosings(): PontoMonthClosing[] {
+  try {
+    const data = localStorage.getItem(PONTO_CLOSINGS_KEY);
+    if (data) {
+      const parsed: PontoMonthClosing[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao carregar fechamentos de ponto do LocalStorage:', e);
+  }
+  return [];
+}
+
+export function savePontoClosings(closings: PontoMonthClosing[]): void {
+  try {
+    localStorage.setItem(PONTO_CLOSINGS_KEY, JSON.stringify(closings));
+  } catch (e) {
+    console.error('Erro ao salvar fechamentos de ponto:', e);
+  }
+}
+
 export function resetAllData(): void {
   localStorage.removeItem(STUDENTS_KEY);
   localStorage.removeItem(RECORDS_KEY);
   localStorage.removeItem(TURMAS_KEY);
+  localStorage.removeItem(PONTO_RECORDS_KEY);
+  localStorage.removeItem(PONTO_CLOSINGS_KEY);
 }
 
 function generateInitialSeedRecords(): AttendanceRecord[] {

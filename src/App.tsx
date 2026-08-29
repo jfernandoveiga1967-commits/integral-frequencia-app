@@ -2,8 +2,27 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
-import { loadStudents, saveStudents, loadAttendanceRecords, saveAttendanceRecords, loadTurmas, saveTurmas, loadActivities, saveActivities, loadSchedules, saveSchedules, loadHolidays, saveHolidays, resetAllData, isMockStudent } from './utils/storageUtils';
-import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR } from './utils/dateUtils';
+import {
+  loadStudents,
+  saveStudents,
+  loadAttendanceRecords,
+  saveAttendanceRecords,
+  loadTurmas,
+  saveTurmas,
+  loadActivities,
+  saveActivities,
+  loadSchedules,
+  saveSchedules,
+  loadHolidays,
+  saveHolidays,
+  loadPontoRecords,
+  savePontoRecords,
+  loadPontoClosings,
+  savePontoClosings,
+  resetAllData,
+  isMockStudent,
+} from './utils/storageUtils';
+import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS, isCoordenador } from './utils/authUtils';
@@ -62,8 +81,8 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [turmas, setTurmas] = useState<string[]>([]);
-  const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>([]);
-  const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>([]);
+  const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
+  const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
@@ -463,11 +482,27 @@ export default function App() {
     });
 
     const unsubPontoRecords = subscribePontoRecords((fsPontoRecords) => {
-      setPontoRecords(fsPontoRecords);
+      if (fsPontoRecords && fsPontoRecords.length > 0) {
+        setPontoRecords(fsPontoRecords);
+        savePontoRecords(fsPontoRecords);
+      } else {
+        const localRecs = loadPontoRecords();
+        if (localRecs.length > 0) {
+          batchSavePontoRecordsToFirestore(localRecs).catch(() => {});
+        }
+      }
     });
 
     const unsubPontoClosings = subscribePontoClosings((fsPontoClosings) => {
-      setPontoClosings(fsPontoClosings);
+      if (fsPontoClosings && fsPontoClosings.length > 0) {
+        setPontoClosings(fsPontoClosings);
+        savePontoClosings(fsPontoClosings);
+      } else {
+        const localClosings = loadPontoClosings();
+        if (localClosings.length > 0) {
+          localClosings.forEach((c) => savePontoClosingToFirestore(c).catch(() => {}));
+        }
+      }
     });
 
     return () => {
@@ -865,12 +900,15 @@ export default function App() {
   const handleSavePontoRecord = (record: PontoRecord) => {
     setPontoRecords((prev) => {
       const idx = prev.findIndex((r) => r.id === record.id);
+      let next: PontoRecord[];
       if (idx >= 0) {
-        const next = [...prev];
+        next = [...prev];
         next[idx] = record;
-        return next;
+      } else {
+        next = [...prev, record];
       }
-      return [...prev, record];
+      savePontoRecords(next);
+      return next;
     });
     savePontoRecordToFirestore(record);
   };
@@ -880,7 +918,9 @@ export default function App() {
       const map = new Map<string, PontoRecord>();
       prev.forEach((r) => map.set(r.id, r));
       recordsToSave.forEach((r) => map.set(r.id, r));
-      return Array.from(map.values());
+      const merged = Array.from(map.values());
+      savePontoRecords(merged);
+      return merged;
     });
     batchSavePontoRecordsToFirestore(recordsToSave);
   };
@@ -888,12 +928,15 @@ export default function App() {
   const handleSavePontoClosing = (closing: PontoMonthClosing) => {
     setPontoClosings((prev) => {
       const idx = prev.findIndex((c) => c.id === closing.id);
+      let next: PontoMonthClosing[];
       if (idx >= 0) {
-        const next = [...prev];
+        next = [...prev];
         next[idx] = closing;
-        return next;
+      } else {
+        next = [...prev, closing];
       }
-      return [...prev, closing];
+      savePontoClosings(next);
+      return next;
     });
     savePontoClosingToFirestore(closing);
   };
@@ -958,7 +1001,8 @@ export default function App() {
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        totalStudents={students.length}
+        totalStudents={students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || students.length}
+        totalMatriculados={students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || students.length}
         totalAtivosHoje={todayConsolidated.totalAtivos}
         presentesHoje={todayConsolidated.presentes}
         faltasHoje={todayConsolidated.faltas}
@@ -984,14 +1028,14 @@ export default function App() {
                     Auditoria de Chamada
                   </span>
                   <span className="text-xs font-bold text-amber-800">
-                    Dia {formatDateBR(todayStr)}
+                    Dia {formatDateBR(todayStr)} ({todayConsolidated.dayName})
                   </span>
                 </div>
                 <h4 className="text-sm font-extrabold text-amber-950 mt-1">
-                  Existem {todayConsolidated.pendentes} {todayConsolidated.pendentes === 1 ? 'aluno com chamada pendente' : 'alunos com chamada pendente/não lançada'} hoje
+                  Existem {todayConsolidated.pendentes} {todayConsolidated.pendentes === 1 ? 'aluno esperado com chamada pendente' : 'alunos esperados com chamada pendente/não lançada'} hoje
                 </h4>
                 <p className="text-xs text-amber-800/90 mt-0.5">
-                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} matrículas ativas</strong> esperadas. Certifique-se de preencher todos os alunos antes de gerar relatórios consolidados em PDF.
+                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} alunos com frequência prevista hoje</strong> (de {students.length} matriculados). Alunos sem agenda para hoje não geram pendência.
                 </p>
               </div>
             </div>
@@ -1177,7 +1221,7 @@ export default function App() {
                     Auditoria de Chamadas Pendentes
                   </h3>
                   <p className="text-xs text-slate-400">
-                    {todayConsolidated.pendentes} alunos matriculados sem chamada de Rotina em {formatDateBR(todayStr)}
+                    {todayConsolidated.pendentes} alunos com presença prevista hoje sem chamada de Rotina em {formatDateBR(todayStr)} ({todayConsolidated.dayName})
                   </p>
                 </div>
               </div>
@@ -1228,7 +1272,7 @@ export default function App() {
                 <div className="py-12 text-center text-slate-400">
                   <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
                   <p className="text-sm font-extrabold text-slate-700">Nenhum aluno pendente encontrado!</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Todos os alunos correspondentes ao filtro estão com chamada lançada.</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Todos os alunos esperados hoje correspondentes ao filtro estão com chamada lançada.</p>
                 </div>
               ) : (
                 filteredPendingStudents.map((student) => (
@@ -1245,6 +1289,9 @@ export default function App() {
                           <span className="text-xs font-bold text-slate-900">{student.name}</span>
                           <span className="text-[10px] font-extrabold px-2 py-0.2 bg-slate-100 text-slate-700 rounded-full border border-slate-200">
                             Turma {student.turma}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.2 bg-indigo-50 text-indigo-700 rounded-full border border-indigo-200">
+                            {formatDiasFrequencia(student.diasFrequencia)}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-500 mt-0.5">

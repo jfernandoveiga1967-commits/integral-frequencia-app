@@ -43,6 +43,9 @@ import {
 import {
   isCoordenador,
   getRoleBadgeStyle,
+  isUserActive,
+  isUserInactiveOrDismissed,
+  getUserStatusBadge,
 } from '../utils/authUtils';
 import {
   isWeekend,
@@ -73,6 +76,7 @@ import {
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint } from '../utils/printUtils';
+import { loadPontoRecords } from '../utils/storageUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
@@ -113,10 +117,44 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1); // 1-12
   const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
-  // Filtered users list (exclude inactive if any)
+  // State to optionally view inactive / dismissed employees in Livro Ponto
+  const [showInactiveUsers, setShowInactiveUsers] = useState(false);
+
+  // Available users list for Livro Ponto:
+  // 1. Active users are always shown for daily routines and current operations.
+  // 2. Inactive / Dismissed users are hidden by default from daily selection, but PRESERVED and displayed when:
+  //    - The user explicitly toggles `showInactiveUsers`, OR
+  //    - The inactive/dismissed user has historical punch records in the selected monthKey, OR
+  //    - The inactive/dismissed user has a recorded month closing in the selected monthKey.
+  // This guarantees full legal, fiscal and audit history preservation while keeping daily routines clutter-free.
   const availableUsers = useMemo(() => {
-    return [...users].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [users]);
+    return users
+      .filter((u) => {
+        if (isUserActive(u)) return true;
+        if (showInactiveUsers) return true;
+
+        // Check if user has historical punch records in this selected month
+        const hasRecordsInMonth = pontoRecords.some(
+          (r) => r.userId === u.id && r.date && r.date.startsWith(monthKey)
+        );
+        if (hasRecordsInMonth) return true;
+
+        // Check if user has a stored monthly closing in this selected month
+        const hasClosingInMonth = pontoClosings.some(
+          (c) => c.userId === u.id && c.monthKey === monthKey
+        );
+        if (hasClosingInMonth) return true;
+
+        return false;
+      })
+      .sort((a, b) => {
+        // Active users first, then alphabetically
+        const aActive = isUserActive(a) ? 1 : 0;
+        const bActive = isUserActive(b) ? 1 : 0;
+        if (aActive !== bActive) return bActive - aActive;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+  }, [users, showInactiveUsers, pontoRecords, pontoClosings, monthKey]);
 
   // Selected User for viewing/editing
   const [selectedUserId, setSelectedUserId] = useState<string>(() => {
@@ -126,14 +164,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     return currentUser?.id || users[0]?.id || '';
   });
 
-  // Keep selected user updated if current user changes or selected user not set
+  // Keep selected user updated if current user changes or selected user is not in availableUsers
   useEffect(() => {
     if (!isAdmin && currentUser) {
       setSelectedUserId(currentUser.id);
-    } else if (!selectedUserId && users.length > 0) {
-      setSelectedUserId(users[0].id);
+    } else if (availableUsers.length > 0) {
+      const exists = availableUsers.some((u) => u.id === selectedUserId);
+      if (!exists) {
+        setSelectedUserId(availableUsers[0].id);
+      }
     }
-  }, [isAdmin, currentUser, users, selectedUserId]);
+  }, [isAdmin, currentUser, availableUsers, selectedUserId]);
 
   const targetUser = useMemo(() => {
     return users.find((u) => u.id === selectedUserId) || currentUser || users[0] || null;
@@ -475,6 +516,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
+    if (isUserInactiveOrDismissed(targetUser)) {
+      setPunchFeedback({
+        text: `Não é possível registrar batida de ponto para colaboradores com status Inativo ou Desligado (${targetUser?.name || 'Colaborador'}).`,
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 5000);
+      return;
+    }
+
     const currentNow = new Date();
     const todayStr = toISODateString(currentNow);
     if (!todayStr.startsWith(monthKey)) {
@@ -488,9 +538,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
     const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
     
-    // Always find latest day record from pontoRecords or monthUserRecords
+    // Always find latest day record from pontoRecords, monthUserRecords or fresh LocalStorage cache
+    const freshLocal = loadPontoRecords();
     const dayRecord =
       pontoRecords.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
+      freshLocal.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
       monthUserRecords.find((r) => r.date === todayStr);
 
     const result = processSequentialPunch({
@@ -589,6 +641,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       pixKey,
       unjustifiedAbsencesCount: financials.unjustifiedAbsencesCount,
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
+      missingMinutesTotal: financials.totalMissingMinutes,
+      missingHoursDiscount: financials.missingHoursDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
       extraHoursAmount: financials.extraHoursAmount,
       manualAddition,
@@ -648,6 +702,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       pixKey,
       unjustifiedAbsencesCount: financials.unjustifiedAbsencesCount,
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
+      missingMinutesTotal: financials.totalMissingMinutes,
+      missingHoursDiscount: financials.missingHoursDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
       extraHoursAmount: financials.extraHoursAmount,
       manualAddition,
@@ -893,15 +949,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             <button
               type="button"
               onClick={handleQuickPunch}
-              disabled={isMonthClosed}
+              disabled={isMonthClosed || isUserInactiveOrDismissed(targetUser)}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all ${
-                isMonthClosed
+                isMonthClosed || isUserInactiveOrDismissed(targetUser)
                   ? 'bg-slate-800/80 text-slate-500 cursor-not-allowed border border-slate-700 opacity-60'
                   : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white border border-emerald-400/40 shadow-emerald-900/30 cursor-pointer'
               }`}
               title={
                 isMonthClosed
                   ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
+                  : isUserInactiveOrDismissed(targetUser)
+                  ? 'Colaborador com status Inativo ou Desligado (Batidas bloqueadas)'
                   : 'Registrar batida de ponto com o horário exato de agora'
               }
             >
@@ -1004,24 +1062,52 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           {/* Collaborator Selector (Admin or Locked for standard user) & Badges */}
           <div className="md:col-span-2 flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-3">
             {/* Left side: Colaborador selector */}
-            <div className="flex-1 flex items-center space-x-2.5 min-w-0">
+            <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
               <div className="flex items-center space-x-1.5 shrink-0 text-slate-400 font-medium text-xs">
                 <User className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span className="hidden sm:inline">Colaborador(a):</span>
+                <span>Colaborador(a):</span>
               </div>
 
               {isAdmin ? (
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer truncate"
-                >
-                  {availableUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} — ({u.cargoLabel || (u.role === 'coordenador' ? 'Coordenação' : 'Monitora/Professora')})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center space-x-2 flex-1 min-w-0">
+                  <select
+                    value={selectedUserId}
+                    onChange={(e) => setSelectedUserId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer truncate"
+                  >
+                    {availableUsers.map((u) => {
+                      const isInactive = isUserInactiveOrDismissed(u);
+                      const statusTag = isInactive
+                        ? u.status === 'DESLIGADO'
+                          ? ` [DESLIGADO${u.dataDesligamento ? ` em ${formatDateBR(u.dataDesligamento)}` : ''}]`
+                          : ' [INATIVO]'
+                        : '';
+                      return (
+                        <option key={u.id} value={u.id}>
+                          {u.name}{statusTag} — ({u.cargoLabel || (u.role === 'coordenador' ? 'Coordenação' : 'Monitora/Professora')})
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowInactiveUsers((prev) => !prev)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center space-x-1 border ${
+                      showInactiveUsers
+                        ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50'
+                        : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                    title={
+                      showInactiveUsers
+                        ? 'Ocultar colaboradores inativos/desligados'
+                        : 'Exibir todos os colaboradores inativos/desligados no seletor'
+                    }
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{showInactiveUsers ? 'Inativos ON' : 'Ver Inativos'}</span>
+                  </button>
+                </div>
               ) : (
                 <div className="flex items-center space-x-2 text-slate-200 text-sm font-bold truncate">
                   <span className="truncate">{targetUser?.name || currentUser?.name}</span>
@@ -1064,11 +1150,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               {targetUser?.name ? targetUser.name.substring(0, 2).toUpperCase() : 'CP'}
             </div>
             <div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center flex-wrap gap-2">
                 <h2 className="text-lg font-black text-slate-900">{targetUser?.name || 'Colaborador(a)'}</h2>
                 <span className="text-xs px-2.5 py-0.5 font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
                   {targetUser?.cargoLabel || 'Estagiária'}
                 </span>
+                {(() => {
+                  const badge = getUserStatusBadge(targetUser);
+                  return (
+                    <span
+                      className={`text-[11px] px-2.5 py-0.5 font-extrabold rounded-full border ${badge.bg} ${badge.text} ${badge.border}`}
+                    >
+                      {badge.label}
+                    </span>
+                  );
+                })()}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Empresa Conveniada: <strong className="text-slate-700">{companyName}</strong> • Instituição de Ensino:{' '}
@@ -1360,14 +1456,35 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                               return <span className="text-slate-400 font-normal">{item.isWk ? '—' : '0h00min'}</span>;
                             }
                             const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
+                            const hasCompletePair = Boolean(
+                              (rec?.entry1 && (rec?.exit2 || rec?.exit1)) ||
+                              (rec?.entry1 && rec?.exit1 && rec?.entry2 && rec?.exit2)
+                            );
+
                             return (
                               <div className="flex flex-col items-center">
-                                <span className={`font-black ${dayCalc.overtimeMinutes > 0 ? 'text-indigo-600' : 'text-slate-900'}`}>
+                                <span
+                                  className={`font-black ${
+                                    dayCalc.overtimeMinutes > 0
+                                      ? 'text-indigo-600'
+                                      : dayCalc.missingMinutes > 0 && hasCompletePair
+                                      ? 'text-rose-600'
+                                      : 'text-slate-900'
+                                  }`}
+                                >
                                   {formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
                                 </span>
                                 {dayCalc.overtimeMinutes > 0 && (
                                   <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">
                                     +{formatMinutesToHoursAndMinutes(dayCalc.overtimeMinutes)}
+                                  </span>
+                                )}
+                                {dayCalc.missingMinutes > 0 && hasCompletePair && (
+                                  <span
+                                    className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1 rounded"
+                                    title={`Atraso/Saldo negativo de -${formatMinutesToHoursAndMinutes(dayCalc.missingMinutes)}`}
+                                  >
+                                    -{formatMinutesToHoursAndMinutes(dayCalc.missingMinutes)}
                                   </span>
                                 )}
                               </div>
@@ -1496,7 +1613,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           {/* Grid of calculations */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
               <span className="text-slate-500 font-medium block truncate text-[11px]">Bolsa Auxílio Base:</span>
               <span className="text-sm sm:text-base font-black text-slate-800 truncate mt-1">
@@ -1522,6 +1639,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas Injustificadas:</span>
               <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
                 {financials.unjustifiedAbsencesCount} dias ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})
+              </span>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+              <span className="text-amber-800 font-medium block truncate text-[11px]">Atrasos / Horas Faltantes:</span>
+              <span className="text-xs sm:text-sm font-black text-amber-950 break-words mt-1 leading-snug font-mono">
+                {financials.missingHoursFormatted} ({financials.missingHoursDiscount > 0 ? formatCurrencyBR(-financials.missingHoursDiscount) : 'R$ 0,00'})
               </span>
             </div>
 
@@ -2116,8 +2240,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="grid grid-cols-2 gap-8 pt-6">
                 <div className="text-center">
                   <div className="border-b border-slate-900 pb-1 w-full"></div>
-                  <span className="text-[10px] text-slate-500 font-semibold block mt-1">
-                    COORDENAÇÃO DO INTEGRAL
+                  <span className="text-[10px] text-slate-500 font-semibold block mt-1 uppercase">
+                    COORDENAÇÃO DO INTEGRAL / DP {companyName.replace(/ - Gestão e Apoio/i, '').trim() || companyName}
                   </span>
                 </div>
                 <div className="text-center">

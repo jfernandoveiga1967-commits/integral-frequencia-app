@@ -2,7 +2,21 @@ import { WeekInfo, HolidayItem, DayOfWeek, Student } from '../types';
 
 export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
-export function formatDiasFrequencia(dias?: DayOfWeek[]): string {
+/**
+ * Normalizes day of week string safely handling case, accents and abbreviations.
+ */
+export function normalizeDayOfWeek(day: string | null | undefined): DayOfWeek | null {
+  if (!day) return null;
+  const s = day.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (s.startsWith('seg')) return 'segunda';
+  if (s.startsWith('ter')) return 'terca';
+  if (s.startsWith('qua') && !s.startsWith('qui')) return 'quarta';
+  if (s.startsWith('qui')) return 'quinta';
+  if (s.startsWith('sex')) return 'sexta';
+  return null;
+}
+
+export function formatDiasFrequencia(dias?: (DayOfWeek | string)[]): string {
   if (!dias || dias.length === 0 || dias.length === 5) {
     return 'Integral Completo (Seg a Sex)';
   }
@@ -13,7 +27,12 @@ export function formatDiasFrequencia(dias?: DayOfWeek[]): string {
     quinta: 'Qui',
     sexta: 'Sex',
   };
-  return dias.map((d) => map[d] || d).join(', ');
+  return dias
+    .map((d) => {
+      const norm = normalizeDayOfWeek(d);
+      return norm ? map[norm] || norm : d;
+    })
+    .join(', ');
 }
 
 /**
@@ -42,16 +61,24 @@ export function isStudentActiveOnDate(
   return true;
 }
 
-export function isStudentScheduledForDay(student: { diasFrequencia?: DayOfWeek[] } | null | undefined, dayOfWeek: DayOfWeek | null): boolean {
+export function isStudentScheduledForDay(
+  student: { diasFrequencia?: (DayOfWeek | string)[] } | null | undefined,
+  dayOfWeek: DayOfWeek | string | null
+): boolean {
   if (!student) return false;
   if (!dayOfWeek) return false;
+  const targetDay = normalizeDayOfWeek(dayOfWeek as string);
+  if (!targetDay) return false;
   if (!student.diasFrequencia || !Array.isArray(student.diasFrequencia) || student.diasFrequencia.length === 0) {
-    return true; // Default: enrolled for all weekdays
+    return true; // Default: enrolled for all weekdays (Seg a Sex)
   }
-  return student.diasFrequencia.includes(dayOfWeek);
+  return student.diasFrequencia.some((d) => normalizeDayOfWeek(d) === targetDay);
 }
 
-export function isStudentScheduledForDate(student: { diasFrequencia?: DayOfWeek[] } | null | undefined, date: Date | string): boolean {
+export function isStudentScheduledForDate(
+  student: { diasFrequencia?: (DayOfWeek | string)[] } | null | undefined,
+  date: Date | string
+): boolean {
   if (!student) return false;
   const dayOfWeek = getDayOfWeekFromDate(date);
   return isStudentScheduledForDay(student, dayOfWeek);
