@@ -8,6 +8,7 @@ import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
+import { safeWindowPrint } from '../utils/printUtils';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -727,7 +728,7 @@ function getCurrentHHMM(): string {
             {/* Print Timesheet / Call List */}
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => safeWindowPrint()}
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs active:scale-95"
               title="Imprimir lista de chamada / espelho de frequência em folha A4"
             >
@@ -832,7 +833,7 @@ function getCurrentHHMM(): string {
             <div className="flex items-center space-x-2">
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={() => safeWindowPrint()}
                 className="px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all cursor-pointer flex items-center space-x-1 active:scale-95"
                 title="Imprimir lista de chamada em formato A4"
               >

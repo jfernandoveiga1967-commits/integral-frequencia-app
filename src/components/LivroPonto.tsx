@@ -75,7 +75,7 @@ import {
   processSequentialPunch,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
-import { triggerPrint } from '../utils/printUtils';
+import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
 import { loadPontoRecords } from '../utils/storageUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
@@ -2260,7 +2260,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={() => safeWindowPrint('timesheet-official-sheet')}
                     className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
                   >
                     <Printer className="w-4 h-4" />

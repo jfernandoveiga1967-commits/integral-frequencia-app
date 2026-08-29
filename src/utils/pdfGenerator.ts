@@ -100,8 +100,9 @@ function drawOfficialHeader(
   orientation: 'portrait' | 'landscape' = 'portrait'
 ) {
   const pageWidth = orientation === 'landscape' ? 297 : 210;
+  const rightMarginX = pageWidth - 14;
 
-  // Header Banner Background
+  // Header Banner Background (Height 32mm)
   doc.setFillColor(15, 23, 42); // slate-900
   doc.rect(0, 0, pageWidth, 32, 'F');
 
@@ -128,44 +129,72 @@ function drawOfficialHeader(
   }
 
   const textStartX = logoDrawn ? 54 : 14;
+  const availableWidth = rightMarginX - textStartX;
 
-  // Brand Name
+  // Tier 1 (Y = 9.5mm): Organization Brand on Left, Emission Timestamp on Right
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(244, 63, 94); // rose-500 badge look
-  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 10.5);
+  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 9.5);
 
-  // Document Title
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(255, 255, 255);
-  const titleY = subtitle && subtitle.trim().length > 0 ? 18 : 20.5;
-  doc.text(title.toUpperCase(), textStartX, titleY);
-
-  // Subtitle / Description
-  if (subtitle && subtitle.trim().length > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(191, 219, 254); // blue-200
-    doc.text(subtitle, textStartX, 25);
-  }
-
-  // Right Side: Emission Date and Filters
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(203, 213, 225); // slate-300
-  doc.text(`Emissão: ${getCurrentDateTimeString()}`, pageWidth - 14, 10.5, { align: 'right' });
+  doc.text(`Emissão: ${getCurrentDateTimeString()}`, rightMarginX, 9.5, { align: 'right' });
 
-  if (filterDetails.length > 0) {
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(224, 231, 255); // indigo-100
-    const filterText = filterDetails.join('  |  ');
-    doc.text(filterText, pageWidth - 14, 18, { align: 'right' });
+  // Tier 2 (Y = 15.5mm): Exclusively dedicated to document Title across the entire available width
+  doc.setFont('helvetica', 'bold');
+  const rawTitle = title.toUpperCase();
+  let titleFontSize = 12;
+  doc.setFontSize(titleFontSize);
+  while (titleFontSize > 8.5 && doc.getTextWidth(rawTitle) > availableWidth) {
+    titleFontSize -= 0.5;
+    doc.setFontSize(titleFontSize);
+  }
+  doc.setTextColor(255, 255, 255);
+  doc.text(rawTitle, textStartX, 15.5);
+
+  // Tier 3 (Y = 21.5mm): Subtitle on Left, Official Tag on Right
+  if (subtitle && subtitle.trim().length > 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(191, 219, 254); // blue-200
+    const maxSubWidth = availableWidth - 55; // 55mm reserved for right label
+    let cleanSubtitle = subtitle.trim();
+    if (doc.getTextWidth(cleanSubtitle) > maxSubWidth) {
+      while (cleanSubtitle.length > 5 && doc.getTextWidth(cleanSubtitle + '...') > maxSubWidth) {
+        cleanSubtitle = cleanSubtitle.slice(0, -1);
+      }
+      cleanSubtitle += '...';
+    }
+    doc.text(cleanSubtitle, textStartX, 21.5);
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(148, 163, 184);
-  doc.text('Documento Oficial de Registro Escolar', pageWidth - 14, 25, { align: 'right' });
+  doc.setFontSize(6.5);
+  doc.setTextColor(148, 163, 184); // slate-400
+  doc.text('Documento Oficial de Registro Escolar', rightMarginX, 21.5, { align: 'right' });
+
+  // Tier 4 (Y = 27mm): Filter Details (Aluno, Turma, Período, etc.) on its own dedicated row
+  if (filterDetails && filterDetails.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    let filterFontSize = 7.5;
+    doc.setFontSize(filterFontSize);
+    const filterText = filterDetails.join('   •   ');
+    while (filterFontSize > 6.2 && doc.getTextWidth(filterText) > availableWidth) {
+      filterFontSize -= 0.3;
+      doc.setFontSize(filterFontSize);
+    }
+    doc.setTextColor(224, 231, 255); // indigo-100
+    let cleanFilterText = filterText;
+    if (doc.getTextWidth(cleanFilterText) > availableWidth) {
+      while (cleanFilterText.length > 5 && doc.getTextWidth(cleanFilterText + '...') > availableWidth) {
+        cleanFilterText = cleanFilterText.slice(0, -1);
+      }
+      cleanFilterText += '...';
+    }
+    doc.text(cleanFilterText, textStartX, 27);
+  }
 }
 
 /**
@@ -179,10 +208,11 @@ function drawCompactOfficialHeader(
   orientation: 'portrait' | 'landscape' = 'portrait'
 ) {
   const pageWidth = orientation === 'landscape' ? 297 : 210;
+  const rightMarginX = pageWidth - 14;
 
-  // Header Banner Background (Height 20mm)
+  // Header Banner Background (Height 21mm)
   doc.setFillColor(15, 23, 42); // slate-900
-  doc.rect(0, 0, pageWidth, 20, 'F');
+  doc.rect(0, 0, pageWidth, 21, 'F');
 
   // Accent line
   doc.setFillColor(79, 70, 229); // indigo-600
@@ -194,8 +224,8 @@ function drawCompactOfficialHeader(
   if (logoData) {
     try {
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(12, 4, 28, 13.5, 1.5, 1.5, 'F');
-      doc.addImage(logoData, 'PNG', 13, 4.8, 26, 11.8);
+      doc.roundedRect(12, 4, 28, 14, 1.5, 1.5, 'F');
+      doc.addImage(logoData, 'PNG', 13, 4.8, 26, 12);
       logoDrawn = true;
     } catch {
       logoDrawn = false;
@@ -203,44 +233,60 @@ function drawCompactOfficialHeader(
   }
 
   const textStartX = logoDrawn ? 43 : 14;
+  const availableWidth = rightMarginX - textStartX;
 
-  // Brand Name
+  // Tier 1 (Y = 7mm): Brand and Timestamp
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(244, 63, 94); // rose-500 badge look
-  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 7.5);
+  doc.setFontSize(7);
+  doc.setTextColor(244, 63, 94);
+  doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 7);
 
-  // Document Title
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(255, 255, 255);
-  doc.text(title.toUpperCase(), textStartX, 13);
-
-  // Subtitle
-  if (subtitle && subtitle.trim().length > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.setTextColor(191, 219, 254);
-    doc.text(subtitle, textStartX, 17.5);
-  }
-
-  // Right Side: Emission & Details
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.2);
   doc.setTextColor(203, 213, 225);
-  doc.text(`Emissão: ${getCurrentDateTimeString()}`, pageWidth - 14, 7.5, { align: 'right' });
+  doc.text(`Emissão: ${getCurrentDateTimeString()}`, rightMarginX, 7, { align: 'right' });
 
-  if (filterDetails.length > 0) {
+  // Tier 2 (Y = 12mm): Dedicated row for Title
+  doc.setFont('helvetica', 'bold');
+  let titleFontSize = 10;
+  doc.setFontSize(titleFontSize);
+  const rawTitle = title.toUpperCase();
+  while (titleFontSize > 7.5 && doc.getTextWidth(rawTitle) > availableWidth) {
+    titleFontSize -= 0.5;
+    doc.setFontSize(titleFontSize);
+  }
+  doc.setTextColor(255, 255, 255);
+  doc.text(rawTitle, textStartX, 12);
+
+  // Tier 3 (Y = 17mm): Subtitle or Filters on Left, Official Tag on Right
+  const detailText = filterDetails && filterDetails.length > 0 
+    ? filterDetails.join('  •  ')
+    : (subtitle || '');
+
+  if (detailText.trim().length > 0) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
+    let detailFontSize = 6.8;
+    doc.setFontSize(detailFontSize);
+    const maxDetailWidth = availableWidth - 45;
+    let cleanDetail = detailText.trim();
+    while (detailFontSize > 5.5 && doc.getTextWidth(cleanDetail) > maxDetailWidth) {
+      detailFontSize -= 0.3;
+      doc.setFontSize(detailFontSize);
+    }
     doc.setTextColor(224, 231, 255);
-    doc.text(filterDetails.join('  |  '), pageWidth - 14, 13, { align: 'right' });
+    if (doc.getTextWidth(cleanDetail) > maxDetailWidth) {
+      while (cleanDetail.length > 5 && doc.getTextWidth(cleanDetail + '...') > maxDetailWidth) {
+        cleanDetail = cleanDetail.slice(0, -1);
+      }
+      cleanDetail += '...';
+    }
+    doc.text(cleanDetail, textStartX, 17);
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
+  doc.setFontSize(5.8);
   doc.setTextColor(148, 163, 184);
-  doc.text('Documento Oficial de Registro Escolar', pageWidth - 14, 17.5, { align: 'right' });
+  doc.text('Documento Oficial de Registro Escolar', rightMarginX, 17, { align: 'right' });
 }
 
 /**

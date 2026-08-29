@@ -37,6 +37,7 @@ import { generateActivitySchedulePDF } from '../utils/pdfGenerator';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { isCoordenador } from '../utils/authUtils';
 import { PdfViewerModal } from './PdfViewerModal';
+import { safeWindowPrint } from '../utils/printUtils';
 
 interface ActivityScheduleViewProps {
   activitiesList: ActivityItem[];
@@ -255,7 +256,7 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
 
   // Browser Print Handler (@media print)
   const handlePrint = () => {
-    window.print();
+    safeWindowPrint();
   };
 
   return (

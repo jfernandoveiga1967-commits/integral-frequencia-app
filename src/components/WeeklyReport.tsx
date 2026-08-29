@@ -21,6 +21,7 @@ import {
   generateNumericAttendanceConsolidatedPDFReport,
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
+import { safeWindowPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -506,7 +507,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // Printing & CSV
   const handlePrint = () => {
-    window.print();
+    safeWindowPrint();
   };
 
   const handleExportCSV = () => {

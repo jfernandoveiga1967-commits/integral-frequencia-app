@@ -5,78 +5,140 @@ export interface PrintOptions {
   blobUrl?: string | null;
   dataUrl?: string | null;
   elementId?: string | null;
+  pageImages?: string[];
 }
 
 /**
- * Directs printing directly to the computer's native printer dialog box.
- * Handles:
- * 1. Generated jsPDF instances via dedicated hidden iframe with PDF object
- * 2. Unlocks scroll / overflow styles temporarily so native window.print() doesn't freeze
- * 3. Fallback support across all desktop/mobile browsers and iframe sandboxes
+ * Ensures global @media print styles exist in the document head
+ * so that modal toolbars, headers, and backgrounds are cleanly hidden during printing,
+ * while the document content / PDF pages fill the printed A4 sheet in high quality.
  */
-export function triggerPrint(options: PrintOptions = {}): void {
-  const { doc, blobUrl, dataUrl, elementId } = options;
+function ensurePrintStyles(): void {
+  const styleId = 'pdf-print-global-style';
+  if (document.getElementById(styleId)) return;
 
-  // 1. If we have a jsPDF document or a PDF blob/data URL, printing the PDF blob via an iframe
-  // sends the exact vector PDF directly to the native printer box!
-  let effectiveBlobUrl = blobUrl;
-  if (!effectiveBlobUrl && doc) {
-    try {
-      const blob = doc.output('blob');
-      effectiveBlobUrl = URL.createObjectURL(blob);
-    } catch (e) {
-      console.warn('Could not generate blob for printing:', e);
-    }
-  }
-
-  if (effectiveBlobUrl || dataUrl) {
-    const url = effectiveBlobUrl || dataUrl!;
-    try {
-      // Remove any existing print iframes
-      const existing = document.getElementById('native-print-frame');
-      if (existing && existing.parentNode) {
-        existing.parentNode.removeChild(existing);
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.innerHTML = `
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 8mm 8mm 8mm 8mm;
+      }
+      
+      html, body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
 
-      const iframe = document.createElement('iframe');
-      iframe.id = 'native-print-frame';
-      iframe.setAttribute(
-        'style',
-        'position:fixed;top:0;left:0;width:1px;height:1px;border:none;opacity:0;pointer-events:none;z-index:-999;'
-      );
-      iframe.src = url;
+      /* Hide everything by default except the active modal and printable container */
+      body * {
+        visibility: hidden;
+      }
 
-      document.body.appendChild(iframe);
+      #pdf-viewer-modal-backdrop,
+      #pdf-viewer-modal-backdrop *,
+      #pdf-printable-area,
+      #pdf-printable-area *,
+      .pdf-printable-page,
+      .pdf-printable-page * {
+        visibility: visible;
+      }
 
-      iframe.onload = () => {
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (err) {
-            console.warn('Iframe print restricted, triggering window.print fallback:', err);
-            safeWindowPrint(elementId);
-          }
-        }, 200);
-      };
+      /* Reset modal backdrop in print */
+      #pdf-viewer-modal-backdrop {
+        position: static !important;
+        inset: auto !important;
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+        display: block !important;
+      }
 
-      // Auto-cleanup iframe after printing
-      setTimeout(() => {
-        try {
-          if (iframe.parentNode) {
-            iframe.parentNode.removeChild(iframe);
-          }
-        } catch {}
-      }, 60000);
+      #pdf-viewer-modal-container {
+        position: static !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
 
-      return;
-    } catch (err) {
-      console.error('Error in PDF print handler:', err);
+      #pdf-frame-wrapper {
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        height: auto !important;
+        overflow: visible !important;
+        display: block !important;
+      }
+
+      /* Hide modal UI elements */
+      .print-hidden,
+      [data-print-hidden="true"],
+      header,
+      nav,
+      aside {
+        display: none !important;
+      }
+
+      /* Ensure each page breaks neatly */
+      .pdf-printable-page {
+        page-break-after: always;
+        break-after: page;
+        margin: 0 0 10mm 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+      }
+
+      .pdf-printable-page:last-child {
+        page-break-after: avoid;
+        break-after: avoid;
+        margin-bottom: 0 !important;
+      }
+
+      .pdf-printable-page img {
+        width: 100% !important;
+        height: auto !important;
+        max-width: 100% !important;
+        display: block !important;
+        image-rendering: -webkit-optimize-contrast;
+      }
     }
-  }
+  `;
+  document.head.appendChild(style);
+}
 
-  // 2. Standard HTML Print with body overflow unlock to avoid freezing
-  safeWindowPrint(elementId);
+/**
+ * Directs printing reliably to the computer's native printer dialog box.
+ */
+export function triggerPrint(options: PrintOptions = {}): void {
+  const { doc, pageImages, elementId } = options;
+
+  ensurePrintStyles();
+
+  // If pageImages are available or element exists, print via safeWindowPrint
+  safeWindowPrint(elementId || 'pdf-viewer-modal-container');
 }
 
 /**
@@ -84,33 +146,40 @@ export function triggerPrint(options: PrintOptions = {}): void {
  * is never frozen by modal backdrops or overflow:hidden
  */
 export function safeWindowPrint(elementId?: string | null): void {
+  ensurePrintStyles();
+
   const originalOverflow = document.body.style.overflow;
   const originalHeight = document.body.style.height;
+  const originalPosition = document.body.style.position;
 
-  // Temporarily unlock
+  // Temporarily unlock body
   document.body.style.overflow = 'visible';
   document.body.style.height = 'auto';
+  document.body.style.position = 'static';
 
-  // If specific elementId requested, we can focus it
   if (elementId) {
     const el = document.getElementById(elementId);
-    el?.focus();
+    if (el) {
+      el.focus();
+    }
   }
 
+  // Use requestAnimationFrame & timeout to give the browser layout engine time to recalculate styles
   requestAnimationFrame(() => {
     setTimeout(() => {
       try {
         window.focus();
         window.print();
       } catch (err) {
-        console.error('Error invoking window.print():', err);
+        console.error('Erro ao invocar window.print():', err);
       } finally {
-        // Restore styles after print dialog is handled
+        // Restore styles after print dialog has closed/handled
         setTimeout(() => {
           document.body.style.overflow = originalOverflow;
           document.body.style.height = originalHeight;
-        }, 1000);
+          document.body.style.position = originalPosition;
+        }, 1200);
       }
-    }, 100);
+    }, 150);
   });
 }
