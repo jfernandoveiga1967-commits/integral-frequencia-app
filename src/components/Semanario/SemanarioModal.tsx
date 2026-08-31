@@ -14,6 +14,12 @@ import {
   User,
   Calendar,
   Zap,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
+  Square,
+  Users,
 } from 'lucide-react';
 import { ActivityItem, DayOfWeek, SemanarioPlan, SemanarioStatus, TurmaType, UserProfile } from '../../types';
 import {
@@ -26,6 +32,7 @@ interface SemanarioModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (plan: SemanarioPlan) => void;
+  onBatchSave?: (plans: SemanarioPlan[]) => void;
   initialPlan?: Partial<SemanarioPlan> | null;
   turmas: TurmaType[];
   users: UserProfile[];
@@ -41,6 +48,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onBatchSave,
   initialPlan,
   turmas,
   users,
@@ -78,6 +86,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   const [photos, setPhotos] = useState<string[]>([]);
   const [notes, setNotes] = useState<string>('');
 
+  // Copy / Replica Multiturmas State
+  const [isCopySectionOpen, setIsCopySectionOpen] = useState<boolean>(false);
+  const [selectedCopyTurmas, setSelectedCopyTurmas] = useState<TurmaType[]>([]);
+  const [copyExecutionRecords, setCopyExecutionRecords] = useState<boolean>(false);
+
   // AI Assistant Panel State
   const [showAiPanel, setShowAiPanel] = useState<boolean>(false);
   const [aiTheme, setAiTheme] = useState<string>('');
@@ -98,6 +111,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     }
     return users.map((u) => u.name).filter(Boolean);
   }, [users]);
+
+  // Other available turmas for replication (excluding the current active turma)
+  const availableTargetTurmas = useMemo(() => {
+    return turmas.filter((t) => t !== turma);
+  }, [turmas, turma]);
 
   // Initialize or reset form fields
   useEffect(() => {
@@ -137,6 +155,9 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         setPhotos([]);
         setNotes('');
       }
+      setSelectedCopyTurmas([]);
+      setCopyExecutionRecords(false);
+      setIsCopySectionOpen(false);
       setShowAiPanel(false);
       setAiError(null);
     }
@@ -145,10 +166,28 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   // Adjust category if turma changes and previously selected category is invalid
   const handleTurmaChange = (newTurma: TurmaType) => {
     setTurma(newTurma);
+    // Remove newTurma from copy selections if it was selected
+    setSelectedCopyTurmas((prev) => prev.filter((t) => t !== newTurma));
     const validCats = getCategoriesForTurma(newTurma, activitiesList);
     if (!validCats.includes(category)) {
       setCategory(validCats[0] || 'Acolhimento');
     }
+  };
+
+  // Multiturma Selection Helpers
+  const handleSelectAllCopyTurmas = () => {
+    setSelectedCopyTurmas(turmas.filter((t) => t !== turma));
+  };
+
+  const handleClearCopyTurmas = () => {
+    setSelectedCopyTurmas([]);
+  };
+
+  const handleToggleCopyTurma = (targetTurma: TurmaType) => {
+    if (targetTurma === turma) return;
+    setSelectedCopyTurmas((prev) =>
+      prev.includes(targetTurma) ? prev.filter((t) => t !== targetTurma) : [...prev, targetTurma]
+    );
   };
 
   // Image Upload handler (Base64 file reader)
@@ -234,7 +273,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       return;
     }
 
-    const planToSave: SemanarioPlan = {
+    const primaryPlan: SemanarioPlan = {
       id: initialPlan?.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       turma,
       weekNumber: initialPlan?.weekNumber || weekNumber,
@@ -260,7 +299,31 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       updatedBy: currentUser?.name,
     };
 
-    onSave(planToSave);
+    const targetTurmasToReplicate = selectedCopyTurmas.filter((t) => t !== turma);
+
+    if (targetTurmasToReplicate.length > 0) {
+      const replicatedPlans: SemanarioPlan[] = targetTurmasToReplicate.map((targetTurma, idx) => ({
+        ...primaryPlan,
+        id: `plan_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+        turma: targetTurma,
+        status: copyExecutionRecords ? status : 'pendente',
+        substitutionReason: copyExecutionRecords && status === 'substituida' ? substitutionReason.trim() : undefined,
+        photos: copyExecutionRecords && photos.length > 0 ? [...photos] : undefined,
+        notes: copyExecutionRecords && notes.trim() ? notes.trim() : undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      if (onBatchSave) {
+        onBatchSave([primaryPlan, ...replicatedPlans]);
+      } else {
+        onSave(primaryPlan);
+        replicatedPlans.forEach((p) => onSave(p));
+      }
+    } else {
+      onSave(primaryPlan);
+    }
+
     onClose();
   };
 
@@ -702,6 +765,133 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* Nova Seção: Copiar Proposta para Outras Turmas (Bloco Expansível) */}
+          <div className="p-4 bg-indigo-50/50 border border-indigo-200/90 rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCopySectionOpen(!isCopySectionOpen)}
+                className="flex items-center space-x-2 text-xs font-extrabold text-indigo-950 hover:text-indigo-700 transition-colors cursor-pointer text-left"
+              >
+                <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-xs">
+                  <Copy className="w-4 h-4" />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-black text-indigo-950">Copiar para quais turmas?</span>
+                  {selectedCopyTurmas.length > 0 ? (
+                    <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-xs">
+                      {selectedCopyTurmas.length} {selectedCopyTurmas.length === 1 ? 'selecionada' : 'selecionadas'}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-indigo-600/80 bg-indigo-100/70 px-2 py-0.5 rounded-full">
+                      Opcional
+                    </span>
+                  )}
+                </div>
+                {isCopySectionOpen ? (
+                  <ChevronUp className="w-4 h-4 text-indigo-600 ml-1" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-indigo-600 ml-1" />
+                )}
+              </button>
+
+              {/* Botões de Ação Rápida */}
+              <div className="flex items-center space-x-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCopySectionOpen(true);
+                    handleSelectAllCopyTurmas();
+                  }}
+                  className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center space-x-1.5 active:scale-95"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Selecionar Todas</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearCopyTurmas}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
+
+            {/* Conteúdo Expansível: Grade de Seleção de Turmas & Cópia de Mídias */}
+            {isCopySectionOpen && (
+              <div className="space-y-3 pt-3 border-t border-indigo-200/80 animate-in fade-in">
+                {/* Grade de Seleção de Turmas (Checkboxes) */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                    Selecione as turmas de destino para replicar este planejamento:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                    {turmas.map((t) => {
+                      const isCurrentOrigin = t === turma;
+                      const isSelected = selectedCopyTurmas.includes(t);
+
+                      return (
+                        <div
+                          key={t}
+                          onClick={() => {
+                            if (!isCurrentOrigin) handleToggleCopyTurma(t);
+                          }}
+                          className={`flex items-center space-x-2 p-2.5 rounded-xl border text-xs font-bold transition-all select-none ${
+                            isCurrentOrigin
+                              ? 'bg-slate-100/90 text-slate-400 border-slate-200 cursor-not-allowed opacity-75'
+                              : isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-2 ring-indigo-500/20 cursor-pointer'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 cursor-pointer'
+                          }`}
+                        >
+                          <div className="shrink-0">
+                            {isCurrentOrigin ? (
+                              <CheckCircle2 className="w-4 h-4 text-slate-400" />
+                            ) : isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-white" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                          <div className="truncate">
+                            <span className="truncate block leading-tight">{t}</span>
+                            {isCurrentOrigin && (
+                              <span className="text-[9px] font-medium text-slate-500 block leading-tight mt-0.5">
+                                Turma Atual
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Opção de Cópia de Registros e Mídias */}
+                <div className="pt-2.5 border-t border-indigo-200/70">
+                  <label className="flex items-start space-x-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={copyExecutionRecords}
+                      onChange={(e) => setCopyExecutionRecords(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                    />
+                    <div className="space-y-1">
+                      <span className="text-xs font-bold text-slate-900 block">
+                        Copiar também o registro de realização?
+                      </span>
+                      <p className="text-[11px] font-semibold text-indigo-900 bg-indigo-100/80 px-3 py-1.5 rounded-xl border border-indigo-200/80 leading-relaxed">
+                        💡 Se houver fotos, vídeos e justificativas salvas para esta atividade na turma atual, eles também serão copiados para a turma de destino.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
         </form>
 
         {/* Modal Footer */}
@@ -721,7 +911,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Salvar Proposta</span>
+              <span>
+                {selectedCopyTurmas.length > 0
+                  ? `Salvar & Replicar (${selectedCopyTurmas.length + 1} Turmas)`
+                  : 'Salvar Proposta'}
+              </span>
             </button>
           </div>
         </div>
