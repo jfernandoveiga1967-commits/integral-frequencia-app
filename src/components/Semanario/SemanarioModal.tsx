@@ -21,9 +21,10 @@ import {
   Square,
   Users,
 } from 'lucide-react';
-import { ActivityItem, DayOfWeek, SemanarioPlan, SemanarioStatus, TurmaType, UserProfile } from '../../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaType, UserProfile } from '../../types';
 import {
   getCategoriesForTurma,
+  getScheduleBlocksForTurma,
   generateCuratedProposal,
   isTurmaEligibleForProjeto,
 } from '../../utils/semanarioUtils';
@@ -38,6 +39,7 @@ interface SemanarioModalProps {
   users: UserProfile[];
   currentUser?: UserProfile | null;
   activitiesList?: ActivityItem[];
+  schedules?: ScheduleBlock[];
   weekNumber: number;
   year: number;
   defaultDate?: string;
@@ -54,6 +56,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   users,
   currentUser,
   activitiesList,
+  schedules,
   weekNumber,
   year,
   defaultDate,
@@ -99,10 +102,15 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Available categories for currently selected class (strict alphabetical, "Projeto" if eligible)
+  // Available categories for currently selected class strictly from Grade Horária (alphabetical)
   const availableCategories = useMemo(() => {
-    return getCategoriesForTurma(turma, activitiesList);
-  }, [turma, activitiesList]);
+    return getCategoriesForTurma(turma, schedules, activitiesList);
+  }, [turma, schedules, activitiesList]);
+
+  // Scheduled blocks for currently selected turma and day of week
+  const scheduledBlocksForDay = useMemo(() => {
+    return getScheduleBlocksForTurma(turma, dayOfWeek, schedules);
+  }, [turma, dayOfWeek, schedules]);
 
   // Registered staff suggestions for ADI and Monitors
   const staffSuggestions = useMemo(() => {
@@ -121,11 +129,14 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       if (initialPlan) {
-        setTurma(initialPlan.turma || turmas[0] || '1º Ano Azul');
-        setDayOfWeek(initialPlan.dayOfWeek || defaultDayOfWeek);
+        const initTurma = initialPlan.turma || turmas[0] || '1º Ano Azul';
+        const initDay = initialPlan.dayOfWeek || defaultDayOfWeek;
+        const validCats = getCategoriesForTurma(initTurma, schedules, activitiesList);
+        setTurma(initTurma);
+        setDayOfWeek(initDay);
         setTimeSlot(initialPlan.timeSlot || '13:30 - 14:30');
         setWeekTheme(initialPlan.weekTheme || '');
-        setCategory(initialPlan.category || availableCategories[0] || 'Acolhimento');
+        setCategory(initialPlan.category || validCats[0] || '');
         setTitle(initialPlan.title || '');
         setAdiResponsible(initialPlan.adiResponsible || initialPlan.teacherName || '');
         setMonitors(initialPlan.monitors || '');
@@ -138,12 +149,16 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         setNotes(initialPlan.notes || '');
       } else {
         const initialTurma = turmas[0] || '1º Ano Azul';
-        const cats = getCategoriesForTurma(initialTurma, activitiesList);
+        const cats = getCategoriesForTurma(initialTurma, schedules, activitiesList);
+        const blocks = getScheduleBlocksForTurma(initialTurma, defaultDayOfWeek, schedules);
+        const defaultTime = blocks.length > 0 ? `${blocks[0].startTime} - ${blocks[0].endTime}` : '13:30 - 14:30';
+        const defaultCat = blocks.length > 0 ? blocks[0].activityId : cats[0] || '';
+
         setTurma(initialTurma);
         setDayOfWeek(defaultDayOfWeek);
-        setTimeSlot('13:30 - 14:30');
+        setTimeSlot(defaultTime);
         setWeekTheme('');
-        setCategory(cats[0] || 'Acolhimento');
+        setCategory(defaultCat);
         setTitle('');
         setAdiResponsible(currentUser?.name || '');
         setMonitors('');
@@ -161,16 +176,16 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       setShowAiPanel(false);
       setAiError(null);
     }
-  }, [isOpen, initialPlan, activitiesList]);
+  }, [isOpen, initialPlan?.id]);
 
   // Adjust category if turma changes and previously selected category is invalid
   const handleTurmaChange = (newTurma: TurmaType) => {
     setTurma(newTurma);
     // Remove newTurma from copy selections if it was selected
     setSelectedCopyTurmas((prev) => prev.filter((t) => t !== newTurma));
-    const validCats = getCategoriesForTurma(newTurma, activitiesList);
+    const validCats = getCategoriesForTurma(newTurma, schedules, activitiesList);
     if (!validCats.includes(category)) {
-      setCategory(validCats[0] || 'Acolhimento');
+      setCategory(validCats[0] || '');
     }
   };
 

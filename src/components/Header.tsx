@@ -172,12 +172,12 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center space-x-2 mb-0.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider bg-red-500/15 text-red-400 px-2.5 py-0.5 rounded-full border border-red-500/30">
-                  Programa Integral • COLÉGIO CRESCER
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                  COLÉGIO CRESCER
                 </span>
               </div>
               <h1 className="text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
-                Frequência Extracurricular
+                Programa do Integral
               </h1>
             </div>
           </div>

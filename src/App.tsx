@@ -5,6 +5,9 @@ import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import {
   loadStudents,
   saveStudents,
+  normalizeStudent,
+  mergeStudentData,
+  mergeStudentsList,
   loadAttendanceRecords,
   saveAttendanceRecords,
   loadTurmas,
@@ -171,6 +174,9 @@ export default function App() {
     let isInitialStudentsSync = true;
     let isInitialRecordsSync = true;
     let isInitialTurmasSync = true;
+    let hasHealedAdminUser = false;
+    let hasCleanedMockProfiles = false;
+    let hasHealedActivitiesList = false;
 
     const cleanedMockStudentIds = new Set<string>();
     const cleanedMockRecordIds = new Set<string>();
@@ -186,8 +192,12 @@ export default function App() {
       });
 
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
-      setStudents(realStudents);
-      saveStudents(realStudents);
+      // CRITICAL: Deep merge Firestore students with localStorage students to preserve custom diasFrequencia, horariosSaida, and status!
+      const currentLocal = loadStudents();
+      const mergedStudents = mergeStudentsList(currentLocal, realStudents);
+
+      setStudents(mergedStudents);
+      saveStudents(mergedStudents);
 
       if (isInitialStudentsSync && realStudents.length === 0 && loadedStudents.length > 0) {
         const realLoaded = loadedStudents.filter((s) => !isMockStudent(s));
@@ -235,60 +245,65 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup any unwanted mock profiles
-      fsUsers.forEach((u) => {
-        if (
-          u.id === 'usr_prof_1' ||
-          u.id === 'usr_aux_1' ||
-          u.name.toLowerCase().includes('marcos silva') ||
-          u.name.toLowerCase().includes('mariana santos') ||
-          u.name.toLowerCase().includes('marina santos') ||
-          u.email === 'marcos.professor@crescer.edu.br' ||
-          u.email === 'mariana.auxiliar@crescer.edu.br'
-        ) {
-          deleteUserFromFirestore(u.id);
-        }
-      });
-
-      // Self-heal Fernando Veiga in Firestore if missing or if marked with wrong role
-      const adminUsersInFs = fsUsers.filter(
-        (u) =>
-          (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
-          u.id === 'usr_coord_1' ||
-          u.name.toLowerCase().includes('fernando veiga')
-      );
-
-      if (adminUsersInFs.length === 0) {
-        saveUserToFirestore(PRESET_USERS[0]);
-      } else {
-        // If there are duplicate admin documents in Firestore (e.g. non usr_coord_1 or with incomplete activities), delete duplicates
-        adminUsersInFs.forEach((adm) => {
-          if (adm.id !== 'usr_coord_1') {
-            deleteUserFromFirestore(adm.id);
-          } else if (
-            adm.role !== 'coordenador' ||
-            adm.cargoLabel !== 'Coordenador (Administrador)' ||
-            !adm.canManageStudents ||
-            !adm.canMarkAttendance ||
-            !adm.assignedActivities ||
-            adm.assignedActivities.length < 7
+      // Cleanup any unwanted mock profiles once
+      if (!hasCleanedMockProfiles) {
+        hasCleanedMockProfiles = true;
+        fsUsers.forEach((u) => {
+          if (
+            u.id === 'usr_prof_1' ||
+            u.id === 'usr_aux_1' ||
+            u.name.toLowerCase().includes('marcos silva') ||
+            u.name.toLowerCase().includes('mariana santos') ||
+            u.name.toLowerCase().includes('marina santos') ||
+            u.email === 'marcos.professor@crescer.edu.br' ||
+            u.email === 'mariana.auxiliar@crescer.edu.br'
           ) {
-            saveUserToFirestore({
-              ...adm,
-              id: 'usr_coord_1',
-              name: 'Fernando Veiga',
-              email: 'jfernandoveiga1967@gmail.com',
-              role: 'coordenador',
-              cargoLabel: 'Coordenador (Administrador)',
-              avatarColor: 'bg-amber-500',
-              assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
-              assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-              allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-              canManageStudents: true,
-              canMarkAttendance: true,
-            });
+            deleteUserFromFirestore(u.id);
           }
         });
+      }
+
+      // Self-heal Fernando Veiga in Firestore if missing (once per session)
+      if (!hasHealedAdminUser) {
+        hasHealedAdminUser = true;
+        const adminUsersInFs = fsUsers.filter(
+          (u) =>
+            (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+            u.id === 'usr_coord_1' ||
+            u.name.toLowerCase().includes('fernando veiga')
+        );
+
+        if (adminUsersInFs.length === 0) {
+          saveUserToFirestore(PRESET_USERS[0]);
+        } else {
+          adminUsersInFs.forEach((adm) => {
+            if (adm.id !== 'usr_coord_1') {
+              deleteUserFromFirestore(adm.id);
+            } else if (
+              adm.role !== 'coordenador' ||
+              adm.cargoLabel !== 'Coordenador (Administrador)' ||
+              !adm.canManageStudents ||
+              !adm.canMarkAttendance ||
+              !adm.assignedActivities ||
+              adm.assignedActivities.length < 7
+            ) {
+              saveUserToFirestore({
+                ...adm,
+                id: 'usr_coord_1',
+                name: 'Fernando Veiga',
+                email: 'jfernandoveiga1967@gmail.com',
+                role: 'coordenador',
+                cargoLabel: 'Coordenador (Administrador)',
+                avatarColor: 'bg-amber-500',
+                assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
+                assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+                allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+                canManageStudents: true,
+                canMarkAttendance: true,
+              });
+            }
+          });
+        }
       }
 
       const cleanFsUsers = fsUsers
@@ -412,8 +427,8 @@ export default function App() {
           const isOfficial = officialMap.has(act.id) || officialMap.has(act.name);
           if (isOfficial) {
             const officialTemplate = officialMap.get(act.id) || officialMap.get(act.name)!;
-            // If requiresRollCall is false in Firestore, fix it immediately in Firestore
-            if (act.requiresRollCall !== true) {
+            // If requiresRollCall is false in Firestore, fix it immediately in Firestore (once)
+            if (!hasHealedActivitiesList && act.requiresRollCall !== true) {
               saveActivityToFirestore({
                 ...officialTemplate,
                 ...act,
@@ -429,13 +444,16 @@ export default function App() {
           return act;
         });
 
-        // If any official activity is missing from Firestore, seed it to Firestore
-        ACTIVITIES_LIST.forEach((officialAct) => {
-          if (!healedActivities.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
-            saveActivityToFirestore(officialAct);
-            healedActivities.push(officialAct);
-          }
-        });
+        // If any official activity is missing from Firestore, seed it to Firestore (once)
+        if (!hasHealedActivitiesList) {
+          hasHealedActivitiesList = true;
+          ACTIVITIES_LIST.forEach((officialAct) => {
+            if (!healedActivities.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
+              saveActivityToFirestore(officialAct);
+              healedActivities.push(officialAct);
+            }
+          });
+        }
 
         setActivitiesList(healedActivities);
         saveActivities(healedActivities);
@@ -554,10 +572,11 @@ export default function App() {
 
   // Save student modifications
   const handleAddStudent = async (newStudentData: Omit<Student, 'id'>) => {
-    const newStudent: Student = {
+    const rawStudent: Student = {
       ...newStudentData,
       id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     };
+    const newStudent = normalizeStudent(rawStudent);
     setStudents((prev) => {
       const updated = [newStudent, ...prev];
       saveStudents(updated);
@@ -576,13 +595,17 @@ export default function App() {
     activities: ActivityType[],
     diasFrequencia?: DayOfWeek[]
   ) => {
-    const newStudentsList: Student[] = names.map((name, idx) => ({
-      id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-      name,
-      turma,
-      activities,
-      diasFrequencia: diasFrequencia && diasFrequencia.length > 0 ? diasFrequencia : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    }));
+    const newStudentsList: Student[] = names.map((name, idx) =>
+      normalizeStudent({
+        id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+        name,
+        turma,
+        activities,
+        diasFrequencia: diasFrequencia && diasFrequencia.length > 0 ? diasFrequencia : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+        horariosSaida: {},
+        status: 'ativo',
+      })
+    );
 
     setStudents((prev) => {
       const updated = [...newStudentsList, ...prev];
@@ -599,7 +622,9 @@ export default function App() {
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
     setStudents((prev) => {
-      const updated = prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
+      const existing = prev.find((s) => s.id === updatedStudent.id);
+      const merged = mergeStudentData(existing, updatedStudent);
+      const updated = prev.map((s) => (s.id === merged.id ? merged : s));
       saveStudents(updated);
       return updated;
     });
@@ -963,7 +988,7 @@ export default function App() {
   };
 
   // Semanário Pedagogical Planning Handlers
-  const handleSaveSemanarioPlan = (plan: SemanarioPlan) => {
+  const handleSaveSemanarioPlan = useCallback((plan: SemanarioPlan) => {
     setSemanarioPlans((prev) => {
       const idx = prev.findIndex((p) => p.id === plan.id);
       let next: SemanarioPlan[];
@@ -977,18 +1002,18 @@ export default function App() {
       return next;
     });
     saveSemanarioPlanToFirestore(plan);
-  };
+  }, []);
 
-  const handleDeleteSemanarioPlan = (planId: string) => {
+  const handleDeleteSemanarioPlan = useCallback((planId: string) => {
     setSemanarioPlans((prev) => {
       const next = prev.filter((p) => p.id !== planId);
       saveSemanarioPlans(next);
       return next;
     });
     deleteSemanarioPlanFromFirestore(planId);
-  };
+  }, []);
 
-  const handleBatchSaveSemanarioPlans = (plansToSave: SemanarioPlan[]) => {
+  const handleBatchSaveSemanarioPlans = useCallback((plansToSave: SemanarioPlan[]) => {
     setSemanarioPlans((prev) => {
       const map = new Map<string, SemanarioPlan>();
       prev.forEach((p) => map.set(p.id, p));
@@ -998,7 +1023,7 @@ export default function App() {
       return merged;
     });
     batchSaveSemanarioPlansToFirestore(plansToSave);
-  };
+  }, []);
 
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
@@ -1159,7 +1184,7 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Semanário / Planejamento Pedagógico (BNCC) */}
+        {/* Tab 3: Semanário / Planejamento Pedagógico */}
         {activeTab === 'semanario' && (
           <SemanarioMain
             plans={semanarioPlans}
@@ -1168,6 +1193,7 @@ export default function App() {
             currentUser={currentUser}
             currentWeek={currentWeek}
             activitiesList={activitiesList}
+            schedules={schedules}
             onSavePlan={handleSaveSemanarioPlan}
             onDeletePlan={handleDeleteSemanarioPlan}
             onBatchSavePlans={handleBatchSaveSemanarioPlans}
@@ -1265,7 +1291,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex flex-col sm:flex-row items-center gap-2 text-left">
             <div>
-              <span className="font-bold text-white">Frequência Extracurricular</span> • v1.2
+              <span className="font-bold text-white">Programa do Integral</span> • v1.2
             </div>
             {firebaseConnected && (
               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">

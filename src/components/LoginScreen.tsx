@@ -195,8 +195,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
             </div>
           </div>
 
-          <div className="inline-flex items-center space-x-2 bg-red-500/10 border border-red-500/30 px-3.5 py-1 rounded-full text-red-500 text-xs font-extrabold uppercase tracking-wider mb-3">
-            <span>COLÉGIO CRESCER • PROGRAMA INTEGRAL</span>
+          <div className="inline-flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3.5 py-1 rounded-full text-amber-400 text-xs font-extrabold uppercase tracking-wider mb-3">
+            <span>COLÉGIO CRESCER</span>
           </div>
           
           <div className="flex justify-center mb-3">
@@ -206,7 +206,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Frequência Extracurricular
+            Programa do Integral
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md mx-auto">
             Acesse o diário de classe informando seu e-mail e senha.

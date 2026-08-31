@@ -13,6 +13,7 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes } from './utils/pontoUtils';
+import { normalizeStudent } from './utils/storageUtils';
 
 export { doc, deleteDoc };
 
@@ -95,14 +96,11 @@ export function subscribeStudents(
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         if (!data) return;
-        const rawActivities = Array.isArray(data.activities) ? data.activities : [];
-        const activities = rawActivities.includes('Rotina') ? rawActivities : ['Rotina', ...rawActivities];
-        list.push({
+        const normalized = normalizeStudent({
+          ...data,
           id: docSnap.id,
-          name: data.name || '',
-          turma: data.turma || '',
-          activities,
         });
+        list.push(normalized);
       });
       onData(list);
     },
@@ -413,14 +411,20 @@ export async function deleteUserFromFirestore(userId: string) {
 
 export async function saveStudentToFirestore(student: Student) {
   try {
-    const acts = Array.isArray(student.activities) ? student.activities : [];
-    const activities = acts.includes('Rotina') ? acts : ['Rotina', ...acts];
-    const docRef = doc(db, 'students', student.id);
+    const normalized = normalizeStudent(student);
+    const docRef = doc(db, 'students', normalized.id);
     await setDoc(docRef, {
-      id: student.id,
-      name: student.name,
-      turma: student.turma,
-      activities,
+      id: normalized.id,
+      name: normalized.name,
+      turma: normalized.turma,
+      activities: normalized.activities,
+      diasFrequencia: normalized.diasFrequencia,
+      horariosSaida: normalized.horariosSaida || {},
+      status: normalized.status || 'ativo',
+      statusMatricula: normalized.statusMatricula || normalized.status || 'ativo',
+      inactivationDate: normalized.inactivationDate || '',
+      inactivationReason: normalized.inactivationReason || '',
+      notes: normalized.notes || '',
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `students/${student.id}`);
@@ -493,11 +497,19 @@ export async function seedInitialDataToFirestore(
       batch.set(doc(db, 'turmas', safeId), { id: safeId, name: t });
     }
     for (const s of students) {
-      batch.set(doc(db, 'students', s.id), {
-        id: s.id,
-        name: s.name,
-        turma: s.turma,
-        activities: s.activities,
+      const normalized = normalizeStudent(s);
+      batch.set(doc(db, 'students', normalized.id), {
+        id: normalized.id,
+        name: normalized.name,
+        turma: normalized.turma,
+        activities: normalized.activities,
+        diasFrequencia: normalized.diasFrequencia,
+        horariosSaida: normalized.horariosSaida || {},
+        status: normalized.status || 'ativo',
+        statusMatricula: normalized.statusMatricula || normalized.status || 'ativo',
+        inactivationDate: normalized.inactivationDate || '',
+        inactivationReason: normalized.inactivationReason || '',
+        notes: normalized.notes || '',
       });
     }
     for (const r of records) {

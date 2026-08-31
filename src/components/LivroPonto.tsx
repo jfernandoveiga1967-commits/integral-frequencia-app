@@ -167,14 +167,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   // Keep selected user updated if current user changes or selected user is not in availableUsers
   useEffect(() => {
     if (!isAdmin && currentUser) {
-      setSelectedUserId(currentUser.id);
+      if (selectedUserId !== currentUser.id) {
+        setSelectedUserId(currentUser.id);
+      }
     } else if (availableUsers.length > 0) {
       const exists = availableUsers.some((u) => u.id === selectedUserId);
-      if (!exists) {
+      if (!exists && selectedUserId !== availableUsers[0].id) {
         setSelectedUserId(availableUsers[0].id);
       }
     }
-  }, [isAdmin, currentUser, availableUsers, selectedUserId]);
+  }, [isAdmin, currentUser?.id, availableUsers, selectedUserId]);
 
   const targetUser = useMemo(() => {
     return users.find((u) => u.id === selectedUserId) || currentUser || users[0] || null;

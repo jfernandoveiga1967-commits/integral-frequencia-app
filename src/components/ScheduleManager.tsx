@@ -103,7 +103,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     if (sortedTurmas.length > 0 && !sortedTurmas.includes(selectedTurma)) {
       setSelectedTurma(sortedTurmas[0]);
     }
-  }, [sortedTurmas, selectedTurma]);
+  }, [sortedTurmas.join(','), selectedTurma]);
 
   // Modal State for New/Edit Block
   const [isModalOpen, setIsModalOpen] = useState(false);

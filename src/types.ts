@@ -29,7 +29,9 @@ export interface Student {
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
   diasFrequencia?: DayOfWeek[]; // Dias da semana em que o aluno frequenta o Integral (ex: ['segunda', 'quarta', 'sexta'])
   horariosSaida?: Partial<Record<DayOfWeek, string>>; // Horário de saída por dia da semana (ex: { segunda: '17:00', terca: '18:00' })
+  horarioSaida?: string; // Horário de saída fixo/padrão único (para compatibilidade)
   status?: StudentStatus; // 'ativo' | 'inativo' | 'cancelado' (padrão: 'ativo')
+  statusMatricula?: StudentStatus; // Alias de compatibilidade com sistemas legados/importações
   inactivationDate?: string; // Data da inativação/cancelamento (YYYY-MM-DD)
   inactivationReason?: string; // Motivo opcional da inativação/cancelamento
   notes?: string;

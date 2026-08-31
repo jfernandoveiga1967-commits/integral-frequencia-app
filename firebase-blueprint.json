@@ -11,7 +11,27 @@
         "activities": {
           "type": "array",
           "description": "List of extra activity names assigned to student"
-        }
+        },
+        "diasFrequencia": {
+          "type": "array",
+          "description": "Days of the week the student attends Integral"
+        },
+        "horariosSaida": {
+          "type": "object",
+          "description": "Exit schedule per day of the week"
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 32,
+          "enum": ["ativo", "inativo", "cancelado"]
+        },
+        "statusMatricula": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "inactivationDate": { "type": "string", "maxLength": 32 },
+        "inactivationReason": { "type": "string", "maxLength": 500 },
+        "notes": { "type": "string", "maxLength": 1000 }
       },
       "required": ["id", "name", "turma", "activities"]
     },

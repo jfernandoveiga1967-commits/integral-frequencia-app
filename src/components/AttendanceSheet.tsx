@@ -91,27 +91,31 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   useEffect(() => {
     if (!isCoordenador) {
       if (allowedActivities.length === 1) {
-        setSelectedActivity(allowedActivities[0].id as ActivityType);
+        if (selectedActivity !== allowedActivities[0].id) {
+          setSelectedActivity(allowedActivities[0].id as ActivityType);
+        }
       } else if (allowedActivities.length > 1 && selectedActivity !== 'TODAS' && !allowedActivityIds.includes(selectedActivity)) {
         setSelectedActivity(allowedActivities[0].id as ActivityType);
-      } else if (allowedActivities.length === 0) {
+      } else if (allowedActivities.length === 0 && selectedActivity !== 'TODAS') {
         setSelectedActivity('TODAS');
       }
     }
-  }, [isCoordenador, allowedActivities, allowedActivityIds, selectedActivity]);
+  }, [isCoordenador, allowedActivities.length, allowedActivityIds.join(','), selectedActivity]);
 
   // Keep selectedTurma aligned with allowed turmas for non-coordenador
   useEffect(() => {
     if (!isCoordenador) {
       if (allowedTurmas.length === 1) {
-        setSelectedTurma(allowedTurmas[0] as TurmaType);
+        if (selectedTurma !== allowedTurmas[0]) {
+          setSelectedTurma(allowedTurmas[0] as TurmaType);
+        }
       } else if (allowedTurmas.length > 1 && selectedTurma !== 'TODAS' && !allowedTurmas.includes(selectedTurma)) {
         setSelectedTurma(allowedTurmas[0] as TurmaType);
-      } else if (allowedTurmas.length === 0) {
+      } else if (allowedTurmas.length === 0 && selectedTurma !== 'TODAS') {
         setSelectedTurma('TODAS');
       }
     }
-  }, [isCoordenador, allowedTurmas, selectedTurma]);
+  }, [isCoordenador, allowedTurmas.length, allowedTurmas.join(','), selectedTurma]);
 
   // Equipment modal state
   const [modalState, setModalState] = useState<{

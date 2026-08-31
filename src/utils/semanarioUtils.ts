@@ -1,50 +1,104 @@
-import { ActivityItem, DayOfWeek, SemanarioCategory, SemanarioPlan, WeekInfo } from '../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, WeekInfo } from '../types';
 import { getTurmaPedagogicalWeight } from './turmaUtils';
-import { loadActivities } from './storageUtils';
-import { ACTIVITIES_LIST } from '../data/initialData';
+import { loadActivities, loadSchedules } from './storageUtils';
+import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
+import { getISOWeekNumber, getWeekInfo, getWeekDays } from './dateUtils';
+import { OFFICIAL_SCHEDULE_TEMPLATES, getDefaultScheduleBlocks } from './scheduleDefaults';
 
 export const CATEGORIA_PROJETO = 'Projeto';
 
 /**
- * Retorna as categorias / modalidades permitidas para uma turma específica.
- * Consome a lista oficial unificada de atividades cadastradas no sistema.
- * A modalidade "Projeto" só é habilitada para turmas do 3º ao 6º Ano (e segmentos superiores).
- * Mantém sempre ordenação alfabética estrita de A a Z.
+ * Retorna os blocos de horário oficiais cadastrados na Grade Horária para uma turma e opcionalmente um dia.
  */
-export function getCategoriesForTurma(turmaName: string, activitiesList?: ActivityItem[]): string[] {
-  const isProjetoAllowed = isTurmaEligibleForProjeto(turmaName);
-  
-  let rawNames: string[] = [];
-  if (activitiesList && activitiesList.length > 0) {
-    rawNames = activitiesList.map((a) => (a.name || a.id).trim());
-  } else {
-    try {
-      const stored = loadActivities();
-      if (stored && stored.length > 0) {
-        rawNames = stored.map((a) => (a.name || a.id).trim());
-      } else {
-        rawNames = ACTIVITIES_LIST.map((a) => (a.name || a.id).trim());
-      }
-    } catch {
-      rawNames = ACTIVITIES_LIST.map((a) => (a.name || a.id).trim());
+export function getScheduleBlocksForTurma(
+  turmaName: string,
+  dayOfWeek?: DayOfWeek,
+  schedules?: ScheduleBlock[]
+): ScheduleBlock[] {
+  let allSchedules = schedules;
+  if (!allSchedules || allSchedules.length === 0) {
+    allSchedules = loadSchedules();
+  }
+  if (!allSchedules || allSchedules.length === 0) {
+    allSchedules = getDefaultScheduleBlocks();
+  }
+
+  let turmaBlocks = allSchedules.filter(
+    (b) => b.turma.toLowerCase().trim() === turmaName.toLowerCase().trim()
+  );
+
+  // Se a turma ainda não tiver blocos salvos, busca no template padrão
+  if (turmaBlocks.length === 0) {
+    const template = OFFICIAL_SCHEDULE_TEMPLATES[turmaName];
+    if (template) {
+      const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      days.forEach((d) => {
+        const daySlots = template[d] || [];
+        daySlots.forEach((slot) => {
+          turmaBlocks.push({
+            id: `sched_tmpl_${turmaName}_${d}_${slot.activity}`,
+            turma: turmaName,
+            dayOfWeek: d,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            activityId: slot.activity,
+          });
+        });
+      });
     }
   }
 
-  // Deduplicate and filter "Projeto" for lower grades if not eligible
-  const set = new Set<string>();
-  rawNames.forEach((name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    if (trimmed.toLowerCase() === 'projeto' && !isProjetoAllowed) {
-      return;
+  if (dayOfWeek) {
+    turmaBlocks = turmaBlocks.filter((b) => b.dayOfWeek === dayOfWeek);
+  }
+
+  // Ordenação por horário de início
+  return turmaBlocks.sort((a, b) => a.startTime.localeCompare(b.startTime));
+}
+
+/**
+ * Retorna as categorias / modalidades permitidas para uma turma específica,
+ * EXTRAÍDAS EXCLUSIVAMENTE DA GRADE HORÁRIA OFICIAL CADASTRADA para aquela turma.
+ *
+ * Regra Estrita:
+ * - A turma Mini e Maternal Azul NÃO possui Robótica na grade -> Robótica NUNCA será retornada.
+ * - Somente turmas com Robótica na grade (ex: 3º ao 6º Ano) terão Robótica retornada.
+ * - Mantém sempre ordenação alfabética estrita de A a Z.
+ */
+export function getCategoriesForTurma(
+  turmaName: string,
+  schedules?: ScheduleBlock[],
+  _activitiesList?: ActivityItem[]
+): string[] {
+  if (!turmaName) return [];
+
+  const blocks = getScheduleBlocksForTurma(turmaName, undefined, schedules);
+  const categoriesSet = new Set<string>();
+
+  blocks.forEach((b) => {
+    const act = (b.activityId || '').trim();
+    if (act) {
+      categoriesSet.add(act);
     }
-    set.add(trimmed);
   });
 
-  const categories = Array.from(set);
+  // Se por alguma razão extrema não houver blocos na grade, usa o template padrão
+  if (categoriesSet.size === 0) {
+    const template = OFFICIAL_SCHEDULE_TEMPLATES[turmaName];
+    if (template) {
+      const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      days.forEach((d) => {
+        (template[d] || []).forEach((slot) => {
+          if (slot.activity) categoriesSet.add(slot.activity.trim());
+        });
+      });
+    }
+  }
 
   // Ordenação alfabética estrita em português (A a Z)
-  return categories.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  return Array.from(categoriesSet).sort((a, b) =>
+    a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+  );
 }
 
 /**
@@ -82,7 +136,6 @@ export function getAllCategoriesAlphabetical(activitiesList?: ActivityItem[]): s
 export function isTurmaEligibleForProjeto(turmaName: string): boolean {
   if (!turmaName) return false;
   const weight = getTurmaPedagogicalWeight(turmaName);
-  // 3º Ano tem peso ~130. Turmas do 3º ao 6º ano tem peso >= 130
   return weight >= 130;
 }
 
@@ -191,7 +244,7 @@ export function getStatusStyle(status: 'realizada' | 'pendente' | 'substituida')
     case 'pendente':
     default:
       return {
-        label: 'Pendente',
+        label: '⏳ Pendente',
         bg: 'bg-slate-100 text-slate-700 border-slate-300',
         text: 'text-slate-700',
         border: 'border-slate-300',
@@ -203,12 +256,68 @@ export function getStatusStyle(status: 'realizada' | 'pendente' | 'substituida')
 // Storage local keys
 const SEMANARIO_STORAGE_KEY = 'integral_semanario_plans_v1';
 
+/**
+ * Normaliza e sincroniza os planos do Semanário com a Matriz Curricular e Grade Horária Oficial:
+ * 1. Remove planos com categorias que não existem na turma ou que não estejam no dia oficial da grade.
+ * 2. Atualiza o timeSlot com os horários oficiais exatos da Grade Horária (block.startTime - block.endTime).
+ * 3. Propostas que ainda não foram preenchidas/detalhadas pela equipe mantêm status garantido como 'pendente'.
+ */
+export function normalizeAndSyncSemanarioPlans(
+  plans: SemanarioPlan[],
+  schedules?: ScheduleBlock[]
+): SemanarioPlan[] {
+  if (!Array.isArray(plans)) return [];
+
+  const normalized: SemanarioPlan[] = [];
+
+  plans.forEach((p) => {
+    if (!p || !p.turma || !p.dayOfWeek) return;
+
+    // Obtém os blocos da grade oficial daquela turma para aquele dia da semana
+    const dayBlocks = getScheduleBlocksForTurma(p.turma, p.dayOfWeek, schedules);
+    if (dayBlocks.length === 0) return;
+
+    // Procura se a atividade/categoria do plano existe nos blocos daquele dia
+    const matchingBlock = dayBlocks.find(
+      (b) => (b.activityId || '').trim().toLowerCase() === (p.category || '').trim().toLowerCase()
+    );
+
+    // Se não está na grade do dia correspondente, ignora/remove do cache
+    if (!matchingBlock) return;
+
+    // Corrige rigorosamente o horário para o horário oficial da grade da turma
+    const officialTimeSlot = `${matchingBlock.startTime} - ${matchingBlock.endTime}`;
+
+    // Verifica se a proposta teve preenchimento real de evidências ou substituição
+    const hasCustomWork =
+      (p.photos && p.photos.length > 0) ||
+      (p.notes && p.notes.trim().length > 0) ||
+      (p.substitutionReason && p.substitutionReason.trim().length > 0) ||
+      (p.adiResponsible && p.adiResponsible.trim().length > 0) ||
+      (p.monitors && p.monitors.trim().length > 0);
+
+    const effectiveStatus: SemanarioStatus = hasCustomWork ? (p.status || 'pendente') : (p.status === 'substituida' ? 'substituida' : (p.status || 'pendente'));
+
+    normalized.push({
+      ...p,
+      timeSlot: officialTimeSlot,
+      status: effectiveStatus,
+    });
+  });
+
+  return normalized;
+}
+
 export function loadSemanarioPlans(): SemanarioPlan[] {
   try {
     const raw = localStorage.getItem(SEMANARIO_STORAGE_KEY);
     if (!raw) return getInitialSamplePlans();
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Limpa planos espúrios e sincroniza horários oficiais da grade
+      const cleaned = normalizeAndSyncSemanarioPlans(parsed);
+      return cleaned.length > 0 ? cleaned : getInitialSamplePlans();
+    }
     return getInitialSamplePlans();
   } catch (err) {
     console.error('Erro ao carregar planos do Semanário do localStorage:', err);
@@ -225,121 +334,89 @@ export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
 }
 
 /**
- * Amostras Pedagógicas Iniciais para demonstração e povoamento da grade
+ * Remove propostas que não pertencem à Grade Horária da turma correspondente.
+ * Exemplo: Se houver uma proposta de "Robótica" para "Mini e Maternal Azul", ela é removida.
  */
-export function getInitialSamplePlans(): SemanarioPlan[] {
-  const now = new Date();
-  const year = now.getFullYear();
-
-  return [
-    {
-      id: 'sem_plan_init_1',
-      turma: '1º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-24`,
-      dayOfWeek: 'segunda',
-      timeSlot: '13:30 - 14:30',
-      category: 'Acolhimento / Roda de Conversa',
-      title: 'Roda das Emoções & Caixa dos Sentimentos',
-      objectives: 'Estimular a autorregulação emocional, a escuta ativa e a empatia no retorno das atividades do final de semana.',
-      development: '1. Acolhimento em círculo na esteira pedagógica.\n2. Passagem do "Bichinho da Voz": cada criança compartilha um momento marcante do fim de semana.\n3. Apresentação do termômetro das emoções (alegria, saudade, calma, cansaço).',
-      materials: 'Bichinho de pelúcia (voz), cartazes do termômetro das emoções e almofadas.',
-      teacherName: 'Monitora Integral',
-      status: 'realizada',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'sem_plan_init_2',
-      turma: '1º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-24`,
-      dayOfWeek: 'segunda',
-      timeSlot: '15:00 - 16:00',
-      category: 'Estimulação Psicomotora e Movimento',
-      title: 'Circuito Sensorial dos Pés e Equilíbrio',
-      objectives: 'Desenvolver a consciência corporal, motricidade ampla, equilíbrio estático e dinâmico e integração sensorial.',
-      development: '1. Aquecimento lúdico com música corporal.\n2. Percurso com cones, cordas, tapetes texturizados (folhas, plástico bolha, esponja) e trave de equilíbrio.\n3. Relaxamento no final com respiração da flor e da vela.',
-      materials: 'Cones, cordas, tapetes táteis texturizados, caixas baixas.',
-      teacherName: 'Monitora Integral',
-      status: 'realizada',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'sem_plan_init_3',
-      turma: '1º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-25`,
-      dayOfWeek: 'terca',
-      timeSlot: '13:30 - 14:30',
-      category: 'Contação de Histórias e Literatura',
-      title: 'Varal de Histórias: "O Monstro das Cores"',
-      objectives: 'Incentivar o gosto pela leitura, ampliação do vocabulário e reflexão sobre sentimentos.',
-      development: '1. Leitura mediada do livro utilizando fantoches de feltro das cores.\n2. Classificação dos potes de sentimentos pelas crianças.\n3. Desenho coletivo do próprio monstrinho alegre.',
-      materials: 'Livro físico, fantoches de feltro, potes plásticos transparentes e novelos de lã colorida.',
-      teacherName: 'Monitora Integral',
-      status: 'realizada',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'sem_plan_init_4',
-      turma: '1º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-26`,
-      dayOfWeek: 'quarta',
-      timeSlot: '14:00 - 15:00',
-      category: 'Oficina Pedagógica e Criativa',
-      title: 'Modelagem Criativa com Argila e Elementos Naturais',
-      objectives: 'Trabalhar a coordenação motora fina, tato tridimensional e criatividade exploratória.',
-      development: '1. Manipulação livre da argila úmida.\n2. Impressão de texturas com galhos, folhas secas e sementes recolhidas no pátio escolar.\n3. Criação de esculturas de animais da natureza.',
-      materials: 'Argila escolar, folhas, gravetos, sementes, palitos e água em borrifadores.',
-      teacherName: 'Monitora Integral',
-      status: 'pendente',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'sem_plan_init_5',
-      turma: '3º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-27`,
-      dayOfWeek: 'quinta',
-      timeSlot: '14:30 - 15:30',
-      category: 'Projeto',
-      title: 'Projeto Horta & Sustentabilidade: Germinação de Sementes',
-      objectives: 'Compreender o ciclo de vida das plantas, responsabilidade ecológica e cultivo de hortaliças.',
-      development: '1. Estudo das sementes de alface e rúcula.\n2. Preparação dos vasinhos biodegradáveis com terra adubada.\n3. Rega controlada e confecção da tabela de observação diária de crescimento.',
-      materials: 'Sementes, copinhos de jornal, terra adubada, regadores e etiquetas de identificação.',
-      teacherName: 'Monitora Integral',
-      status: 'pendente',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'sem_plan_init_6',
-      turma: '2º Ano Azul',
-      weekNumber: 35,
-      year: year,
-      date: `${year}-08-28`,
-      dayOfWeek: 'sexta',
-      timeSlot: '14:00 - 15:00',
-      category: 'Jogos de Tabuleiro e Raciocínio',
-      title: 'Torneio Cooperativo de Dominó e Jogo da Memória Gigante',
-      objectives: 'Desenvolver o raciocínio lógico-matemático, respeito às regras e espírito de cooperação.',
-      development: '1. Divisão em pequenas equipes de 4 alunos.\n2. Rodízio de jogos de mesa clássicos (dominó, dama simplificada, ludo).\n3. Roda de fechamento destacando os momentos de ajuda mútua.',
-      materials: 'Jogos de dominó, memórias gigantes ilustradas, tapete de jogos.',
-      teacherName: 'Monitora Integral',
-      status: 'substituida',
-      substitutionReason: 'Substituído por Recreação ao Ar Livre devido ao dia ensolarado e atividade integrada comemorativa no pátio.',
-      createdAt: new Date().toISOString(),
-    },
-  ];
+export function cleanupInvalidTurmaPlans(plans: SemanarioPlan[], schedules?: ScheduleBlock[]): SemanarioPlan[] {
+  return normalizeAndSyncSemanarioPlans(plans, schedules);
 }
 
 /**
- * Gerador de sugestão pedagógica com IA (Fallback offline caso a API esteja sem chave ou instável)
+ * Amostras Pedagógicas Iniciais para demonstração e povoamento da grade 100% alinhadas com a Grade Horária Real.
+ */
+export function getInitialSamplePlans(
+  currentWeekInfo?: WeekInfo,
+  turmasToUse?: string[],
+  schedules?: ScheduleBlock[],
+  activitiesList?: ActivityItem[]
+): SemanarioPlan[] {
+  const now = new Date();
+  const iso = getISOWeekNumber(now);
+  const week = currentWeekInfo || getWeekInfo(iso.year, iso.weekNumber);
+  const turmasList = turmasToUse && turmasToUse.length > 0 ? turmasToUse : TURMAS_LIST;
+  return generateCurriculumForTurmasAndWeek(turmasList, week, schedules, activitiesList);
+}
+
+const DAYS_OF_WEEK_ORDER: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+
+/**
+ * Gera automaticamente o currículo pedagógico completo para as turmas informadas na semana indicada,
+ * PUXANDO EXCLUSIVAMENTE da Grade Horária oficial (ScheduleBlock) de cada turma para cada dia da semana.
+ * Todas as propostas não preenchidas iniciam com status [⏳ Pendente].
+ */
+export function generateCurriculumForTurmasAndWeek(
+  turmasList: string[],
+  weekInfo: WeekInfo,
+  schedules?: ScheduleBlock[],
+  _activitiesList?: ActivityItem[]
+): SemanarioPlan[] {
+  const plans: SemanarioPlan[] = [];
+  const weekDays = getWeekDays(weekInfo.startDate);
+
+  turmasList.forEach((turmaName) => {
+    DAYS_OF_WEEK_ORDER.forEach((day, dayOffset) => {
+      const dayDate = weekDays[dayOffset]?.dateStr || weekInfo.startDate;
+      const dayBlocks = getScheduleBlocksForTurma(turmaName, day, schedules);
+
+      dayBlocks.forEach((block) => {
+        const categoryName = block.activityId;
+        const timeSlot = `${block.startTime} - ${block.endTime}`;
+        const proposal = generateCuratedProposal(turmaName, categoryName);
+
+        const safeTurmaId = turmaName.replace(/\s+/g, '_').toLowerCase();
+        const safeCatId = categoryName.replace(/\s+/g, '_').toLowerCase();
+        const safeTime = block.startTime.replace(':', '');
+
+        plans.push({
+          id: `plan_sched_${safeTurmaId}_${day}_${safeCatId}_${safeTime}_w${weekInfo.weekNumber}_${weekInfo.year}`,
+          turma: turmaName,
+          weekNumber: weekInfo.weekNumber,
+          year: weekInfo.year,
+          date: dayDate,
+          dayOfWeek: day,
+          timeSlot: timeSlot,
+          category: categoryName,
+          title: proposal.title,
+          objectives: proposal.objectives,
+          development: proposal.development,
+          materials: proposal.materials,
+          teacherName: 'Aguardando preenchimento',
+          status: 'pendente',
+          substitutionReason: undefined,
+          photos: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'Coordenação Pedagógica',
+        });
+      });
+    });
+  });
+
+  return plans;
+}
+
+/**
+ * Gerador de sugestão pedagógica com IA e biblioteca curricular por modalidade
  */
 export function generateCuratedProposal(
   turma: string,
@@ -352,8 +429,9 @@ export function generateCuratedProposal(
   materials: string;
 } {
   const cleanTheme = (theme || '').trim();
+  const cat = (category || '').toLowerCase();
 
-  if (category.includes('Natação') || category.includes('Natacao') || category.includes('piscina') || category.includes('aquática')) {
+  if (cat.includes('natação') || cat.includes('natacao') || cat.includes('piscina') || cat.includes('aquática')) {
     return {
       title: cleanTheme ? `Natação Educativa: ${cleanTheme}` : 'Circuito Aquático: Respiração, Flutuação e Propulsão Lúdica',
       objectives: 'Desenvolver a segurança no meio aquático, controle respiratório, coordenação motora dos membros e autonomia na água.',
@@ -362,7 +440,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Balé') || category.includes('Bale')) {
+  if (cat.includes('balé') || cat.includes('bale')) {
     return {
       title: cleanTheme ? `Expressão no Balé: ${cleanTheme}` : 'Iniciação ao Balé Clássico: Postura, Flexibilidade e Graça',
       objectives: 'Desenvolver a postura corporal, musicalidade, noções de ritmo clássico e coordenação espacial.',
@@ -371,7 +449,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Judô') || category.includes('Judo') || category.includes('Marcial')) {
+  if (cat.includes('judô') || cat.includes('judo') || cat.includes('marcial')) {
     return {
       title: cleanTheme ? `Caminho Suave: ${cleanTheme}` : 'Judô Pedagógico: Disciplina, Amortecimento de Quedas (Ukemi) e Respeito',
       objectives: 'Trabalhar o autocontrole, respeito mútuo, equilíbrio corporal, noção de segurança nas quedas e espírito esportivo.',
@@ -380,7 +458,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Futebol') || category.includes('Esporte')) {
+  if (cat.includes('futebol') || cat.includes('esporte')) {
     return {
       title: cleanTheme ? `Clube do Futebol: ${cleanTheme}` : 'Futebol Cooperativo: Domínio de Bola, Passe Preciso e Jogo Coletivo',
       objectives: 'Aprimorar a coordenação motora ampla, visão de jogo, precisão nos passes e espírito de equipe.',
@@ -389,7 +467,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Dança') || category.includes('Danca')) {
+  if (cat.includes('dança') || cat.includes('danca')) {
     return {
       title: cleanTheme ? `Oficina de Ritmos: ${cleanTheme}` : 'Dança & Expressão: Ritmos Brasileiros e Consciência Corporal',
       objectives: 'Estimular a liberdade expressiva, percepção rítmica, lateralidade e integração em grupo.',
@@ -398,7 +476,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Flauta') || category.includes('Instrumentos')) {
+  if (cat.includes('flauta') || cat.includes('instrumentos')) {
     return {
       title: cleanTheme ? `Musicalização com Flauta: ${cleanTheme}` : 'Flauta Doce: Emissão Sonora, Digitação e Pequenas Melodias',
       objectives: 'Desenvolver a respiração diafragmática, afinação, coordenação motora fina e leitura musical básica.',
@@ -407,7 +485,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Ginástica') || category.includes('Ginastica')) {
+  if (cat.includes('ginástica') || cat.includes('ginastica')) {
     return {
       title: cleanTheme ? `Ginástica Artística: ${cleanTheme}` : 'Ginástica e Acrobacias: Rolamentos, Estrelas e Equilíbrio',
       objectives: 'Desenvolver a flexibilidade, força muscular funcional, coordenação acrobática e segurança corporal.',
@@ -416,7 +494,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Robótica') || category.includes('Robotica') || category.includes('Computacional')) {
+  if (cat.includes('robótica') || cat.includes('robotica') || cat.includes('computacional')) {
     return {
       title: cleanTheme ? `Robótica Educacional: ${cleanTheme}` : 'Mundo Maker: Construção de Mecanismos e Pensamento Computacional',
       objectives: 'Estimular o raciocínio lógico, noções de engrenagens e alavancas, resolução colaborativa de problemas e tecnologia.',
@@ -425,7 +503,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Devocional') || category.includes('Valores') || category.includes('Espiritualidade')) {
+  if (cat.includes('devocional') || cat.includes('valores') || cat.includes('espiritualidade')) {
     return {
       title: cleanTheme ? `Momento de Valores: ${cleanTheme}` : 'Momento Devocional: Gratidão, Solidariedade e Amor ao Próximo',
       objectives: 'Cultivar sentimentos de gratidão, empatia, respeito às diferenças e reflexão sobre a bondade no dia a dia.',
@@ -434,7 +512,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Almoço') || category.includes('Almoco') || category.includes('Refeição')) {
+  if (cat.includes('almoço') || cat.includes('almoco') || cat.includes('refeição')) {
     return {
       title: cleanTheme ? `Educação Nutricional: ${cleanTheme}` : 'Almoço Saudável & Autonomia: Cores no Prato e Higiene Bucal',
       objectives: 'Incentivar o consumo de saladas e legumes, a mastigação consciente, a postura à mesa e a higiene após as refeições.',
@@ -443,7 +521,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Acolhimento') || category.includes('Roda')) {
+  if (cat.includes('acolhimento') || cat.includes('roda')) {
     return {
       title: cleanTheme ? `Roda de Acolhimento: ${cleanTheme}` : 'Roda de Acolhimento & Cápsula do Afeto',
       objectives: 'Estimular a oralidade, o pertencimento ao grupo escolar, o respeito aos turnos de fala e a conexão afetiva.',
@@ -452,7 +530,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Artes') || category.includes('Expressão')) {
+  if (cat.includes('artes') || cat.includes('expressão')) {
     return {
       title: cleanTheme ? `Ateliê de Artes: ${cleanTheme}` : 'Ateliê Criativo: Pintura com Pigmentos Naturais',
       objectives: 'Explorar texturas, cores primárias/secundárias, motricidade fina e liberdade expressiva.',
@@ -461,7 +539,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Contação') || category.includes('Histórias') || category.includes('Literatura')) {
+  if (cat.includes('contação') || cat.includes('contacao') || cat.includes('histórias') || cat.includes('historias') || cat.includes('literatura')) {
     return {
       title: cleanTheme ? `Viagem Literária: ${cleanTheme}` : 'Teatro de Sombras & Contação de Lendas Brasileiras',
       objectives: 'Despertar o imaginário, interpretação narrativa e valorização da cultura popular brasileira.',
@@ -470,7 +548,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Culinária') || category.includes('Nutricional')) {
+  if (cat.includes('culinária') || cat.includes('nutricional')) {
     return {
       title: cleanTheme ? `Oficina Nutricional: ${cleanTheme}` : 'Oficina Masterchef Mirim: Espetinhos de Frutas Divertidos',
       objectives: 'Promover hábitos alimentares saudáveis, noções de higiene e classificação de alimentos por cores e sabores.',
@@ -479,7 +557,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Psicomotora') || category.includes('Movimento')) {
+  if (cat.includes('psicomotora') || cat.includes('movimento')) {
     return {
       title: cleanTheme ? `Circuito Motor: ${cleanTheme}` : 'Circuito de Agilidade, Salto e Coordenação Visomotora',
       objectives: 'Aprimorar o equilíbrio, noções espaço-temporais, lateralidade e cooperação em equipe.',
@@ -488,7 +566,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Jogos') || category.includes('Raciocínio')) {
+  if (cat.includes('jogos') || cat.includes('raciocínio')) {
     return {
       title: cleanTheme ? `Clube do Raciocínio: ${cleanTheme}` : 'Desafio dos Blocos Lógicos & Tangram Gigante',
       objectives: 'Desenvolver a percepção espacial, reconhecimento de formas geométricas e resolução de problemas.',
@@ -497,7 +575,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Música') || category.includes('Musicalização') || category.includes('Ritmo')) {
+  if (cat.includes('música') || cat.includes('musicalização') || cat.includes('ritmo')) {
     return {
       title: cleanTheme ? `Banda do Integral: ${cleanTheme}` : 'Oficina de Percussão Corporal e Paisagens Sonoras',
       objectives: 'Trabalhar a percepção auditiva, pulsação rítmica, coordenação motora bilateral e sincronia.',
@@ -506,7 +584,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Projeto')) {
+  if (cat.includes('projeto')) {
     return {
       title: cleanTheme ? `Projeto Integrador: ${cleanTheme}` : 'Projeto Científico: Laboratório de Experiências Práticas',
       objectives: 'Fomentar a curiosidade científica, metodologia investigativa, formulação de hipóteses e registro de resultados.',
@@ -515,7 +593,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Recreação') || category.includes('Brincadeiras')) {
+  if (cat.includes('recreação') || cat.includes('brincadeiras')) {
     return {
       title: cleanTheme ? `Gincana Recreativa: ${cleanTheme}` : 'Gincana Cooperativa: Jogos Tradicionais de Rua',
       objectives: 'Incentivar o brincar livre e dirigido, integração social, respeito às regras e superação de desafios.',
@@ -524,7 +602,7 @@ export function generateCuratedProposal(
     };
   }
 
-  if (category.includes('Relaxamento') || category.includes('Calma')) {
+  if (cat.includes('relaxamento') || cat.includes('calma')) {
     return {
       title: cleanTheme ? `Momento Zen: ${cleanTheme}` : 'Jornada da Calma: Yoga Lúdico & Massagem com Bolinhas',
       objectives: 'Promover a desaceleração, redução do estresse diário, autocuidado e consciência respiratória.',

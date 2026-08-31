@@ -165,18 +165,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   React.useEffect(() => {
     if (!isCoordenador && currentUser) {
       if (allowedTurmas.length === 1) {
-        setSelectedTurma(allowedTurmas[0] as TurmaType);
+        if (selectedTurma !== allowedTurmas[0]) {
+          setSelectedTurma(allowedTurmas[0] as TurmaType);
+        }
       } else if (
         allowedTurmas.length > 1 &&
         selectedTurma !== 'TODAS' &&
         !allowedTurmas.includes(selectedTurma)
       ) {
         setSelectedTurma(allowedTurmas[0] as TurmaType);
-      } else if (allowedTurmas.length === 0) {
+      } else if (allowedTurmas.length === 0 && selectedTurma !== 'TODAS') {
         setSelectedTurma('TODAS');
       }
     }
-  }, [isCoordenador, currentUser, allowedTurmas, selectedTurma]);
+  }, [isCoordenador, currentUser?.id, allowedTurmas.length, allowedTurmas.join(','), selectedTurma]);
 
   // Keep form turmas aligned with allowed turmas
   React.useEffect(() => {
@@ -188,7 +190,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         setBatchTurma(allowedTurmas[0] as TurmaType);
       }
     }
-  }, [allowedTurmas, newTurma, batchTurma]);
+  }, [allowedTurmas.length, allowedTurmas.join(','), newTurma, batchTurma]);
 
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);

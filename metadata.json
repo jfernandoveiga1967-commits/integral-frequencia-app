@@ -1,5 +1,5 @@
 {
-  "name": "Integral - Frequência Extracurricular",
+  "name": "Programa do Integral - Colégio Crescer",
   "description": "Assistente para gestão de chamada de frequência semanal, grade horária ao vivo das atividades do Integral, Semanário Pedagógico com BNCC e IA (Gemini), e Livro Ponto digital com tolerância, fechamento de folha e quitação institucional.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

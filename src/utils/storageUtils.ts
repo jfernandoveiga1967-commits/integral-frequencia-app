@@ -1,6 +1,8 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
+import { getInitialSamplePlans } from './semanarioUtils';
+import { getDefaultScheduleBlocks } from './scheduleDefaults';
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
@@ -11,6 +13,203 @@ const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
 const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 const SEMANARIO_KEY = 'integral_semanario_plans_v1';
+
+export const DEFAULT_DIAS_FREQUENCIA: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+
+/**
+ * Normaliza e enriquece os dados de um aluno, garantindo a integridade e
+ * preservação irrestrita das propriedades customizadas (diasFrequencia, horariosSaida, statusMatricula, etc.),
+ * aplicando valores padrão APENAS quando essas propriedades estiverem ausentes.
+ */
+export function normalizeStudent(
+  rawStudent: any,
+  existingStudent?: Student
+): Student {
+  if (!rawStudent && !existingStudent) {
+    return {
+      id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      name: '',
+      turma: '',
+      activities: ['Rotina'],
+      diasFrequencia: [...DEFAULT_DIAS_FREQUENCIA],
+      horariosSaida: {},
+      status: 'ativo',
+      statusMatricula: 'ativo',
+    };
+  }
+
+  const s = rawStudent || {};
+  const id = String(s.id || existingStudent?.id || `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`).trim();
+  const name = String(s.name !== undefined ? s.name : (existingStudent?.name || '')).trim();
+  const turma = String(s.turma !== undefined ? s.turma : (existingStudent?.turma || '')) as TurmaType;
+
+  // Atividades: Garantir array e presença obrigatória da 'Rotina'
+  let rawActs: string[] = [];
+  if (Array.isArray(s.activities)) {
+    rawActs = s.activities;
+  } else if (Array.isArray(existingStudent?.activities)) {
+    rawActs = existingStudent.activities;
+  }
+  const uniqueActs = Array.from(new Set(rawActs.map((a: any) => String(a).trim()).filter(Boolean)));
+  const activities = uniqueActs.includes('Rotina') ? uniqueActs : ['Rotina', ...uniqueActs];
+
+  // Preservação de Dias de Frequência (diasFrequencia / dias_frequencia)
+  // REGRA CRÍTICA: Se já existir no registro ou no aluno existente (mesmo que parcial, ex: 2ª/4ª/6ª), PRESERVAR!
+  let diasFrequencia: DayOfWeek[];
+  if (Array.isArray(s.diasFrequencia) && s.diasFrequencia.length > 0) {
+    diasFrequencia = [...s.diasFrequencia];
+  } else if (Array.isArray(s.dias_frequencia) && s.dias_frequencia.length > 0) {
+    diasFrequencia = [...s.dias_frequencia];
+  } else if (existingStudent && Array.isArray(existingStudent.diasFrequencia) && existingStudent.diasFrequencia.length > 0) {
+    diasFrequencia = [...existingStudent.diasFrequencia];
+  } else {
+    diasFrequencia = [...DEFAULT_DIAS_FREQUENCIA];
+  }
+
+  // Preservação de Horários de Saída (horariosSaida / horarioSaida)
+  let horariosSaida: Partial<Record<DayOfWeek, string>> = {};
+  if (existingStudent?.horariosSaida && typeof existingStudent.horariosSaida === 'object') {
+    horariosSaida = { ...existingStudent.horariosSaida };
+  }
+  if (s.horariosSaida && typeof s.horariosSaida === 'object') {
+    horariosSaida = { ...horariosSaida, ...s.horariosSaida };
+  } else if (typeof s.horarioSaida === 'string' && s.horarioSaida.trim().length > 0) {
+    const fixedTime = s.horarioSaida.trim();
+    horariosSaida = {
+      segunda: fixedTime,
+      terca: fixedTime,
+      quarta: fixedTime,
+      quinta: fixedTime,
+      sexta: fixedTime,
+    };
+  }
+
+  // Preservação de Status / Status de Matrícula
+  const rawStatus = s.status || s.statusMatricula || existingStudent?.status || existingStudent?.statusMatricula || 'ativo';
+  const status: StudentStatus = (rawStatus === 'inativo' || rawStatus === 'cancelado') ? rawStatus : 'ativo';
+
+  const inactivationDate = s.inactivationDate || existingStudent?.inactivationDate || undefined;
+  const inactivationReason = s.inactivationReason || existingStudent?.inactivationReason || undefined;
+  const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
+
+  return {
+    id,
+    name,
+    turma,
+    activities,
+    diasFrequencia,
+    horariosSaida,
+    status,
+    statusMatricula: status,
+    inactivationDate,
+    inactivationReason,
+    notes,
+  };
+}
+
+/**
+ * Fusão inteligente (Deep Merge) de dois registros de alunos,
+ * preservando todas as customizações (diasFrequencia, horariosSaida, status)
+ * sem redefinir para padrões default.
+ */
+export function mergeStudentData(
+  existingStudent: Student | undefined,
+  incomingStudent: Partial<Student> | Student
+): Student {
+  if (!existingStudent) {
+    return normalizeStudent(incomingStudent);
+  }
+
+  // Se o incoming tem diasFrequencia com valores válidos, usa; se não, preserva o do existing
+  const incomingDays = Array.isArray(incomingStudent.diasFrequencia) && incomingStudent.diasFrequencia.length > 0
+    ? incomingStudent.diasFrequencia
+    : existingStudent.diasFrequencia;
+
+  // Merge de horários de saída: preserva os horários já definidos no existing
+  const mergedHorarios: Partial<Record<DayOfWeek, string>> = {
+    ...(existingStudent.horariosSaida || {}),
+    ...(incomingStudent.horariosSaida || {}),
+  };
+
+  // Se incoming tem horarioSaida string único especificado
+  if (typeof (incomingStudent as any).horarioSaida === 'string' && (incomingStudent as any).horarioSaida.trim().length > 0) {
+    const fixedTime = (incomingStudent as any).horarioSaida.trim();
+    (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]).forEach((d) => {
+      if (!mergedHorarios[d]) mergedHorarios[d] = fixedTime;
+    });
+  }
+
+  // Atividades
+  const incomingActs = Array.isArray(incomingStudent.activities) ? incomingStudent.activities : [];
+  const existingActs = Array.isArray(existingStudent.activities) ? existingStudent.activities : [];
+  const baseActs = incomingActs.length > 0 ? incomingActs : existingActs;
+  const mergedActivities = Array.from(new Set(['Rotina', ...baseActs]));
+
+  const status = incomingStudent.status || (incomingStudent as any).statusMatricula || existingStudent.status || existingStudent.statusMatricula || 'ativo';
+
+  return {
+    ...existingStudent,
+    ...incomingStudent,
+    id: incomingStudent.id || existingStudent.id,
+    name: incomingStudent.name !== undefined ? incomingStudent.name : existingStudent.name,
+    turma: incomingStudent.turma !== undefined ? incomingStudent.turma : existingStudent.turma,
+    activities: mergedActivities,
+    diasFrequencia: incomingDays && incomingDays.length > 0 ? incomingDays : (existingStudent.diasFrequencia || [...DEFAULT_DIAS_FREQUENCIA]),
+    horariosSaida: mergedHorarios,
+    status,
+    statusMatricula: status,
+    inactivationDate: incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : existingStudent.inactivationDate,
+    inactivationReason: incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : existingStudent.inactivationReason,
+    notes: incomingStudent.notes !== undefined ? incomingStudent.notes : existingStudent.notes,
+  };
+}
+
+/**
+ * Mescla uma lista de alunos recebida (ex: do Firestore ou importação) com a lista local existente,
+ * preservando todas as configurações customizadas já salvas de cada aluno.
+ */
+export function mergeStudentsList(
+  currentStudents: Student[],
+  incomingStudents: Student[]
+): Student[] {
+  const currentMap = new Map<string, Student>();
+  const nameTurmaMap = new Map<string, Student>();
+
+  (currentStudents || []).forEach((s) => {
+    if (s.id) currentMap.set(s.id, s);
+    if (s.name && s.turma) {
+      const key = `${s.name.toLowerCase().trim()}_${s.turma.toLowerCase().trim()}`;
+      nameTurmaMap.set(key, s);
+    }
+  });
+
+  const processedIds = new Set<string>();
+  const mergedList: Student[] = [];
+
+  (incomingStudents || []).forEach((incoming) => {
+    if (!incoming) return;
+    if (isMockStudent(incoming)) return;
+
+    let existing = incoming.id ? currentMap.get(incoming.id) : undefined;
+    if (!existing && incoming.name && incoming.turma) {
+      const key = `${incoming.name.toLowerCase().trim()}_${incoming.turma.toLowerCase().trim()}`;
+      existing = nameTurmaMap.get(key);
+    }
+
+    const merged = mergeStudentData(existing, incoming);
+    processedIds.add(merged.id);
+    mergedList.push(merged);
+  });
+
+  // Preservar alunos locais que não estejam no incoming (para não perder dados offline ou de lotes parciais)
+  (currentStudents || []).forEach((localStudent) => {
+    if (!isMockStudent(localStudent) && !processedIds.has(localStudent.id)) {
+      mergedList.push(normalizeStudent(localStudent));
+    }
+  });
+
+  return mergedList;
+}
 
 export function loadHolidays(): HolidayItem[] {
   try {
@@ -75,14 +274,16 @@ export function loadSchedules(): ScheduleBlock[] {
     const data = localStorage.getItem(SCHEDULES_KEY);
     if (data) {
       const parsed: ScheduleBlock[] = JSON.parse(data);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
     }
   } catch (e) {
     console.error('Erro ao carregar grade horária do LocalStorage:', e);
   }
-  return [];
+  const defaultBlocks = getDefaultScheduleBlocks();
+  saveSchedules(defaultBlocks);
+  return defaultBlocks;
 }
 
 export function saveSchedules(schedules: ScheduleBlock[]): void {
@@ -178,45 +379,43 @@ export function loadStudents(): Student[] {
   try {
     const data = localStorage.getItem(STUDENTS_KEY);
     if (data) {
-      let parsed: Student[] = JSON.parse(data);
-      let migrated = false;
-      const newTurmas: TurmaType[] = ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul'];
-      parsed = parsed.map((s, idx) => {
-        let studentToUpdate = { ...s };
-        if ((studentToUpdate.turma as string) === 'Mini Maternal / Maternal / Infantil 1 Azul') {
-          migrated = true;
-          studentToUpdate.turma = newTurmas[idx % 3];
-        }
-        // MANDATORY RULE: Every student must have 'Rotina' in activities
-        if (!Array.isArray(studentToUpdate.activities)) {
-          studentToUpdate.activities = ['Rotina'];
-          migrated = true;
-        } else if (!studentToUpdate.activities.includes('Rotina')) {
-          studentToUpdate.activities = ['Rotina', ...studentToUpdate.activities];
-          migrated = true;
-        }
-        return studentToUpdate;
-      });
+      const parsed: any[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        let migrated = false;
+        const newTurmas: TurmaType[] = ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul'];
 
-      // Filter out any mock/fictional model students
-      const originalLength = parsed.length;
-      parsed = parsed.filter((s) => !isMockStudent(s));
+        // Filter out any mock/fictional model students
+        const nonMock = parsed.filter((s) => !isMockStudent(s));
+        if (nonMock.length !== parsed.length) migrated = true;
 
-      if (migrated || parsed.length !== originalLength) {
-        saveStudents(parsed);
+        const normalized = nonMock.map((s, idx) => {
+          let studentToUpdate = { ...s };
+          if ((studentToUpdate.turma as string) === 'Mini Maternal / Maternal / Infantil 1 Azul') {
+            migrated = true;
+            studentToUpdate.turma = newTurmas[idx % 3];
+          }
+          return normalizeStudent(studentToUpdate);
+        });
+
+        if (migrated) {
+          saveStudents(normalized);
+        }
+        return normalized;
       }
-      return parsed;
     }
   } catch (e) {
     console.error('Erro ao carregar alunos do LocalStorage:', e);
   }
-  saveStudents(INITIAL_STUDENTS);
-  return INITIAL_STUDENTS;
+  const defaultInitial = INITIAL_STUDENTS.map((s) => normalizeStudent(s));
+  saveStudents(defaultInitial);
+  return defaultInitial;
 }
 
 export function saveStudents(students: Student[]): void {
   try {
-    localStorage.setItem(STUDENTS_KEY, JSON.stringify(students));
+    const nonMock = (students || []).filter((s) => !isMockStudent(s));
+    const normalized = nonMock.map((s) => normalizeStudent(s));
+    localStorage.setItem(STUDENTS_KEY, JSON.stringify(normalized));
   } catch (e) {
     console.error('Erro ao salvar alunos:', e);
   }
@@ -302,14 +501,16 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
     const data = localStorage.getItem(SEMANARIO_KEY);
     if (data) {
       const parsed: SemanarioPlan[] = JSON.parse(data);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
     }
   } catch (e) {
     console.error('Erro ao carregar planos do Semanário do LocalStorage:', e);
   }
-  return [];
+  const defaultPlans = getInitialSamplePlans();
+  saveSemanarioPlans(defaultPlans);
+  return defaultPlans;
 }
 
 export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
