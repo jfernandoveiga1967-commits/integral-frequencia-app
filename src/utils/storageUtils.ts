@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 
@@ -10,6 +10,7 @@ const SCHEDULES_KEY = 'integral_frequencia_schedules_v1';
 const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
 const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
+const SEMANARIO_KEY = 'integral_semanario_plans_v1';
 
 export function loadHolidays(): HolidayItem[] {
   try {
@@ -98,38 +99,46 @@ export function loadActivities(): ActivityItem[] {
     if (data) {
       const parsed: ActivityItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const officialIds = new Set(ACTIVITIES_LIST.map((a) => a.id));
+        const officialMap = new Map<string, ActivityItem>();
+        ACTIVITIES_LIST.forEach((a) => {
+          officialMap.set(a.id, a);
+          officialMap.set(a.name, a);
+        });
         
-        // Enrich and guarantee requiresRollCall: true for official extracurriculars
-        let enriched = parsed.map((act) => {
-          const isOfficial = officialIds.has(act.id) || officialIds.has(act.name);
+        // Enrich activities
+        const enriched: ActivityItem[] = parsed.map((act): ActivityItem => {
+          const official = officialMap.get(act.id) || officialMap.get(act.name);
           return {
             ...act,
-            requiresRollCall: isOfficial ? true : (act.requiresRollCall !== undefined ? act.requiresRollCall : true),
+            requiresRollCall: act.requiresRollCall !== undefined ? act.requiresRollCall : (official ? official.requiresRollCall : true),
+            icon: act.icon || (official ? official.icon : 'Clock'),
           };
         });
 
         // Ensure all default official activities are present
         ACTIVITIES_LIST.forEach((officialAct) => {
           if (!enriched.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
-            enriched.push({ ...officialAct, requiresRollCall: true });
+            enriched.push({ ...officialAct });
           }
         });
 
-        saveActivities(enriched);
-        return enriched;
+        const sorted = enriched.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
+        saveActivities(sorted);
+        return sorted;
       }
     }
   } catch (e) {
     console.error('Erro ao carregar atividades do LocalStorage:', e);
   }
-  saveActivities(ACTIVITIES_LIST);
-  return ACTIVITIES_LIST;
+  const defaultSorted = [...ACTIVITIES_LIST].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
+  saveActivities(defaultSorted);
+  return defaultSorted;
 }
 
 export function saveActivities(activities: ActivityItem[]): void {
   try {
-    localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(activities));
+    const sorted = [...activities].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
+    localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(sorted));
   } catch (e) {
     console.error('Erro ao salvar atividades:', e);
   }
@@ -288,12 +297,36 @@ export function savePontoClosings(closings: PontoMonthClosing[]): void {
   }
 }
 
+export function loadSemanarioPlans(): SemanarioPlan[] {
+  try {
+    const data = localStorage.getItem(SEMANARIO_KEY);
+    if (data) {
+      const parsed: SemanarioPlan[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao carregar planos do Semanário do LocalStorage:', e);
+  }
+  return [];
+}
+
+export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
+  try {
+    localStorage.setItem(SEMANARIO_KEY, JSON.stringify(plans));
+  } catch (e) {
+    console.error('Erro ao salvar planos do Semanário:', e);
+  }
+}
+
 export function resetAllData(): void {
   localStorage.removeItem(STUDENTS_KEY);
   localStorage.removeItem(RECORDS_KEY);
   localStorage.removeItem(TURMAS_KEY);
   localStorage.removeItem(PONTO_RECORDS_KEY);
   localStorage.removeItem(PONTO_CLOSINGS_KEY);
+  localStorage.removeItem(SEMANARIO_KEY);
 }
 
 function generateInitialSeedRecords(): AttendanceRecord[] {

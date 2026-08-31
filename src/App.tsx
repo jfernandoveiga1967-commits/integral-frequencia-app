@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import {
   loadStudents,
@@ -19,6 +19,8 @@ import {
   savePontoRecords,
   loadPontoClosings,
   savePontoClosings,
+  loadSemanarioPlans,
+  saveSemanarioPlans,
   resetAllData,
   isMockStudent,
 } from './utils/storageUtils';
@@ -34,6 +36,7 @@ import { WeeklyReport } from './components/WeeklyReport';
 import { WeeklyLibrary } from './components/WeeklyLibrary';
 import { UserManagement } from './components/UserManagement';
 import { LivroPonto } from './components/LivroPonto';
+import { SemanarioMain } from './components/Semanario/SemanarioMain';
 import { LoginScreen } from './components/LoginScreen';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
@@ -49,6 +52,10 @@ import {
   batchSavePontoRecordsToFirestore,
   subscribePontoClosings,
   savePontoClosingToFirestore,
+  subscribeSemanarioPlans,
+  saveSemanarioPlanToFirestore,
+  deleteSemanarioPlanFromFirestore,
+  batchSaveSemanarioPlansToFirestore,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -83,6 +90,7 @@ export default function App() {
   const [turmas, setTurmas] = useState<string[]>([]);
   const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
   const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
+  const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
 
@@ -505,6 +513,18 @@ export default function App() {
       }
     });
 
+    const unsubSemanario = subscribeSemanarioPlans((fsPlans) => {
+      if (fsPlans && fsPlans.length > 0) {
+        setSemanarioPlans(fsPlans);
+        saveSemanarioPlans(fsPlans);
+      } else {
+        const localPlans = loadSemanarioPlans();
+        if (localPlans.length > 0) {
+          batchSaveSemanarioPlansToFirestore(localPlans).catch(() => {});
+        }
+      }
+    });
+
     return () => {
       unsubStudents();
       unsubRecords();
@@ -515,6 +535,7 @@ export default function App() {
       unsubHolidays();
       unsubPontoRecords();
       unsubPontoClosings();
+      unsubSemanario();
     };
   }, []);
 
@@ -941,6 +962,44 @@ export default function App() {
     savePontoClosingToFirestore(closing);
   };
 
+  // Semanário Pedagogical Planning Handlers
+  const handleSaveSemanarioPlan = (plan: SemanarioPlan) => {
+    setSemanarioPlans((prev) => {
+      const idx = prev.findIndex((p) => p.id === plan.id);
+      let next: SemanarioPlan[];
+      if (idx >= 0) {
+        next = [...prev];
+        next[idx] = plan;
+      } else {
+        next = [plan, ...prev];
+      }
+      saveSemanarioPlans(next);
+      return next;
+    });
+    saveSemanarioPlanToFirestore(plan);
+  };
+
+  const handleDeleteSemanarioPlan = (planId: string) => {
+    setSemanarioPlans((prev) => {
+      const next = prev.filter((p) => p.id !== planId);
+      saveSemanarioPlans(next);
+      return next;
+    });
+    deleteSemanarioPlanFromFirestore(planId);
+  };
+
+  const handleBatchSaveSemanarioPlans = (plansToSave: SemanarioPlan[]) => {
+    setSemanarioPlans((prev) => {
+      const map = new Map<string, SemanarioPlan>();
+      prev.forEach((p) => map.set(p.id, p));
+      plansToSave.forEach((p) => map.set(p.id, p));
+      const merged = Array.from(map.values());
+      saveSemanarioPlans(merged);
+      return merged;
+    });
+    batchSaveSemanarioPlansToFirestore(plansToSave);
+  };
+
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
     if (date) {
@@ -1097,6 +1156,23 @@ export default function App() {
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}
             onNavigateToAttendance={handleNavigateToAttendance}
+          />
+        )}
+
+        {/* Tab 3: Semanário / Planejamento Pedagógico (BNCC) */}
+        {activeTab === 'semanario' && (
+          <SemanarioMain
+            plans={semanarioPlans}
+            turmas={turmas}
+            users={users}
+            currentUser={currentUser}
+            currentWeek={currentWeek}
+            activitiesList={activitiesList}
+            onSavePlan={handleSaveSemanarioPlan}
+            onDeletePlan={handleDeleteSemanarioPlan}
+            onBatchSavePlans={handleBatchSaveSemanarioPlans}
+            onSelectWeek={setCurrentWeek}
+            onAddTurma={handleAddTurma}
           />
         )}
 

@@ -21,6 +21,7 @@ import {
   generateNumericAttendanceConsolidatedPDFReport,
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
+import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
@@ -48,6 +49,7 @@ import {
   Award,
   CalendarOff,
   Info,
+  Utensils,
 } from 'lucide-react';
 
 interface WeeklyReportProps {
@@ -395,6 +397,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const [pdfNumericStartDate, setPdfNumericStartDate] = useState<string>(effectiveStartDate);
   const [pdfNumericEndDate, setPdfNumericEndDate] = useState<string>(effectiveEndDate);
 
+  // 5. Meal Financial Report Modal State
+  const [showMealReportModal, setShowMealReportModal] = useState(false);
+
   const numericTargetStudents = useMemo(() => {
     if (numericTurmaFilter === 'all') {
       return isCoordenador || !currentUser
@@ -608,6 +613,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             >
               <BarChart3 className="w-4 h-4 text-emerald-600" />
               <span>PDF Numérico</span>
+            </button>
+
+            <button
+              onClick={() => setShowMealReportModal(true)}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-amber-400/30"
+              title="Abrir Relatório Financeiro de Refeições (Almoço) com Edição Diária e Exportação em Excel"
+            >
+              <Utensils className="w-4 h-4 text-amber-600" />
+              <span>Refeições (Almoço)</span>
             </button>
 
             <button
@@ -838,7 +852,39 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <p className="text-[11px] text-slate-400 mt-1">Apuradas na chamada da Rotina</p>
           </div>
         </div>
+
+        {/* Meal Financial Report Card Banner */}
+        <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-200/80 rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center space-x-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20">
+              <Utensils className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-black text-slate-900">
+                  Relatório Financeiro de Refeições (Almoço)
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                  Editável & Excel
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Faça a conferência dia a dia da quantidade de alunos servidos, ajuste o valor unitário da refeição e exporte em planilha Excel (.xlsx) com fórmulas ativas ou PDF de fechamento.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowMealReportModal(true)}
+            className="px-5 py-2.5 rounded-2xl text-xs font-black text-white bg-slate-900 hover:bg-slate-800 shadow-md transition-all cursor-pointer flex items-center justify-center space-x-2 shrink-0"
+          >
+            <Utensils className="w-4 h-4 text-amber-400" />
+            <span>Abrir Módulo de Refeições</span>
+          </button>
+        </div>
       </div>
+
 
       {/* Equipment Alerts Banner */}
       {equipmentRecords.length > 0 && (
@@ -1845,6 +1891,18 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
       )}
 
+      {/* Meal Financial Report Modal */}
+      {showMealReportModal && (
+        <MealReportModal
+          isOpen={showMealReportModal}
+          onClose={() => setShowMealReportModal(false)}
+          students={students}
+          records={records}
+          holidays={holidays}
+          currentUser={currentUser}
+        />
+      )}
+
       {/* On-screen PDF Viewer Modal */}
       <PdfViewerModal
         isOpen={pdfPreviewState.isOpen}
@@ -1860,3 +1918,4 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     </div>
   );
 };
+

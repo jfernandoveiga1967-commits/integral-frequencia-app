@@ -1,6 +1,6 @@
 {
   "name": "Integral - Frequência Extracurricular",
-  "description": "Assistente para gestão de chamada de frequência semanal, grade horária ao vivo das atividades do Integral (Natação, Balé, Dança, Judô, Futebol, Ginástica, Flauta e rotinas) e Livro Ponto digital com tolerância, fechamento de folha e quitação institucional.",
+  "description": "Assistente para gestão de chamada de frequência semanal, grade horária ao vivo das atividades do Integral, Semanário Pedagógico com BNCC e IA (Gemini), e Livro Ponto digital com tolerância, fechamento de folha e quitação institucional.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

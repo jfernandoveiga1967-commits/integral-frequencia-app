@@ -200,3 +200,67 @@ export interface UserProfile {
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
   updatedAt?: string;
 }
+
+export interface MealDailyEntry {
+  date: string; // YYYY-MM-DD
+  dayNumber: number; // 1-31
+  dayOfWeek: DayOfWeek | 'sabado' | 'domingo';
+  dayLabel: string; // "Segunda-feira"
+  isSchoolDay: boolean;
+  holidayName?: string;
+  systemCount: number; // Alunos presentes calculados automaticamente pela chamada
+  manualCount: number; // Quantidade de alunos (editável pelo financeiro)
+  unitPrice: number; // Valor unitário da refeição (editável, ex: 15.00)
+  total: number; // manualCount * unitPrice
+  notes?: string;
+}
+
+export interface MealReportConfig {
+  id: string; // "YYYY-MM"
+  monthKey: string; // "YYYY-MM"
+  year: number;
+  month: number;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  defaultUnitPrice: number; // ex: 15.00
+  entries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }>;
+  contractCompany?: string; // ex: "Cantina & Refeições Integrais"
+  responsibleCoordinator?: string;
+  coordinatorRole?: string;
+  responsibleFinancial?: string;
+  financialRole?: string;
+  generalNotes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type SemanarioCategory = string;
+
+export type SemanarioStatus = 'realizada' | 'pendente' | 'substituida';
+
+export interface SemanarioPlan {
+  id: string; // e.g. "plan_2026_w35_1ano_azul_seg_1"
+  turma: TurmaType; // Uma das turmas oficiais do cadastro escolar
+  weekNumber: number;
+  year: number;
+  date: string; // YYYY-MM-DD
+  dayOfWeek: DayOfWeek;
+  timeSlot?: string; // e.g. "13:30 - 14:30"
+  weekTheme?: string; // Tema da Semana (ex: "Perdoar como Jesus nos ensinou")
+  category: string; // Categoria / Prefixo pedagógico oficial (ex: "Artes")
+  title: string; // Nome da Atividade / Proposta (ex: "Crescendo com Jesus")
+  adiResponsible?: string; // ADI Responsável (ex: "Patrícia")
+  monitors?: string; // Monitora(s) (ex: "Sthefany e Márcia")
+  objectives?: string; // Objetivos de Aprendizagem & BNCC
+  development: string; // Descrição / Passo a passo detalhado da proposta
+  materials?: string; // Recursos e materiais necessários
+  teacherName?: string; // Legacy/fallback: Monitora ou Professora responsável
+  status: SemanarioStatus; // 'realizada' | 'pendente' | 'substituida'
+  substitutionReason?: string; // Motivo da substituição (quando status === 'substituida')
+  photos?: string[]; // URLs ou Base64 das fotos/mídias anexas
+  notes?: string; // Observações gerais
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+

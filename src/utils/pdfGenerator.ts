@@ -13,6 +13,7 @@ import {
   PontoRecord,
   PontoMonthClosing,
   HolidayItem,
+  SemanarioPlan,
 } from '../types';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
@@ -2721,3 +2722,469 @@ export function generateNumericAttendanceConsolidatedPDFReport({
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
+
+/**
+ * Generates the Official Meal Financial Report PDF (Relatório Financeiro de Refeições / Almoço)
+ */
+export function generateMealFinancialPDFReport(
+  entries: Array<{
+    date: string;
+    dayLabel: string;
+    isSchoolDay: boolean;
+    manualCount: number;
+    unitPrice: number;
+    total: number;
+    notes?: string;
+  }>,
+  periodLabel: string,
+  config: {
+    monthKey: string;
+    startDate?: string;
+    endDate?: string;
+    defaultUnitPrice: number;
+    contractCompany?: string;
+    responsibleCoordinator?: string;
+    coordinatorRole?: string;
+    responsibleFinancial?: string;
+    financialRole?: string;
+    generalNotes?: string;
+  },
+  saveImmediately = false
+) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const totals = {
+    totalMeals: entries.reduce((acc, curr) => acc + (Number(curr.manualCount) || 0), 0),
+    totalAmount: entries.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0),
+    attendedDays: entries.filter((e) => e.manualCount > 0).length,
+  };
+
+  const avgMeals = totals.attendedDays > 0 ? (totals.totalMeals / totals.attendedDays).toFixed(1) : '0';
+
+  // 1. Header Oficial de 4 Níveis
+  drawOfficialHeader(
+    doc,
+    'Relatório Financeiro de Refeições',
+    `Prestador: ${config.contractCompany || 'Cantina e Nutrição Escolar'} • Prestação de Contas`,
+    [`Período: ${periodLabel}`, `Preço Base: R$ ${config.defaultUnitPrice.toFixed(2)}`],
+    'portrait'
+  );
+
+  let startY = 38;
+
+  // 2. Summary Metric Boxes
+  const metrics = [
+    { label: 'Dias com Almoço', value: `${totals.attendedDays} dias`, color: [15, 23, 42] as [number, number, number] },
+    { label: 'Total Refeições', value: `${totals.totalMeals} un`, color: [79, 70, 229] as [number, number, number] },
+    { label: 'Média Diária', value: `${avgMeals} al/dia`, color: [14, 116, 144] as [number, number, number] },
+    { label: 'Valor Unitário', value: `R$ ${config.defaultUnitPrice.toFixed(2)}`, color: [217, 119, 6] as [number, number, number] },
+    {
+      label: 'Total a Pagar',
+      value: `R$ ${totals.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      color: [22, 163, 74] as [number, number, number],
+    },
+  ];
+  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+
+  startY += 18;
+
+  // 3. Prepare Table Data
+  const tableData = entries.map((e) => {
+    const formattedTotal = `R$ ${e.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formattedUnit = `R$ ${e.unitPrice.toFixed(2)}`;
+    const obs = e.notes || (e.isSchoolDay ? 'Dia Letivo' : 'Não Letivo');
+
+    return [
+      `${formatDateBR(e.date)} (${e.dayLabel.split('-')[0]})`,
+      obs,
+      String(e.manualCount),
+      formattedUnit,
+      formattedTotal,
+    ];
+  });
+
+  const totalGeralStr = `R$ ${totals.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  autoTable(doc, {
+    startY,
+    head: [['Data / Dia', 'Situação / Observação', 'Alunos Presentes', 'Valor Unitário', 'Total Diário']],
+    body: tableData,
+    foot: [
+      [
+        'TOTAL GERAL DO PERÍODO',
+        `Consolidado (${totals.attendedDays} dias faturados)`,
+        String(totals.totalMeals),
+        '-',
+        totalGeralStr,
+      ],
+    ],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'center',
+    },
+    bodyStyles: {
+      fontSize: 7.2,
+      textColor: [51, 65, 85],
+      cellPadding: 2,
+    },
+    footStyles: {
+      fillColor: [30, 41, 59],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'center',
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      0: { cellWidth: 38, fontStyle: 'bold' },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+      3: { cellWidth: 26, halign: 'right' },
+      4: { cellWidth: 32, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'foot' && data.column.index === 0) {
+        data.cell.styles.halign = 'left';
+      }
+      if (data.section === 'foot' && data.column.index === 4) {
+        data.cell.styles.textColor = [52, 211, 153]; // emerald-400
+      }
+    },
+  });
+
+  // Signatures on the last page
+  const finalY = (doc as any).lastAutoTable?.finalY || 210;
+  const pageHeight = 297;
+  let sigY = finalY + 22;
+
+  if (sigY + 28 > pageHeight - 15) {
+    doc.addPage('a4', 'portrait');
+    drawOfficialHeader(
+      doc,
+      'Relatório Financeiro de Refeições (Validação)',
+      `Fechamento Oficial • Período: ${periodLabel}`,
+      [`Período: ${periodLabel}`],
+      'portrait'
+    );
+    sigY = 55;
+  }
+
+  // Linhas de Assinatura (Apenas 2: Coordenação e Financeiro)
+  doc.setDrawColor(148, 163, 184); // slate-400
+  doc.setLineWidth(0.3);
+  doc.line(20, sigY, 90, sigY);
+  doc.line(120, sigY, 190, sigY);
+
+  // Assinatura 1 - Coordenação do Integral (Padrão Vertical: Linha 1 = Nome, Linha 2 = Cargo)
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(
+    config.responsibleCoordinator || 'Fernando Veiga',
+    55,
+    sigY + 4.5,
+    { align: 'center' }
+  );
+
+  doc.setFontSize(7.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    config.coordinatorRole || 'Coordenação do Integral / DP GAVAR',
+    55,
+    sigY + 8.5,
+    { align: 'center' }
+  );
+
+  // Assinatura 2 - Departamento Financeiro (Padrão Vertical: Linha 1 = Nome/Depto, Linha 2 = Cargo/Função)
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(
+    config.responsibleFinancial || 'Departamento Financeiro',
+    155,
+    sigY + 4.5,
+    { align: 'center' }
+  );
+
+  doc.setFontSize(7.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    config.financialRole || 'Conferência & Prestação de Contas',
+    155,
+    sigY + 8.5,
+    { align: 'center' }
+  );
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const cleanPeriod = periodLabel.replace(/[\/\s:]+/g, '_');
+  const filename = `Relatorio_Financeiro_Refeicoes_${cleanPeriod}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * ============================================================================
+ * GERADOR DE PDF OFICIAL - SEMANÁRIO PEDAGÓGICO (PROGRAMA INTEGRAL)
+ * Cabeçalho Institucional Oficial de 4 Níveis do Instituto Educacional Crescer
+ * ============================================================================
+ */
+export function generateSemanarioPDFReport(
+  plans: SemanarioPlan[],
+  weekInfo: WeekInfo,
+  selectedTurma: string = 'all',
+  selectedDay: string = 'all',
+  currentUser?: UserProfile | null,
+  saveImmediately: boolean = false
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const leftMargin = 14;
+  const rightMargin = 196;
+  const printableWidth = rightMargin - leftMargin;
+
+  // Filter labels for Header Tier 4
+  const filterDetails: string[] = [];
+  filterDetails.push(`Semana ${weekInfo.weekNumber} (${formatDateBR(weekInfo.startDate)} a ${formatDateBR(weekInfo.endDate)})`);
+  if (selectedTurma && selectedTurma !== 'all') {
+    filterDetails.push(`Turma: ${selectedTurma}`);
+  } else {
+    filterDetails.push('Todas as 13 Turmas Oficiais');
+  }
+  if (selectedDay && selectedDay !== 'all') {
+    const dayLabels: Record<string, string> = {
+      segunda: 'Segunda-feira',
+      terca: 'Terça-feira',
+      quarta: 'Quarta-feira',
+      quinta: 'Quinta-feira',
+      sexta: 'Sexta-feira',
+    };
+    filterDetails.push(`Dia: ${dayLabels[selectedDay] || selectedDay}`);
+  }
+
+  // Draw the official 4-tier institutional header
+  drawOfficialHeader(
+    doc,
+    'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
+    'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+    filterDetails,
+    'portrait'
+  );
+
+  let currentY = 36;
+
+  // KPI Metrics Banner
+  const total = plans.length;
+  const realizadas = plans.filter((p) => p.status === 'realizada').length;
+  const pendentes = plans.filter((p) => p.status === 'pendente').length;
+  const substituidas = plans.filter((p) => p.status === 'substituida').length;
+  const taxa = total > 0 ? Math.round((realizadas / total) * 100) : 0;
+
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.roundedRect(leftMargin, currentY, printableWidth, 14, 2, 2, 'FD');
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text('RESUMO DO PLANEJAMENTO:', leftMargin + 4, currentY + 5.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(
+    `Total de Propostas: ${total}   |   Realizadas: ${realizadas} (${taxa}%)   |   Pendentes: ${pendentes}   |   Substituídas: ${substituidas}`,
+    leftMargin + 4,
+    currentY + 10.5
+  );
+
+  currentY += 18;
+
+  // Days order
+  const dayOrder: Array<{ id: DayOfWeek; label: string }> = [
+    { id: 'segunda', label: 'Segunda-feira' },
+    { id: 'terca', label: 'Terça-feira' },
+    { id: 'quarta', label: 'Quarta-feira' },
+    { id: 'quinta', label: 'Quinta-feira' },
+    { id: 'sexta', label: 'Sexta-feira' },
+  ];
+
+  const activeDays = selectedDay === 'all'
+    ? dayOrder
+    : dayOrder.filter((d) => d.id === selectedDay);
+
+  if (plans.length === 0) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Nenhuma proposta pedagógica cadastrada para o filtro selecionado.', leftMargin, currentY + 10);
+    currentY += 25;
+  } else {
+    activeDays.forEach((day) => {
+      const dayPlans = plans.filter((p) => p.dayOfWeek === day.id);
+      if (dayPlans.length === 0) return;
+
+      // Check for page overflow
+      if (currentY > 230) {
+        doc.addPage();
+        drawOfficialHeader(
+          doc,
+          'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
+          'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+          filterDetails,
+          'portrait'
+        );
+        currentY = 36;
+      }
+
+      // Day Header Section
+      doc.setFillColor(30, 41, 59); // slate-800
+      doc.roundedRect(leftMargin, currentY, printableWidth, 7, 1.5, 1.5, 'F');
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`${day.label.toUpperCase()} (${dayPlans.length} ${dayPlans.length === 1 ? 'atividade' : 'atividades'})`, leftMargin + 4, currentY + 5);
+
+      currentY += 9;
+
+      // Table of Proposals for this Day
+      const tableRows = dayPlans.map((p) => {
+        let statusStr = 'Pendente';
+        if (p.status === 'realizada') statusStr = 'Realizada';
+        if (p.status === 'substituida') {
+          statusStr = p.substitutionReason ? `Substituída (${p.substitutionReason})` : 'Substituída';
+        }
+
+        const detailsText = [
+          `Turma: ${p.turma}${p.timeSlot ? ` • Horário: ${p.timeSlot}` : ''} • Responsável: ${p.teacherName || 'Monitora'}`,
+          p.objectives ? `Objetivos / BNCC: ${p.objectives}` : '',
+          p.development ? `Desenvolvimento: ${p.development}` : '',
+          p.materials ? `Materiais: ${p.materials}` : '',
+        ].filter(Boolean).join('\n');
+
+        return [
+          `${p.category}\n[${statusStr}]`,
+          `${p.title.toUpperCase()}\n\n${detailsText}`,
+        ];
+      });
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['Categoria / Status', 'Proposta Pedagógica, Objetivos & Desenvolvimento']],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [71, 85, 105], // slate-600
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 7.5,
+          cellPadding: 2,
+        },
+        bodyStyles: {
+          fontSize: 7,
+          cellPadding: 2.5,
+          textColor: [30, 41, 59],
+          valign: 'top',
+        },
+        columnStyles: {
+          0: { cellWidth: 42, fontStyle: 'bold' },
+          1: { cellWidth: 140 },
+        },
+        margin: { left: leftMargin, right: 14 },
+        didDrawPage: (data) => {
+          currentY = data.cursor?.y || currentY;
+        },
+      });
+
+      currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : currentY + 10;
+    });
+  }
+
+  // Signatures Section
+  if (currentY > 245) {
+    doc.addPage();
+    drawOfficialHeader(
+      doc,
+      'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
+      'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+      filterDetails,
+      'portrait'
+    );
+    currentY = 36;
+  }
+
+  const sigY = Math.max(currentY + 12, 255);
+
+  doc.setDrawColor(148, 163, 184); // slate-400
+  doc.setLineWidth(0.3);
+  doc.line(20, sigY, 90, sigY);
+  doc.line(120, sigY, 190, sigY);
+
+  // Assinatura 1 - Coordenação
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text('Fernando Veiga', 55, sigY + 4, { align: 'center' });
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Coordenação do Programa Integral / DP GAVAR', 55, sigY + 7.5, { align: 'center' });
+
+  // Assinatura 2 - Monitoria / Professora
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(currentUser?.name || 'Professora / Monitora Responsável', 155, sigY + 4, { align: 'center' });
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Equipe de Monitoria & Desenvolvimento Pedagógico', 155, sigY + 7.5, { align: 'center' });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const cleanTurma = selectedTurma === 'all' ? 'Todas_Turmas' : selectedTurma.replace(/[\/\s:]+/g, '_');
+  const filename = `Semanario_Integral_Semana_${weekInfo.weekNumber}_${cleanTurma}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+

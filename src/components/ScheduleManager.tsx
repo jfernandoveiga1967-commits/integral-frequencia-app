@@ -88,6 +88,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     return sortTurmasPedagogical(turmas);
   }, [turmas]);
 
+  // Sort activities strictly A-Z
+  const sortedActivities = useMemo(() => {
+    return [...activitiesList].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
+  }, [activitiesList]);
+
   const [selectedTurma, setSelectedTurma] = useState<TurmaType>(() => {
     const sorted = sortTurmasPedagogical(turmas);
     return sorted[0] || 'Mini Maternal Azul';
@@ -2038,7 +2043,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   onChange={(e) => setFormActivityId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {activitiesList.map((act) => (
+                  {sortedActivities.map((act) => (
                     <option key={act.id} value={act.id}>
                       {act.name} {act.requiresRollCall !== false ? '• (Exige Chamada)' : '• (Rotina / Grade)'}
                     </option>
@@ -2440,11 +2445,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     onChange={(e) => setPdfTargetActivity(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {activitiesList.map((a) => {
+                    {sortedActivities.map((a) => {
                       const count = schedules.filter((s) => s.activityId === a.id).length;
                       return (
                         <option key={a.id} value={a.id}>
-                          {a.id} ({count} horários na semana)
+                          {a.name || a.id} ({count} horários na semana)
                         </option>
                       );
                     })}

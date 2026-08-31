@@ -954,4 +954,136 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
   }
 }
 
+// ==========================================
+// SEMANÁRIO PEDAGÓGICO FIRESTORE OPERATIONS
+// ==========================================
+
+import { SemanarioPlan } from './types';
+
+export function subscribeSemanarioPlans(
+  onData: (plans: SemanarioPlan[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'semanarioPlans');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const list: SemanarioPlan[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (!data) return;
+        list.push({
+          id: docSnap.id,
+          turma: data.turma || '',
+          weekNumber: Number(data.weekNumber) || 0,
+          year: Number(data.year) || 2026,
+          date: data.date || '',
+          dayOfWeek: data.dayOfWeek || 'segunda',
+          timeSlot: data.timeSlot || '',
+          category: data.category || '',
+          title: data.title || '',
+          objectives: data.objectives || '',
+          development: data.development || '',
+          materials: data.materials || '',
+          teacherName: data.teacherName || '',
+          status: data.status || 'pendente',
+          substitutionReason: data.substitutionReason || '',
+          photos: Array.isArray(data.photos) ? data.photos : [],
+          notes: data.notes || '',
+          createdAt: data.createdAt || '',
+          updatedAt: data.updatedAt || '',
+          updatedBy: data.updatedBy || '',
+        });
+      });
+      onData(list);
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'semanarioPlans');
+    }
+  );
+}
+
+export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
+  try {
+    const docRef = doc(db, 'semanarioPlans', plan.id);
+    await setDoc(
+      docRef,
+      {
+        id: plan.id,
+        turma: plan.turma || '',
+        weekNumber: Number(plan.weekNumber) || 0,
+        year: Number(plan.year) || 2026,
+        date: plan.date || '',
+        dayOfWeek: plan.dayOfWeek || 'segunda',
+        timeSlot: plan.timeSlot || '',
+        category: plan.category || '',
+        title: plan.title || '',
+        objectives: plan.objectives || '',
+        development: plan.development || '',
+        materials: plan.materials || '',
+        teacherName: plan.teacherName || '',
+        status: plan.status || 'pendente',
+        substitutionReason: plan.substitutionReason || '',
+        photos: plan.photos || [],
+        notes: plan.notes || '',
+        createdAt: plan.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: plan.updatedBy || '',
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `semanarioPlans/${plan.id}`);
+  }
+}
+
+export async function deleteSemanarioPlanFromFirestore(planId: string) {
+  try {
+    const docRef = doc(db, 'semanarioPlans', planId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `semanarioPlans/${planId}`);
+  }
+}
+
+export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[]) {
+  try {
+    const batch = writeBatch(db);
+    plans.forEach((p) => {
+      const docRef = doc(db, 'semanarioPlans', p.id);
+      batch.set(
+        docRef,
+        {
+          id: p.id,
+          turma: p.turma || '',
+          weekNumber: Number(p.weekNumber) || 0,
+          year: Number(p.year) || 2026,
+          date: p.date || '',
+          dayOfWeek: p.dayOfWeek || 'segunda',
+          timeSlot: p.timeSlot || '',
+          category: p.category || '',
+          title: p.title || '',
+          objectives: p.objectives || '',
+          development: p.development || '',
+          materials: p.materials || '',
+          teacherName: p.teacherName || '',
+          status: p.status || 'pendente',
+          substitutionReason: p.substitutionReason || '',
+          photos: p.photos || [],
+          notes: p.notes || '',
+          createdAt: p.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: p.updatedBy || '',
+        },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
+  }
+}
+
+
 
