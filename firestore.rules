@@ -6,89 +6,47 @@ service cloud.firestore {
     }
 
     match /students/{studentId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'turma', 'activities'])
-        && isNonEmptyString(request.resource.data.name, 128)
-        && isNonEmptyString(request.resource.data.turma, 64);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /attendanceRecords/{recordId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'studentId', 'date', 'weekNumber', 'year', 'activity', 'turma', 'status', 'createdAt'])
-        && isNonEmptyString(request.resource.data.studentId, 128)
-        && isNonEmptyString(request.resource.data.date, 10);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /turmas/{turmaId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'name'])
-        && isNonEmptyString(request.resource.data.name, 64);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'role'])
-        && isNonEmptyString(request.resource.data.name, 128);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /activities/{activityId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'name'])
-        && isNonEmptyString(request.resource.data.name, 128);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /schedules/{scheduleId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'turma', 'dayOfWeek', 'startTime', 'endTime', 'activityId'])
-        && isNonEmptyString(request.resource.data.turma, 64)
-        && isNonEmptyString(request.resource.data.activityId, 128)
-        && isNonEmptyString(request.resource.data.startTime, 10)
-        && isNonEmptyString(request.resource.data.endTime, 10);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /holidays/{holidayId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'date', 'name', 'type'])
-        && isNonEmptyString(request.resource.data.date, 10)
-        && isNonEmptyString(request.resource.data.name, 128)
-        && isNonEmptyString(request.resource.data.type, 32);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /pontoRecords/{recordId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'userId', 'date', 'monthKey', 'status'])
-        && isNonEmptyString(request.resource.data.userId, 128)
-        && isNonEmptyString(request.resource.data.date, 10);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /pontoClosings/{closingId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'userId', 'monthKey', 'year', 'month', 'netTotal', 'isClosed'])
-        && isNonEmptyString(request.resource.data.userId, 128)
-        && isNonEmptyString(request.resource.data.monthKey, 10);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     match /semanarioPlans/{planId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['id', 'turma', 'weekNumber', 'year', 'category', 'title', 'status'])
-        && isNonEmptyString(request.resource.data.turma, 64)
-        && isNonEmptyString(request.resource.data.title, 256);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
-
     match /test/{docId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /{document=**} {
@@ -96,3 +54,4 @@ service cloud.firestore {
     }
   }
 }
+
