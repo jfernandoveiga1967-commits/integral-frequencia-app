@@ -237,13 +237,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const recordMap = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
     (records || []).forEach((rec) => {
-      if (rec && rec.weekNumber === currentWeek.weekNumber && rec.year === currentWeek.year) {
+      if (rec && rec.studentId && rec.activity && rec.date) {
         const key = `${rec.studentId}_${rec.activity}_${rec.date}`;
         map.set(key, rec);
       }
     });
     return map;
-  }, [records, currentWeek]);
+  }, [records]);
 
 function getCurrentHHMM(): string {
   const now = new Date();

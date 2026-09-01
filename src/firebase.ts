@@ -14,6 +14,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes } from './utils/pontoUtils';
 import { normalizeStudent } from './utils/storageUtils';
+import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
 
 export { doc, deleteDoc };
 
@@ -171,9 +172,6 @@ export function subscribeTurmas(
   );
 }
 
-export const MASTER_ADMIN_ACTIVITIES = ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'];
-export const MASTER_ADMIN_TURMAS = ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'];
-
 export function subscribeUsers(
   onData: (users: UserProfile[]) => void,
   onError?: (err: Error) => void
@@ -183,6 +181,7 @@ export function subscribeUsers(
     colRef,
     (snapshot) => {
       const rawList: { docId: string; user: UserProfile }[] = [];
+      const seenDocsByKey = new Map<string, string[]>();
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -190,17 +189,39 @@ export function subscribeUsers(
           const docId = docSnap.id;
           const userEmail = (data.email || '').trim().toLowerCase();
           const userName = (data.name || '').trim().toLowerCase();
+
+          // Exclusão definitiva: Banir e remover perfil de Ana Clara Carchano Garcia do Firestore
+          const isBanned =
+            userEmail === 'anaclara.garcia@crescercampinas.com.br' ||
+            userEmail.includes('anaclara.garcia') ||
+            userEmail.includes('anaclaracarchano') ||
+            userName.includes('ana clara carchano') ||
+            userName.includes('anaclara') ||
+            (userName.includes('ana clara') && userName.includes('garcia'));
+
+          if (isBanned) {
+            deleteDoc(doc(db, 'users', docId)).catch(() => {});
+            return;
+          }
+
           const isMasterAdmin =
-            userEmail === 'jfernandoveiga1967@gmail.com' ||
+            userEmail === ADMIN_EMAIL.toLowerCase() ||
             docId === 'usr_coord_1' ||
             data.id === 'usr_coord_1' ||
-            userName.includes('fernando veiga');
+            userName.includes('fernando veiga') ||
+            userEmail === 'coordenacao@crescer.edu.br';
 
-          // If this is a duplicate or secondary document for Fernando Veiga, delete it from Firestore
+          // Se for documento duplicado ou secundário do Fernando Veiga, remove do Firestore
           if (isMasterAdmin && docId !== 'usr_coord_1') {
             deleteDoc(doc(db, 'users', docId)).catch(() => {});
             return;
           }
+
+          // Agrupar para detectar documentos duplicados na base do Firestore
+          const dedupKey = userEmail || (userName ? `name:${userName}` : docId);
+          const existingIds = seenDocsByKey.get(dedupKey) || [];
+          existingIds.push(docId);
+          seenDocsByKey.set(dedupKey, existingIds);
 
           const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
           const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
@@ -208,7 +229,6 @@ export function subscribeUsers(
 
           let assignedActivities = Array.isArray(data.assignedActivities) ? data.assignedActivities : [];
           if (isMasterAdmin) {
-            // Master Admin must strictly have all 7 modalities
             assignedActivities = MASTER_ADMIN_ACTIVITIES;
           }
 
@@ -229,13 +249,16 @@ export function subscribeUsers(
           const profile: UserProfile = {
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
             name: isMasterAdmin ? 'Fernando Veiga' : (data.name || ''),
-            email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (data.email || ''),
+            email: isMasterAdmin ? ADMIN_EMAIL : (data.email || ''),
             phone: data.phone || undefined,
             role,
             cargoLabel,
             avatarColor,
             birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
             pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+            status: data.status || 'ATIVO',
+            dataDesligamento: data.dataDesligamento || undefined,
+            motivoDesligamento: data.motivoDesligamento || undefined,
             assignedActivities,
             assignedTurmas,
             allowedClassIds: assignedTurmas,
@@ -255,17 +278,20 @@ export function subscribeUsers(
         }
       });
 
-      // Deduplicate by normalized email or ID
-      const userMap = new Map<string, UserProfile>();
-
-      rawList.forEach(({ docId, user }) => {
-        const key = user.id || docId;
-        if (!userMap.has(key)) {
-          userMap.set(key, user);
+      // Limpeza de documentos fantasmas duplicados no Firestore
+      seenDocsByKey.forEach((docIds, _key) => {
+        if (docIds.length > 1) {
+          // Manter o primeiro e excluir os demais documentos duplicados do Firestore
+          const toDelete = docIds.slice(1);
+          toDelete.forEach((dupId) => {
+            deleteDoc(doc(db, 'users', dupId)).catch(() => {});
+          });
         }
       });
 
-      onData(Array.from(userMap.values()));
+      // Aplica a normalização e deduplicação rigorosa
+      const deduplicated = normalizeAndDeduplicateUsers(rawList.map((item) => item.user));
+      onData(deduplicated);
     },
     (error) => {
       if (onError) onError(error);
@@ -325,6 +351,10 @@ export async function saveUserToFirestore(user: UserProfile) {
         canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
         canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
         pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
+        status: isMasterAdmin ? 'ATIVO' : (user.status || 'ATIVO'),
+        dataDesligamento: user.dataDesligamento || '',
+        motivoDesligamento: user.motivoDesligamento || '',
+        workShiftType: user.workShiftType || '',
         contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : '',
         contractDailyHours: decimalHours,
         contractDailyMinutes: resolvedMinutes,

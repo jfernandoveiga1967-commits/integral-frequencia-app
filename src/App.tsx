@@ -30,7 +30,7 @@ import {
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
-import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, PRESET_USERS, isCoordenador } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { CurrentActivities } from './components/CurrentActivities';
@@ -245,18 +245,26 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup any unwanted mock profiles once
+      // Cleanup any unwanted mock profiles and banned users (Ana Clara Carchano Garcia)
       if (!hasCleanedMockProfiles) {
         hasCleanedMockProfiles = true;
         fsUsers.forEach((u) => {
+          const uEmail = (u.email || '').toLowerCase().trim();
+          const uName = (u.name || '').toLowerCase().trim();
           if (
             u.id === 'usr_prof_1' ||
             u.id === 'usr_aux_1' ||
-            u.name.toLowerCase().includes('marcos silva') ||
-            u.name.toLowerCase().includes('mariana santos') ||
-            u.name.toLowerCase().includes('marina santos') ||
-            u.email === 'marcos.professor@crescer.edu.br' ||
-            u.email === 'mariana.auxiliar@crescer.edu.br'
+            uEmail === 'anaclara.garcia@crescercampinas.com.br' ||
+            uEmail.includes('anaclara.garcia') ||
+            uEmail.includes('anaclaracarchano') ||
+            uName.includes('ana clara carchano') ||
+            uName.includes('anaclara') ||
+            (uName.includes('ana clara') && uName.includes('garcia')) ||
+            uName.includes('marcos silva') ||
+            uName.includes('mariana santos') ||
+            uName.includes('marina santos') ||
+            uEmail === 'marcos.professor@crescer.edu.br' ||
+            uEmail === 'mariana.auxiliar@crescer.edu.br'
           ) {
             deleteUserFromFirestore(u.id);
           }
@@ -268,7 +276,7 @@ export default function App() {
         hasHealedAdminUser = true;
         const adminUsersInFs = fsUsers.filter(
           (u) =>
-            (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+            (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
             u.id === 'usr_coord_1' ||
             u.name.toLowerCase().includes('fernando veiga')
         );
@@ -279,93 +287,13 @@ export default function App() {
           adminUsersInFs.forEach((adm) => {
             if (adm.id !== 'usr_coord_1') {
               deleteUserFromFirestore(adm.id);
-            } else if (
-              adm.role !== 'coordenador' ||
-              adm.cargoLabel !== 'Coordenador (Administrador)' ||
-              !adm.canManageStudents ||
-              !adm.canMarkAttendance ||
-              !adm.assignedActivities ||
-              adm.assignedActivities.length < 7
-            ) {
-              saveUserToFirestore({
-                ...adm,
-                id: 'usr_coord_1',
-                name: 'Fernando Veiga',
-                email: 'jfernandoveiga1967@gmail.com',
-                role: 'coordenador',
-                cargoLabel: 'Coordenador (Administrador)',
-                avatarColor: 'bg-amber-500',
-                assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
-                assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-                allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-                canManageStudents: true,
-                canMarkAttendance: true,
-              });
             }
           });
         }
       }
 
-      const cleanFsUsers = fsUsers
-        .filter(
-          (u) =>
-            u.id !== 'usr_prof_1' &&
-            u.id !== 'usr_aux_1' &&
-            !u.name.toLowerCase().includes('marcos silva') &&
-            !u.name.toLowerCase().includes('mariana santos') &&
-            !u.name.toLowerCase().includes('marina santos') &&
-            u.email !== 'marcos.professor@crescer.edu.br' &&
-            u.email !== 'mariana.auxiliar@crescer.edu.br'
-        )
-        .map((u) => {
-          if (
-            (u.email && u.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
-            u.id === 'usr_coord_1' ||
-            u.name.toLowerCase().includes('fernando veiga')
-          ) {
-            return {
-              ...u,
-              id: 'usr_coord_1',
-              name: 'Fernando Veiga',
-              email: 'jfernandoveiga1967@gmail.com',
-              role: 'coordenador' as UserRole,
-              cargoLabel: 'Coordenador (Administrador)',
-              avatarColor: 'bg-amber-500',
-              assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
-              assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-              allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-              canManageStudents: true,
-              canMarkAttendance: true,
-            };
-          }
-          return u;
-        });
-
-      // Strictly deduplicate by ID and email (Firestore users always take absolute precedence over hardcoded presets)
-      const dedupMap = new Map<string, UserProfile>();
-      cleanFsUsers.forEach((u) => {
-        const idKey = u.id;
-        const emailKey = (u.email || '').trim().toLowerCase();
-        const primaryKey = idKey || emailKey;
-        if (primaryKey && !dedupMap.has(primaryKey)) {
-          dedupMap.set(primaryKey, u);
-        }
-      });
-
-      PRESET_USERS.forEach((pu) => {
-        const emailKey = (pu.email || '').trim().toLowerCase();
-        const alreadyExists = Array.from(dedupMap.values()).some(
-          (existing) =>
-            existing.id === pu.id ||
-            (emailKey && existing.email && existing.email.trim().toLowerCase() === emailKey)
-        );
-        if (!alreadyExists) {
-          const key = pu.id || emailKey;
-          if (key) dedupMap.set(key, pu);
-        }
-      });
-
-      const merged = Array.from(dedupMap.values());
+      // Deduplicate strictly and merge with presets
+      const merged = normalizeAndDeduplicateUsers([...fsUsers, ...PRESET_USERS]);
       setUsers(merged);
       saveLocalUsersList(merged);
 
@@ -377,13 +305,13 @@ export default function App() {
         );
         if (updatedSelf) {
           const isMasterAdmin =
-            (updatedSelf.email && updatedSelf.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+            (updatedSelf.email && updatedSelf.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
             updatedSelf.id === 'usr_coord_1';
           const enforcedSelf: UserProfile = isMasterAdmin
             ? {
                 ...updatedSelf,
                 name: 'Fernando Veiga',
-                email: 'jfernandoveiga1967@gmail.com',
+                email: ADMIN_EMAIL,
                 role: 'coordenador' as UserRole,
                 cargoLabel: 'Coordenador (Administrador)',
                 avatarColor: 'bg-amber-500',
@@ -649,7 +577,7 @@ export default function App() {
   };
 
   // Save attendance record modifications
-  const handleSaveRecord = (recordData: Omit<AttendanceRecord, 'id' | 'createdAt'>) => {
+  const handleSaveRecord = async (recordData: Omit<AttendanceRecord, 'id' | 'createdAt'>) => {
     const recordId = `${recordData.studentId}_${recordData.activity}_${recordData.date}`;
     const newRecord: AttendanceRecord = {
       ...recordData,
@@ -657,16 +585,23 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
     
+    // Atualização local imediata e síncrona
     setRecords((prev) => {
       const filtered = prev.filter((r) => r.id !== recordId);
       const updated = [newRecord, ...filtered];
       saveAttendanceRecords(updated);
       return updated;
     });
-    saveRecordToFirestore(newRecord);
+
+    // Gravação direta e síncrona no Firestore
+    try {
+      await saveRecordToFirestore(newRecord);
+    } catch (err) {
+      console.error('Erro ao salvar chamada no Firestore:', err);
+    }
   };
 
-  const handleBatchMarkPresent = (
+  const handleBatchMarkPresent = async (
     studentIds: string[],
     activity: ActivityType | 'TODAS',
     date: string
@@ -703,10 +638,14 @@ export default function App() {
       return updated;
     });
 
-    batchNewRecords.forEach((r) => saveRecordToFirestore(r));
+    try {
+      await Promise.allSettled(batchNewRecords.map((r) => saveRecordToFirestore(r)));
+    } catch (err) {
+      console.error('Erro ao salvar lote de presença no Firestore:', err);
+    }
   };
 
-  const handleClearRecords = (
+  const handleClearRecords = async (
     studentIds: string[],
     activity: ActivityType | 'TODAS',
     date: string
@@ -741,11 +680,13 @@ export default function App() {
       return updated;
     });
 
-    targetKeys.forEach((key) => {
-      deleteDoc(doc(db, 'attendanceRecords', key)).catch((err) =>
-        console.error('Error clearing Firestore record:', err)
+    try {
+      await Promise.allSettled(
+        Array.from(targetKeys).map((key) => deleteDoc(doc(db, 'attendanceRecords', key)))
       );
-    });
+    } catch (err) {
+      console.error('Error clearing Firestore records:', err);
+    }
   };
 
   // Turma management
@@ -821,8 +762,11 @@ export default function App() {
     setActiveTab(targetTab);
   };
 
-  const handleSaveUser = (userToSave: UserProfile) => {
-    const existingIdx = users.findIndex((u) => u.id === userToSave.id);
+  const handleSaveUser = async (userToSave: UserProfile) => {
+    const targetEmail = (userToSave.email || '').trim().toLowerCase();
+    const existingIdx = users.findIndex(
+      (u) => u.id === userToSave.id || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
+    );
     let updatedUsers: UserProfile[];
     if (existingIdx >= 0) {
       updatedUsers = [...users];
@@ -830,14 +774,24 @@ export default function App() {
     } else {
       updatedUsers = [userToSave, ...users];
     }
-    setUsers(updatedUsers);
-    saveLocalUsersList(updatedUsers);
-    saveUserToFirestore(userToSave);
+    const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
+    setUsers(deduplicated);
+    saveLocalUsersList(deduplicated);
 
     // If currentUser was saved, update state & storage immediately
-    if (currentUser && currentUser.id === userToSave.id) {
+    if (
+      currentUser &&
+      (currentUser.id === userToSave.id ||
+        (currentUser.email && userToSave.email && currentUser.email.toLowerCase() === userToSave.email.toLowerCase()))
+    ) {
       setCurrentUser(userToSave);
       saveStoredUser(userToSave);
+    }
+
+    try {
+      await saveUserToFirestore(userToSave);
+    } catch (err) {
+      console.error('Erro ao persistir usuário no Firestore:', err);
     }
   };
 
@@ -852,11 +806,20 @@ export default function App() {
     handleSaveUser(updated);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    const updatedUsers = users.filter((u) => u.id !== userId);
-    setUsers(updatedUsers);
-    saveLocalUsersList(updatedUsers);
-    deleteUserFromFirestore(userId);
+  const handleDeleteUser = async (userId: string) => {
+    const targetUser = users.find((u) => u.id === userId);
+    const targetEmail = (targetUser?.email || '').trim().toLowerCase();
+    const updatedUsers = users.filter(
+      (u) => u.id !== userId && (!targetEmail || !u.email || u.email.trim().toLowerCase() !== targetEmail)
+    );
+    const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
+    setUsers(deduplicated);
+    saveLocalUsersList(deduplicated);
+    try {
+      await deleteUserFromFirestore(userId);
+    } catch (err) {
+      console.error('Erro ao excluir usuário no Firestore:', err);
+    }
   };
 
   const handleSaveActivity = (activityToSave: ActivityItem) => {

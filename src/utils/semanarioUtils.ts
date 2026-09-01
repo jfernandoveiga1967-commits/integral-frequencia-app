@@ -1,4 +1,4 @@
-import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, WeekInfo } from '../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, WeekInfo } from '../types';
 import { getTurmaPedagogicalWeight } from './turmaUtils';
 import { loadActivities, loadSchedules } from './storageUtils';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';

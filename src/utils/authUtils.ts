@@ -1,6 +1,9 @@
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, ActivityType } from '../types';
 
 export const ADMIN_EMAIL = 'jfernandoveiga1967@gmail.com';
+
+export const MASTER_ADMIN_ACTIVITIES: ActivityType[] = ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'];
+export const MASTER_ADMIN_TURMAS: string[] = ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'];
 
 export const PRESET_USERS: UserProfile[] = [
   {
@@ -12,13 +15,225 @@ export const PRESET_USERS: UserProfile[] = [
     avatarColor: 'bg-amber-500',
     birthDate: '1967-08-12',
     pin: '12/08/1967',
-    assignedActivities: ['Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'],
-    assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
-    allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul', '2º Ano Amarelo', '3º Ano', '4º Ano', '5º Ano', '6º ao 9º Ano'],
+    status: 'ATIVO',
+    assignedActivities: MASTER_ADMIN_ACTIVITIES,
+    assignedTurmas: MASTER_ADMIN_TURMAS,
+    allowedClassIds: MASTER_ADMIN_TURMAS,
     canManageStudents: true,
     canMarkAttendance: true,
+    company: 'GADAL - Gestão e Apoio',
+    contractSchedule: '07:30 - 17:30',
+    contractDailyHours: 8,
+    contractDailyMinutes: 480,
+    contractDailyHoursFormatted: '8h 00min',
   },
 ];
+
+/**
+ * Normaliza e deduplica rigorosamente uma lista de usuários por E-mail e ID único.
+ * Elimina perfis duplicados, contas fantasmas e garante a integridade do Coordenador Geral.
+ */
+export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfile[] {
+  if (!Array.isArray(rawUsers)) return [...PRESET_USERS];
+
+  const userMap = new Map<string, UserProfile>();
+
+  rawUsers.forEach((raw) => {
+    if (!raw) return;
+
+    const rawName = (raw.name || '').trim();
+    const rawNameLower = rawName.toLowerCase();
+    const rawEmail = (raw.email || '').trim();
+    const rawEmailLower = rawEmail.toLowerCase();
+    const rawId = (raw.id || '').trim();
+
+    // 1. Filtrar contas mock de demonstração antigas e perfis excluídos definitivamente (Ana Clara Carchano Garcia)
+    const isBannedProfile =
+      rawEmailLower === 'anaclara.garcia@crescercampinas.com.br' ||
+      rawEmailLower.includes('anaclara.garcia') ||
+      rawEmailLower.includes('anaclaracarchano') ||
+      rawNameLower.includes('ana clara carchano') ||
+      rawNameLower.includes('anaclara') ||
+      (rawNameLower.includes('ana clara') && rawNameLower.includes('garcia')) ||
+      rawId === 'usr_prof_1' ||
+      rawId === 'usr_aux_1' ||
+      rawNameLower.includes('marcos silva') ||
+      rawNameLower.includes('mariana santos') ||
+      rawNameLower.includes('marina santos') ||
+      rawEmailLower === 'marcos.professor@crescer.edu.br' ||
+      rawEmailLower === 'mariana.auxiliar@crescer.edu.br';
+
+    if (isBannedProfile) {
+      return;
+    }
+
+    // 2. Identificar se é o Coordenador Geral (Fernando Veiga)
+    const isMasterAdmin =
+      rawEmailLower === ADMIN_EMAIL.toLowerCase() ||
+      rawId === 'usr_coord_1' ||
+      rawNameLower.includes('fernando veiga') ||
+      rawEmailLower === 'coordenacao@crescer.edu.br';
+
+    if (isMasterAdmin) {
+      const adminKey = `email:${ADMIN_EMAIL.toLowerCase()}`;
+      const existingAdmin = userMap.get(adminKey);
+
+      const resolvedAdmin: UserProfile = {
+        ...(existingAdmin || {}),
+        ...raw,
+        id: 'usr_coord_1',
+        name: 'Fernando Veiga',
+        email: ADMIN_EMAIL,
+        role: 'coordenador' as UserRole,
+        cargoLabel: 'Coordenador (Administrador)',
+        avatarColor: 'bg-amber-500',
+        birthDate: raw.birthDate || existingAdmin?.birthDate || '1967-08-12',
+        pin: raw.pin || existingAdmin?.pin || '12/08/1967',
+        status: 'ATIVO',
+        assignedActivities: MASTER_ADMIN_ACTIVITIES,
+        assignedTurmas: MASTER_ADMIN_TURMAS,
+        allowedClassIds: MASTER_ADMIN_TURMAS,
+        canManageStudents: true,
+        canMarkAttendance: true,
+        company: raw.company || existingAdmin?.company || 'GADAL - Gestão e Apoio',
+        contractSchedule: raw.contractSchedule || existingAdmin?.contractSchedule || '07:30 - 17:30',
+        contractDailyHours: raw.contractDailyHours !== undefined ? raw.contractDailyHours : 8,
+        contractDailyMinutes: raw.contractDailyMinutes !== undefined ? raw.contractDailyMinutes : 480,
+        contractDailyHoursFormatted: raw.contractDailyHoursFormatted || '8h 00min',
+        updatedAt: raw.updatedAt || existingAdmin?.updatedAt || new Date().toISOString(),
+      };
+
+      userMap.set(adminKey, resolvedAdmin);
+      return;
+    }
+
+    // 3. Usuários regulares da equipe
+    // Chave de deduplicação primária: E-mail normalizado; secundária: Nome normalizado; terciária: ID
+    const dedupKey = rawEmailLower
+      ? `email:${rawEmailLower}`
+      : (rawNameLower ? `name:${rawNameLower}` : `id:${rawId}`);
+
+    const existing = userMap.get(dedupKey);
+
+    if (!existing) {
+      const role = raw.role === 'coordenador' ? 'coordenador' : 'professor';
+      const cargoLabel = raw.cargoLabel || (role === 'coordenador' ? 'Coordenador (Administrador)' : 'Monitor / Professor');
+      const avatarColor = raw.avatarColor || (role === 'coordenador' ? 'bg-amber-500' : 'bg-indigo-600');
+      const rawStatus = (raw.status || 'ATIVO').toUpperCase() as any;
+      const status = rawStatus || 'ATIVO';
+
+      const singleProfile: UserProfile = {
+        ...raw,
+        id: rawId || 'usr_' + Date.now() + Math.random().toString(36).substr(2, 4),
+        name: rawName || 'Colaborador',
+        email: rawEmailLower || (rawNameLower ? `${rawNameLower.replace(/[^a-z0-9]/g, '')}@crescer.local` : ''),
+        role,
+        cargoLabel,
+        avatarColor,
+        status,
+        dataDesligamento: raw.dataDesligamento || undefined,
+        motivoDesligamento: raw.motivoDesligamento || undefined,
+        workShiftType: raw.workShiftType || undefined,
+        birthDate: raw.birthDate || '1995-01-01',
+        pin: raw.pin || '1234',
+        assignedActivities: Array.isArray(raw.assignedActivities) ? raw.assignedActivities : [],
+        assignedTurmas: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : (Array.isArray(raw.assignedTurmas) ? raw.assignedTurmas : []),
+        allowedClassIds: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : (Array.isArray(raw.assignedTurmas) ? raw.assignedTurmas : []),
+        canManageStudents: raw.canManageStudents !== undefined ? raw.canManageStudents : true,
+        canMarkAttendance: raw.canMarkAttendance !== undefined ? raw.canMarkAttendance : true,
+        phone: raw.phone ? raw.phone.trim() : undefined,
+        pixKey: raw.pixKey ? raw.pixKey.trim() : undefined,
+        contractSchedule: raw.contractSchedule ? raw.contractSchedule.trim() : undefined,
+        company: raw.company ? raw.company.trim() : 'GADAL - Gestão e Apoio',
+        baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null && !isNaN(Number(raw.baseSalary)) ? Number(raw.baseSalary) : 1200,
+        updatedAt: raw.updatedAt || new Date().toISOString(),
+      };
+
+      userMap.set(dedupKey, singleProfile);
+    } else {
+      // Mesclagem rigorosa para unificar duplicatas / preservar o status explicitamente alterado
+      const rawStatus = (raw.status || '').toUpperCase();
+      const existingStatus = (existing.status || '').toUpperCase();
+      
+      // REGRA CRÍTICA: Se algum registro foi marcado explicitamente como INATIVO, DESLIGADO, FERIAS ou LICENCA, respeitar!
+      let mergedStatus = 'ATIVO';
+      if (rawStatus && rawStatus !== 'ATIVO') {
+        mergedStatus = rawStatus;
+      } else if (existingStatus && existingStatus !== 'ATIVO') {
+        mergedStatus = existingStatus;
+      }
+
+      // Unir atividades e turmas sem repetições
+      const mergedActs = Array.from(
+        new Set([...(existing.assignedActivities || []), ...(raw.assignedActivities || [])])
+      );
+      const mergedTurmas = Array.from(
+        new Set([
+          ...(existing.allowedClassIds || existing.assignedTurmas || []),
+          ...(raw.allowedClassIds || raw.assignedTurmas || []),
+        ])
+      );
+
+      const mergedRole = (existing.role === 'coordenador' || raw.role === 'coordenador') ? 'coordenador' : 'professor';
+      const cargoLabel = mergedRole === 'coordenador' ? 'Coordenador (Administrador)' : (raw.cargoLabel || existing.cargoLabel || 'Monitor / Professor');
+      const avatarColor = mergedRole === 'coordenador' ? 'bg-amber-500' : (raw.avatarColor || existing.avatarColor || 'bg-indigo-600');
+
+      // Preservar ID canônico mais antigo / estável
+      const canonicalId = existing.id || raw.id;
+
+      // Nome com melhor formatação (mais longo / completo)
+      const mergedName = (rawName.length >= existing.name.length ? rawName : existing.name) || 'Colaborador';
+
+      const mergedProfile: UserProfile = {
+        ...existing,
+        ...raw,
+        id: canonicalId,
+        name: mergedName,
+        email: existing.email || rawEmailLower,
+        role: mergedRole,
+        cargoLabel,
+        avatarColor,
+        status: mergedStatus as any,
+        dataDesligamento: raw.dataDesligamento || existing.dataDesligamento || undefined,
+        motivoDesligamento: raw.motivoDesligamento || existing.motivoDesligamento || undefined,
+        workShiftType: raw.workShiftType || existing.workShiftType || undefined,
+        phone: raw.phone || existing.phone,
+        pixKey: raw.pixKey || existing.pixKey,
+        birthDate: (raw.birthDate && raw.birthDate !== '1995-01-01') ? raw.birthDate : existing.birthDate,
+        pin: (raw.pin && raw.pin !== '1234') ? raw.pin : existing.pin,
+        contractSchedule: raw.contractSchedule || existing.contractSchedule,
+        contractDailyHours: raw.contractDailyHours !== undefined ? raw.contractDailyHours : existing.contractDailyHours,
+        contractDailyMinutes: raw.contractDailyMinutes !== undefined ? raw.contractDailyMinutes : existing.contractDailyMinutes,
+        contractDailyHoursFormatted: raw.contractDailyHoursFormatted || existing.contractDailyHoursFormatted,
+        company: raw.company || existing.company || 'GADAL - Gestão e Apoio',
+        baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null ? Number(raw.baseSalary) : existing.baseSalary,
+        assignedActivities: mergedActs,
+        assignedTurmas: mergedTurmas,
+        allowedClassIds: mergedTurmas,
+        canManageStudents: raw.canManageStudents !== undefined ? raw.canManageStudents : existing.canManageStudents,
+        canMarkAttendance: raw.canMarkAttendance !== undefined ? raw.canMarkAttendance : existing.canMarkAttendance,
+        updatedAt: raw.updatedAt || new Date().toISOString(),
+      };
+
+      userMap.set(dedupKey, mergedProfile);
+    }
+  });
+
+  // Garantir que Fernando Veiga esteja sempre presente
+  const adminKey = `email:${ADMIN_EMAIL.toLowerCase()}`;
+  if (!userMap.has(adminKey)) {
+    userMap.set(adminKey, PRESET_USERS[0]);
+  }
+
+  const result = Array.from(userMap.values());
+
+  // Ordenar: Fernando Veiga (Admin) sempre em primeiro, depois em ordem alfabética por nome
+  return result.sort((a, b) => {
+    if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
+    if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;
+    return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
+  });
+}
 
 export function formatBirthDateToDisplay(dateStr?: string): string {
   if (!dateStr) return '';
@@ -86,7 +301,20 @@ export function getStoredUser(): UserProfile | null {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
     const user = JSON.parse(raw) as UserProfile;
-    if (user.id === 'usr_prof_1' || user.name.toLowerCase().includes('marcos silva') || user.email === 'marcos.professor@crescer.edu.br') {
+    const userEmailLower = (user.email || '').toLowerCase().trim();
+    const userNameLower = (user.name || '').toLowerCase().trim();
+
+    if (
+      user.id === 'usr_prof_1' ||
+      user.id === 'usr_aux_1' ||
+      userEmailLower === 'anaclara.garcia@crescercampinas.com.br' ||
+      userEmailLower.includes('anaclara.garcia') ||
+      userNameLower.includes('ana clara carchano') ||
+      userNameLower.includes('marcos silva') ||
+      userNameLower.includes('mariana santos') ||
+      userEmailLower === 'marcos.professor@crescer.edu.br' ||
+      userEmailLower === 'mariana.auxiliar@crescer.edu.br'
+    ) {
       saveStoredUser(null);
       return null;
     }
@@ -94,7 +322,6 @@ export function getStoredUser(): UserProfile | null {
     if (
       (user.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
       user.email === 'coordenacao@crescer.edu.br' ||
-      user.name.includes('Ana Clara') ||
       user.id === 'usr_coord_1'
     ) {
       const coordUser: UserProfile = {
@@ -144,72 +371,21 @@ export function saveStoredUser(user: UserProfile | null): void {
 export function getLocalUsersList(): UserProfile[] {
   try {
     const raw = localStorage.getItem(ALL_USERS_STORAGE_KEY);
-    if (!raw) return PRESET_USERS;
-    let list = JSON.parse(raw) as UserProfile[];
-    // Remove Prof. Marcos Silva & Mariana/Marina Santos mock users
-    list = list.filter(
-      (u) =>
-        u.id !== 'usr_prof_1' &&
-        u.id !== 'usr_aux_1' &&
-        !u.name.toLowerCase().includes('marcos silva') &&
-        !u.name.toLowerCase().includes('mariana santos') &&
-        !u.name.toLowerCase().includes('marina santos') &&
-        u.email !== 'marcos.professor@crescer.edu.br' &&
-        u.email !== 'mariana.auxiliar@crescer.edu.br'
-    );
-    // Ensure Fernando Veiga is strictly Coordenador in stored user list
-    let hasAdmin = false;
-    list = list.map((u) => {
-      if (
-        (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
-        u.email === 'coordenacao@crescer.edu.br' ||
-        u.name.includes('Ana Clara') ||
-        u.id === 'usr_coord_1'
-      ) {
-        hasAdmin = true;
-        return {
-          ...u,
-          id: u.id || 'usr_coord_1',
-          name: 'Fernando Veiga',
-          email: ADMIN_EMAIL,
-          role: 'coordenador' as UserRole,
-          cargoLabel: 'Coordenador (Administrador)',
-          avatarColor: 'bg-amber-500',
-          canManageStudents: true,
-          canMarkAttendance: true,
-        };
-      }
-      return u;
-    });
-
-    if (!hasAdmin) {
-      list = [PRESET_USERS[0], ...list];
-    }
-
-    saveLocalUsersList(list);
-    return list.length > 0 ? list : PRESET_USERS;
+    if (!raw) return [...PRESET_USERS];
+    const parsed = JSON.parse(raw) as UserProfile[];
+    const deduplicated = normalizeAndDeduplicateUsers(parsed);
+    saveLocalUsersList(deduplicated);
+    return deduplicated.length > 0 ? deduplicated : [...PRESET_USERS];
   } catch (err) {
     console.error('Error loading local users list:', err);
-    return PRESET_USERS;
+    return [...PRESET_USERS];
   }
 }
 
 export function saveLocalUsersList(users: UserProfile[]): void {
   try {
-    const normalizedList = users.map((u) => {
-      if (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        return {
-          ...u,
-          role: 'coordenador' as UserRole,
-          cargoLabel: 'Coordenador (Administrador)',
-          avatarColor: 'bg-amber-500',
-          canManageStudents: true,
-          canMarkAttendance: true,
-        };
-      }
-      return u;
-    });
-    localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(normalizedList));
+    const deduplicated = normalizeAndDeduplicateUsers(users);
+    localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(deduplicated));
   } catch (err) {
     console.error('Error saving local users list:', err);
   }

@@ -12,6 +12,7 @@ import {
   isUserInactiveOrDismissed,
   getUserStatus,
   getUserStatusBadge,
+  normalizeAndDeduplicateUsers,
 } from '../utils/authUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
@@ -288,37 +289,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   }
 
   // Filtered & Sorted Users (Admin always pinned on top + alphabetical A-Z for others)
-  const filteredUsers = (users || [])
-    .filter((u) => {
-      if (!u) return false;
-      const matchesSearch =
-        (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (u.company || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
+  const filteredUsers = useMemo(() => {
+    const deduplicatedUsers = normalizeAndDeduplicateUsers(users || []);
+    return deduplicatedUsers
+      .filter((u) => {
+        if (!u) return false;
+        const matchesSearch =
+          (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (u.company || '').toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
 
-      let matchesStatus = true;
-      if (statusFilter === 'ATIVOS') {
-        matchesStatus = isUserActive(u);
-      } else if (statusFilter === 'INATIVOS') {
-        matchesStatus = isUserInactiveOrDismissed(u);
-      }
+        let matchesStatus = true;
+        if (statusFilter === 'ATIVOS') {
+          matchesStatus = isUserActive(u);
+        } else if (statusFilter === 'INATIVOS') {
+          matchesStatus = isUserInactiveOrDismissed(u);
+        }
 
-      return matchesSearch && matchesRole && matchesStatus;
-    })
-    .sort((a, b) => {
-      // 1. Coordenador/Admin fica sempre no topo
-      if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
-      if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;
+        return matchesSearch && matchesRole && matchesStatus;
+      })
+      .sort((a, b) => {
+        // 1. Coordenador/Admin fica sempre no topo
+        if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
+        if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;
 
-      // 2. Colaboradores Ativos antes de Desligados/Inativos se visualizando Todos
-      const aActive = isUserActive(a) ? 1 : 0;
-      const bActive = isUserActive(b) ? 1 : 0;
-      if (aActive !== bActive) return bActive - aActive;
+        // 2. Colaboradores Ativos antes de Desligados/Inativos se visualizando Todos
+        const aActive = isUserActive(a) ? 1 : 0;
+        const bActive = isUserActive(b) ? 1 : 0;
+        if (aActive !== bActive) return bActive - aActive;
 
-      // 3. Demais usuários ordenados por nome (A-Z)
-      return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
-    });
+        // 3. Demais usuários ordenados por nome (A-Z)
+        return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
+      });
+  }, [users, searchTerm, roleFilter, statusFilter]);
 
   // Filtered Activities / Modalidades
   const filteredActivities = useMemo(() => {
@@ -631,6 +635,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     onSaveUser(updated);
     showToast(`Cargo de ${user.name} alterado para ${roleLabels[newRole]}!`);
+  };
+
+  const handleQuickStatusChange = (user: UserProfile, newStatus: UserStatus) => {
+    if (user.status === newStatus) return;
+    if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
+      showToast('O status do Coordenador Geral não pode ser alterado.', 'error');
+      return;
+    }
+
+    const updated: UserProfile = {
+      ...user,
+      status: newStatus,
+      dataDesligamento: newStatus === 'DESLIGADO' ? (user.dataDesligamento || new Date().toISOString().split('T')[0]) : undefined,
+      motivoDesligamento: newStatus === 'DESLIGADO' ? (user.motivoDesligamento || 'Desligamento') : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    onSaveUser(updated);
+    showToast(`Status de ${user.name} alterado para ${newStatus}!`);
   };
 
   const handleToggleCanManageStudents = (user: UserProfile) => {
@@ -1363,6 +1386,44 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             </div>
                           )}
                         </div>
+
+                        {/* Quick Status Control Bar */}
+                        {!isMasterCoord && (
+                          <div className="bg-slate-100/90 border border-slate-200 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                            <div className="flex items-center space-x-2 text-slate-700 font-bold">
+                              <UserCheck className="w-4 h-4 text-slate-600 shrink-0" />
+                              <span>Status do Colaborador:</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {(
+                                [
+                                  { id: 'ATIVO', label: 'Ativo', bgActive: 'bg-emerald-600 text-white border-emerald-700 shadow-xs' },
+                                  { id: 'INATIVO', label: 'Inativo / Suspenso', bgActive: 'bg-rose-600 text-white border-rose-700 shadow-xs' },
+                                  { id: 'DESLIGADO', label: 'Desligado', bgActive: 'bg-slate-800 text-white border-slate-900 shadow-xs' },
+                                  { id: 'FERIAS', label: 'Férias', bgActive: 'bg-sky-600 text-white border-sky-700 shadow-xs' },
+                                  { id: 'LICENCA', label: 'Licença', bgActive: 'bg-amber-600 text-white border-amber-700 shadow-xs' },
+                                ] as const
+                              ).map((st) => {
+                                const isCurrent = (user.status || 'ATIVO') === st.id;
+                                return (
+                                  <button
+                                    key={st.id}
+                                    type="button"
+                                    onClick={() => handleQuickStatusChange(user, st.id as UserStatus)}
+                                    className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                      isCurrent
+                                        ? st.bgActive
+                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {isCurrent && <span className="mr-1">●</span>}
+                                    {st.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Permissões, Turmas e Modalidades */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 text-xs">

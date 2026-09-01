@@ -1,8 +1,11 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, UserProfile } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
+import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
+
+export { normalizeAndDeduplicateUsers };
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
@@ -13,6 +16,15 @@ const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
 const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 const SEMANARIO_KEY = 'integral_semanario_plans_v1';
+export const ALL_USERS_KEY = 'frequencia_integral_all_users';
+
+export function loadUsers(): UserProfile[] {
+  return getLocalUsersList();
+}
+
+export function saveUsers(users: UserProfile[]): void {
+  saveLocalUsersList(users);
+}
 
 export const DEFAULT_DIAS_FREQUENCIA: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
