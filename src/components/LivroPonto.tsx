@@ -73,6 +73,8 @@ import {
   isContinuousShift,
   calcularHorasDia,
   processSequentialPunch,
+  isOverlappedPontoRecord,
+  repairOverlappedPontoRecords,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
@@ -581,6 +583,37 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 4500);
+  };
+
+  // Check how many overlapped records exist in the current month for the selected user
+  const overlappedRecordsInMonth = useMemo(() => {
+    return monthUserRecords.filter((r) => isOverlappedPontoRecord(r, contractSchedule));
+  }, [monthUserRecords, contractSchedule]);
+
+  // Handler to repair all overlapped/corrupted punch records for the current user and whole database
+  const handleRepairOverlappedRecords = () => {
+    const usersMap = new Map<string, UserProfile>();
+    users.forEach((u) => usersMap.set(u.id, u));
+
+    const { repairedRecords, repairedCount } = repairOverlappedPontoRecords(
+      pontoRecords,
+      usersMap,
+      contractSchedule
+    );
+
+    if (repairedCount > 0) {
+      onBatchSavePontoRecords(repairedRecords);
+      setPunchFeedback({
+        text: `Trava e Correção Aplicadas: ${repairedCount} registro(s) com sobreposição foram restaurados com sucesso (Entrada 11:40 restabelecida e Saída 17:40 preservada)!`,
+        type: 'success',
+      });
+    } else {
+      setPunchFeedback({
+        text: 'Nenhum registro corrompido ou com sobreposição de saída detectado. Todas as batidas estão íntegras!',
+        type: 'info',
+      });
+    }
+    setTimeout(() => setPunchFeedback(null), 5000);
   };
 
   // Month Navigation
@@ -1307,6 +1340,27 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <span>Falta Injustificada</span>
               </span>
             </div>
+
+            {/* Repair / Restore Overlapped Punches Button */}
+            {isAdmin && !isMonthClosed && (
+              <button
+                type="button"
+                onClick={handleRepairOverlappedRecords}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95 border ${
+                  overlappedRecordsInMonth.length > 0
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 animate-pulse'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                }`}
+                title="Audita e restaura automaticamente batidas de entrada (11:40) e saída (17:40) sem perda de registros"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>
+                  {overlappedRecordsInMonth.length > 0
+                    ? `Corrigir ${overlappedRecordsInMonth.length} Batida(s) Sobreposta(s)`
+                    : 'Restaurar Batidas'}
+                </span>
+              </button>
+            )}
 
             {/* Print & PDF Action Buttons at the Top of Timesheet */}
             <button

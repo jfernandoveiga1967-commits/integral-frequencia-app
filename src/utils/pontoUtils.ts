@@ -956,3 +956,145 @@ export function numberToWordsBRL(value: number): string {
   }
   return textReais || textCentavos || 'zero reais';
 }
+
+/**
+ * Checks whether a PontoRecord has an overlapped / corrupted punch state:
+ * - Afternoon / exit punch sitting in entry1 with exit empty
+ * - Inverted punches (entry1 >= exit2)
+ * - Identical duplicate punches
+ */
+export function isOverlappedPontoRecord(
+  record?: PontoRecord | null,
+  contractSchedule = '11:40 - 17:40'
+): boolean {
+  if (!record || !record.entry1) return false;
+  const e1 = record.entry1.trim();
+  const s1 = (record.exit1 || '').trim();
+  const e2 = (record.entry2 || '').trim();
+  const s2 = (record.exit2 || '').trim();
+
+  const { start, end, startMinutes: expStartMin, endMinutes: expEndMin } = parseContractSchedule(contractSchedule);
+  const e1Min = parseTimeToMinutes(e1);
+  if (e1Min === null) return false;
+
+  // Case 1: Only entry1 is filled, but its time is in the afternoon or close to/after contractual exit
+  // (e.g. e1 >= 13:00 (780 min) when start is 11:40 (700 min), or e1 >= expStartMin + 90 min)
+  if (!s1 && !e2 && !s2) {
+    if (e1Min >= expStartMin + 90 || e1Min >= 780 || e1Min >= expEndMin - 90) {
+      return true;
+    }
+  }
+
+  // Case 2: Inverted punches (entry1 is later than exit2 or exit1)
+  const s2Min = parseTimeToMinutes(s2 || s1);
+  if (s2Min !== null && e1Min > s2Min) {
+    return true;
+  }
+
+  // Case 3: Identical punches in entry1 and exit2 (e.g. both '17:40')
+  if (s2 && e1 === s2 && e1Min >= expStartMin + 90) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Restores a single corrupted/overlapped PontoRecord:
+ * - Restores contractual standard entry time (e.g. '11:40') in entry1
+ * - Places the recorded exit time in exit2
+ */
+export function repairSinglePontoRecord(
+  record: PontoRecord,
+  user?: Partial<UserProfile> | null,
+  contractSchedule = '11:40 - 17:40'
+): PontoRecord {
+  const sched = (user?.contractSchedule || contractSchedule || '11:40 - 17:40').trim();
+  const { start: expStart, end: expEnd } = parseContractSchedule(sched);
+
+  const e1 = (record.entry1 || '').trim();
+  const s1 = (record.exit1 || '').trim();
+  const e2 = (record.entry2 || '').trim();
+  const s2 = (record.exit2 || '').trim();
+
+  const nowIso = new Date().toISOString();
+  let resolvedEntry = expStart || '11:40';
+  let resolvedExit = expEnd || '17:40';
+
+  // If entry1 had the afternoon punch, that is the exit punch!
+  if (e1 && (!s1 && !e2 && !s2)) {
+    resolvedExit = e1;
+    resolvedEntry = expStart || '11:40';
+  } else if (e1 && s2) {
+    const e1Min = parseTimeToMinutes(e1) || 0;
+    const s2Min = parseTimeToMinutes(s2) || 0;
+    if (e1Min > s2Min) {
+      // Inverted: s2 was actually entrance, e1 was exit
+      resolvedEntry = s2;
+      resolvedExit = e1;
+    } else if (e1 === s2) {
+      resolvedEntry = expStart || '11:40';
+      resolvedExit = s2;
+    }
+  }
+
+  return {
+    ...record,
+    entry1: resolvedEntry,
+    exit1: '',
+    entry2: '',
+    exit2: resolvedExit,
+    status: record.status === 'falta_injustificada' ? 'normal' : (record.status || 'normal'),
+    updatedAt: nowIso,
+    updatedBy: 'Restauração Automática de Batida',
+    note: record.note
+      ? `${record.note} (Entrada restaurada: ${resolvedEntry} / Saída: ${resolvedExit})`
+      : `Horário de entrada restaurado (${resolvedEntry}) e saída preservada (${resolvedExit})`,
+  };
+}
+
+/**
+ * Audits and repairs an array of PontoRecords, fixing all records where exit punches overwrote entrance punches.
+ */
+export function repairOverlappedPontoRecords(
+  records: PontoRecord[],
+  usersMap?: Map<string, UserProfile> | Record<string, UserProfile>,
+  defaultSchedule = '11:40 - 17:40'
+): {
+  repairedRecords: PontoRecord[];
+  repairedCount: number;
+  repairedDetails: Array<{ id: string; userName: string; date: string; oldEntry: string; newEntry: string; newExit: string }>;
+} {
+  let repairedCount = 0;
+  const repairedDetails: Array<{ id: string; userName: string; date: string; oldEntry: string; newEntry: string; newExit: string }> = [];
+
+  const repairedRecords = (records || []).map((rec) => {
+    let user: UserProfile | undefined;
+    if (usersMap) {
+      if (usersMap instanceof Map) {
+        user = usersMap.get(rec.userId);
+      } else {
+        user = usersMap[rec.userId];
+      }
+    }
+    const schedule = user?.contractSchedule || defaultSchedule || '11:40 - 17:40';
+
+    if (isOverlappedPontoRecord(rec, schedule)) {
+      const oldEntry = rec.entry1 || '';
+      const fixed = repairSinglePontoRecord(rec, user, schedule);
+      repairedCount++;
+      repairedDetails.push({
+        id: rec.id,
+        userName: rec.userName || user?.name || rec.userId,
+        date: rec.date,
+        oldEntry,
+        newEntry: fixed.entry1 || '',
+        newExit: fixed.exit2 || '',
+      });
+      return fixed;
+    }
+    return rec;
+  });
+
+  return { repairedRecords, repairedCount, repairedDetails };
+}

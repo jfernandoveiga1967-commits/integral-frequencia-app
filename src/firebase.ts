@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
-import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes } from './utils/pontoUtils';
+import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords } from './utils/pontoUtils';
 import { normalizeStudent } from './utils/storageUtils';
 import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
 
@@ -803,7 +803,16 @@ export function subscribePontoRecords(callback: (records: PontoRecord[]) => void
           });
         }
       });
-      callback(recordList);
+      // Apply auto-repair to restore any records where exit punch overwrote entrance punch
+      const { repairedRecords, repairedCount, repairedDetails } = repairOverlappedPontoRecords(recordList);
+      if (repairedCount > 0) {
+        // Sync repaired records back to Firestore
+        const recordsToSave = repairedRecords.filter((r) => repairedDetails.some((d) => d.id === r.id));
+        batchSavePontoRecordsToFirestore(recordsToSave).catch((err) => {
+          console.error('Erro ao sincronizar batidas restauradas no Firestore:', err);
+        });
+      }
+      callback(repairedRecords);
     },
     (error) => {
       handleFirestoreError(error, OperationType.GET, 'pontoRecords');

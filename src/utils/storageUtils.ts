@@ -4,6 +4,7 @@ import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './d
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
+import { repairOverlappedPontoRecords } from './pontoUtils';
 
 export { normalizeAndDeduplicateUsers };
 
@@ -468,7 +469,11 @@ export function loadPontoRecords(): PontoRecord[] {
     if (data) {
       const parsed: PontoRecord[] = JSON.parse(data);
       if (Array.isArray(parsed)) {
-        return parsed;
+        const { repairedRecords, repairedCount } = repairOverlappedPontoRecords(parsed);
+        if (repairedCount > 0) {
+          savePontoRecords(repairedRecords);
+        }
+        return repairedRecords;
       }
     }
   } catch (e) {
