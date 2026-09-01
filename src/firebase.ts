@@ -190,20 +190,6 @@ export function subscribeUsers(
           const userEmail = (data.email || '').trim().toLowerCase();
           const userName = (data.name || '').trim().toLowerCase();
 
-          // Exclusão definitiva: Banir e remover perfil de Ana Clara Carchano Garcia do Firestore
-          const isBanned =
-            userEmail === 'anaclara.garcia@crescercampinas.com.br' ||
-            userEmail.includes('anaclara.garcia') ||
-            userEmail.includes('anaclaracarchano') ||
-            userName.includes('ana clara carchano') ||
-            userName.includes('anaclara') ||
-            (userName.includes('ana clara') && userName.includes('garcia'));
-
-          if (isBanned) {
-            deleteDoc(doc(db, 'users', docId)).catch(() => {});
-            return;
-          }
-
           const isMasterAdmin =
             userEmail === ADMIN_EMAIL.toLowerCase() ||
             docId === 'usr_coord_1' ||

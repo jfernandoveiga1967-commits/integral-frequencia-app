@@ -47,14 +47,8 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
     const rawEmailLower = rawEmail.toLowerCase();
     const rawId = (raw.id || '').trim();
 
-    // 1. Filtrar contas mock de demonstração antigas e perfis excluídos definitivamente (Ana Clara Carchano Garcia)
+    // 1. Filtrar apenas contas mock de demonstração legadas
     const isBannedProfile =
-      rawEmailLower === 'anaclara.garcia@crescercampinas.com.br' ||
-      rawEmailLower.includes('anaclara.garcia') ||
-      rawEmailLower.includes('anaclaracarchano') ||
-      rawNameLower.includes('ana clara carchano') ||
-      rawNameLower.includes('anaclara') ||
-      (rawNameLower.includes('ana clara') && rawNameLower.includes('garcia')) ||
       rawId === 'usr_prof_1' ||
       rawId === 'usr_aux_1' ||
       rawNameLower.includes('marcos silva') ||
@@ -307,9 +301,6 @@ export function getStoredUser(): UserProfile | null {
     if (
       user.id === 'usr_prof_1' ||
       user.id === 'usr_aux_1' ||
-      userEmailLower === 'anaclara.garcia@crescercampinas.com.br' ||
-      userEmailLower.includes('anaclara.garcia') ||
-      userNameLower.includes('ana clara carchano') ||
       userNameLower.includes('marcos silva') ||
       userNameLower.includes('mariana santos') ||
       userEmailLower === 'marcos.professor@crescer.edu.br' ||

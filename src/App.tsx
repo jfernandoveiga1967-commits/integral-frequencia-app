@@ -245,7 +245,7 @@ export default function App() {
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup any unwanted mock profiles and banned users (Ana Clara Carchano Garcia)
+      // Cleanup any unwanted legacy mock profiles
       if (!hasCleanedMockProfiles) {
         hasCleanedMockProfiles = true;
         fsUsers.forEach((u) => {
@@ -254,12 +254,6 @@ export default function App() {
           if (
             u.id === 'usr_prof_1' ||
             u.id === 'usr_aux_1' ||
-            uEmail === 'anaclara.garcia@crescercampinas.com.br' ||
-            uEmail.includes('anaclara.garcia') ||
-            uEmail.includes('anaclaracarchano') ||
-            uName.includes('ana clara carchano') ||
-            uName.includes('anaclara') ||
-            (uName.includes('ana clara') && uName.includes('garcia')) ||
             uName.includes('marcos silva') ||
             uName.includes('mariana santos') ||
             uName.includes('marina santos') ||
