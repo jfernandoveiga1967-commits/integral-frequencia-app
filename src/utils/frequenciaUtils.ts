@@ -201,6 +201,9 @@ export function getDailyConsolidatedMetrics(
     });
   });
 
+  // Guarantee strictly alphabetical sorting (A-Z) for pending students
+  pendingStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+
   const apurados = presentes + faltas + justificados;
   const isAuditStrictlyValid = presentes + faltas + justificados + pendentes === totalAtivos;
 

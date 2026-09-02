@@ -1473,15 +1473,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               {(isCoordenador || turmasList.length > 1) && (
                 <option value="TODAS">
                   {isCoordenador
-                    ? `Todas as Turmas (${students.length} Alunos)`
-                    : `Todas Minhas Turmas (${filteredStudents.length} Alunos)`}
+                    ? `Todas as Turmas (${totalAtivosCount} Alunos Ativos)`
+                    : `Todas Minhas Turmas (${students.filter((s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && allowedTurmas.includes(s.turma)).length} Alunos Ativos)`}
                 </option>
               )}
               {turmasList.map((t) => {
-                const count = students.filter((s) => s.turma === t).length;
+                const count = students.filter(
+                  (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
+                ).length;
                 return (
                   <option key={t} value={t}>
-                    {t} ({count} alunos)
+                    {t} ({count} {count === 1 ? 'aluno' : 'alunos'})
                   </option>
                 );
               })}
@@ -1511,12 +1513,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               onChange={(e) => setSelectedActivity(e.target.value as ActivityType | 'TODAS')}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium"
             >
-              <option value="TODOS">Todas as Atividades</option>
+              <option value="TODOS">Todas as Atividades ({totalAtivosCount} alunos)</option>
               {extracurricularRollCallActivities.map((a) => {
-                const count = students.filter((s) => (s.activities || []).includes(a.id)).length;
+                const count = students.filter(
+                  (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && (s.activities || []).includes(a.id)
+                ).length;
                 return (
                   <option key={a.id} value={a.id}>
-                    {a.name || a.id} ({count} alunos)
+                    {a.name || a.id} ({count} {count === 1 ? 'aluno' : 'alunos'})
                   </option>
                 );
               })}

@@ -1016,16 +1016,18 @@ export default function App() {
     onNavigateToAttendance: handleNavigateToAttendance,
   });
 
-  // Filtered pending students for audit modal
+  // Filtered pending students for audit modal (always strictly alphabetical A-Z)
   const filteredPendingStudents = useMemo(() => {
-    return todayConsolidated.pendingStudents.filter((s) => {
-      const matchTurma = pendingFilterTurma === 'all' || s.turma === pendingFilterTurma;
-      const matchSearch =
-        !pendingSearchTerm.trim() ||
-        s.name.toLowerCase().includes(pendingSearchTerm.toLowerCase()) ||
-        s.turma.toLowerCase().includes(pendingSearchTerm.toLowerCase());
-      return matchTurma && matchSearch;
-    });
+    return todayConsolidated.pendingStudents
+      .filter((s) => {
+        const matchTurma = pendingFilterTurma === 'all' || s.turma === pendingFilterTurma;
+        const matchSearch =
+          !pendingSearchTerm.trim() ||
+          s.name.toLowerCase().includes(pendingSearchTerm.toLowerCase()) ||
+          s.turma.toLowerCase().includes(pendingSearchTerm.toLowerCase());
+        return matchTurma && matchSearch;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
   }, [todayConsolidated.pendingStudents, pendingFilterTurma, pendingSearchTerm]);
 
   // If user is not logged in, render the Login Screen with all registered users
