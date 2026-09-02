@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
+import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords } from './utils/pontoUtils';
 import { normalizeStudent, addToAttendanceOutbox, removeFromAttendanceOutbox, getAttendanceOutbox } from './utils/storageUtils';
 import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
@@ -234,7 +234,7 @@ export function subscribeUsers(
 
           const profile: UserProfile = {
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
-            name: isMasterAdmin ? 'Fernando Veiga' : (data.name || ''),
+            name: (data.name && data.name.trim()) || (isMasterAdmin ? 'Fernando Veiga' : ''),
             email: isMasterAdmin ? ADMIN_EMAIL : (data.email || ''),
             phone: data.phone || undefined,
             role,
@@ -245,6 +245,7 @@ export function subscribeUsers(
             status: data.status || 'ATIVO',
             dataDesligamento: data.dataDesligamento || undefined,
             motivoDesligamento: data.motivoDesligamento || undefined,
+            workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
             assignedActivities,
             assignedTurmas,
             allowedClassIds: assignedTurmas,
@@ -255,7 +256,7 @@ export function subscribeUsers(
             contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
             contractDailyMinutes: rawMinutes,
             contractDailyHoursFormatted: formattedHours,
-            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : 1200,
+            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : (isMasterAdmin ? 5000 : 1200),
             company: data.company || 'GADAL - Gestão e Apoio',
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
@@ -286,73 +287,74 @@ export function subscribeUsers(
   );
 }
 
-export async function saveUserToFirestore(user: UserProfile) {
-  try {
-    const isMasterAdmin =
-      (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
-      user.id === 'usr_coord_1' ||
-      (user.name && user.name.toLowerCase().includes('fernando veiga'));
+export async function saveUserToFirestore(user: UserProfile): Promise<void> {
+  const isMasterAdmin =
+    (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+    user.id === 'usr_coord_1' ||
+    (user.name && user.name.toLowerCase().includes('fernando veiga'));
 
-    const canonicalId = isMasterAdmin ? 'usr_coord_1' : (user.id || 'usr_' + Date.now());
+  const canonicalId = isMasterAdmin ? 'usr_coord_1' : (user.id || 'usr_' + Date.now());
 
-    // If previously saved under a different ID, clean up old doc
-    if (user.id && user.id !== canonicalId) {
-      try {
-        await deleteDoc(doc(db, 'users', user.id));
-      } catch {
-        // Ignore if didn't exist
-      }
+  // If previously saved under a different ID, clean up old doc
+  if (user.id && user.id !== canonicalId) {
+    try {
+      await deleteDoc(doc(db, 'users', user.id));
+    } catch {
+      // Ignore if didn't exist
     }
+  }
 
-    const role = isMasterAdmin ? 'coordenador' : user.role;
-    const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : user.cargoLabel;
-    const avatarColor = isMasterAdmin ? 'bg-amber-500' : (user.avatarColor || 'bg-indigo-600');
-    const assignedActivities = isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : (user.assignedActivities || []);
-    const assignedTurmas = isMasterAdmin
-      ? (user.allowedClassIds && user.allowedClassIds.length > 0 ? user.allowedClassIds : MASTER_ADMIN_TURMAS)
-      : (user.allowedClassIds !== undefined ? user.allowedClassIds : (user.assignedTurmas !== undefined ? user.assignedTurmas : []));
+  const role: UserRole = isMasterAdmin ? 'coordenador' : (user.role || 'professor');
+  const cargoLabel = isMasterAdmin ? (user.cargoLabel || 'Coordenador (Administrador)') : (user.cargoLabel || 'Monitor / Professor');
+  const avatarColor = isMasterAdmin ? 'bg-amber-500' : (user.avatarColor || 'bg-indigo-600');
+  const assignedActivities = (user.assignedActivities && user.assignedActivities.length > 0)
+    ? user.assignedActivities
+    : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
+  const assignedTurmas = (user.allowedClassIds && user.allowedClassIds.length > 0)
+    ? user.allowedClassIds
+    : ((user.assignedTurmas && user.assignedTurmas.length > 0) ? user.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
-    const resolvedMinutes = user.contractDailyMinutes !== undefined && Number(user.contractDailyMinutes) > 0
-      ? Number(user.contractDailyMinutes)
-      : (user.contractDailyHoursFormatted ? parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted) : (user.contractDailyHours ? Math.round(Number(user.contractDailyHours) * 60) : 360));
-    const formattedHours = formatMinutesToHoursAndMinutes(resolvedMinutes);
-    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
+  const resolvedMinutes = user.contractDailyMinutes !== undefined && Number(user.contractDailyMinutes) > 0
+    ? Number(user.contractDailyMinutes)
+    : (user.contractDailyHoursFormatted ? parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted) : (user.contractDailyHours ? Math.round(Number(user.contractDailyHours) * 60) : (isMasterAdmin ? 480 : 360)));
+  const formattedHours = user.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(resolvedMinutes);
+  const decimalHours = user.contractDailyHours !== undefined ? Number(user.contractDailyHours) : Number((resolvedMinutes / 60).toFixed(2));
 
-    const docRef = doc(db, 'users', canonicalId);
-    await setDoc(
-      docRef,
-      {
-        id: canonicalId,
-        name: isMasterAdmin ? 'Fernando Veiga' : user.name,
-        email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : (user.email || '').trim().toLowerCase(),
-        phone: user.phone ? user.phone.trim() : '',
-        role,
-        cargoLabel,
-        avatarColor,
-        birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : ''),
-        pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-        assignedActivities,
-        assignedTurmas,
-        allowedClassIds: assignedTurmas,
-        canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
-        canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
-        pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
-        status: isMasterAdmin ? 'ATIVO' : (user.status || 'ATIVO'),
-        dataDesligamento: user.dataDesligamento || '',
-        motivoDesligamento: user.motivoDesligamento || '',
-        workShiftType: user.workShiftType || '',
-        contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : '',
-        contractDailyHours: decimalHours,
-        contractDailyMinutes: resolvedMinutes,
-        contractDailyHoursFormatted: formattedHours,
-        baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : 1200,
-        company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
-        updatedAt: user.updatedAt || new Date().toISOString(),
-      },
-      { merge: true }
-    );
+  const docRef = doc(db, 'users', canonicalId);
+  const docData: any = {
+    id: canonicalId,
+    name: user.name ? user.name.trim() : (isMasterAdmin ? 'Fernando Veiga' : 'Colaborador'),
+    email: isMasterAdmin ? ADMIN_EMAIL : (user.email || '').trim().toLowerCase(),
+    phone: user.phone ? user.phone.trim() : '',
+    role,
+    cargoLabel,
+    avatarColor,
+    birthDate: user.birthDate || (isMasterAdmin ? '1967-08-12' : '1995-01-01'),
+    pin: user.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+    assignedActivities,
+    assignedTurmas,
+    allowedClassIds: assignedTurmas,
+    canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
+    canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
+    pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
+    status: isMasterAdmin ? 'ATIVO' : (user.status || 'ATIVO'),
+    dataDesligamento: user.dataDesligamento || '',
+    motivoDesligamento: user.motivoDesligamento || '',
+    workShiftType: user.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
+    contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : (isMasterAdmin ? '07:30 - 17:30' : '11:40 - 17:40'),
+    contractDailyHours: decimalHours,
+    contractDailyMinutes: resolvedMinutes,
+    contractDailyHoursFormatted: formattedHours,
+    baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : (isMasterAdmin ? 5000 : 1200),
+    company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
+    updatedAt: user.updatedAt || new Date().toISOString(),
+  };
+
+  try {
+    await setDoc(docRef, docData, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
+    handleFirestoreError(error, OperationType.WRITE, `users/${canonicalId}`);
+    throw error;
   }
 }
 

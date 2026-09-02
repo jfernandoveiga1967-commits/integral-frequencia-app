@@ -89,7 +89,7 @@ interface UserManagementProps {
   turmas?: string[];
   schedules?: ScheduleBlock[];
   holidays?: HolidayItem[];
-  onSaveUser: (user: UserProfile) => void;
+  onSaveUser: (user: UserProfile) => void | Promise<void>;
   onDeleteUser: (userId: string) => void;
   onSaveActivity: (activity: ActivityItem) => void;
   onDeleteActivity: (activityId: string) => void;
@@ -229,6 +229,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // Toast Feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   // Accordion Expand/Collapse State for Users
   const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
@@ -510,17 +511,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
   };
 
-  const handleSaveFormSubmit = (e: React.FormEvent) => {
+  const handleSaveFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim()) {
-      showToast('Preencha o nome do usuário.', 'error');
+
+    const cleanName = formName.trim();
+    if (!cleanName) {
+      showToast('Por favor, informe o Nome Completo do usuário.', 'error');
       return;
     }
 
     const effectiveBirthDate = formBirthDate || (editingUser?.birthDate) || '1995-01-01';
     const rawEmail = formEmail.trim().toLowerCase();
-    const fallbackEmail = `${formName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'usuario'}${Date.now().toString().slice(-4)}@crescer.local`;
+    const fallbackEmail = `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'usuario'}${Date.now().toString().slice(-4)}@crescer.local`;
     const normalizedEmail = rawEmail || (editingUser?.email) || fallbackEmail;
+
+    if (!rawEmail && !editingUser?.email) {
+      showToast('Por favor, informe o E-mail de acesso do usuário.', 'error');
+      return;
+    }
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -536,8 +544,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     const isMasterAdmin =
       normalizedEmail === 'jfernandoveiga1967@gmail.com' ||
-      (editingUser && editingUser.id === 'usr_coord_1');
-    const effectiveRole = isMasterAdmin ? 'coordenador' : formRole;
+      (editingUser && editingUser.id === 'usr_coord_1') ||
+      (editingUser && editingUser.email && editingUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') ||
+      (editingUser && editingUser.name && editingUser.name.toLowerCase().includes('fernando veiga'));
+
+    const effectiveRole: UserRole = isMasterAdmin ? 'coordenador' : formRole;
 
     const existingUserWithEmail = (users || []).find(
       (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail && (!editingUser || u.id !== editingUser.id)
@@ -547,14 +558,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       ? 'usr_coord_1'
       : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
 
-    const effectiveActivities = isMasterAdmin
-      ? (formActivities && formActivities.length >= 8 ? formActivities : ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'])
-      : formActivities;
+    const effectiveActivities = (formActivities && formActivities.length > 0)
+      ? formActivities
+      : (isMasterAdmin ? ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'] : []);
 
-    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : 1200;
+    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : (isMasterAdmin ? 5000 : 1200);
     
     // Resolve precise minutes and formatted daily hours string (Model: 8h40min)
-    let resolvedMinutes = formContractDailyMinutes > 0 ? formContractDailyMinutes : 360;
+    let resolvedMinutes = formContractDailyMinutes > 0 ? formContractDailyMinutes : (isMasterAdmin ? 480 : 360);
     if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
       resolvedMinutes = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
     } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
@@ -575,8 +586,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     const updatedUser: UserProfile = {
       id: targetId,
-      name: isMasterAdmin ? 'Fernando Veiga' : formName.trim(),
-      email: normalizedEmail,
+      name: isMasterAdmin ? (cleanName || 'Fernando Veiga') : cleanName,
+      email: isMasterAdmin ? 'jfernandoveiga1967@gmail.com' : normalizedEmail,
       phone: formPhone.trim() || undefined,
       role: effectiveRole,
       status: effectiveStatus,
@@ -592,7 +603,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
-      contractSchedule: formContractSchedule.trim() || undefined,
+      contractSchedule: formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined),
       contractDailyHours: decimalHours,
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
@@ -602,10 +613,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    onSaveUser(updatedUser);
-    setEditingUser(null);
-    setIsNewUserModalOpen(false);
-    showToast(`Perfil de ${updatedUser.name} atualizado com sucesso!`);
+    try {
+      setIsSavingUser(true);
+      await Promise.resolve(onSaveUser(updatedUser));
+      setEditingUser(null);
+      setIsNewUserModalOpen(false);
+      showToast(`Perfil de ${updatedUser.name} salvo com sucesso!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao salvar usuário:', err);
+      showToast(`Erro ao gravar usuário no Firestore: ${err?.message || 'Falha de comunicação'}`, 'error');
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
   const handleQuickRoleChange = (user: UserProfile, newRole: UserRole) => {
@@ -2541,10 +2560,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center space-x-2"
+                  disabled={isSavingUser}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>Salvar Usuário</span>
+                  {isSavingUser ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>{isSavingUser ? 'Salvando Usuário...' : 'Salvar Usuário'}</span>
                 </button>
               </div>
             </form>

@@ -775,14 +775,18 @@ export default function App() {
       (currentUser.id === userToSave.id ||
         (currentUser.email && userToSave.email && currentUser.email.toLowerCase() === userToSave.email.toLowerCase()))
     ) {
-      setCurrentUser(userToSave);
-      saveStoredUser(userToSave);
+      const updatedCurrent = deduplicated.find(
+        (u) => u.id === userToSave.id || (u.email && userToSave.email && u.email.toLowerCase() === userToSave.email.toLowerCase())
+      ) || userToSave;
+      setCurrentUser(updatedCurrent);
+      saveStoredUser(updatedCurrent);
     }
 
     try {
       await saveUserToFirestore(userToSave);
     } catch (err) {
       console.error('Erro ao persistir usuário no Firestore:', err);
+      throw err;
     }
   };
 
