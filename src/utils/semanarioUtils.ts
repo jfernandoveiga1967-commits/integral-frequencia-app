@@ -212,26 +212,8 @@ export function getCategoryBadgeStyle(category: string): {
   if (cat.includes('contação') || cat.includes('contacao') || cat.includes('histórias') || cat.includes('historias') || cat.includes('literatura')) {
     return { bg: 'bg-sky-50', text: 'text-sky-800', border: 'border-sky-200', dot: 'bg-sky-500' };
   }
-  if (cat.includes('psicomotora') || cat.includes('movimento') || cat.includes('circuito')) {
-    return { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200', dot: 'bg-emerald-500' };
-  }
-  if (cat.includes('jogos') || cat.includes('tabuleiro') || cat.includes('raciocínio') || cat.includes('raciocinio') || cat.includes('xadrez')) {
-    return { bg: 'bg-indigo-50', text: 'text-indigo-800', border: 'border-indigo-200', dot: 'bg-indigo-500' };
-  }
-  if (cat.includes('oficina') || cat.includes('maker') || cat.includes('ciências') || cat.includes('ciencias')) {
-    return { bg: 'bg-teal-50', text: 'text-teal-800', border: 'border-teal-200', dot: 'bg-teal-500' };
-  }
   if (cat.includes('projeto')) {
     return { bg: 'bg-rose-50', text: 'text-rose-800', border: 'border-rose-300', dot: 'bg-rose-600' };
-  }
-  if (cat.includes('recreação') || cat.includes('recreacao') || cat.includes('brincadeiras') || cat.includes('parque')) {
-    return { bg: 'bg-cyan-50', text: 'text-cyan-800', border: 'border-cyan-200', dot: 'bg-cyan-500' };
-  }
-  if (cat.includes('relaxamento') || cat.includes('calma') || cat.includes('sono') || cat.includes('soninho') || cat.includes('descanso')) {
-    return { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-blue-200', dot: 'bg-blue-500' };
-  }
-  if (cat.includes('tarefas') || cat.includes('estudo') || cat.includes('lição') || cat.includes('licao') || cat.includes('dever')) {
-    return { bg: 'bg-violet-50', text: 'text-violet-800', border: 'border-violet-200', dot: 'bg-violet-500' };
   }
   if (cat.includes('rotina')) {
     return { bg: 'bg-slate-100', text: 'text-slate-800', border: 'border-slate-300', dot: 'bg-slate-600' };
@@ -576,24 +558,6 @@ export function generateCuratedProposal(
     };
   }
 
-  if (cat.includes('psicomotora') || cat.includes('movimento')) {
-    return {
-      title: cleanTheme ? `Circuito Motor: ${cleanTheme}` : 'Circuito de Agilidade, Salto e Coordenação Visomotora',
-      objectives: 'Aprimorar o equilíbrio, noções espaço-temporais, lateralidade e cooperação em equipe.',
-      development: '1. Aquecimento com corrida lúdica com comandos de "estátua" e "troca de direção".\n2. Estações motoras: zig-zag em cones, salto de mini-obstáculos e passagem por túnel de tecido.\n3. Alongamento e respiração consciente.',
-      materials: 'Cones, arcos (bambolês), cordas elásticas, túnel lúdico e colchonetes.',
-    };
-  }
-
-  if (cat.includes('jogos') || cat.includes('raciocínio')) {
-    return {
-      title: cleanTheme ? `Clube do Raciocínio: ${cleanTheme}` : 'Desafio dos Blocos Lógicos & Tangram Gigante',
-      objectives: 'Desenvolver a percepção espacial, reconhecimento de formas geométricas e resolução de problemas.',
-      development: '1. Apresentação das 7 peças do Tangram e suas propriedades geométricas.\n2. Desafio individual de reproduzir cartas-modelo de animais e objetos.\n3. Desafio em dupla: criação de uma figura inédita.',
-      materials: 'Kits de Tangram em EVA ou madeira, cartas de desafios graduados e cronômetro lúdico.',
-    };
-  }
-
   if (cat.includes('música') || cat.includes('musicalização') || cat.includes('ritmo')) {
     return {
       title: cleanTheme ? `Banda do Integral: ${cleanTheme}` : 'Oficina de Percussão Corporal e Paisagens Sonoras',
@@ -612,29 +576,11 @@ export function generateCuratedProposal(
     };
   }
 
-  if (cat.includes('recreação') || cat.includes('brincadeiras')) {
-    return {
-      title: cleanTheme ? `Gincana Recreativa: ${cleanTheme}` : 'Gincana Cooperativa: Jogos Tradicionais de Rua',
-      objectives: 'Incentivar o brincar livre e dirigido, integração social, respeito às regras e superação de desafios.',
-      development: '1. Resgate de brincadeiras tradicionais: queimada cooperativa, corrida de saco e bandeirinha.\n2. Foco na participação de todos sem exclusão ou eliminação permanente.\n3. Roda de água e conversa sobre espírito esportivo.',
-      materials: 'Bolas de borracha macia, sacos de estopa/tecido, cones e fita crepe.',
-    };
-  }
-
-  if (cat.includes('relaxamento') || cat.includes('calma')) {
-    return {
-      title: cleanTheme ? `Momento Zen: ${cleanTheme}` : 'Jornada da Calma: Yoga Lúdico & Massagem com Bolinhas',
-      objectives: 'Promover a desaceleração, redução do estresse diário, autocuidado e consciência respiratória.',
-      development: '1. Posturas lúdicas de yoga inspiradas em animais (gato, cachorro, borboleta, árvore).\n2. Automassagem nos pés e costas com bolinhas de borracha texturizadas.\n3. Relaxamento guiado com som de chuva e óleo essencial de lavanda no difusor.',
-      materials: 'Colchonetes, bolinhas de borracha, difusor de aromas e playlist relaxante.',
-    };
-  }
-
-  // Padrão / Tarefas / Outros
+  // Padrão / Vivência Integrada
   return {
-    title: cleanTheme ? `Estudo & Prática: ${cleanTheme}` : 'Plantão de Tarefas & Mentoria de Leitura Compartilhada',
-    objectives: 'Garantir a consolidação dos conteúdos escolares da grade regular com apoio pedagógico e autonomia.',
-    development: '1. Organização dos materiais e verificação individual das agendas e tarefas escolares.\n2. Esclarecimento de dúvidas em pequenos grupos de estudo.\n3. Leitura silenciosa e compartilhada após a conclusão dos deveres.',
-    materials: 'Cadernos, livros didáticos, estojos e dicionários ilustrados.',
+    title: cleanTheme ? `Vivência Pedagógica: ${cleanTheme}` : 'Atividade Pedagógica & Expressão Criativa',
+    objectives: 'Promover o desenvolvimento integral, a criatividade, autonomia e integração em grupo.',
+    development: '1. Apresentação da proposta e diálogo inicial com o grupo.\n2. Desenvolvimento prático da atividade de forma participativa e colaborativa.\n3. Roda de partilha e avaliação coletiva da experiência.',
+    materials: 'Materiais pedagógicos de apoio, pranchetas e registros visuais.',
   };
 }

@@ -13,7 +13,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
   'Mini Maternal Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala do Mini' },
-      { activity: 'Estimulação Psicomotora', startTime: '13:40', endTime: '14:30', location: 'Espaço Psicomotor' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
       { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Infantil' },
     ],
     terca: [
@@ -24,7 +24,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala do Mini' },
       { activity: 'Artes', startTime: '13:40', endTime: '14:30', location: 'Ateliê Criativo' },
-      { activity: 'Recreação Dirigida', startTime: '15:00', endTime: '15:50', location: 'Parquinho' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
     quinta: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala do Mini' },
@@ -33,14 +33,14 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala do Mini' },
-      { activity: 'Jogos de Tabuleiro', startTime: '13:40', endTime: '14:30', location: 'Sala do Mini' },
-      { activity: 'Relaxamento', startTime: '15:00', endTime: '15:50', location: 'Sala de Descanso' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
   },
   'Maternal Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Maternal' },
-      { activity: 'Estimulação Psicomotora', startTime: '13:40', endTime: '14:30', location: 'Espaço Psicomotor' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
       { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Infantil' },
     ],
     terca: [
@@ -51,7 +51,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Maternal' },
       { activity: 'Artes', startTime: '13:40', endTime: '14:30', location: 'Ateliê Criativo' },
-      { activity: 'Recreação Dirigida', startTime: '15:00', endTime: '15:50', location: 'Parquinho' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
     quinta: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala Maternal' },
@@ -60,14 +60,14 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Maternal' },
-      { activity: 'Jogos de Tabuleiro', startTime: '13:40', endTime: '14:30', location: 'Sala Maternal' },
-      { activity: 'Relaxamento', startTime: '15:00', endTime: '15:50', location: 'Sala de Descanso' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
   },
   'Infantil 1 Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 1' },
-      { activity: 'Estimulação Psicomotora', startTime: '13:40', endTime: '14:30', location: 'Espaço Psicomotor' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
       { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Infantil' },
     ],
     terca: [
@@ -78,7 +78,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 1' },
       { activity: 'Artes', startTime: '13:40', endTime: '14:30', location: 'Ateliê Criativo' },
-      { activity: 'Recreação Dirigida', startTime: '15:00', endTime: '15:50', location: 'Parquinho' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
     quinta: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 1' },
@@ -87,14 +87,14 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 1' },
-      { activity: 'Jogos de Tabuleiro', startTime: '13:40', endTime: '14:30', location: 'Sala Infantil 1' },
-      { activity: 'Relaxamento', startTime: '15:00', endTime: '15:50', location: 'Sala de Descanso' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
   },
   'Infantil 2 Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 2' },
-      { activity: 'Estimulação Psicomotora', startTime: '13:40', endTime: '14:30', location: 'Espaço Psicomotor' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
       { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Infantil' },
     ],
     terca: [
@@ -114,15 +114,15 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala Infantil 2' },
-      { activity: 'Jogos de Tabuleiro', startTime: '13:40', endTime: '14:30', location: 'Sala Infantil 2' },
-      { activity: 'Relaxamento', startTime: '15:00', endTime: '15:50', location: 'Sala de Descanso' },
+      { activity: 'Musicalização', startTime: '13:40', endTime: '14:30', location: 'Sala de Música' },
+      { activity: 'Contação de Histórias', startTime: '15:00', endTime: '15:50', location: 'Biblioteca Infantil' },
     ],
   },
   '1º Ano Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Ano' },
       { activity: 'Natação', startTime: '13:40', endTime: '14:40', location: 'Piscina Grande' },
-      { activity: 'Estimulação Psicomotora', startTime: '15:00', endTime: '15:50', location: 'Quadra Coberta' },
+      { activity: 'Ginástica', startTime: '15:00', endTime: '15:50', location: 'Quadra Coberta' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Ano' },
@@ -141,15 +141,15 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
-      { activity: 'Jogos de Tabuleiro', startTime: '15:00', endTime: '15:50', location: 'Sala 1º Ano' },
+      { activity: 'Artes', startTime: '13:40', endTime: '14:40', location: 'Ateliê de Artes' },
+      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
     ],
   },
   '1º Ano Vermelho': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Vermelho' },
       { activity: 'Natação', startTime: '13:40', endTime: '14:40', location: 'Piscina Grande' },
-      { activity: 'Estimulação Psicomotora', startTime: '15:00', endTime: '15:50', location: 'Quadra Coberta' },
+      { activity: 'Ginástica', startTime: '15:00', endTime: '15:50', location: 'Quadra Coberta' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Vermelho' },
@@ -168,8 +168,8 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 1º Vermelho' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
-      { activity: 'Jogos de Tabuleiro', startTime: '15:00', endTime: '15:50', location: 'Sala 1º Vermelho' },
+      { activity: 'Artes', startTime: '13:40', endTime: '14:40', location: 'Ateliê de Artes' },
+      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
     ],
   },
   '2º Ano Azul': {
@@ -195,8 +195,8 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 2º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
-      { activity: 'Jogos de Tabuleiro', startTime: '15:00', endTime: '15:50', location: 'Sala 2º Ano' },
+      { activity: 'Artes', startTime: '13:40', endTime: '14:40', location: 'Ateliê de Artes' },
+      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
     ],
   },
   '2º Ano Vermelho': {
@@ -222,8 +222,8 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 2º Vermelho' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
-      { activity: 'Jogos de Tabuleiro', startTime: '15:00', endTime: '15:50', location: 'Sala 2º Vermelho' },
+      { activity: 'Artes', startTime: '13:40', endTime: '14:40', location: 'Ateliê de Artes' },
+      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
     ],
   },
   '3º Ano Azul': {
@@ -249,7 +249,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },
@@ -276,7 +276,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Vermelho' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },
@@ -303,7 +303,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },
@@ -330,7 +330,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Vermelho' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },
@@ -357,7 +357,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 5º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },
@@ -384,7 +384,7 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     sexta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 6º Ano' },
-      { activity: 'Tarefas Escolares', startTime: '13:40', endTime: '14:40', location: 'Sala de Estudos' },
+      { activity: 'Robótica', startTime: '13:40', endTime: '14:40', location: 'Laboratório Maker' },
       { activity: 'Projeto', startTime: '15:00', endTime: '15:50', location: 'Laboratório de Ideias' },
     ],
   },

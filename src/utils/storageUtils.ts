@@ -360,12 +360,28 @@ export function saveSchedules(schedules: ScheduleBlock[]): void {
   }
 }
 
+export const REMOVED_CATEGORY_NAMES = new Set([
+  'Estimulação Psicomotora',
+  'Estimulação Motora',
+  'Estimulação Psicomotora / Motora',
+  'Jogos de Tabuleiro',
+  'Oficina Pedagógica',
+  'Recreação Dirigida',
+  'Relaxamento',
+  'Tarefas Escolares',
+]);
+
 export function loadActivities(): ActivityItem[] {
   try {
     const data = localStorage.getItem(ACTIVITIES_KEY);
     if (data) {
       const parsed: ActivityItem[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        // Remove quaisquer categorias excluídas do sistema
+        const filteredParsed = parsed.filter(
+          (act) => !REMOVED_CATEGORY_NAMES.has(act.id) && !REMOVED_CATEGORY_NAMES.has(act.name)
+        );
+
         const officialMap = new Map<string, ActivityItem>();
         ACTIVITIES_LIST.forEach((a) => {
           officialMap.set(a.id, a);
@@ -373,7 +389,7 @@ export function loadActivities(): ActivityItem[] {
         });
         
         // Enrich activities
-        const enriched: ActivityItem[] = parsed.map((act): ActivityItem => {
+        const enriched: ActivityItem[] = filteredParsed.map((act): ActivityItem => {
           const official = officialMap.get(act.id) || officialMap.get(act.name);
           return {
             ...act,
@@ -404,7 +420,10 @@ export function loadActivities(): ActivityItem[] {
 
 export function saveActivities(activities: ActivityItem[]): void {
   try {
-    const sorted = [...activities].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
+    const cleanList = activities.filter(
+      (act) => !REMOVED_CATEGORY_NAMES.has(act.id) && !REMOVED_CATEGORY_NAMES.has(act.name)
+    );
+    const sorted = [...cleanList].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'pt-BR', { sensitivity: 'base' }));
     localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(sorted));
   } catch (e) {
     console.error('Erro ao salvar atividades:', e);

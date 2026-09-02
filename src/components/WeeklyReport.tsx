@@ -52,6 +52,16 @@ import {
   Utensils,
 } from 'lucide-react';
 
+export const SPECIALIST_WORKSHOPS: ActivityType[] = [
+  'Balé',
+  'Dança',
+  'Flauta',
+  'Futebol',
+  'Ginástica',
+  'Judô',
+  'Natação',
+];
+
 interface WeeklyReportProps {
   students: Student[];
   records: AttendanceRecord[];
@@ -229,9 +239,18 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const presenceRate = totalRoutineRecords > 0 ? Math.round((validPresences / totalRoutineRecords) * 100) : 0;
   const equipmentRecords = activeRecords.filter((r) => r.status === 'sem_equipamento');
 
-  // Stats per activity
+  // Stats per activity - Exclusivamente modalidades de oficinas especialistas
   const activityStats = useMemo(() => {
-    return activeActivities.map((act) => {
+    const allowedSet = new Set<string>(SPECIALIST_WORKSHOPS);
+    const filteredActivities = activeActivities.filter((act) => allowedSet.has(act.id));
+
+    // Garante que todas as 7 oficinas apareçam ordenadas
+    const workshopList = SPECIALIST_WORKSHOPS.map((wId) => {
+      const existing = filteredActivities.find((a) => a.id === wId);
+      return existing || { id: wId, name: wId };
+    });
+
+    return workshopList.map((act) => {
       const actRecords = activeRecords.filter((r) => r.activity === act.id);
       const total = actRecords.length;
       const pres = actRecords.filter((r) => r.status === 'presente').length;
@@ -380,10 +399,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   // 3. Modality/Oficina PDF Modal State
   const [showModalityModal, setShowModalityModal] = useState(false);
   const [selectedPdfModality, setSelectedPdfModality] = useState<ActivityType>(
-    activeActivities[0]?.id || 'Natação'
+    SPECIALIST_WORKSHOPS[0] || 'Balé'
   );
   const [pdfModalityTeacher, setPdfModalityTeacher] = useState<string>(() => {
-    const initialMod = activeActivities[0]?.id || 'Natação';
+    const initialMod = SPECIALIST_WORKSHOPS[0] || 'Balé';
     const found = getSpecialistTeacherForActivity(initialMod, users, currentUser);
     return found || (currentUser?.role === 'professor' ? currentUser.name : '');
   });
@@ -1618,9 +1637,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   }}
                   className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-violet-500 focus:outline-none"
                 >
-                  {activeActivities.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.id}
+                  {SPECIALIST_WORKSHOPS.map((workshopId) => (
+                    <option key={workshopId} value={workshopId}>
+                      {workshopId}
                     </option>
                   ))}
                 </select>

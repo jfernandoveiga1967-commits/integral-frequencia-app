@@ -9,21 +9,15 @@ export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Culinária', name: 'Culinária', icon: 'Utensils', description: 'Educação nutricional e culinária pedagógica', defaultEquipment: 'Touca e avental higiênico', requiresRollCall: true },
   { id: 'Dança', name: 'Dança', icon: 'Music', description: 'Ritmos, musicalidade e consciência corporal', defaultEquipment: 'Uniforme de Dança / Tênis', requiresRollCall: true },
   { id: 'Devocional', name: 'Devocional', icon: 'Heart', description: 'Momento devocional, formação de valores e espiritualidade', defaultEquipment: 'Bíblia infantil / Caderno de valores', requiresRollCall: false },
-  { id: 'Estimulação Psicomotora', name: 'Estimulação Psicomotora', icon: 'Activity', description: 'Psicomotricidade, circuitos motores e equilíbrio', defaultEquipment: 'Tênis e roupa confortável', requiresRollCall: false },
   { id: 'Flauta', name: 'Flauta', icon: 'Music2', description: 'Musicalização e prática de Flauta Doce', defaultEquipment: 'Flauta Doce e Pasta de Músicas', requiresRollCall: true },
   { id: 'Futebol', name: 'Futebol', icon: 'Trophy', description: 'Esporte coletivo no campo/quadra', defaultEquipment: 'Uniforme, Chuteira/Tênis e Meião', requiresRollCall: true },
   { id: 'Ginástica', name: 'Ginástica', icon: 'Activity', description: 'Ginástica artística e rítmica', defaultEquipment: 'Uniforme de Ginástica', requiresRollCall: true },
-  { id: 'Jogos de Tabuleiro', name: 'Jogos de Tabuleiro', icon: 'Gamepad2', description: 'Raciocínio lógico, estratégia e cooperação', defaultEquipment: 'Jogos pedagógicos e tabuleiro', requiresRollCall: false },
   { id: 'Judô', name: 'Judô', icon: 'Award', description: 'Arte marcial e disciplina física', defaultEquipment: 'Kimono e Faixa', requiresRollCall: true },
   { id: 'Musicalização', name: 'Musicalização', icon: 'Music', description: 'Educação musical, percussão e ritmo', defaultEquipment: 'Instrumentos musicais', requiresRollCall: false },
   { id: 'Natação', name: 'Natação', icon: 'Waves', description: 'Atividade aquática na piscina do Integral', defaultEquipment: 'Maiô/Sunga, Touca e Óculos', requiresRollCall: true },
-  { id: 'Oficina Pedagógica', name: 'Oficina Pedagógica', icon: 'Layers', description: 'Oficinas maker, ciências e experiências práticas', defaultEquipment: 'Materiais pedagógicos estruturados', requiresRollCall: false },
   { id: 'Projeto', name: 'Projeto', icon: 'Sparkles', description: 'Projetos investigativos temáticos (3º ao 6º Ano)', defaultEquipment: 'Diário de bordo e material de pesquisa', requiresRollCall: false },
-  { id: 'Recreação Dirigida', name: 'Recreação Dirigida', icon: 'Gamepad2', description: 'Brincadeiras dirigidas, jogos populares e integração', defaultEquipment: 'Materiais esportivos e lúdicos', requiresRollCall: false },
-  { id: 'Relaxamento', name: 'Relaxamento', icon: 'Clock', description: 'Momento zen, yoga infantil e volta à calma', defaultEquipment: 'Colchonetes e almofadas', requiresRollCall: false },
   { id: 'Robótica', name: 'Robótica', icon: 'Cpu', description: 'Robótica educacional, lógica e pensamento computacional', defaultEquipment: 'Kit de robótica / Tablets', requiresRollCall: true },
   { id: 'Rotina', name: 'Rotina', icon: 'Clock', description: 'Rotina diária e acompanhamento geral de todos os alunos do Integral', defaultEquipment: 'Agenda escolar / Material de uso diário', requiresRollCall: true },
-  { id: 'Tarefas Escolares', name: 'Tarefas Escolares', icon: 'BookOpen', description: 'Acompanhamento e estudo orientado de deveres de casa', defaultEquipment: 'Material didático, cadernos e estojo', requiresRollCall: false },
 ];
 
 export const TURMAS_LIST: TurmaType[] = [
