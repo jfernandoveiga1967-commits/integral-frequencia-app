@@ -1059,8 +1059,8 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
-        {/* Banner de Auditoria e Trava para Coordenação/Administração */}
-        {todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
+        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente na aba Chamada de Frequência */}
+        {activeTab === 'frequencia' && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
           <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
             <div className="flex items-start space-x-3">
               <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
@@ -1092,16 +1092,17 @@ export default function App() {
                 <UserX className="w-4 h-4" />
                 <span>Ver {todayConsolidated.pendentes} Alunos Pendentes</span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedDate(todayStr);
-                  setActiveTab('frequencia');
-                }}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300 transition-all cursor-pointer"
-              >
-                Ir para Chamada
-              </button>
+              {selectedDate !== todayStr && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate(todayStr);
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300 transition-all cursor-pointer"
+                >
+                  Ir para Hoje
+                </button>
+              )}
             </div>
           </div>
         )}
