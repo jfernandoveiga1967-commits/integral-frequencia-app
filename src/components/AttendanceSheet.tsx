@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
-import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
+import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
@@ -45,17 +45,44 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
   const userCanMarkAttendance = canMarkAttendance(currentUser);
 
-  // In Attendance Sheet (Chamada de Frequência), ONLY display activities that require roll call (requiresRollCall !== false)
+  // Na Chamada de Frequência, exibir EXCLUSIVAMENTE as 8 modalidades oficiais especialistas de chamada: Rotina, Balé, Dança, Flauta, Futebol, Ginástica, Judô e Natação
   const rollCallActivities = useMemo(() => {
     const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
-    return active.filter((act) => act.requiresRollCall !== false);
+    return OFFICIAL_ROLL_CALL_MODALITIES.map((name) => {
+      const existing = active.find((a) => a.id === name || a.name === name);
+      return (
+        existing || {
+          id: name,
+          name: name,
+          icon:
+            name === 'Rotina'
+              ? 'Clock'
+              : name === 'Natação'
+              ? 'Waves'
+              : name === 'Futebol'
+              ? 'Trophy'
+              : name === 'Judô'
+              ? 'Award'
+              : name === 'Balé'
+              ? 'Sparkles'
+              : name === 'Dança'
+              ? 'Music'
+              : name === 'Flauta'
+              ? 'Music2'
+              : 'Activity',
+          description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
+          defaultEquipment: '',
+          requiresRollCall: true,
+        }
+      );
+    });
   }, [activitiesList]);
 
   const isCoordenador = currentUser?.role === 'coordenador';
   const userAssignedActivities = useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
   const userAssignedTurmas = useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
 
-  // For Monitor/Professor: ONLY display their assigned modalities that require roll call. For Coordenador: display all roll call activities.
+  // Para Monitor/Professor: apenas as modalidades atribuídas dentre as oficiais. Para Coordenador: todas as 8 modalidades oficiais.
   const allowedActivities = useMemo(() => {
     if (isCoordenador) return rollCallActivities;
     return rollCallActivities.filter((act) => userAssignedActivities.includes(act.id));
@@ -83,21 +110,25 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const turmasList = allowedTurmas;
 
-  const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
+  const [selectedActivity, setSelectedActivity] = useState<ActivityType>(() => {
+    if (!isCoordenador && userAssignedActivities.length > 0) {
+      const match = OFFICIAL_ROLL_CALL_MODALITIES.find((m) => userAssignedActivities.includes(m));
+      if (match) return match;
+    }
+    return 'Rotina';
+  });
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Keep selectedActivity aligned with allowed activities for non-coordenador
+  // Sincroniza a modalidade selecionada conforme permissões do usuário
   useEffect(() => {
     if (!isCoordenador) {
-      if (allowedActivities.length === 1) {
-        if (selectedActivity !== allowedActivities[0].id) {
-          setSelectedActivity(allowedActivities[0].id as ActivityType);
-        }
-      } else if (allowedActivities.length > 1 && selectedActivity !== 'TODAS' && !allowedActivityIds.includes(selectedActivity)) {
+      if (allowedActivities.length > 0 && !allowedActivityIds.includes(selectedActivity)) {
         setSelectedActivity(allowedActivities[0].id as ActivityType);
-      } else if (allowedActivities.length === 0 && selectedActivity !== 'TODAS') {
-        setSelectedActivity('TODAS');
+      }
+    } else {
+      if (!OFFICIAL_ROLL_CALL_MODALITIES.includes(selectedActivity)) {
+        setSelectedActivity('Rotina');
       }
     }
   }, [isCoordenador, allowedActivities.length, allowedActivityIds.join(','), selectedActivity]);
@@ -210,10 +241,14 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         const studentActs = Array.isArray(student.activities) ? student.activities : [];
 
         // Activity filter - MUST match allowedActivityIds
+        if (!allowedActivityIds.includes(selectedActivity)) {
+          return false;
+        }
+
         const matchesActivity =
-          selectedActivity === 'TODAS'
-            ? studentActs.some((act) => allowedActivityIds.includes(act as ActivityType))
-            : studentActs.includes(selectedActivity) && allowedActivityIds.includes(selectedActivity as ActivityType);
+          selectedActivity === 'Rotina'
+            ? true
+            : studentActs.includes(selectedActivity);
 
         // Turma filter
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
@@ -262,34 +297,26 @@ function getCurrentHHMM(): string {
     let pendente = 0;
 
     filteredStudents.forEach((student) => {
-      const studentActs = Array.isArray(student.activities) ? student.activities : [];
-      const activitiesToCount =
-        selectedActivity === 'TODAS'
-          ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
-          : [selectedActivity];
-
-      activitiesToCount.forEach((act) => {
-        const key = `${student.id}_${act}_${selectedDate}`;
-        const rec = recordMap.get(key);
-        if (!rec) {
-          pendente++;
-        } else if (rec.status === 'presente') {
-          presente++;
-        } else if (rec.status === 'saida_antecipada') {
-          saidaAntecipada++;
-        } else if (rec.status === 'falta') {
-          falta++;
-        } else if (rec.status === 'saude') {
-          saude++;
-        } else if (rec.status === 'sem_equipamento') {
-          semEquipamento++;
-        }
-      });
+      const key = `${student.id}_${selectedActivity}_${selectedDate}`;
+      const rec = recordMap.get(key);
+      if (!rec) {
+        pendente++;
+      } else if (rec.status === 'presente') {
+        presente++;
+      } else if (rec.status === 'saida_antecipada') {
+        saidaAntecipada++;
+      } else if (rec.status === 'falta') {
+        falta++;
+      } else if (rec.status === 'saude') {
+        saude++;
+      } else if (rec.status === 'sem_equipamento') {
+        semEquipamento++;
+      }
     });
 
     const total = presente + saidaAntecipada + falta + saude + semEquipamento + pendente;
     return { presente, saidaAntecipada, falta, saude, semEquipamento, pendente, total };
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap, allowedActivityIds]);
+  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
   // Handlers for status click
   const handleStatusClick = (
@@ -356,82 +383,41 @@ function getCurrentHHMM(): string {
   const areAllMarkedPresent = useMemo(() => {
     if (filteredStudents.length === 0) return false;
     return filteredStudents.every((student) => {
-      const studentActs = Array.isArray(student.activities) ? student.activities : [];
-      const activitiesToCheck =
-        selectedActivity === 'TODAS'
-          ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
-          : [selectedActivity];
-      if (activitiesToCheck.length === 0) return false;
-      return activitiesToCheck.every((act) => {
-        const key = `${student.id}_${act}_${selectedDate}`;
-        const rec = recordMap.get(key);
-        return rec?.status === 'presente';
-      });
+      const key = `${student.id}_${selectedActivity}_${selectedDate}`;
+      const rec = recordMap.get(key);
+      return rec?.status === 'presente';
     });
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap, allowedActivityIds]);
+  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
   const handleBatchMarkAllPresent = () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
 
     if (areAllMarkedPresent) {
-      if (selectedActivity === 'TODAS') {
-        allowedActivityIds.forEach((act) => {
-          onClearRecords(studentIds, act, selectedDate);
-        });
-      } else {
-        onClearRecords(studentIds, selectedActivity, selectedDate);
-      }
+      onClearRecords(studentIds, selectedActivity, selectedDate);
       setObsMap((prev) => {
         const next = { ...prev };
-        filteredStudents.forEach((student) => {
-          const studentActs = Array.isArray(student.activities) ? student.activities : [];
-          const acts =
-            selectedActivity === 'TODAS'
-              ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
-              : [selectedActivity];
-          acts.forEach((act) => {
-            delete next[`${student.id}_${act}_${selectedDate}`];
-          });
+        studentIds.forEach((sid) => {
+          delete next[`${sid}_${selectedActivity}_${selectedDate}`];
         });
         return next;
       });
     } else {
-      if (selectedActivity === 'TODAS') {
-        allowedActivityIds.forEach((act) => {
-          onBatchMarkPresent(studentIds, act, selectedDate);
-        });
-      } else {
-        onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
-      }
+      onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
     }
   };
 
   const handleClearSelected = () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
-    const actLabel = selectedActivity === 'TODAS' ? 'suas modalidades liberadas' : `a atividade "${selectedActivity}"`;
-    if (window.confirm(`Tem certeza que deseja limpar as marcações de ${actLabel} no dia selecionado?`)) {
-      if (selectedActivity === 'TODAS') {
-        allowedActivityIds.forEach((act) => {
-          onClearRecords(studentIds, act, selectedDate);
-        });
-      } else {
-        onClearRecords(studentIds, selectedActivity, selectedDate);
-      }
+    if (window.confirm(`Tem certeza que deseja limpar as marcações de "${selectedActivity}" no dia selecionado?`)) {
+      onClearRecords(studentIds, selectedActivity, selectedDate);
 
       // Clear local observation state for cleared records
       setObsMap((prev) => {
         const next = { ...prev };
-        filteredStudents.forEach((student) => {
-          const studentActs = Array.isArray(student.activities) ? student.activities : [];
-          const acts =
-            selectedActivity === 'TODAS'
-              ? studentActs.filter((act) => allowedActivityIds.includes(act as ActivityType))
-              : [selectedActivity];
-          acts.forEach((act) => {
-            delete next[`${student.id}_${act}_${selectedDate}`];
-          });
+        studentIds.forEach((sid) => {
+          delete next[`${sid}_${selectedActivity}_${selectedDate}`];
         });
         return next;
       });
@@ -456,9 +442,14 @@ function getCurrentHHMM(): string {
         dataUrl: result.dataUrl || result.dataUri,
         blobUrl: result.blobUrl,
         filename: result.filename,
-        title: `Lista de Chamada Diária — ${selectedActivity === 'TODAS' ? 'Todas Atividades' : selectedActivity} (${formatDateBR(selectedDate)})`,
+        title: `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`,
         onDownload: result.download,
       });
+    } catch (e) {
+      console.error('Erro ao gerar relatório diário:', e);
+      alert('Ocorreu um erro ao gerar o PDF da chamada.');
+    }
+  };
     } catch (err) {
       console.error('Erro ao gerar PDF da chamada:', err);
     }
@@ -530,31 +521,19 @@ function getCurrentHHMM(): string {
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {(isCoordenador || allowedActivities.length > 1) && (
-                <button
-                  onClick={() => setSelectedActivity('TODAS')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    selectedActivity === 'TODAS'
-                      ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                  }`}
-                >
-                  {isCoordenador ? 'Todas Atividades' : 'Todas Minhas Modalidades'}
-                </button>
-              )}
-
               {allowedActivities.map((act) => {
+                const isSelected = selectedActivity === act.id;
                 return (
                   <button
                     key={act.id}
                     onClick={() => setSelectedActivity(act.id)}
-                    className={`transition-all cursor-pointer relative ${
-                      selectedActivity === act.id
-                        ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-1'
-                        : 'opacity-80 hover:opacity-100'
+                    className={`transition-all cursor-pointer relative rounded-xl ${
+                      isSelected
+                        ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-2'
+                        : 'opacity-80 hover:opacity-100 hover:scale-102'
                     }`}
                   >
-                    <ActivityBadge activity={act.id} size="md" />
+                    <ActivityBadge activity={act.id} size="md" iconName={act.icon} customIconUrl={act.customIconUrl} />
                   </button>
                 );
               })}

@@ -393,7 +393,7 @@ export function loadActivities(): ActivityItem[] {
           const official = officialMap.get(act.id) || officialMap.get(act.name);
           return {
             ...act,
-            requiresRollCall: act.requiresRollCall !== undefined ? act.requiresRollCall : (official ? official.requiresRollCall : true),
+            requiresRollCall: official ? (official.requiresRollCall ?? false) : (act.requiresRollCall ?? false),
             icon: act.icon || (official ? official.icon : 'Clock'),
           };
         });

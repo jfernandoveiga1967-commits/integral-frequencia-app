@@ -1,12 +1,23 @@
 import { ActivityItem, TurmaType, Student, HolidayItem } from '../types';
 
+export const OFFICIAL_ROLL_CALL_MODALITIES: ActivityType[] = [
+  'Rotina',
+  'Balé',
+  'Dança',
+  'Flauta',
+  'Futebol',
+  'Ginástica',
+  'Judô',
+  'Natação',
+];
+
 export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Acolhimento', name: 'Acolhimento', icon: 'HeartHandshake', description: 'Acolhimento, Roda de Conversa e integração dos alunos', defaultEquipment: 'Almofadas e agenda escolar', requiresRollCall: false },
   { id: 'Almoço', name: 'Almoço', icon: 'Utensils', description: 'Momento de refeição, hábitos nutricionais e autonomia', defaultEquipment: 'Kit de higiene bucal', requiresRollCall: false },
-  { id: 'Artes', name: 'Artes', icon: 'Palette', description: 'Expressão plástica, pintura, modelagem e ateliê criativo', defaultEquipment: 'Avental de artes e materiais expressivos', requiresRollCall: true },
+  { id: 'Artes', name: 'Artes', icon: 'Palette', description: 'Expressão plástica, pintura, modelagem e ateliê criativo', defaultEquipment: 'Avental de artes e materiais expressivos', requiresRollCall: false },
   { id: 'Balé', name: 'Balé', icon: 'Sparkles', description: 'Expressão corporal e dança clássica', defaultEquipment: 'Colan, Sapatilha e Coque', requiresRollCall: true },
   { id: 'Contação de Histórias', name: 'Contação de Histórias', icon: 'BookOpen', description: 'Literatura infantil, contação mediada e imaginação', defaultEquipment: 'Livro literário e fantoches', requiresRollCall: false },
-  { id: 'Culinária', name: 'Culinária', icon: 'Utensils', description: 'Educação nutricional e culinária pedagógica', defaultEquipment: 'Touca e avental higiênico', requiresRollCall: true },
+  { id: 'Culinária', name: 'Culinária', icon: 'Utensils', description: 'Educação nutricional e culinária pedagógica', defaultEquipment: 'Touca e avental higiênico', requiresRollCall: false },
   { id: 'Dança', name: 'Dança', icon: 'Music', description: 'Ritmos, musicalidade e consciência corporal', defaultEquipment: 'Uniforme de Dança / Tênis', requiresRollCall: true },
   { id: 'Devocional', name: 'Devocional', icon: 'Heart', description: 'Momento devocional, formação de valores e espiritualidade', defaultEquipment: 'Bíblia infantil / Caderno de valores', requiresRollCall: false },
   { id: 'Flauta', name: 'Flauta', icon: 'Music2', description: 'Musicalização e prática de Flauta Doce', defaultEquipment: 'Flauta Doce e Pasta de Músicas', requiresRollCall: true },
@@ -16,7 +27,7 @@ export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Musicalização', name: 'Musicalização', icon: 'Music', description: 'Educação musical, percussão e ritmo', defaultEquipment: 'Instrumentos musicais', requiresRollCall: false },
   { id: 'Natação', name: 'Natação', icon: 'Waves', description: 'Atividade aquática na piscina do Integral', defaultEquipment: 'Maiô/Sunga, Touca e Óculos', requiresRollCall: true },
   { id: 'Projeto', name: 'Projeto', icon: 'Sparkles', description: 'Projetos investigativos temáticos (3º ao 6º Ano)', defaultEquipment: 'Diário de bordo e material de pesquisa', requiresRollCall: false },
-  { id: 'Robótica', name: 'Robótica', icon: 'Cpu', description: 'Robótica educacional, lógica e pensamento computacional', defaultEquipment: 'Kit de robótica / Tablets', requiresRollCall: true },
+  { id: 'Robótica', name: 'Robótica', icon: 'Cpu', description: 'Robótica educacional, lógica e pensamento computacional', defaultEquipment: 'Kit de robótica / Tablets', requiresRollCall: false },
   { id: 'Rotina', name: 'Rotina', icon: 'Clock', description: 'Rotina diária e acompanhamento geral de todos os alunos do Integral', defaultEquipment: 'Agenda escolar / Material de uso diário', requiresRollCall: true },
 ];
 

@@ -346,18 +346,19 @@ export default function App() {
           const isOfficial = officialMap.has(act.id) || officialMap.has(act.name);
           if (isOfficial) {
             const officialTemplate = officialMap.get(act.id) || officialMap.get(act.name)!;
-            // If requiresRollCall is false in Firestore, fix it immediately in Firestore (once)
-            if (!hasHealedActivitiesList && act.requiresRollCall !== true) {
+            const expectedRollCall = officialTemplate.requiresRollCall !== undefined ? officialTemplate.requiresRollCall : false;
+            // If requiresRollCall in Firestore differs from official definition, sync it (once)
+            if (!hasHealedActivitiesList && act.requiresRollCall !== expectedRollCall) {
               saveActivityToFirestore({
                 ...officialTemplate,
                 ...act,
-                requiresRollCall: true,
+                requiresRollCall: expectedRollCall,
               });
             }
             return {
               ...officialTemplate,
               ...act,
-              requiresRollCall: true,
+              requiresRollCall: expectedRollCall,
             };
           }
           return act;

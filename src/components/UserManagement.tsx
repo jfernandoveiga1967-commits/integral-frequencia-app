@@ -1656,7 +1656,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   [
                     { id: 'TODAS', label: 'Todas as Modalidades' },
                     { id: 'CHAMADA', label: 'Exige Chamada' },
-                    { id: 'ROTINA', label: 'Rotina / Grade' },
+                    { id: 'ROTINA', label: 'Apenas Grade' },
                     { id: 'PERSONALIZADA', label: 'Personalizadas' },
                   ] as const
                 ).map((f) => {
@@ -2912,14 +2912,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-xs flex items-center gap-1.5">
                         <Clock className={`w-3.5 h-3.5 ${!actRequiresRollCall ? 'text-amber-600' : 'text-slate-400'}`} />
-                        Apenas Grade / Rotina
+                        Apenas Grade
                       </span>
                       {!actRequiresRollCall && (
                         <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      Momento da rotina (ex: Almoço, Lanche, Lição) sem chamada de presença.
+                      Evento ou bloco de horário (ex: Almoço, Lanche, Parque) sem chamada de presença.
                     </p>
                   </button>
                 </div>

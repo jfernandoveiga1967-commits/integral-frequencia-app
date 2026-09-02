@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus } from '../types';
-import { TURMAS_LIST, ACTIVITIES_LIST } from '../data/initialData';
+import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -62,67 +62,35 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return map;
   }, [activeActivities]);
 
-  // Filter activities to only extracurricular modalities that require roll call (requiresRollCall !== false / exigeChamada !== false)
-  // Completely hides routine/general schedule blocks that don't have individual student roll call (Acolhimento, Almoço, Higienização, Lanche, Descanso, Parque, etc.)
+  // Modalidades oficiais especialistas que exigem chamada individual (Rotina, Balé, Dança, Flauta, Futebol, Ginástica, Judô e Natação)
   const extracurricularRollCallActivities = React.useMemo(() => {
-    const routineKeywords = [
-      'acolhimento',
-      'almoço',
-      'almoco',
-      'higienização',
-      'higienizacao',
-      'higiene',
-      'lanche',
-      'descanso',
-      'sono',
-      'parque',
-      'recreio',
-      'patio',
-      'pátio',
-      'lição de casa',
-      'licao de casa',
-      'estudo orientado',
-      'saída',
-      'saida',
-      'entrada',
-    ];
-
-    const officialExtracurriculars = new Set([
-      'rotina',
-      'natação',
-      'natacao',
-      'balé',
-      'bale',
-      'dança',
-      'danca',
-      'judô',
-      'judo',
-      'futebol',
-      'ginástica',
-      'ginastica',
-      'flauta',
-    ]);
-
-    return activeActivities.filter((act) => {
-      const norm = (act.name || act.id || '').toLowerCase().trim();
-      const normNoAccent = norm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-      // Official extracurricular activities (including Natação, Judô, Balé, etc.) are always included
-      if (officialExtracurriculars.has(norm) || officialExtracurriculars.has(normNoAccent)) {
-        return act.requiresRollCall !== false && (act as any).exigeChamada !== false;
-      }
-
-      // Check explicit roll call requirements
-      if (act.requiresRollCall === false || (act as any).exigeChamada === false) {
-        return false;
-      }
-
-      // Check routine keywords
-      if (routineKeywords.some((k) => norm === k || norm.startsWith(`${k} `) || norm.endsWith(` ${k}`))) {
-        return false;
-      }
-
-      return true;
+    return OFFICIAL_ROLL_CALL_MODALITIES.map((name) => {
+      const existing = activeActivities.find((a) => a.id === name || a.name === name);
+      return (
+        existing || {
+          id: name,
+          name: name,
+          icon:
+            name === 'Rotina'
+              ? 'Clock'
+              : name === 'Natação'
+              ? 'Waves'
+              : name === 'Futebol'
+              ? 'Trophy'
+              : name === 'Judô'
+              ? 'Award'
+              : name === 'Balé'
+              ? 'Sparkles'
+              : name === 'Dança'
+              ? 'Music'
+              : name === 'Flauta'
+              ? 'Music2'
+              : 'Activity',
+          description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
+          defaultEquipment: '',
+          requiresRollCall: true,
+        }
+      );
     });
   }, [activeActivities]);
 
@@ -628,7 +596,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 Atividades Extracurriculares (Apenas com Chamada):
               </label>
               <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades ativas
+                {extracurricularRollCallActivities.length} modalidades oficiais
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1180,10 +1148,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     Atividades Extracurriculares (Apenas com Chamada):
                   </label>
                   <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                    {extracurricularRollCallActivities.filter((a) => a.id !== 'Rotina').length} modalidades
+                    {extracurricularRollCallActivities.length} modalidades oficiais
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto p-1">
                   {extracurricularRollCallActivities.map((act) => {
                     const isChecked = (editingStudent.activities || []).includes(act.id);
                     const isRotina = act.id === 'Rotina';
