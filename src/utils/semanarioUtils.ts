@@ -8,13 +8,27 @@ import { OFFICIAL_SCHEDULE_TEMPLATES, getDefaultScheduleBlocks } from './schedul
 export const CATEGORIA_PROJETO = 'Projeto';
 
 /**
+ * Normaliza o nome da turma para comparação flexível (sem acentos, sem símbolos).
+ */
+function normalizeTurma(str: string): string {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
  * Retorna os blocos de horário oficiais cadastrados na Grade Horária para uma turma e opcionalmente um dia.
+ * Busca todos os horários cadastrados da turma (do acolhimento à saída final), sem omissões.
  */
 export function getScheduleBlocksForTurma(
   turmaName: string,
   dayOfWeek?: DayOfWeek,
   schedules?: ScheduleBlock[]
 ): ScheduleBlock[] {
+  if (!turmaName) return [];
+
   let allSchedules = schedules;
   if (!allSchedules || allSchedules.length === 0) {
     allSchedules = loadSchedules();
@@ -23,25 +37,34 @@ export function getScheduleBlocksForTurma(
     allSchedules = getDefaultScheduleBlocks();
   }
 
-  let turmaBlocks = allSchedules.filter(
-    (b) => b.turma.toLowerCase().trim() === turmaName.toLowerCase().trim()
+  const normTarget = normalizeTurma(turmaName);
+
+  let turmaBlocks = (allSchedules || []).filter(
+    (b) => b && normalizeTurma(b.turma) === normTarget
   );
 
-  // Se a turma ainda não tiver blocos salvos, busca no template padrão
+  // Se a turma ainda não tiver blocos salvos na lista de schedules, busca no template padrão
   if (turmaBlocks.length === 0) {
-    const template = OFFICIAL_SCHEDULE_TEMPLATES[turmaName];
+    const templateKey = Object.keys(OFFICIAL_SCHEDULE_TEMPLATES).find(
+      (k) => normalizeTurma(k) === normTarget
+    );
+    const template = templateKey
+      ? OFFICIAL_SCHEDULE_TEMPLATES[templateKey]
+      : OFFICIAL_SCHEDULE_TEMPLATES[turmaName] || OFFICIAL_SCHEDULE_TEMPLATES['1º Ano Azul'];
+
     if (template) {
       const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
       days.forEach((d) => {
         const daySlots = template[d] || [];
-        daySlots.forEach((slot) => {
+        daySlots.forEach((slot, idx) => {
           turmaBlocks.push({
-            id: `sched_tmpl_${turmaName}_${d}_${slot.activity}`,
-            turma: turmaName,
+            id: `sched_tmpl_${turmaName.replace(/\s+/g, '_')}_${d}_${idx + 1}_${slot.activity}`,
+            turma: turmaName as any,
             dayOfWeek: d,
             startTime: slot.startTime,
             endTime: slot.endTime,
             activityId: slot.activity,
+            location: slot.location || '',
           });
         });
       });
@@ -52,8 +75,8 @@ export function getScheduleBlocksForTurma(
     turmaBlocks = turmaBlocks.filter((b) => b.dayOfWeek === dayOfWeek);
   }
 
-  // Ordenação por horário de início
-  return turmaBlocks.sort((a, b) => a.startTime.localeCompare(b.startTime));
+  // Ordenação estritamente cronológica por horário de início
+  return [...turmaBlocks].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 }
 
 /**
@@ -275,28 +298,24 @@ export function normalizeAndSyncSemanarioPlans(
 
     // Obtém os blocos da grade oficial daquela turma para aquele dia da semana
     const dayBlocks = getScheduleBlocksForTurma(p.turma, p.dayOfWeek, schedules);
-    if (dayBlocks.length === 0) return;
+    if (dayBlocks.length === 0) {
+      normalized.push(p);
+      return;
+    }
 
     // Procura se a atividade/categoria do plano existe nos blocos daquele dia
     const matchingBlock = dayBlocks.find(
-      (b) => (b.activityId || '').trim().toLowerCase() === (p.category || '').trim().toLowerCase()
+      (b) =>
+        (b.activityId || '').trim().toLowerCase() === (p.category || '').trim().toLowerCase() ||
+        (p.timeSlot && p.timeSlot.includes(b.startTime))
     );
 
-    // Se não está na grade do dia correspondente, ignora/remove do cache
-    if (!matchingBlock) return;
+    // Se houver bloco oficial correspondente, sincroniza o horário oficial
+    const officialTimeSlot = matchingBlock
+      ? `${matchingBlock.startTime} - ${matchingBlock.endTime}`
+      : p.timeSlot || '13:00 - 14:00';
 
-    // Corrige rigorosamente o horário para o horário oficial da grade da turma
-    const officialTimeSlot = `${matchingBlock.startTime} - ${matchingBlock.endTime}`;
-
-    // Verifica se a proposta teve preenchimento real de evidências ou substituição
-    const hasCustomWork =
-      (p.photos && p.photos.length > 0) ||
-      (p.notes && p.notes.trim().length > 0) ||
-      (p.substitutionReason && p.substitutionReason.trim().length > 0) ||
-      (p.adiResponsible && p.adiResponsible.trim().length > 0) ||
-      (p.monitors && p.monitors.trim().length > 0);
-
-    const effectiveStatus: SemanarioStatus = hasCustomWork ? (p.status || 'pendente') : (p.status === 'substituida' ? 'substituida' : (p.status || 'pendente'));
+    const effectiveStatus: SemanarioStatus = p.status || 'pendente';
 
     normalized.push({
       ...p,

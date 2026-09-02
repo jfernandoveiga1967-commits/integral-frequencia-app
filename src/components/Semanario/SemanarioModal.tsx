@@ -132,21 +132,25 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         const initTurma = initialPlan.turma || turmas[0] || '1º Ano Azul';
         const initDay = initialPlan.dayOfWeek || defaultDayOfWeek;
         const validCats = getCategoriesForTurma(initTurma, schedules, activitiesList);
+        
+        // Mantém preenchidos apenas: Turma, Dia da Semana, Horário e Categoria
         setTurma(initTurma);
         setDayOfWeek(initDay);
         setTimeSlot(initialPlan.timeSlot || '13:30 - 14:30');
-        setWeekTheme(initialPlan.weekTheme || '');
         setCategory(initialPlan.category || validCats[0] || '');
-        setTitle(initialPlan.title || '');
-        setAdiResponsible(initialPlan.adiResponsible || initialPlan.teacherName || '');
-        setMonitors(initialPlan.monitors || '');
-        setDevelopment(initialPlan.development || '');
-        setObjectives(initialPlan.objectives || '');
-        setMaterials(initialPlan.materials || '');
         setStatus(initialPlan.status || 'pendente');
-        setSubstitutionReason(initialPlan.substitutionReason || '');
-        setPhotos(initialPlan.photos || []);
-        setNotes(initialPlan.notes || '');
+
+        // Campos de texto completamente em branco / sem conteúdo prévio
+        setTitle('');
+        setDevelopment('');
+        setObjectives('');
+        setMaterials('');
+        setWeekTheme('');
+        setAdiResponsible('');
+        setMonitors('');
+        setSubstitutionReason('');
+        setPhotos([]);
+        setNotes('');
       } else {
         const initialTurma = turmas[0] || '1º Ano Azul';
         const cats = getCategoriesForTurma(initialTurma, schedules, activitiesList);
@@ -157,15 +161,17 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         setTurma(initialTurma);
         setDayOfWeek(defaultDayOfWeek);
         setTimeSlot(defaultTime);
-        setWeekTheme('');
         setCategory(defaultCat);
+        setStatus('pendente');
+
+        // Campos de texto completamente em branco
         setTitle('');
-        setAdiResponsible(currentUser?.name || '');
-        setMonitors('');
         setDevelopment('');
         setObjectives('');
         setMaterials('');
-        setStatus('pendente');
+        setWeekTheme('');
+        setAdiResponsible('');
+        setMonitors('');
         setSubstitutionReason('');
         setPhotos([]);
         setNotes('');

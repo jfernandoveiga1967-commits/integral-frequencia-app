@@ -41,6 +41,19 @@ import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/tu
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
 import { generateSemanarioPDFReport } from '../../utils/pdfGenerator';
 
+/**
+ * Extrai o horário de início (horaInicio) de um timeSlot como '11:20 - 11:30' ou '07:30'
+ * Retorna string normalizada para ordenação como '07:30', '11:20', etc.
+ */
+function extractStartTime(timeSlot?: string): string {
+  if (!timeSlot) return '99:99';
+  const match = timeSlot.match(/(\d{1,2}:\d{2})/);
+  if (match) {
+    return match[1].padStart(5, '0');
+  }
+  return timeSlot.trim();
+}
+
 interface SemanarioMainProps {
   plans: SemanarioPlan[];
   turmas: TurmaType[];
@@ -125,9 +138,6 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Navigation State: null = Overview of all turmas; string = Selected Turma Detailed View
   const [activeTurma, setActiveTurma] = useState<string | null>(null);
-
-  // Grouping mode inside active turma: 'category' (by Categoria/Modalidade) or 'day' (by Dia da Semana)
-  const [groupMode, setGroupMode] = useState<'category' | 'day'>('category');
 
   // Filters State - strictly single day selection from Segunda to Sexta
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(() => getInitialDayOfWeek());
@@ -238,40 +248,45 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   }, [weekPlans, activeTurma]);
 
   // Vínculo Estrito com a Grade Horária Oficial da Turma no Dia Selecionado:
-  // Carrega exclusivamente as atividades previstas na matriz curricular da turma para o dia ativo,
-  // garantindo horários oficiais de início/fim e status padrão [⏳ Pendente] para itens não preenchidos.
+  // Carrega todas as atividades previstas na matriz curricular da turma para o dia ativo (do acolhimento à saída),
+  // garantindo horários oficiais de início/fim e status padrão [⏳ Pendente] para itens não preenchidos,
+  // além de incorporar quaisquer propostas personalizadas salvas para o dia sem omissões.
   const activeTurmaDaySchedulePlans = useMemo(() => {
     if (!activeTurma) return [];
 
-    // Blocos oficiais da Grade Horária para a turma e o dia selecionado
+    // Blocos oficiais da Grade Horária para a turma e o dia selecionado (ordenados por horário)
     const officialBlocks = getScheduleBlocksForTurma(activeTurma, selectedDay, schedules);
     const weekDays = getWeekDays(currentWeek.startDate);
     const dayIndex = DAYS_OF_WEEK_CONFIG.findIndex((d) => d.id === selectedDay);
     const dayDate = weekDays[dayIndex >= 0 ? dayIndex : 0]?.dateStr || currentWeek.startDate;
 
-    return officialBlocks.map((block) => {
-      const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
+    const usedExistingPlanIds = new Set<string>();
 
-      // Procura plano já salvo para esta turma, semana, dia e categoria
-      const existingPlan = activeTurmaPlans.find(
-        (p) =>
-          p.dayOfWeek === selectedDay &&
-          (p.category || '').toLowerCase().trim() === (block.activityId || '').toLowerCase().trim()
-      );
+    const officialMappedPlans = officialBlocks.map((block) => {
+      const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
+      const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
+      const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
+      const safeTime = (block.startTime || '').replace(':', '');
+
+      // Procura plano já salvo que coincida com o horário, id gerado ou categoria
+      const existingPlan = activeTurmaPlans.find((p) => {
+        if (p.dayOfWeek !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
+        if (p.timeSlot && p.timeSlot.trim() === officialTimeSlot.trim()) return true;
+        if (p.id && (p.id.includes(block.id) || (p.id.includes(safeCatId) && p.id.includes(safeTime)))) return true;
+        return (p.category || '').toLowerCase().trim() === (block.activityId || '').toLowerCase().trim();
+      });
 
       if (existingPlan) {
+        usedExistingPlanIds.add(existingPlan.id);
         return {
           ...existingPlan,
-          timeSlot: officialTimeSlot,
+          timeSlot: existingPlan.timeSlot || officialTimeSlot,
           status: existingPlan.status || 'pendente',
         };
       }
 
       // Se ainda não foi detalhado pela equipe, gera proposta com status padrão [⏳ Pendente]
       const curated = generateCuratedProposal(activeTurma, block.activityId);
-      const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
-      const safeCatId = block.activityId.replace(/\s+/g, '_').toLowerCase();
-      const safeTime = block.startTime.replace(':', '');
 
       const newPlan: SemanarioPlan = {
         id: `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`,
@@ -296,20 +311,27 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
       return newPlan;
     });
+
+    // Planos adicionais cadastrados pelo usuário para o dia que não coincidem com os blocos oficiais
+    const extraPlans = activeTurmaPlans.filter(
+      (p) => p.dayOfWeek === selectedDay && !usedExistingPlanIds.has(p.id)
+    );
+
+    return [...officialMappedPlans, ...extraPlans];
   }, [activeTurma, selectedDay, schedules, activeTurmaPlans, currentWeek]);
 
-  // Filtered Plans inside selected Turma and selected Day
+  // Filtered and Chronologically Sorted Plans inside selected Turma and selected Day
   const filteredActiveTurmaPlans = useMemo(() => {
     if (!activeTurma) return [];
-    return activeTurmaDaySchedulePlans.filter((p) => {
+    const list = activeTurmaDaySchedulePlans.filter((p) => {
       if (selectedCategory !== 'all' && p.category.toLowerCase() !== selectedCategory.toLowerCase()) return false;
       if (selectedStatus !== 'all' && p.status !== selectedStatus) return false;
 
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
-        const matchTitle = p.title.toLowerCase().includes(query);
-        const matchCategory = p.category.toLowerCase().includes(query);
-        const matchTurma = p.turma.toLowerCase().includes(query);
+        const matchTitle = (p.title || '').toLowerCase().includes(query);
+        const matchCategory = (p.category || '').toLowerCase().includes(query);
+        const matchTurma = (p.turma || '').toLowerCase().includes(query);
         const matchTheme = (p.weekTheme || '').toLowerCase().includes(query);
         const matchAdi = (p.adiResponsible || '').toLowerCase().includes(query);
         const matchMonitors = (p.monitors || '').toLowerCase().includes(query);
@@ -317,6 +339,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         const matchDevelopment = (p.development || '').toLowerCase().includes(query);
         const matchTeacher = (p.teacherName || '').toLowerCase().includes(query);
         const matchMaterials = (p.materials || '').toLowerCase().includes(query);
+        const matchTime = (p.timeSlot || '').toLowerCase().includes(query);
         if (
           !matchTitle &&
           !matchCategory &&
@@ -327,13 +350,23 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           !matchObjectives &&
           !matchDevelopment &&
           !matchTeacher &&
-          !matchMaterials
+          !matchMaterials &&
+          !matchTime
         ) {
           return false;
         }
       }
 
       return true;
+    });
+
+    // Ordenação estritamente cronológica pelo horário de início (horaInicio) em ordem crescente
+    return [...list].sort((a, b) => {
+      const timeA = extractStartTime(a.timeSlot);
+      const timeB = extractStartTime(b.timeSlot);
+      const timeCompare = timeA.localeCompare(timeB);
+      if (timeCompare !== 0) return timeCompare;
+      return (a.category || '').localeCompare(b.category || '', 'pt-BR');
     });
   }, [activeTurmaDaySchedulePlans, activeTurma, selectedCategory, selectedStatus, searchTerm]);
 
@@ -914,10 +947,10 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
               </div>
             </div>
 
-            {/* Turma Switcher & Grouping View Toggle */}
+            {/* Turma Switcher */}
             <div className="flex flex-wrap items-center gap-2.5">
               {/* Quick Select another turma */}
-              <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+              <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
                 <span className="text-xs font-bold text-slate-500">Turma:</span>
                 <select
                   value={activeTurma}
@@ -930,34 +963,6 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                     </option>
                   ))}
                 </select>
-              </div>
-
-              {/* View Mode: By Category vs By Day */}
-              <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setGroupMode('category')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                    groupMode === 'category'
-                      ? 'bg-white text-indigo-900 shadow-xs font-black'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <FolderTree className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Por Categoria</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGroupMode('day')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                    groupMode === 'day'
-                      ? 'bg-white text-indigo-900 shadow-xs font-black'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Por Dia</span>
-                </button>
               </div>
             </div>
           </div>
@@ -972,7 +977,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar nesta turma por atividade, objetivo, ADI, monitora..."
+                  placeholder="Buscar nesta turma por atividade, horário..."
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
@@ -1058,7 +1063,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           </div>
 
           {/* =========================================================================
-              EXIBIÇÃO DOS REGISTROS DE ATIVIDADES DA TURMA
+              EXIBIÇÃO DOS REGISTROS DE ATIVIDADES DA TURMA (ORDEM CRONOLÓGICA)
               ========================================================================= */}
           {filteredActiveTurmaPlans.length === 0 ? (
             <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center shadow-xs">
@@ -1091,104 +1096,43 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
               </div>
             </div>
           ) : (
-            <div className="space-y-8">
-              {/* MODO 1: AGRUPADO POR CATEGORIA / MODALIDADE */}
-              {groupMode === 'category' && (
-                <div className="space-y-8">
-                  {activeTurmaDayCategories.map((categoryName) => {
-                    const categoryPlans = filteredActiveTurmaPlans.filter(
-                      (p) => p.category.toLowerCase() === categoryName.toLowerCase()
-                    );
-                    const categoryStyle = getCategoryBadgeStyle(categoryName);
-
-                    if (categoryPlans.length === 0) return null;
-
-                    return (
-                      <div key={categoryName} className="space-y-3">
-                        {/* Category Header */}
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                          <div className="flex items-center space-x-2.5">
-                            <span
-                              className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-xl text-xs font-extrabold border ${categoryStyle.bg} ${categoryStyle.text} ${categoryStyle.border}`}
-                            >
-                              <span className={`w-2.5 h-2.5 rounded-full ${categoryStyle.dot}`} />
-                              <span>{categoryName}</span>
-                            </span>
-
-                            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                              {categoryPlans.length} {categoryPlans.length === 1 ? 'atividade' : 'atividades'}
-                            </span>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCreateNewPlan(selectedDay, categoryName, activeTurma)}
-                            className="text-xs font-extrabold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1.5 cursor-pointer bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-200/80 transition-all shadow-2xs"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Nova em {categoryName}</span>
-                          </button>
-                        </div>
-
-                        {/* Proposals in this Category */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {categoryPlans.map((plan) => (
-                            <SemanarioCard
-                              key={plan.id}
-                              plan={plan}
-                              onEdit={handleEditPlan}
-                              onDelete={onDeletePlan}
-                              onDuplicate={handleDuplicatePlan}
-                              onStatusChange={handleStatusChange}
-                              onRegenerateWithAI={handleRegenerateWithAI}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
+            <div className="space-y-4">
+              {/* Header do Dia em Ordem Cronológica */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-3 h-3 rounded-full bg-amber-500 ring-4 ring-amber-100" />
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    {DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label} • Grade Horária (Ordem Cronológica)
+                  </h3>
+                  <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                    {filteredActiveTurmaPlans.length} {filteredActiveTurmaPlans.length === 1 ? 'atividade' : 'atividades'}
+                  </span>
                 </div>
-              )}
 
-              {/* MODO 2: VISÃO DIÁRIA CRONOLÓGICA */}
-              {groupMode === 'day' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                    <div className="flex items-center space-x-2.5">
-                      <div className="w-3 h-3 rounded-full bg-amber-500 ring-4 ring-amber-100" />
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
-                        {DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label} • Grade Oficial
-                      </h3>
-                      <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full">
-                        {filteredActiveTurmaPlans.length} {filteredActiveTurmaPlans.length === 1 ? 'atividade prevista' : 'atividades previstas'}
-                      </span>
-                    </div>
+                <button
+                  type="button"
+                  onClick={() => handleCreateNewPlan(selectedDay, undefined, activeTurma)}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-all border border-indigo-200/60"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar em {DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.short}</span>
+                </button>
+              </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleCreateNewPlan(selectedDay, undefined, activeTurma)}
-                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-all border border-indigo-200/60"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Adicionar em {DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.short}</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredActiveTurmaPlans.map((plan) => (
-                      <SemanarioCard
-                        key={plan.id}
-                        plan={plan}
-                        onEdit={handleEditPlan}
-                        onDelete={onDeletePlan}
-                        onDuplicate={handleDuplicatePlan}
-                        onStatusChange={handleStatusChange}
-                        onRegenerateWithAI={handleRegenerateWithAI}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Lista dos Cards em Ordem Cronológica */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredActiveTurmaPlans.map((plan) => (
+                  <SemanarioCard
+                    key={plan.id}
+                    plan={plan}
+                    onEdit={handleEditPlan}
+                    onDelete={onDeletePlan}
+                    onDuplicate={handleDuplicatePlan}
+                    onStatusChange={handleStatusChange}
+                    onRegenerateWithAI={handleRegenerateWithAI}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
