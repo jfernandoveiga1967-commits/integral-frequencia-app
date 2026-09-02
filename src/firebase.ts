@@ -13,7 +13,7 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords } from './utils/pontoUtils';
-import { normalizeStudent } from './utils/storageUtils';
+import { normalizeStudent, addToAttendanceOutbox, removeFromAttendanceOutbox, getAttendanceOutbox } from './utils/storageUtils';
 import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
 
 export { doc, deleteDoc };
@@ -456,26 +456,110 @@ export async function deleteStudentFromFirestore(studentId: string) {
   }
 }
 
-export async function saveRecordToFirestore(record: AttendanceRecord) {
+export async function saveRecordToFirestore(record: AttendanceRecord): Promise<void> {
+  const docRef = doc(db, 'attendanceRecords', record.id);
+  const payload = {
+    id: record.id,
+    studentId: record.studentId,
+    date: record.date,
+    weekNumber: record.weekNumber,
+    year: record.year,
+    activity: record.activity,
+    turma: record.turma,
+    status: record.status,
+    exitTime: record.exitTime || '',
+    equipmentMissingDetails: record.equipmentMissingDetails || '',
+    observation: record.observation || '',
+    createdAt: record.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
   try {
-    const docRef = doc(db, 'attendanceRecords', record.id);
-    await setDoc(docRef, {
-      id: record.id,
-      studentId: record.studentId,
-      date: record.date,
-      weekNumber: record.weekNumber,
-      year: record.year,
-      activity: record.activity,
-      turma: record.turma,
-      status: record.status,
-      exitTime: record.exitTime || '',
-      equipmentMissingDetails: record.equipmentMissingDetails || '',
-      observation: record.observation || '',
-      createdAt: record.createdAt,
-    });
+    await setDoc(docRef, payload, { merge: true });
+    // Remove from outbox if it was previously queued
+    removeFromAttendanceOutbox(record.id);
   } catch (error) {
+    // If offline or network error, save to local outbox queue to be processed automatically on reconnect
+    addToAttendanceOutbox({
+      type: 'SET',
+      record,
+      recordId: record.id,
+    });
     handleFirestoreError(error, OperationType.WRITE, `attendanceRecords/${record.id}`);
   }
+}
+
+export async function deleteAttendanceRecordFromFirestore(recordId: string): Promise<void> {
+  const docRef = doc(db, 'attendanceRecords', recordId);
+  try {
+    await deleteDoc(docRef);
+    removeFromAttendanceOutbox(recordId);
+  } catch (error) {
+    addToAttendanceOutbox({
+      type: 'DELETE',
+      recordId,
+    });
+    handleFirestoreError(error, OperationType.DELETE, `attendanceRecords/${recordId}`);
+  }
+}
+
+let isProcessingOutbox = false;
+export async function processAttendanceOutbox(): Promise<number> {
+  if (isProcessingOutbox) return 0;
+  const outboxItems = getAttendanceOutbox();
+  if (!outboxItems || outboxItems.length === 0) return 0;
+
+  isProcessingOutbox = true;
+  let processedCount = 0;
+
+  try {
+    for (const item of outboxItems) {
+      if (item.type === 'SET' && item.record) {
+        const docRef = doc(db, 'attendanceRecords', item.record.id);
+        await setDoc(docRef, {
+          id: item.record.id,
+          studentId: item.record.studentId,
+          date: item.record.date,
+          weekNumber: item.record.weekNumber,
+          year: item.record.year,
+          activity: item.record.activity,
+          turma: item.record.turma,
+          status: item.record.status,
+          exitTime: item.record.exitTime || '',
+          equipmentMissingDetails: item.record.equipmentMissingDetails || '',
+          observation: item.record.observation || '',
+          createdAt: item.record.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        removeFromAttendanceOutbox(item.record.id);
+        processedCount++;
+      } else if (item.type === 'DELETE' && item.recordId) {
+        const docRef = doc(db, 'attendanceRecords', item.recordId);
+        await deleteDoc(docRef);
+        removeFromAttendanceOutbox(item.recordId);
+        processedCount++;
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao processar outbox de frequência (retentando depois):', e);
+  } finally {
+    isProcessingOutbox = false;
+  }
+
+  return processedCount;
+}
+
+// Global online listener for automatic outbox flush
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    processAttendanceOutbox().catch(() => {});
+  });
+  // Periodic background check every 20 seconds
+  setInterval(() => {
+    if (navigator.onLine) {
+      processAttendanceOutbox().catch(() => {});
+    }
+  }, 20000);
 }
 
 export async function saveTurmaToFirestore(turmaName: string) {

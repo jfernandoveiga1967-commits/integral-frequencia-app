@@ -10,6 +10,7 @@ export { normalizeAndDeduplicateUsers };
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
+const ATTENDANCE_OUTBOX_KEY = 'integral_frequencia_attendance_outbox_v1';
 const TURMAS_KEY = 'integral_frequencia_turmas_v1';
 const ACTIVITIES_KEY = 'integral_frequencia_activities_v1';
 const SCHEDULES_KEY = 'integral_frequencia_schedules_v1';
@@ -18,6 +19,58 @@ const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 const SEMANARIO_KEY = 'integral_semanario_plans_v1';
 export const ALL_USERS_KEY = 'frequencia_integral_all_users';
+
+export interface AttendanceOutboxItem {
+  id: string;
+  type: 'SET' | 'DELETE';
+  record?: AttendanceRecord;
+  recordId: string;
+  timestamp: number;
+}
+
+export function getAttendanceOutbox(): AttendanceOutboxItem[] {
+  try {
+    const raw = localStorage.getItem(ATTENDANCE_OUTBOX_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Erro ao ler outbox de frequência:', e);
+  }
+  return [];
+}
+
+export function addToAttendanceOutbox(item: Omit<AttendanceOutboxItem, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void {
+  try {
+    const current = getAttendanceOutbox();
+    const id = item.id || `outbox_${item.recordId}_${Date.now()}`;
+    const timestamp = item.timestamp || Date.now();
+    const filtered = current.filter((i) => i.recordId !== item.recordId);
+    const updated = [...filtered, { ...item, id, timestamp }];
+    localStorage.setItem(ATTENDANCE_OUTBOX_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Erro ao adicionar item na outbox de frequência:', e);
+  }
+}
+
+export function removeFromAttendanceOutbox(recordId: string): void {
+  try {
+    const current = getAttendanceOutbox();
+    const updated = current.filter((i) => i.recordId !== recordId && i.id !== recordId);
+    localStorage.setItem(ATTENDANCE_OUTBOX_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Erro ao remover item da outbox de frequência:', e);
+  }
+}
+
+export function clearAttendanceOutbox(): void {
+  try {
+    localStorage.removeItem(ATTENDANCE_OUTBOX_KEY);
+  } catch (e) {
+    console.error('Erro ao limpar outbox:', e);
+  }
+}
 
 export function loadUsers(): UserProfile[] {
   return getLocalUsersList();

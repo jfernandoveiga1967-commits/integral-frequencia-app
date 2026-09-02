@@ -62,6 +62,8 @@ import {
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
+  deleteAttendanceRecordFromFirestore,
+  processAttendanceOutbox,
   saveTurmaToFirestore,
   deleteTurmaFromFirestore,
   saveUserToFirestore,
@@ -166,13 +168,15 @@ export default function App() {
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
 
-    // Test Firestore connectivity
+    // Test Firestore connectivity & flush any pending outbox queue
     testFirestoreConnection().then((connected) => {
       setFirebaseConnected(connected);
+      if (connected) {
+        processAttendanceOutbox().catch(() => {});
+      }
     });
 
     let isInitialStudentsSync = true;
-    let isInitialRecordsSync = true;
     let isInitialTurmasSync = true;
     let hasHealedAdminUser = false;
     let hasCleanedMockProfiles = false;
@@ -208,6 +212,7 @@ export default function App() {
       isInitialStudentsSync = false;
     });
 
+    // Realtime Listener for Attendance Records: Firestore is the absolute authority
     const unsubRecords = subscribeRecords((fsRecords) => {
       // Filter out records created for mock students
       const mockRecordsInFs = fsRecords.filter(
@@ -223,14 +228,6 @@ export default function App() {
       const realRecords = fsRecords.filter((r) => !isMockStudent({ id: r.studentId }));
       setRecords(realRecords);
       saveAttendanceRecords(realRecords);
-
-      if (isInitialRecordsSync && realRecords.length === 0 && loadedRecords.length > 0) {
-        const realLoadedRecs = loadedRecords.filter((r) => !isMockStudent({ id: r.studentId }));
-        if (realLoadedRecs.length > 0) {
-          seedInitialDataToFirestore([], realLoadedRecs, []);
-        }
-      }
-      isInitialRecordsSync = false;
     });
 
     const unsubTurmas = subscribeTurmas((fsTurmas) => {
@@ -676,7 +673,7 @@ export default function App() {
 
     try {
       await Promise.allSettled(
-        Array.from(targetKeys).map((key) => deleteDoc(doc(db, 'attendanceRecords', key)))
+        Array.from(targetKeys).map((key) => deleteAttendanceRecordFromFirestore(key))
       );
     } catch (err) {
       console.error('Error clearing Firestore records:', err);
