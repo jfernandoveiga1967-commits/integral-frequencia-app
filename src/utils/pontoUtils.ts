@@ -298,6 +298,247 @@ export function isContinuousShift(
 }
 
 /**
+ * Checks whether all contractual punch slots are completed for a day
+ */
+export function isDayShiftComplete(
+  record?: Partial<PontoRecord> | null,
+  isContinuous = true
+): boolean {
+  if (!record) return false;
+  const e1 = (record.entry1 || '').trim();
+  const s1 = (record.exit1 || '').trim();
+  const e2 = (record.entry2 || '').trim();
+  const s2 = (record.exit2 || '').trim();
+
+  return isContinuous
+    ? Boolean(e1 && (s2 || s1))
+    : Boolean(e1 && s1 && e2 && s2);
+}
+
+export interface DayPontoStatusResult {
+  statusKey: string;
+  label: string;
+  badgeBg: string;
+  badgeText: string;
+  isShiftComplete: boolean;
+  hasPunches: boolean;
+  isToday: boolean;
+  isPast: boolean;
+  tooltip?: string;
+}
+
+/**
+ * Consolidates the daily occurrence status in the Espelho de Ponto:
+ * 
+ * 1. Regra de Jornada Em Andamento (Turnos Incompletos):
+ *    Para colaboradores com contrato de 2 turnos (duas entradas e duas saídas),
+ *    se o dia atual possui batida de entrada/saída do 1º turno, mas a entrada/saída do 2º turno
+ *    ainda está em aberto (—), o status da ocorrência deve obrigatoriamente ser EM ANDAMENTO.
+ * 
+ * 2. Consolidação do Status Final:
+ *    O status PRESENÇA NORMAL só deve ser concedido após o encerramento completo de todos os turnos
+ *    previstos no contrato do dia (ou após o horário final da jornada com as devidas batidas registradas).
+ */
+export function getDayPontoStatus({
+  record,
+  defaultStatus = 'normal',
+  isContinuous,
+  dateStr,
+  isWeekend = false,
+  holidayName,
+  referenceDateStr,
+}: {
+  record?: Partial<PontoRecord> | null;
+  defaultStatus?: string;
+  isContinuous: boolean;
+  dateStr: string;
+  isWeekend?: boolean;
+  holidayName?: string;
+  referenceDateStr?: string;
+}): DayPontoStatusResult {
+  const todayStr = referenceDateStr || toISODateString(new Date());
+  const isToday = dateStr === todayStr;
+  const isPast = dateStr < todayStr;
+  const status = record?.status || defaultStatus;
+
+  if (status === 'feriado') {
+    return {
+      statusKey: 'feriado',
+      label: 'FERIADO PAGO',
+      badgeBg: 'bg-emerald-100',
+      badgeText: 'text-emerald-800',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: holidayName ? `Feriado: ${holidayName}` : 'Feriado Pago (Abonado)',
+    };
+  }
+
+  if (status === 'recesso') {
+    return {
+      statusKey: 'recesso',
+      label: 'RECESSO PAGO',
+      badgeBg: 'bg-teal-100',
+      badgeText: 'text-teal-800',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: holidayName ? `Recesso: ${holidayName}` : 'Recesso Escolar Pago (Abonado)',
+    };
+  }
+
+  if (status === 'falta_injustificada') {
+    return {
+      statusKey: 'falta_injustificada',
+      label: 'FALTA (-1D)',
+      badgeBg: 'bg-rose-100',
+      badgeText: 'text-rose-800',
+      isShiftComplete: false,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: 'Falta Injustificada (Desconto integral de 1 Diária)',
+    };
+  }
+
+  if (status === 'falta_justificada' || status === 'atestado') {
+    return {
+      statusKey: status,
+      label: status === 'atestado' ? 'ATESTADO' : 'JUSTIFICADA',
+      badgeBg: 'bg-indigo-100',
+      badgeText: 'text-indigo-800',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: status === 'atestado' ? 'Atestado Médico Abonado' : 'Falta Justificada Abonada',
+    };
+  }
+
+  if (status === 'compensado') {
+    return {
+      statusKey: 'compensado',
+      label: 'COMPENSADO',
+      badgeBg: 'bg-purple-100',
+      badgeText: 'text-purple-800',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: 'Horas ou dia compensado em banco de horas',
+    };
+  }
+
+  if (status === 'dispensado') {
+    return {
+      statusKey: 'dispensado',
+      label: 'DISPENSADO',
+      badgeBg: 'bg-blue-100',
+      badgeText: 'text-blue-800',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: 'Dispensado(a) pela coordenação',
+    };
+  }
+
+  // Working day (status === 'normal')
+  const e1 = (record?.entry1 || '').trim();
+  const s1 = (record?.exit1 || '').trim();
+  const e2 = (record?.entry2 || '').trim();
+  const s2 = (record?.exit2 || '').trim();
+
+  const hasPunches = Boolean(e1 || s1 || e2 || s2);
+  const isShiftComplete = isContinuous
+    ? Boolean(e1 && (s2 || s1))
+    : Boolean(e1 && s1 && e2 && s2);
+
+  if (!hasPunches) {
+    if (isWeekend) {
+      return {
+        statusKey: 'weekend',
+        label: '—',
+        badgeBg: 'bg-slate-100',
+        badgeText: 'text-slate-400',
+        isShiftComplete: false,
+        hasPunches: false,
+        isToday,
+        isPast,
+      };
+    }
+    return {
+      statusKey: 'a_realizar',
+      label: 'A Realizar',
+      badgeBg: 'bg-slate-100',
+      badgeText: 'text-slate-500',
+      isShiftComplete: false,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: isToday ? 'Aguardando 1ª batida de entrada do dia' : (isPast ? 'Sem registros' : 'Previsto em calendário'),
+    };
+  }
+
+  // Has punches registered
+  if (isShiftComplete) {
+    return {
+      statusKey: 'presenca_normal',
+      label: 'PRESENÇA NORMAL',
+      badgeBg: 'bg-emerald-100',
+      badgeText: 'text-emerald-800',
+      isShiftComplete: true,
+      hasPunches: true,
+      isToday,
+      isPast,
+      tooltip: isContinuous
+        ? 'Jornada contínua concluída com sucesso (Entrada e Saída registradas)'
+        : 'Todos os turnos contratuais concluídos com sucesso (1º e 2º turnos encerrados)',
+    };
+  }
+
+  // Incomplete punches:
+  if (isToday) {
+    // Current day in progress:
+    return {
+      statusKey: 'em_andamento',
+      label: 'EM ANDAMENTO',
+      badgeBg: 'bg-amber-100',
+      badgeText: 'text-amber-800',
+      isShiftComplete: false,
+      hasPunches: true,
+      isToday: true,
+      isPast: false,
+      tooltip: !isContinuous
+        ? (e1 && s1 && !e2
+            ? '1º turno concluído, 2º turno ainda em aberto (Em Andamento)'
+            : (e1 && s1 && e2 && !s2
+                ? '2º turno em andamento (aguardando saída final)'
+                : '1º turno em andamento (aguardando saída almoço)'))
+        : 'Jornada contínua em andamento (aguardando saída final)',
+    };
+  }
+
+  // Past day with incomplete punches:
+  const isSecondTurnMissing = !isContinuous && e1 && s1 && (!e2 || !s2);
+  return {
+    statusKey: isSecondTurnMissing ? 'turno_incompleto' : 'pendente_saida',
+    label: isSecondTurnMissing ? 'TURNO INCOMPLETO' : 'PENDENTE SAÍDA',
+    badgeBg: 'bg-amber-100',
+    badgeText: 'text-amber-800',
+    isShiftComplete: false,
+    hasPunches: true,
+    isToday: false,
+    isPast: true,
+    tooltip: isSecondTurnMissing
+      ? '1º turno foi registrado, mas o 2º turno ficou em aberto ou pendente'
+      : 'Batida de saída pendente no encerramento da jornada',
+  };
+}
+
+/**
  * Calculates total worked minutes for a single day record and identifies overtime/missing minutes
  */
 export function calculateDayWorkedMinutes(
@@ -351,25 +592,61 @@ export function calculateDayWorkedMinutes(
   let period1 = 0;
   let period2 = 0;
 
-  // Case 1: Continuous / 2-Punch Shift (Direct Entrada 1 and Saída (exit2 or exit1), no second entrance e2)
-  if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
-    const punchOut = s2 !== null ? s2 : s1!;
-    
-    // Apply tolerance to entrance and exit against contractual schedule
-    const startDiff = e1 - expStart;
-    const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
+  const continuous = isContinuousShift(null, contractSchedule);
 
-    const endDiff = punchOut - expEnd;
-    const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : punchOut;
+  if (continuous) {
+    // Case 1: Continuous / 2-Punch Shift (Direct Entrada 1 and Saída (exit2 or exit1), no second entrance e2)
+    if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
+      const punchOut = s2 !== null ? s2 : s1!;
+      
+      // Apply tolerance to entrance and exit against contractual schedule
+      const startDiff = e1 - expStart;
+      const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
 
-    period1 = Math.max(0, effectiveEnd - effectiveStart);
-  } else {
-    // Case 2: Split Shift with Lunch Interval (or 4 punches)
-    if (e1 !== null && s1 !== null) {
-      period1 = Math.max(0, s1 - e1);
+      const endDiff = punchOut - expEnd;
+      const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : punchOut;
+
+      period1 = Math.max(0, effectiveEnd - effectiveStart);
     }
+  } else {
+    // Case 2: Split Shift with Lunch Interval (2 turns: 4 punches)
+    const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
+    const matches = Array.from(contractSchedule.matchAll(timeRegex));
+    let t1Start = expStart;
+    let t1End = expStart + 240;
+    let t2Start = expStart + 300;
+    let t2End = expEnd;
+
+    if (matches.length >= 4) {
+      t1Start = (parseInt(matches[0][1], 10) * 60) + parseInt(matches[0][2], 10);
+      t1End = (parseInt(matches[1][1], 10) * 60) + parseInt(matches[1][2], 10);
+      t2Start = (parseInt(matches[2][1], 10) * 60) + parseInt(matches[2][2], 10);
+      t2End = (parseInt(matches[3][1], 10) * 60) + parseInt(matches[3][2], 10);
+    }
+
+    if (e1 !== null && s1 !== null) {
+      const startDiff1 = e1 - t1Start;
+      const effE1 = Math.abs(startDiff1) <= toleranceMinutes ? t1Start : e1;
+      const endDiff1 = s1 - t1End;
+      const effS1 = Math.abs(endDiff1) <= toleranceMinutes ? t1End : s1;
+      period1 = Math.max(0, effS1 - effE1);
+    }
+
     if (e2 !== null && s2 !== null) {
-      period2 = Math.max(0, s2 - e2);
+      const startDiff2 = e2 - t2Start;
+      const effE2 = Math.abs(startDiff2) <= toleranceMinutes ? t2Start : e2;
+      const endDiff2 = s2 - t2End;
+      const effS2 = Math.abs(endDiff2) <= toleranceMinutes ? t2End : s2;
+      period2 = Math.max(0, effS2 - effE2);
+    }
+
+    // Direct continuous fallback if someone with split contract punched e1 and s2 directly
+    if (period1 === 0 && period2 === 0 && e1 !== null && s2 !== null && s1 === null && e2 === null) {
+      const startDiff = e1 - expStart;
+      const effStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
+      const endDiff = s2 - expEnd;
+      const effEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : s2;
+      period1 = Math.max(0, effEnd - effStart);
     }
   }
 
@@ -741,8 +1018,15 @@ export function calculateMonthlyPontoFinancials({
       totalExtraMinutes += overtimeMinutes;
       // Only deduct missing minutes on days where the employee worked partially or has unpunched hours
       // (Full day unjustified absences are already counted in unjustifiedAbsencesCount)
-      if (missingMinutes > 0 && (rec.entry1 || rec.entry2)) {
-        totalMissingMinutes += missingMinutes;
+      const isShiftCompleted = isContinuousShift(null, contractSchedule)
+        ? Boolean(rec.entry1 && (rec.exit2 || rec.exit1))
+        : Boolean(rec.entry1 && rec.exit1 && rec.entry2 && rec.exit2);
+      const isTodayRec = toISODateString(new Date()) === rec.date;
+
+      if (missingMinutes > 0 && (rec.entry1 || rec.entry2 || rec.exit1 || rec.exit2)) {
+        if (!(isTodayRec && !isShiftCompleted)) {
+          totalMissingMinutes += missingMinutes;
+        }
       }
     }
   });
@@ -973,14 +1257,20 @@ export function isOverlappedPontoRecord(
   const e2 = (record.entry2 || '').trim();
   const s2 = (record.exit2 || '').trim();
 
+  const todayStr = toISODateString(new Date());
+  // If record is for today, having only entry1 is completely normal (employee is currently working in their first shift)
+  if (record.date === todayStr && !s1 && !e2 && !s2) {
+    return false;
+  }
+
   const { start, end, startMinutes: expStartMin, endMinutes: expEndMin } = parseContractSchedule(contractSchedule);
   const e1Min = parseTimeToMinutes(e1);
   if (e1Min === null) return false;
 
-  // Case 1: Only entry1 is filled, but its time is in the afternoon or close to/after contractual exit
-  // (e.g. e1 >= 13:00 (780 min) when start is 11:40 (700 min), or e1 >= expStartMin + 90 min)
-  if (!s1 && !e2 && !s2) {
-    if (e1Min >= expStartMin + 90 || e1Min >= 780 || e1Min >= expEndMin - 90) {
+  // Case 1: Past day where only entry1 is filled, but its time is near or after contractual exit
+  // (e.g. e1 was stamped at 17:40 when contractual exit is 17:40, indicating exit punch overwrote entry)
+  if (!s1 && !e2 && !s2 && record.date < todayStr) {
+    if (expEndMin > expStartMin + 180 && e1Min >= expEndMin - 30) {
       return true;
     }
   }
@@ -992,7 +1282,7 @@ export function isOverlappedPontoRecord(
   }
 
   // Case 3: Identical punches in entry1 and exit2 (e.g. both '17:40')
-  if (s2 && e1 === s2 && e1Min >= expStartMin + 90) {
+  if (s2 && e1 === s2 && expEndMin > expStartMin + 180 && e1Min >= expEndMin - 30) {
     return true;
   }
 

@@ -75,6 +75,8 @@ import {
   processSequentialPunch,
   isOverlappedPontoRecord,
   repairOverlappedPontoRecords,
+  getDayPontoStatus,
+  isDayShiftComplete,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
@@ -595,14 +597,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const usersMap = new Map<string, UserProfile>();
     users.forEach((u) => usersMap.set(u.id, u));
 
-    const { repairedRecords, repairedCount } = repairOverlappedPontoRecords(
+    const { repairedRecords, repairedCount, repairedDetails } = repairOverlappedPontoRecords(
       pontoRecords,
       usersMap,
       contractSchedule
     );
 
     if (repairedCount > 0) {
-      onBatchSavePontoRecords(repairedRecords);
+      const changedRecords = repairedRecords.filter((r) =>
+        repairedDetails.some((d) => d.id === r.id)
+      );
+      onBatchSavePontoRecords(changedRecords);
       setPunchFeedback({
         text: `Trava e Correção Aplicadas: ${repairedCount} registro(s) com sobreposição foram restaurados com sucesso (Entrada 11:40 restabelecida e Saída 17:40 preservada)!`,
         type: 'success',
@@ -818,10 +823,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
   // Save Day Edit Modal
   const handleSaveDayEdit = (recordToSave: PontoRecord) => {
-    const hasCompletePunches = Boolean(
-      (recordToSave.entry1 && (recordToSave.exit2 || recordToSave.exit1)) ||
-      (recordToSave.entry1 && recordToSave.exit1 && recordToSave.entry2 && recordToSave.exit2)
-    );
+    const hasCompletePunches = isDayShiftComplete(recordToSave, isUserContinuous);
     const finalRecord: PontoRecord = {
       ...recordToSave,
       status: (hasCompletePunches && (!recordToSave.status || recordToSave.status === 'normal')) ? 'normal' : (recordToSave.status || 'normal'),
@@ -1508,13 +1510,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                         )}
                         <td className="py-2 px-3 text-center font-mono">
                           {(() => {
-                            if (!rec?.entry1 && !rec?.entry2) {
+                            if (!rec?.entry1 && !rec?.entry2 && !rec?.exit1 && !rec?.exit2) {
                               return <span className="text-slate-400 font-normal">{item.isWk ? '—' : '0h00min'}</span>;
                             }
                             const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
-                            const hasCompletePair = Boolean(
-                              (rec?.entry1 && (rec?.exit2 || rec?.exit1)) ||
-                              (rec?.entry1 && rec?.exit1 && rec?.entry2 && rec?.exit2)
+                            const shiftComplete = isDayShiftComplete(rec, isUserContinuous);
+                            const showNegativeDebt = dayCalc.missingMinutes > 0 && (
+                              shiftComplete || (!isToday && (rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2))
                             );
 
                             return (
@@ -1523,7 +1525,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                                   className={`font-black ${
                                     dayCalc.overtimeMinutes > 0
                                       ? 'text-indigo-600'
-                                      : dayCalc.missingMinutes > 0 && hasCompletePair
+                                      : showNegativeDebt
                                       ? 'text-rose-600'
                                       : 'text-slate-900'
                                   }`}
@@ -1535,7 +1537,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                                     +{formatMinutesToHoursAndMinutes(dayCalc.overtimeMinutes)}
                                   </span>
                                 )}
-                                {dayCalc.missingMinutes > 0 && hasCompletePair && (
+                                {showNegativeDebt && (
                                   <span
                                     className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1 rounded"
                                     title={`Atraso/Saldo negativo de -${formatMinutesToHoursAndMinutes(dayCalc.missingMinutes)}`}
@@ -1552,55 +1554,35 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
                     {/* Status Badge */}
                     <td className="py-2 px-3 text-center">
-                      {status === 'normal' && (rec?.entry1 || rec?.entry2) && (
-                        (() => {
-                          const hasExit = Boolean(rec?.exit2 || rec?.exit1);
-                          if (!hasExit) {
-                            return (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800" title="Entrada registrada, saída pendente">
-                                <Clock className="w-3 h-3 mr-0.5 text-amber-600" />
-                                {isToday ? 'EM ANDAMENTO' : 'PENDENTE SAÍDA'}
-                              </span>
-                            );
-                          }
-                          return (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                              <Check className="w-3 h-3 mr-0.5 text-emerald-600" />
-                              PRESENÇA NORMAL
-                            </span>
-                          );
-                        })()
-                      )}
-                      {status === 'normal' && !rec?.entry1 && !rec?.entry2 && !item.isWk && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">
-                          A Realizar
-                        </span>
-                      )}
-                      {status === 'feriado' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                          FERIADO PAGO
-                        </span>
-                      )}
-                      {status === 'recesso' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-800">
-                          RECESSO PAGO
-                        </span>
-                      )}
-                      {status === 'falta_injustificada' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
-                          FALTA (-1D)
-                        </span>
-                      )}
-                      {(status === 'falta_justificada' || status === 'atestado') && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                          JUSTIFICADA
-                        </span>
-                      )}
-                      {status === 'compensado' && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">
-                          COMPENSADO
-                        </span>
-                      )}
+                      {(() => {
+                        const statusResult = getDayPontoStatus({
+                          record: rec,
+                          defaultStatus: status,
+                          isContinuous: isUserContinuous,
+                          dateStr: item.dateStr,
+                          isWeekend: item.isWk,
+                          holidayName: item.holidayItem?.name,
+                        });
+
+                        let icon = null;
+                        if (statusResult.statusKey === 'em_andamento') {
+                          icon = <Clock className="w-3 h-3 mr-0.5 text-amber-600 animate-pulse" />;
+                        } else if (statusResult.statusKey === 'presenca_normal') {
+                          icon = <Check className="w-3 h-3 mr-0.5 text-emerald-600" />;
+                        } else if (statusResult.statusKey === 'turno_incompleto' || statusResult.statusKey === 'pendente_saida') {
+                          icon = <Clock className="w-3 h-3 mr-0.5 text-amber-600" />;
+                        }
+
+                        return (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${statusResult.badgeBg} ${statusResult.badgeText}`}
+                            title={statusResult.tooltip}
+                          >
+                            {icon}
+                            {statusResult.label}
+                          </span>
+                        );
+                      })()}
                     </td>
 
                     {/* Observation note */}
@@ -2276,11 +2258,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                             </>
                           )}
                           <td className="p-1 text-center font-semibold">
-                            {status === 'normal'
-                              ? rec?.entry1
-                                ? 'PRESENTE'
-                                : '—'
-                              : status.toUpperCase()}
+                            {(() => {
+                              const res = getDayPontoStatus({
+                                record: rec,
+                                defaultStatus: status,
+                                isContinuous: isUserContinuous,
+                                dateStr: item.dateStr,
+                                isWeekend: item.isWk,
+                                holidayName: item.holidayItem?.name,
+                              });
+                              return res.label;
+                            })()}
                           </td>
                           <td className="p-1 text-center text-slate-300 font-mono">
                             {closingRecord?.signedDigitally ? `[Digital ${closingRecord.digitalSignatureHash?.substring(0, 10)}]` : '__________________'}
@@ -2561,11 +2549,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   5,
                   contractDailyMinutes
                 );
-                const hasPunches = Boolean(showEditDayModal.entry1 || showEditDayModal.entry2);
-                const hasCompletePair = Boolean(
-                  (showEditDayModal.entry1 && (showEditDayModal.exit2 || showEditDayModal.exit1)) ||
-                  (showEditDayModal.entry1 && showEditDayModal.exit1 && showEditDayModal.entry2 && showEditDayModal.exit2)
-                );
+                const hasPunches = Boolean(showEditDayModal.entry1 || showEditDayModal.entry2 || showEditDayModal.exit1 || showEditDayModal.exit2);
+                const hasCompletePair = isDayShiftComplete(showEditDayModal, isUserContinuous);
 
                 return (
                   <div className="p-3.5 bg-slate-800/90 border border-slate-700 rounded-xl space-y-2 shadow-inner">
@@ -2579,14 +2564,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {hasCompletePair && (
                       <div className="flex items-center space-x-1.5 text-[11px] text-emerald-400 font-bold">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Presença completa com tolerância de 5 min aplicada.</span>
+                        <span>Presença normal completa com todos os turnos encerrados (tolerância de 5 min aplicada).</span>
                       </div>
                     )}
 
                     {hasPunches && !hasCompletePair && (
                       <div className="flex items-center space-x-1.5 text-[11px] text-amber-300 font-semibold">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Batida incompleta (pendente horário de saída).</span>
+                        <span>
+                          {!isUserContinuous && showEditDayModal.entry1 && showEditDayModal.exit1 && (!showEditDayModal.entry2 || !showEditDayModal.exit2)
+                            ? '1º turno concluído, 2º turno ainda em aberto (Em Andamento).'
+                            : 'Batida incompleta (pendente registro de saída).'}
+                        </span>
                       </div>
                     )}
 
@@ -2824,11 +2813,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           </>
                         )}
                         <td className="p-1 text-center font-semibold">
-                          {status === 'normal'
-                            ? rec?.entry1
-                              ? 'PRESENTE'
-                              : '—'
-                            : status.toUpperCase()}
+                          {(() => {
+                            const res = getDayPontoStatus({
+                              record: rec,
+                              defaultStatus: status,
+                              isContinuous: isUserContinuous,
+                              dateStr: item.dateStr,
+                              isWeekend: item.isWk,
+                              holidayName: item.holidayItem?.name,
+                            });
+                            return res.label;
+                          })()}
                         </td>
                         <td className="p-1 text-center text-slate-400 font-mono text-[9px]">
                           {closingRecord?.signedDigitally ? `[Digital ${closingRecord.digitalSignatureHash?.substring(0, 10)}]` : '__________________'}

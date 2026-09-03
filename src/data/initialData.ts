@@ -1,4 +1,4 @@
-import { ActivityItem, TurmaType, Student, HolidayItem } from '../types';
+import { ActivityItem, ActivityType, TurmaType, Student, HolidayItem } from '../types';
 
 export const OFFICIAL_ROLL_CALL_MODALITIES: ActivityType[] = [
   'Rotina',

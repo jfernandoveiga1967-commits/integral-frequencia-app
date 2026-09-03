@@ -63,34 +63,33 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   }, [activeActivities]);
 
   // Modalidades oficiais especialistas que exigem chamada individual (Rotina, Balé, Dança, Flauta, Futebol, Ginástica, Judô e Natação)
-  const extracurricularRollCallActivities = React.useMemo(() => {
+  const extracurricularRollCallActivities = React.useMemo<ActivityItem[]>(() => {
     return OFFICIAL_ROLL_CALL_MODALITIES.map((name) => {
       const existing = activeActivities.find((a) => a.id === name || a.name === name);
-      return (
-        existing || {
-          id: name,
-          name: name,
-          icon:
-            name === 'Rotina'
-              ? 'Clock'
-              : name === 'Natação'
-              ? 'Waves'
-              : name === 'Futebol'
-              ? 'Trophy'
-              : name === 'Judô'
-              ? 'Award'
-              : name === 'Balé'
-              ? 'Sparkles'
-              : name === 'Dança'
-              ? 'Music'
-              : name === 'Flauta'
-              ? 'Music2'
-              : 'Activity',
-          description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
-          defaultEquipment: '',
-          requiresRollCall: true,
-        }
-      );
+      if (existing) return existing;
+      return {
+        id: name,
+        name: name,
+        icon:
+          name === 'Rotina'
+            ? 'Clock'
+            : name === 'Natação'
+            ? 'Waves'
+            : name === 'Futebol'
+            ? 'Trophy'
+            : name === 'Judô'
+            ? 'Award'
+            : name === 'Balé'
+            ? 'Sparkles'
+            : name === 'Dança'
+            ? 'Music'
+            : name === 'Flauta'
+            ? 'Music2'
+            : 'Activity',
+        description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
+        defaultEquipment: '',
+        requiresRollCall: true,
+      };
     });
   }, [activeActivities]);
 

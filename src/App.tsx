@@ -63,6 +63,9 @@ import {
   deleteStudentFromFirestore,
   saveRecordToFirestore,
   deleteAttendanceRecordFromFirestore,
+  batchSaveRecordsToFirestore,
+  batchDeleteAttendanceRecordsFromFirestore,
+  reconnectFirestore,
   processAttendanceOutbox,
   saveTurmaToFirestore,
   deleteTurmaFromFirestore,
@@ -83,6 +86,14 @@ import {
   doc,
   db,
 } from './firebase';
+import {
+  broadcastSyncEvent,
+  subscribeToSyncEvents,
+  initConnectivityMonitor,
+  subscribeConnectionStatus,
+  forceManualSync,
+  ConnectionState,
+} from './services/syncService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
@@ -98,6 +109,12 @@ export default function App() {
   const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>({
+    status: 'synced',
+    isOnline: true,
+    lastSyncTime: Date.now(),
+    pendingOutboxCount: 0,
+  });
 
   // Keep a stable ref of currentUser for real-time listener updates
   const currentUserRef = useRef<UserProfile | null>(currentUser);
@@ -176,56 +193,142 @@ export default function App() {
       }
     });
 
+    // Initialize cross-tab sync & background connectivity engine
+    const cleanupConnectivity = initConnectivityMonitor();
+    const unsubStatus = subscribeConnectionStatus((statusState) => {
+      setConnectionState(statusState);
+      setFirebaseConnected(statusState.isOnline && statusState.status !== 'offline');
+    });
+
+    const unsubCrossTabSync = subscribeToSyncEvents((message) => {
+      switch (message.type) {
+        case 'SYNC_ATTENDANCE_RECORDS': {
+          const payloadRecords = message.payload as AttendanceRecord[];
+          if (Array.isArray(payloadRecords)) {
+            setRecords(payloadRecords);
+            saveAttendanceRecords(payloadRecords);
+          }
+          break;
+        }
+        case 'SYNC_ATTENDANCE_RECORD_UPSERT': {
+          const rec = message.payload as AttendanceRecord;
+          if (rec && rec.id) {
+            setRecords((prev) => {
+              const filtered = prev.filter((r) => r.id !== rec.id);
+              const updated = [rec, ...filtered];
+              saveAttendanceRecords(updated);
+              return updated;
+            });
+          }
+          break;
+        }
+        case 'SYNC_ATTENDANCE_RECORDS_DELETE': {
+          const deletedIds = new Set(message.payload as string[]);
+          setRecords((prev) => {
+            const updated = prev.filter((r) => !deletedIds.has(r.id));
+            saveAttendanceRecords(updated);
+            return updated;
+          });
+          break;
+        }
+        case 'SYNC_STUDENTS': {
+          const updatedStudents = message.payload as Student[];
+          if (Array.isArray(updatedStudents)) {
+            setStudents(updatedStudents);
+            saveStudents(updatedStudents);
+          }
+          break;
+        }
+        case 'SYNC_SCHEDULES': {
+          const updatedSchedules = message.payload as ScheduleBlock[];
+          if (Array.isArray(updatedSchedules)) {
+            setSchedules(updatedSchedules);
+            saveSchedules(updatedSchedules);
+          }
+          break;
+        }
+        case 'SYNC_ACTIVITIES': {
+          const updatedActivities = message.payload as ActivityItem[];
+          if (Array.isArray(updatedActivities)) {
+            setActivitiesList(updatedActivities);
+            saveActivities(updatedActivities);
+          }
+          break;
+        }
+        case 'SYNC_TURMAS': {
+          const updatedTurmas = message.payload as string[];
+          if (Array.isArray(updatedTurmas)) {
+            const sorted = sortTurmasPedagogical(updatedTurmas);
+            setTurmas(sorted);
+            saveTurmas(sorted);
+          }
+          break;
+        }
+        case 'SYNC_PONTO_RECORDS': {
+          const updatedPonto = message.payload as PontoRecord[];
+          if (Array.isArray(updatedPonto)) {
+            setPontoRecords(updatedPonto);
+            savePontoRecords(updatedPonto);
+          }
+          break;
+        }
+        case 'SYNC_PONTO_CLOSINGS': {
+          const updatedClosings = message.payload as PontoMonthClosing[];
+          if (Array.isArray(updatedClosings)) {
+            setPontoClosings(updatedClosings);
+            savePontoClosings(updatedClosings);
+          }
+          break;
+        }
+        case 'SYNC_SEMANARIO': {
+          const updatedPlans = message.payload as SemanarioPlan[];
+          if (Array.isArray(updatedPlans)) {
+            setSemanarioPlans(updatedPlans);
+            saveSemanarioPlans(updatedPlans);
+          }
+          break;
+        }
+        case 'SYNC_USERS': {
+          const updatedUsers = message.payload as UserProfile[];
+          if (Array.isArray(updatedUsers)) {
+            setUsers(updatedUsers);
+            saveLocalUsersList(updatedUsers);
+          }
+          break;
+        }
+        case 'FORCE_RESYNC': {
+          const freshRecords = loadAttendanceRecords();
+          if (freshRecords && freshRecords.length > 0) {
+            setRecords(freshRecords);
+          }
+          break;
+        }
+      }
+    });
+
     let isInitialStudentsSync = true;
     let isInitialTurmasSync = true;
     let hasHealedAdminUser = false;
     let hasCleanedMockProfiles = false;
     let hasHealedActivitiesList = false;
 
-    const cleanedMockStudentIds = new Set<string>();
-    const cleanedMockRecordIds = new Set<string>();
-
     const unsubStudents = subscribeStudents((fsStudents) => {
-      // Safely queue mock student deletions without repeating or looping
-      const mockStudentsInFs = fsStudents.filter((s) => isMockStudent(s));
-      mockStudentsInFs.forEach((s) => {
-        if (!cleanedMockStudentIds.has(s.id)) {
-          cleanedMockStudentIds.add(s.id);
-          deleteStudentFromFirestore(s.id).catch(() => {});
-        }
-      });
-
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
-      // CRITICAL: Deep merge Firestore students with localStorage students to preserve custom diasFrequencia, horariosSaida, and status!
+      // Deep merge Firestore students with localStorage students to preserve custom attributes
       const currentLocal = loadStudents();
       const mergedStudents = mergeStudentsList(currentLocal, realStudents);
 
       setStudents(mergedStudents);
       saveStudents(mergedStudents);
-
-      if (isInitialStudentsSync && realStudents.length === 0 && loadedStudents.length > 0) {
-        const realLoaded = loadedStudents.filter((s) => !isMockStudent(s));
-        if (realLoaded.length > 0) {
-          seedInitialDataToFirestore(realLoaded, [], []);
-        }
-      }
       isInitialStudentsSync = false;
     });
 
     // Realtime Listener for Attendance Records: Firestore is the absolute authority
     const unsubRecords = subscribeRecords((fsRecords) => {
-      // Filter out records created for mock students
-      const mockRecordsInFs = fsRecords.filter(
-        (r) => isMockStudent({ id: r.studentId }) || r.id.startsWith('st-1_') || r.id.startsWith('st-2_') || r.id.startsWith('st-3_')
+      // In-memory filter out records created for mock students
+      const realRecords = fsRecords.filter(
+        (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_')
       );
-      mockRecordsInFs.forEach((r) => {
-        if (!cleanedMockRecordIds.has(r.id)) {
-          cleanedMockRecordIds.add(r.id);
-          deleteDoc(doc(db, 'attendanceRecords', r.id)).catch(() => {});
-        }
-      });
-
-      const realRecords = fsRecords.filter((r) => !isMockStudent({ id: r.studentId }));
       setRecords(realRecords);
       saveAttendanceRecords(realRecords);
     });
@@ -235,55 +338,12 @@ export default function App() {
         const sortedTurmas = sortTurmasPedagogical(fsTurmas);
         setTurmas(sortedTurmas);
         saveTurmas(sortedTurmas);
-      } else if (isInitialTurmasSync && loadedTurmas.length > 0) {
-        seedInitialDataToFirestore([], [], loadedTurmas);
       }
       isInitialTurmasSync = false;
     });
 
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Cleanup any unwanted legacy mock profiles
-      if (!hasCleanedMockProfiles) {
-        hasCleanedMockProfiles = true;
-        fsUsers.forEach((u) => {
-          const uEmail = (u.email || '').toLowerCase().trim();
-          const uName = (u.name || '').toLowerCase().trim();
-          if (
-            u.id === 'usr_prof_1' ||
-            u.id === 'usr_aux_1' ||
-            uName.includes('marcos silva') ||
-            uName.includes('mariana santos') ||
-            uName.includes('marina santos') ||
-            uEmail === 'marcos.professor@crescer.edu.br' ||
-            uEmail === 'mariana.auxiliar@crescer.edu.br'
-          ) {
-            deleteUserFromFirestore(u.id);
-          }
-        });
-      }
-
-      // Self-heal Fernando Veiga in Firestore if missing (once per session)
-      if (!hasHealedAdminUser) {
-        hasHealedAdminUser = true;
-        const adminUsersInFs = fsUsers.filter(
-          (u) =>
-            (u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
-            u.id === 'usr_coord_1' ||
-            u.name.toLowerCase().includes('fernando veiga')
-        );
-
-        if (adminUsersInFs.length === 0) {
-          saveUserToFirestore(PRESET_USERS[0]);
-        } else {
-          adminUsersInFs.forEach((adm) => {
-            if (adm.id !== 'usr_coord_1') {
-              deleteUserFromFirestore(adm.id);
-            }
-          });
-        }
-      }
-
-      // Deduplicate strictly and merge with presets
+      // Deduplicate strictly in memory and merge with presets
       const merged = normalizeAndDeduplicateUsers([...fsUsers, ...PRESET_USERS]);
       setUsers(merged);
       saveLocalUsersList(merged);
@@ -417,13 +477,9 @@ export default function App() {
 
         setHolidays(normalized);
         saveHolidays(normalized);
-        if (needsSync) {
-          batchSaveHolidaysToFirestore(normalized).catch(() => {});
-        }
       } else {
         const defaultHols = loadHolidays();
         setHolidays(defaultHols);
-        batchSaveHolidaysToFirestore(defaultHols).catch(() => {});
       }
     });
 
@@ -434,7 +490,7 @@ export default function App() {
       } else {
         const localRecs = loadPontoRecords();
         if (localRecs.length > 0) {
-          batchSavePontoRecordsToFirestore(localRecs).catch(() => {});
+          setPontoRecords(localRecs);
         }
       }
     });
@@ -446,7 +502,7 @@ export default function App() {
       } else {
         const localClosings = loadPontoClosings();
         if (localClosings.length > 0) {
-          localClosings.forEach((c) => savePontoClosingToFirestore(c).catch(() => {}));
+          setPontoClosings(localClosings);
         }
       }
     });
@@ -458,12 +514,15 @@ export default function App() {
       } else {
         const localPlans = loadSemanarioPlans();
         if (localPlans.length > 0) {
-          batchSaveSemanarioPlansToFirestore(localPlans).catch(() => {});
+          setSemanarioPlans(localPlans);
         }
       }
     });
 
     return () => {
+      cleanupConnectivity();
+      unsubStatus();
+      unsubCrossTabSync();
       unsubStudents();
       unsubRecords();
       unsubTurmas();
@@ -497,11 +556,14 @@ export default function App() {
       id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     };
     const newStudent = normalizeStudent(rawStudent);
+    let updatedList: Student[] = [];
     setStudents((prev) => {
       const updated = [newStudent, ...prev];
+      updatedList = updated;
       saveStudents(updated);
       return updated;
     });
+    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
     try {
       await saveStudentToFirestore(newStudent);
     } catch (err) {
@@ -527,11 +589,14 @@ export default function App() {
       })
     );
 
+    let updatedList: Student[] = [];
     setStudents((prev) => {
       const updated = [...newStudentsList, ...prev];
+      updatedList = updated;
       saveStudents(updated);
       return updated;
     });
+    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
 
     try {
       await Promise.allSettled(newStudentsList.map((s) => saveStudentToFirestore(s)));
@@ -541,13 +606,16 @@ export default function App() {
   };
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
+    let updatedList: Student[] = [];
     setStudents((prev) => {
       const existing = prev.find((s) => s.id === updatedStudent.id);
       const merged = mergeStudentData(existing, updatedStudent);
       const updated = prev.map((s) => (s.id === merged.id ? merged : s));
+      updatedList = updated;
       saveStudents(updated);
       return updated;
     });
+    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
     try {
       await saveStudentToFirestore(updatedStudent);
     } catch (err) {
@@ -556,11 +624,14 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (id: string) => {
+    let updatedList: Student[] = [];
     setStudents((prev) => {
       const updated = prev.filter((s) => s.id !== id);
+      updatedList = updated;
       saveStudents(updated);
       return updated;
     });
+    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
     try {
       await deleteStudentFromFirestore(id);
     } catch (err) {
@@ -585,7 +656,10 @@ export default function App() {
       return updated;
     });
 
-    // Gravação direta e síncrona no Firestore
+    // Notificação imediata para outras abas e janelas em tempo real
+    broadcastSyncEvent('SYNC_ATTENDANCE_RECORD_UPSERT', newRecord);
+
+    // Gravação direta no Firestore
     try {
       await saveRecordToFirestore(newRecord);
     } catch (err) {
@@ -623,15 +697,21 @@ export default function App() {
       });
     });
 
+    let updatedRecords: AttendanceRecord[] = [];
     setRecords((prev) => {
       const filtered = prev.filter((r) => !targetKeys.has(r.id));
       const updated = [...batchNewRecords, ...filtered];
+      updatedRecords = updated;
       saveAttendanceRecords(updated);
       return updated;
     });
 
+    // Notificação imediata para outras abas e dispositivos
+    broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
+
     try {
-      await Promise.allSettled(batchNewRecords.map((r) => saveRecordToFirestore(r)));
+      // Gravação atômica em batch no Firestore
+      await batchSaveRecordsToFirestore(batchNewRecords);
     } catch (err) {
       console.error('Erro ao salvar lote de presença no Firestore:', err);
     }
@@ -658,6 +738,7 @@ export default function App() {
       }
     });
 
+    let updatedRecords: AttendanceRecord[] = [];
     setRecords((prev) => {
       const updated = prev.filter((r) => {
         if (r.date === date && studentIdSet.has(r.studentId)) {
@@ -668,14 +749,17 @@ export default function App() {
         }
         return !targetKeys.has(r.id);
       });
+      updatedRecords = updated;
       saveAttendanceRecords(updated);
       return updated;
     });
 
+    // Notificação imediata para outras abas e dispositivos
+    broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
+
     try {
-      await Promise.allSettled(
-        Array.from(targetKeys).map((key) => deleteAttendanceRecordFromFirestore(key))
-      );
+      // Exclusão atômica em lote no Firestore
+      await batchDeleteAttendanceRecordsFromFirestore(Array.from(targetKeys));
     } catch (err) {
       console.error('Error clearing Firestore records:', err);
     }
@@ -688,6 +772,7 @@ export default function App() {
     const updated = sortTurmasPedagogical([...turmas, name]);
     setTurmas(updated);
     saveTurmas(updated);
+    broadcastSyncEvent('SYNC_TURMAS', updated);
     saveTurmaToFirestore(name);
     return true;
   };
@@ -696,6 +781,7 @@ export default function App() {
     const updatedTurmas = turmas.filter((t) => t !== turmaName);
     setTurmas(updatedTurmas);
     saveTurmas(updatedTurmas);
+    broadcastSyncEvent('SYNC_TURMAS', updatedTurmas);
     deleteTurmaFromFirestore(turmaName);
 
     if (deleteStudents) {
@@ -704,6 +790,7 @@ export default function App() {
       const updatedStudents = students.filter((s) => s.turma !== turmaName);
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
+      broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
       studentIdsToRemove.forEach((sid) => deleteStudentFromFirestore(sid));
 
@@ -711,6 +798,7 @@ export default function App() {
       const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
+      broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
 
       records.filter((r) => studentIdsToRemove.has(r.studentId)).forEach((r) => {
         deleteDoc(doc(db, 'attendanceRecords', r.id)).catch(() => {});
@@ -720,12 +808,14 @@ export default function App() {
       const updatedStudents = students.map((s) => s.turma === turmaName ? { ...s, turma: targetTurmaToReassign } : s);
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
+      broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
       updatedStudents.filter((s) => s.turma === targetTurmaToReassign).forEach((s) => saveStudentToFirestore(s));
 
       const updatedRecords = records.map((r) => r.turma === turmaName ? { ...r, turma: targetTurmaToReassign } : r);
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
+      broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
 
       updatedRecords.filter((r) => r.turma === targetTurmaToReassign).forEach((r) => saveRecordToFirestore(r));
     }
@@ -769,6 +859,7 @@ export default function App() {
     const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
     setUsers(deduplicated);
     saveLocalUsersList(deduplicated);
+    broadcastSyncEvent('SYNC_USERS', deduplicated);
 
     // If currentUser was saved, update state & storage immediately
     if (
@@ -811,6 +902,7 @@ export default function App() {
     const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
     setUsers(deduplicated);
     saveLocalUsersList(deduplicated);
+    broadcastSyncEvent('SYNC_USERS', deduplicated);
     try {
       await deleteUserFromFirestore(userId);
     } catch (err) {
@@ -829,6 +921,7 @@ export default function App() {
     }
     setActivitiesList(updatedActs);
     saveActivities(updatedActs);
+    broadcastSyncEvent('SYNC_ACTIVITIES', updatedActs);
     saveActivityToFirestore(activityToSave);
   };
 
@@ -836,6 +929,7 @@ export default function App() {
     const updatedActs = activitiesList.filter((a) => a.id !== activityId);
     setActivitiesList(updatedActs);
     saveActivities(updatedActs);
+    broadcastSyncEvent('SYNC_ACTIVITIES', updatedActs);
     deleteActivityFromFirestore(activityId);
   };
 
@@ -851,6 +945,7 @@ export default function App() {
     }
     setSchedules(updated);
     saveSchedules(updated);
+    broadcastSyncEvent('SYNC_SCHEDULES', updated);
     saveScheduleBlockToFirestore(block);
   };
 
@@ -858,6 +953,7 @@ export default function App() {
     const updated = schedules.filter((s) => s.id !== id);
     setSchedules(updated);
     saveSchedules(updated);
+    broadcastSyncEvent('SYNC_SCHEDULES', updated);
     deleteScheduleBlockFromFirestore(id);
   };
 
@@ -868,6 +964,7 @@ export default function App() {
   ) => {
     setSchedules(blocks);
     saveSchedules(blocks);
+    broadcastSyncEvent('SYNC_SCHEDULES', blocks);
     if (deletedIds.length > 0) {
       batchSyncSchedulesToFirestore(newOrUpdatedOnly || blocks, deletedIds);
     } else {
@@ -913,6 +1010,7 @@ export default function App() {
         next = [...prev, record];
       }
       savePontoRecords(next);
+      broadcastSyncEvent('SYNC_PONTO_RECORDS', next);
       return next;
     });
     savePontoRecordToFirestore(record);
@@ -925,6 +1023,7 @@ export default function App() {
       recordsToSave.forEach((r) => map.set(r.id, r));
       const merged = Array.from(map.values());
       savePontoRecords(merged);
+      broadcastSyncEvent('SYNC_PONTO_RECORDS', merged);
       return merged;
     });
     batchSavePontoRecordsToFirestore(recordsToSave);
@@ -941,6 +1040,7 @@ export default function App() {
         next = [...prev, closing];
       }
       savePontoClosings(next);
+      broadcastSyncEvent('SYNC_PONTO_CLOSINGS', next);
       return next;
     });
     savePontoClosingToFirestore(closing);
@@ -958,6 +1058,7 @@ export default function App() {
         next = [plan, ...prev];
       }
       saveSemanarioPlans(next);
+      broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
     saveSemanarioPlanToFirestore(plan);
@@ -967,6 +1068,7 @@ export default function App() {
     setSemanarioPlans((prev) => {
       const next = prev.filter((p) => p.id !== planId);
       saveSemanarioPlans(next);
+      broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
     deleteSemanarioPlanFromFirestore(planId);
@@ -1035,6 +1137,15 @@ export default function App() {
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
   }, [todayConsolidated.pendingStudents, pendingFilterTurma, pendingSearchTerm]);
 
+  // Manual sync trigger
+  const handleForceSync = async () => {
+    const res = await forceManualSync();
+    if (res.success) {
+      const freshRecords = loadAttendanceRecords();
+      if (freshRecords.length > 0) setRecords(freshRecords);
+    }
+  };
+
   // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} onSaveUser={handleSaveUser} usersList={users} />;
@@ -1056,12 +1167,14 @@ export default function App() {
         onNavigateToPending={() => setShowPendingAuditModal(true)}
         currentUser={currentUser}
         onLogout={handleLogout}
+        connectionState={connectionState}
+        onForceSync={handleForceSync}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
-        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente na aba Chamada de Frequência */}
-        {activeTab === 'frequencia' && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
+        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente nas abas Chamada de Frequência e Atividades do Momento AO VIVO */}
+        {(activeTab === 'frequencia' || activeTab === 'momento') && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
           <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
             <div className="flex items-start space-x-3">
               <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">

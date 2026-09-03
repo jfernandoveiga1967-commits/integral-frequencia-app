@@ -9,6 +9,8 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
+  enableNetwork,
+  disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
@@ -197,18 +199,6 @@ export function subscribeUsers(
             userName.includes('fernando veiga') ||
             userEmail === 'coordenacao@crescer.edu.br';
 
-          // Se for documento duplicado ou secundário do Fernando Veiga, remove do Firestore
-          if (isMasterAdmin && docId !== 'usr_coord_1') {
-            deleteDoc(doc(db, 'users', docId)).catch(() => {});
-            return;
-          }
-
-          // Agrupar para detectar documentos duplicados na base do Firestore
-          const dedupKey = userEmail || (userName ? `name:${userName}` : docId);
-          const existingIds = seenDocsByKey.get(dedupKey) || [];
-          existingIds.push(docId);
-          seenDocsByKey.set(dedupKey, existingIds);
-
           const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
           const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
           const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
@@ -265,18 +255,7 @@ export function subscribeUsers(
         }
       });
 
-      // Limpeza de documentos fantasmas duplicados no Firestore
-      seenDocsByKey.forEach((docIds, _key) => {
-        if (docIds.length > 1) {
-          // Manter o primeiro e excluir os demais documentos duplicados do Firestore
-          const toDelete = docIds.slice(1);
-          toDelete.forEach((dupId) => {
-            deleteDoc(doc(db, 'users', dupId)).catch(() => {});
-          });
-        }
-      });
-
-      // Aplica a normalização e deduplicação rigorosa
+      // Aplica a normalização e deduplicação rigorosa em memória (sem disparar mutações em tempo de leitura)
       const deduplicated = normalizeAndDeduplicateUsers(rawList.map((item) => item.user));
       onData(deduplicated);
     },
@@ -505,6 +484,102 @@ export async function deleteAttendanceRecordFromFirestore(recordId: string): Pro
   }
 }
 
+export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): Promise<void> {
+  if (!records || records.length === 0) return;
+  try {
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const record of chunk) {
+        const docRef = doc(db, 'attendanceRecords', record.id);
+        batch.set(
+          docRef,
+          {
+            id: record.id,
+            studentId: record.studentId,
+            date: record.date,
+            weekNumber: record.weekNumber,
+            year: record.year,
+            activity: record.activity,
+            turma: record.turma,
+            status: record.status,
+            exitTime: record.exitTime || '',
+            equipmentMissingDetails: record.equipmentMissingDetails || '',
+            observation: record.observation || '',
+            createdAt: record.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+      chunk.forEach((r) => removeFromAttendanceOutbox(r.id));
+    }
+  } catch (error) {
+    records.forEach((record) => {
+      addToAttendanceOutbox({
+        type: 'SET',
+        record,
+        recordId: record.id,
+      });
+    });
+    handleFirestoreError(error, OperationType.WRITE, 'attendanceRecords/batchSave');
+  }
+}
+
+export async function batchDeleteAttendanceRecordsFromFirestore(recordIds: string[]): Promise<void> {
+  if (!recordIds || recordIds.length === 0) return;
+  try {
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < recordIds.length; i += CHUNK_SIZE) {
+      const chunk = recordIds.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const id of chunk) {
+        const docRef = doc(db, 'attendanceRecords', id);
+        batch.delete(docRef);
+      }
+      await batch.commit();
+      chunk.forEach((id) => removeFromAttendanceOutbox(id));
+    }
+  } catch (error) {
+    recordIds.forEach((recordId) => {
+      addToAttendanceOutbox({
+        type: 'DELETE',
+        recordId,
+      });
+    });
+    handleFirestoreError(error, OperationType.DELETE, 'attendanceRecords/batchDelete');
+  }
+}
+
+let isNetworkDisabled = false;
+
+export async function disconnectFirestore(): Promise<boolean> {
+  try {
+    await disableNetwork(db);
+    isNetworkDisabled = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function reconnectFirestore(): Promise<boolean> {
+  if (!isNetworkDisabled) {
+    // Network is already active and healthy; do not reset active write streams
+    return true;
+  }
+  try {
+    await enableNetwork(db);
+    isNetworkDisabled = false;
+    return true;
+  } catch (err) {
+    console.warn('Notice while enabling Firestore network:', err);
+    return false;
+  }
+}
+
 let isProcessingOutbox = false;
 export async function processAttendanceOutbox(): Promise<number> {
   if (isProcessingOutbox) return 0;
@@ -554,11 +629,13 @@ export async function processAttendanceOutbox(): Promise<number> {
 // Global online listener for automatic outbox flush
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    processAttendanceOutbox().catch(() => {});
+    if (getAttendanceOutbox().length > 0) {
+      processAttendanceOutbox().catch(() => {});
+    }
   });
-  // Periodic background check every 20 seconds
+  // Periodic background check every 20 seconds (only if pending items exist)
   setInterval(() => {
-    if (navigator.onLine) {
+    if (navigator.onLine && getAttendanceOutbox().length > 0) {
       processAttendanceOutbox().catch(() => {});
     }
   }, 20000);
@@ -593,44 +670,61 @@ export async function seedInitialDataToFirestore(
   turmas: string[]
 ) {
   try {
-    const batch = writeBatch(db);
-    for (const t of turmas) {
-      const safeId = t.replace(/\s+/g, '_').toLowerCase();
-      batch.set(doc(db, 'turmas', safeId), { id: safeId, name: t });
+    const CHUNK_SIZE = 250;
+    // Chunk turmas
+    for (let i = 0; i < turmas.length; i += CHUNK_SIZE) {
+      const chunk = turmas.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const t of chunk) {
+        const safeId = t.replace(/\s+/g, '_').toLowerCase();
+        batch.set(doc(db, 'turmas', safeId), { id: safeId, name: t });
+      }
+      await batch.commit();
     }
-    for (const s of students) {
-      const normalized = normalizeStudent(s);
-      batch.set(doc(db, 'students', normalized.id), {
-        id: normalized.id,
-        name: normalized.name,
-        turma: normalized.turma,
-        activities: normalized.activities,
-        diasFrequencia: normalized.diasFrequencia,
-        horariosSaida: normalized.horariosSaida || {},
-        status: normalized.status || 'ativo',
-        statusMatricula: normalized.statusMatricula || normalized.status || 'ativo',
-        inactivationDate: normalized.inactivationDate || '',
-        inactivationReason: normalized.inactivationReason || '',
-        notes: normalized.notes || '',
-      });
+    // Chunk students
+    for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+      const chunk = students.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const s of chunk) {
+        const normalized = normalizeStudent(s);
+        batch.set(doc(db, 'students', normalized.id), {
+          id: normalized.id,
+          name: normalized.name,
+          turma: normalized.turma,
+          activities: normalized.activities,
+          diasFrequencia: normalized.diasFrequencia,
+          horariosSaida: normalized.horariosSaida || {},
+          status: normalized.status || 'ativo',
+          statusMatricula: normalized.statusMatricula || normalized.status || 'ativo',
+          inactivationDate: normalized.inactivationDate || '',
+          inactivationReason: normalized.inactivationReason || '',
+          notes: normalized.notes || '',
+        });
+      }
+      await batch.commit();
     }
-    for (const r of records) {
-      batch.set(doc(db, 'attendanceRecords', r.id), {
-        id: r.id,
-        studentId: r.studentId,
-        date: r.date,
-        weekNumber: r.weekNumber,
-        year: r.year,
-        activity: r.activity,
-        turma: r.turma,
-        status: r.status,
-        exitTime: r.exitTime || '',
-        equipmentMissingDetails: r.equipmentMissingDetails || '',
-        observation: r.observation || '',
-        createdAt: r.createdAt,
-      });
+    // Chunk records
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const r of chunk) {
+        batch.set(doc(db, 'attendanceRecords', r.id), {
+          id: r.id,
+          studentId: r.studentId,
+          date: r.date,
+          weekNumber: r.weekNumber,
+          year: r.year,
+          activity: r.activity,
+          turma: r.turma,
+          status: r.status,
+          exitTime: r.exitTime || '',
+          equipmentMissingDetails: r.equipmentMissingDetails || '',
+          observation: r.observation || '',
+          createdAt: r.createdAt,
+        });
+      }
+      await batch.commit();
     }
-    await batch.commit();
   } catch (error) {
     console.error('Error seeding initial data to Firestore:', error);
   }
@@ -701,32 +795,38 @@ export async function batchSyncSchedulesToFirestore(
   deletedIds: string[] = []
 ) {
   try {
-    const batch = writeBatch(db);
-    
-    // Process deletions
-    for (const id of deletedIds) {
-      const docRef = doc(db, 'schedules', id);
-      batch.delete(docRef);
+    const CHUNK_SIZE = 250;
+    // Process deletions in chunks
+    for (let i = 0; i < deletedIds.length; i += CHUNK_SIZE) {
+      const chunk = deletedIds.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const id of chunk) {
+        batch.delete(doc(db, 'schedules', id));
+      }
+      await batch.commit();
     }
 
-    // Process sets
-    for (const item of newOrUpdatedBlocks) {
-      const docRef = doc(db, 'schedules', item.id);
-      batch.set(docRef, {
-        id: item.id,
-        turma: item.turma,
-        dayOfWeek: item.dayOfWeek,
-        startTime: item.startTime,
-        endTime: item.endTime,
-        activityId: item.activityId,
-        location: item.location || '',
-        guidelines: item.guidelines || '',
-        createdAt: item.createdAt || new Date().toISOString(),
-        updatedAt: item.updatedAt || new Date().toISOString(),
-      });
+    // Process sets in chunks
+    for (let i = 0; i < newOrUpdatedBlocks.length; i += CHUNK_SIZE) {
+      const chunk = newOrUpdatedBlocks.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, 'schedules', item.id);
+        batch.set(docRef, {
+          id: item.id,
+          turma: item.turma,
+          dayOfWeek: item.dayOfWeek,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          activityId: item.activityId,
+          location: item.location || '',
+          guidelines: item.guidelines || '',
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString(),
+        });
+      }
+      await batch.commit();
     }
-
-    await batch.commit();
   } catch (error) {
     console.error('Error batch syncing schedules to Firestore:', error);
   }
@@ -734,23 +834,27 @@ export async function batchSyncSchedulesToFirestore(
 
 export async function saveAllSchedulesToFirestore(schedules: ScheduleBlock[]) {
   try {
-    const batch = writeBatch(db);
-    for (const item of schedules) {
-      const docRef = doc(db, 'schedules', item.id);
-      batch.set(docRef, {
-        id: item.id,
-        turma: item.turma,
-        dayOfWeek: item.dayOfWeek,
-        startTime: item.startTime,
-        endTime: item.endTime,
-        activityId: item.activityId,
-        location: item.location || '',
-        guidelines: item.guidelines || '',
-        createdAt: item.createdAt || new Date().toISOString(),
-        updatedAt: item.updatedAt || new Date().toISOString(),
-      });
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < schedules.length; i += CHUNK_SIZE) {
+      const chunk = schedules.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, 'schedules', item.id);
+        batch.set(docRef, {
+          id: item.id,
+          turma: item.turma,
+          dayOfWeek: item.dayOfWeek,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          activityId: item.activityId,
+          location: item.location || '',
+          guidelines: item.guidelines || '',
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString(),
+        });
+      }
+      await batch.commit();
     }
-    await batch.commit();
   } catch (error) {
     console.error('Error saving all schedules to Firestore:', error);
   }
@@ -819,22 +923,27 @@ export async function deleteHolidayFromFirestore(holidayId: string) {
 }
 
 export async function batchSaveHolidaysToFirestore(holidays: HolidayItem[]) {
+  if (!holidays || holidays.length === 0) return;
   try {
-    const batch = writeBatch(db);
-    for (const h of holidays) {
-      const docRef = doc(db, 'holidays', h.id);
-      batch.set(docRef, {
-        id: h.id,
-        date: h.date,
-        endDate: h.endDate || h.date,
-        name: h.name,
-        type: h.type,
-        description: h.description || '',
-        createdAt: h.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < holidays.length; i += CHUNK_SIZE) {
+      const chunk = holidays.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const h of chunk) {
+        const docRef = doc(db, 'holidays', h.id);
+        batch.set(docRef, {
+          id: h.id,
+          date: h.date,
+          endDate: h.endDate || h.date,
+          name: h.name,
+          type: h.type,
+          description: h.description || '',
+          createdAt: h.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      await batch.commit();
     }
-    await batch.commit();
   } catch (error) {
     console.error('Error batch saving holidays to Firestore:', error);
   }
@@ -875,16 +984,8 @@ export function subscribePontoRecords(callback: (records: PontoRecord[]) => void
           });
         }
       });
-      // Apply auto-repair to restore any records where exit punch overwrote entrance punch
-      const { repairedRecords, repairedCount, repairedDetails } = repairOverlappedPontoRecords(recordList);
-      if (repairedCount > 0) {
-        // Sync repaired records back to Firestore
-        const recordsToSave = repairedRecords.filter((r) => repairedDetails.some((d) => d.id === r.id));
-        batchSavePontoRecordsToFirestore(recordsToSave).catch((err) => {
-          console.error('Erro ao sincronizar batidas restauradas no Firestore:', err);
-        });
-      }
-      callback(repairedRecords);
+      // In-memory delivery: strictly avoid write mutations back into Firestore inside snapshot handlers
+      callback(recordList);
     },
     (error) => {
       handleFirestoreError(error, OperationType.GET, 'pontoRecords');
@@ -925,36 +1026,41 @@ export async function savePontoRecordToFirestore(record: PontoRecord) {
 }
 
 export async function batchSavePontoRecordsToFirestore(records: PontoRecord[]) {
+  if (!records || records.length === 0) return;
   try {
-    const batch = writeBatch(db);
-    for (const record of records) {
-      const docRef = doc(db, 'pontoRecords', record.id);
-      batch.set(
-        docRef,
-        {
-          id: record.id,
-          userId: record.userId,
-          userName: record.userName || '',
-          date: record.date,
-          monthKey: record.monthKey || record.date.substring(0, 7),
-          dayNumber: record.dayNumber || Number(record.date.split('-')[2]) || 1,
-          entry1: record.entry1 || '',
-          exit1: record.exit1 || '',
-          entry2: record.entry2 || '',
-          exit2: record.exit2 || '',
-          status: record.status || 'normal',
-          manualOverride: !!record.manualOverride,
-          note: record.note || '',
-          extraMinutes: record.extraMinutes || 0,
-          missingMinutes: record.missingMinutes || 0,
-          createdAt: record.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          updatedBy: record.updatedBy || '',
-        },
-        { merge: true }
-      );
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const record of chunk) {
+        const docRef = doc(db, 'pontoRecords', record.id);
+        batch.set(
+          docRef,
+          {
+            id: record.id,
+            userId: record.userId,
+            userName: record.userName || '',
+            date: record.date,
+            monthKey: record.monthKey || record.date.substring(0, 7),
+            dayNumber: record.dayNumber || Number(record.date.split('-')[2]) || 1,
+            entry1: record.entry1 || '',
+            exit1: record.exit1 || '',
+            entry2: record.entry2 || '',
+            exit2: record.exit2 || '',
+            status: record.status || 'normal',
+            manualOverride: !!record.manualOverride,
+            note: record.note || '',
+            extraMinutes: record.extraMinutes || 0,
+            missingMinutes: record.missingMinutes || 0,
+            createdAt: record.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            updatedBy: record.updatedBy || '',
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
     }
-    await batch.commit();
   } catch (error) {
     console.error('Error batch saving ponto records:', error);
   }
@@ -1171,38 +1277,43 @@ export async function deleteSemanarioPlanFromFirestore(planId: string) {
 }
 
 export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[]) {
+  if (!plans || plans.length === 0) return;
   try {
-    const batch = writeBatch(db);
-    plans.forEach((p) => {
-      const docRef = doc(db, 'semanarioPlans', p.id);
-      batch.set(
-        docRef,
-        {
-          id: p.id,
-          turma: p.turma || '',
-          weekNumber: Number(p.weekNumber) || 0,
-          year: Number(p.year) || 2026,
-          date: p.date || '',
-          dayOfWeek: p.dayOfWeek || 'segunda',
-          timeSlot: p.timeSlot || '',
-          category: p.category || '',
-          title: p.title || '',
-          objectives: p.objectives || '',
-          development: p.development || '',
-          materials: p.materials || '',
-          teacherName: p.teacherName || '',
-          status: p.status || 'pendente',
-          substitutionReason: p.substitutionReason || '',
-          photos: p.photos || [],
-          notes: p.notes || '',
-          createdAt: p.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          updatedBy: p.updatedBy || '',
-        },
-        { merge: true }
-      );
-    });
-    await batch.commit();
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < plans.length; i += CHUNK_SIZE) {
+      const chunk = plans.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const p of chunk) {
+        const docRef = doc(db, 'semanarioPlans', p.id);
+        batch.set(
+          docRef,
+          {
+            id: p.id,
+            turma: p.turma || '',
+            weekNumber: Number(p.weekNumber) || 0,
+            year: Number(p.year) || 2026,
+            date: p.date || '',
+            dayOfWeek: p.dayOfWeek || 'segunda',
+            timeSlot: p.timeSlot || '',
+            category: p.category || '',
+            title: p.title || '',
+            objectives: p.objectives || '',
+            development: p.development || '',
+            materials: p.materials || '',
+            teacherName: p.teacherName || '',
+            status: p.status || 'pendente',
+            substitutionReason: p.substitutionReason || '',
+            photos: p.photos || [],
+            notes: p.notes || '',
+            createdAt: p.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            updatedBy: p.updatedBy || '',
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
   }

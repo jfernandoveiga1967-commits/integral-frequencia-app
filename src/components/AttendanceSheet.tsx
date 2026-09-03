@@ -46,35 +46,34 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const userCanMarkAttendance = canMarkAttendance(currentUser);
 
   // Na Chamada de Frequência, exibir EXCLUSIVAMENTE as 8 modalidades oficiais especialistas de chamada: Rotina, Balé, Dança, Flauta, Futebol, Ginástica, Judô e Natação
-  const rollCallActivities = useMemo(() => {
+  const rollCallActivities = useMemo<ActivityItem[]>(() => {
     const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
     return OFFICIAL_ROLL_CALL_MODALITIES.map((name) => {
       const existing = active.find((a) => a.id === name || a.name === name);
-      return (
-        existing || {
-          id: name,
-          name: name,
-          icon:
-            name === 'Rotina'
-              ? 'Clock'
-              : name === 'Natação'
-              ? 'Waves'
-              : name === 'Futebol'
-              ? 'Trophy'
-              : name === 'Judô'
-              ? 'Award'
-              : name === 'Balé'
-              ? 'Sparkles'
-              : name === 'Dança'
-              ? 'Music'
-              : name === 'Flauta'
-              ? 'Music2'
-              : 'Activity',
-          description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
-          defaultEquipment: '',
-          requiresRollCall: true,
-        }
-      );
+      if (existing) return existing;
+      return {
+        id: name,
+        name: name,
+        icon:
+          name === 'Rotina'
+            ? 'Clock'
+            : name === 'Natação'
+            ? 'Waves'
+            : name === 'Futebol'
+            ? 'Trophy'
+            : name === 'Judô'
+            ? 'Award'
+            : name === 'Balé'
+            ? 'Sparkles'
+            : name === 'Dança'
+            ? 'Music'
+            : name === 'Flauta'
+            ? 'Music2'
+            : 'Activity',
+        description: name === 'Rotina' ? 'Rotina diária e chamada geral da turma' : `Modalidade especialista de ${name}`,
+        defaultEquipment: '',
+        requiresRollCall: true,
+      };
     });
   }, [activitiesList]);
 
@@ -448,10 +447,6 @@ function getCurrentHHMM(): string {
     } catch (e) {
       console.error('Erro ao gerar relatório diário:', e);
       alert('Ocorreu um erro ao gerar o PDF da chamada.');
-    }
-  };
-    } catch (err) {
-      console.error('Erro ao gerar PDF da chamada:', err);
     }
   };
 

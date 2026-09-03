@@ -28,6 +28,7 @@ import {
   numberToWordsBRL,
   calculateMonthlyPontoFinancials,
   isContinuousShift,
+  getDayPontoStatus,
 } from './pontoUtils';
 
 export interface PDFGenerationResult {
@@ -1836,22 +1837,15 @@ export function generateLivroPontoPDFReport({
     const status = rec?.status || item.defaultStatus || 'normal';
     const holidayName = item.holidayItem?.name || item.holidayRecessName || '';
 
-    let statusText = 'Normal';
-    if (status === 'feriado') {
-      statusText = holidayName ? `Feriado (${holidayName})` : 'Feriado Oficial';
-    } else if (status === 'recesso') {
-      statusText = holidayName ? `Recesso (${holidayName})` : 'Recesso Escolar';
-    } else if (status === 'falta_injustificada') {
-      statusText = 'FALTA INJUSTIFICADA';
-    } else if (status === 'falta_justificada' || status === 'atestado') {
-      statusText = status === 'atestado' ? 'Atestado Médico' : 'Falta Justificada';
-    } else if (item.isSun) {
-      statusText = 'Domingo / DSR';
-    } else if (item.isSat) {
-      statusText = 'Sábado';
-    } else if (status === 'dispensado') {
-      statusText = 'Dispensado(a)';
-    }
+    const statusResult = getDayPontoStatus({
+      record: rec,
+      defaultStatus: status,
+      isContinuous,
+      dateStr: item.dateStr,
+      isWeekend: item.isWk,
+      holidayName,
+    });
+    const statusText = statusResult.label;
 
     let workedHoursStr = '-';
     if (status === 'normal' && (rec?.entry1 || rec?.entry2)) {
