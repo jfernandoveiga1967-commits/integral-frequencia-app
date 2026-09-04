@@ -73,11 +73,13 @@ export function clearAttendanceOutbox(): void {
 }
 
 export function loadUsers(): UserProfile[] {
-  return getLocalUsersList();
+  const list = getLocalUsersList();
+  return normalizeAndDeduplicateUsers(list);
 }
 
 export function saveUsers(users: UserProfile[]): void {
-  saveLocalUsersList(users);
+  const deduped = normalizeAndDeduplicateUsers(users);
+  saveLocalUsersList(deduped);
 }
 
 export const DEFAULT_DIAS_FREQUENCIA: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];

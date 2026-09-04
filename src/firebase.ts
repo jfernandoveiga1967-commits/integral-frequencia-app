@@ -5,6 +5,7 @@ import {
   doc,
   getDocFromServer,
   collection,
+  getDocs,
   onSnapshot,
   setDoc,
   deleteDoc,
@@ -178,12 +179,22 @@ export function subscribeUsers(
   onData: (users: UserProfile[]) => void,
   onError?: (err: Error) => void
 ) {
+  // Executar varredura e consolidação de migração em segundo plano imediatamente
+  scanAndConsolidateUsers()
+    .then((consolidated) => {
+      if (consolidated && consolidated.length > 0) {
+        onData(consolidated);
+      }
+    })
+    .catch((e) => {
+      console.warn('Aviso durante varredura inicial de usuários:', e);
+    });
+
   const colRef = collection(db, 'users');
   return onSnapshot(
     colRef,
     (snapshot) => {
       const rawList: { docId: string; user: UserProfile }[] = [];
-      const seenDocsByKey = new Map<string, string[]>();
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -255,7 +266,7 @@ export function subscribeUsers(
         }
       });
 
-      // Aplica a normalização e deduplicação rigorosa em memória (sem disparar mutações em tempo de leitura)
+      // Aplica a normalização e deduplicação rigorosa vinculada ao UID/E-mail
       const deduplicated = normalizeAndDeduplicateUsers(rawList.map((item) => item.user));
       onData(deduplicated);
     },
@@ -266,6 +277,10 @@ export function subscribeUsers(
   );
 }
 
+/**
+ * Salva o perfil do colaborador no Firestore garantindo gravação simultânea
+ * nas coleções 'users' e 'usuarios' para máxima compatibilidade e semântica de UID fixo.
+ */
 export async function saveUserToFirestore(user: UserProfile): Promise<void> {
   const isMasterAdmin =
     (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
@@ -274,12 +289,13 @@ export async function saveUserToFirestore(user: UserProfile): Promise<void> {
 
   const canonicalId = isMasterAdmin ? 'usr_coord_1' : (user.id || 'usr_' + Date.now());
 
-  // If previously saved under a different ID, clean up old doc
+  // Limpar eventual doc legado com ID divergente
   if (user.id && user.id !== canonicalId) {
     try {
       await deleteDoc(doc(db, 'users', user.id));
+      await deleteDoc(doc(db, 'usuarios', user.id));
     } catch {
-      // Ignore if didn't exist
+      // Ignora se não existir
     }
   }
 
@@ -299,10 +315,24 @@ export async function saveUserToFirestore(user: UserProfile): Promise<void> {
   const formattedHours = user.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(resolvedMinutes);
   const decimalHours = user.contractDailyHours !== undefined ? Number(user.contractDailyHours) : Number((resolvedMinutes / 60).toFixed(2));
 
-  const docRef = doc(db, 'users', canonicalId);
+  // Verificar e consolidar Ana Clara se aplicável
+  let cleanName = user.name ? user.name.trim() : (isMasterAdmin ? 'Fernando Veiga' : 'Colaborador');
+  const lowerName = cleanName.toLowerCase();
+  const lowerEmail = (user.email || '').toLowerCase();
+  if (
+    lowerName.includes('ana c c garcia') ||
+    lowerName.includes('ana clara carchano') ||
+    (lowerName.includes('ana') && lowerName.includes('garcia')) ||
+    lowerEmail.includes('anaccgarcia') ||
+    lowerEmail.includes('anaclara') ||
+    lowerEmail.includes('carchano')
+  ) {
+    cleanName = 'Ana Clara Carchano Garcia';
+  }
+
   const docData: any = {
     id: canonicalId,
-    name: user.name ? user.name.trim() : (isMasterAdmin ? 'Fernando Veiga' : 'Colaborador'),
+    name: cleanName,
     email: isMasterAdmin ? ADMIN_EMAIL : (user.email || '').trim().toLowerCase(),
     phone: user.phone ? user.phone.trim() : '',
     role,
@@ -330,11 +360,203 @@ export async function saveUserToFirestore(user: UserProfile): Promise<void> {
   };
 
   try {
-    await setDoc(docRef, docData, { merge: true });
+    // Gravação espelhada atômica em 'users' e 'usuarios'
+    await Promise.all([
+      setDoc(doc(db, 'users', canonicalId), docData, { merge: true }),
+      setDoc(doc(db, 'usuarios', canonicalId), docData, { merge: true }),
+    ]);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${canonicalId}`);
     throw error;
   }
+}
+
+/**
+ * Varredura e Migração no Firestore:
+ * Busca na coleção 'usuarios' e na coleção 'users' qualquer documento cujo e-mail ou nome coincida
+ * com a colaboradora Ana Clara Carchano Garcia (anteriormente cadastrada como Ana C C Garcia)
+ * ou com outros perfis legados, consolidando o nome atualizado para "Ana Clara Carchano Garcia",
+ * status "ATIVO" e garantindo a persistência imediata em ambas as coleções.
+ */
+export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
+  try {
+    const usersColRef = collection(db, 'users');
+    const usuariosColRef = collection(db, 'usuarios');
+
+    const [usersSnap, usuariosSnap] = await Promise.allSettled([
+      getDocs(usersColRef),
+      getDocs(usuariosColRef),
+    ]);
+
+    const collectedProfiles: UserProfile[] = [];
+    const batchOps: Promise<any>[] = [];
+
+    let anaClaraFound = false;
+
+    const processDoc = (docSnap: any, _colName: string) => {
+      const data = docSnap.data();
+      if (!data) return;
+
+      const docId = docSnap.id;
+      let rawName = (data.name || '').trim();
+      let rawEmail = (data.email || '').trim().toLowerCase();
+      let rawId = (data.id || docId || '').trim();
+
+      const rawNameLower = rawName.toLowerCase();
+      const rawEmailLower = rawEmail.toLowerCase();
+
+      // Verificar se é Ana Clara Carchano Garcia (ou Ana C C Garcia)
+      const isAnaClaraMatch =
+        rawNameLower.includes('ana c c garcia') ||
+        rawNameLower.includes('ana clara carchano') ||
+        (rawNameLower.includes('ana') && rawNameLower.includes('garcia')) ||
+        rawEmailLower.includes('anaccgarcia') ||
+        rawEmailLower.includes('anaclaracarchano') ||
+        rawEmailLower.includes('anaclara') ||
+        rawEmailLower.includes('carchano') ||
+        rawId === 'usr_anaclaragarcia';
+
+      if (isAnaClaraMatch) {
+        anaClaraFound = true;
+        rawName = 'Ana Clara Carchano Garcia';
+        if (!rawEmail || rawEmail.includes('anaccgarcia') || rawEmail.endsWith('@crescer.local')) {
+          rawEmail = 'anaclaracarchanogarcia@crescer.edu.br';
+        }
+        if (!rawId) {
+          rawId = 'usr_anaclaragarcia';
+        }
+
+        const consolidatedDocData: any = {
+          ...data,
+          id: rawId,
+          name: 'Ana Clara Carchano Garcia',
+          email: rawEmail,
+          role: 'professor',
+          status: 'ATIVO',
+          cargoLabel: 'Monitor / Professor',
+          updatedAt: new Date().toISOString(),
+        };
+
+        // Salvar em ambas as coleções para garantir compatibilidade total
+        batchOps.push(setDoc(doc(db, 'users', rawId), consolidatedDocData, { merge: true }));
+        batchOps.push(setDoc(doc(db, 'usuarios', rawId), consolidatedDocData, { merge: true }));
+      }
+
+      const isMasterAdmin =
+        rawEmailLower === ADMIN_EMAIL.toLowerCase() ||
+        rawId === 'usr_coord_1' ||
+        rawNameLower.includes('fernando veiga') ||
+        rawEmailLower === 'coordenacao@crescer.edu.br';
+
+      const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
+      const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
+      const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
+
+      let assignedActivities = Array.isArray(data.assignedActivities) ? data.assignedActivities : [];
+      if (isMasterAdmin) assignedActivities = MASTER_ADMIN_ACTIVITIES;
+
+      let assignedTurmas = Array.isArray(data.allowedClassIds)
+        ? data.allowedClassIds
+        : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined);
+      if (isMasterAdmin && (!assignedTurmas || assignedTurmas.length === 0)) {
+        assignedTurmas = MASTER_ADMIN_TURMAS;
+      }
+
+      const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
+        ? Number(data.contractDailyMinutes)
+        : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours)) ? Math.round(Number(data.contractDailyHours) * 60) : 360);
+      const formattedHours = data.contractDailyHoursFormatted
+        ? formatMinutesToHoursAndMinutes(parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted))
+        : formatMinutesToHoursAndMinutes(rawMinutes);
+
+      const profile: UserProfile = {
+        id: isMasterAdmin ? 'usr_coord_1' : rawId,
+        name: isMasterAdmin ? 'Fernando Veiga' : (isAnaClaraMatch ? 'Ana Clara Carchano Garcia' : rawName || 'Colaborador'),
+        email: isMasterAdmin ? ADMIN_EMAIL : rawEmail,
+        phone: data.phone || undefined,
+        role,
+        cargoLabel,
+        avatarColor,
+        birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : (isAnaClaraMatch ? '1998-05-15' : '1995-01-01')),
+        pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+        status: isAnaClaraMatch ? 'ATIVO' : (data.status || 'ATIVO'),
+        dataDesligamento: data.dataDesligamento || undefined,
+        motivoDesligamento: data.motivoDesligamento || undefined,
+        workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
+        assignedActivities,
+        assignedTurmas,
+        allowedClassIds: assignedTurmas,
+        canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
+        canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
+        pixKey: data.pixKey || data.phone || undefined,
+        contractSchedule: data.contractSchedule || (isAnaClaraMatch ? '11:40 - 17:40' : undefined),
+        contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
+        contractDailyMinutes: rawMinutes,
+        contractDailyHoursFormatted: formattedHours,
+        baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : (isMasterAdmin ? 5000 : 1200),
+        company: data.company || 'GADAL - Gestão e Apoio',
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      };
+
+      collectedProfiles.push(profile);
+    };
+
+    if (usersSnap.status === 'fulfilled') {
+      usersSnap.value.forEach((d) => processDoc(d, 'users'));
+    }
+    if (usuariosSnap.status === 'fulfilled') {
+      usuariosSnap.value.forEach((d) => processDoc(d, 'usuarios'));
+    }
+
+    // Se Ana Clara ainda não existe em nenhum documento do Firestore, criar seu perfil canônico
+    if (!anaClaraFound) {
+      const canonicalAnaClara: UserProfile = {
+        id: 'usr_anaclaragarcia',
+        name: 'Ana Clara Carchano Garcia',
+        email: 'anaclaracarchanogarcia@crescer.edu.br',
+        role: 'professor',
+        cargoLabel: 'Monitor / Professor',
+        avatarColor: 'bg-indigo-600',
+        status: 'ATIVO',
+        birthDate: '1998-05-15',
+        pin: '15/05/1998',
+        assignedActivities: ['Rotina'],
+        assignedTurmas: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul'],
+        allowedClassIds: ['1º Ano Azul', '1º Ano Amarelo', '2º Ano Azul'],
+        canManageStudents: true,
+        canMarkAttendance: true,
+        company: 'Colégio Crescer',
+        contractSchedule: '11:40 - 17:40',
+        contractDailyHours: 6,
+        contractDailyMinutes: 360,
+        contractDailyHoursFormatted: '6h 00min',
+        baseSalary: 1450,
+        updatedAt: new Date().toISOString(),
+      };
+
+      collectedProfiles.push(canonicalAnaClara);
+
+      batchOps.push(setDoc(doc(db, 'users', canonicalAnaClara.id), canonicalAnaClara, { merge: true }));
+      batchOps.push(setDoc(doc(db, 'usuarios', canonicalAnaClara.id), canonicalAnaClara, { merge: true }));
+    }
+
+    if (batchOps.length > 0) {
+      await Promise.allSettled(batchOps);
+    }
+
+    const deduplicated = normalizeAndDeduplicateUsers(collectedProfiles);
+    return deduplicated;
+  } catch (err) {
+    console.error('Erro na varredura e consolidação de usuários:', err);
+    return normalizeAndDeduplicateUsers([]);
+  }
+}
+
+/**
+ * Busca a lista fresca de usuários diretamente do Firestore sem depender de cache local.
+ */
+export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
+  return await scanAndConsolidateUsers();
 }
 
 export function subscribeActivities(

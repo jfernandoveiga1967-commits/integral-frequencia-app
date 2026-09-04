@@ -103,6 +103,7 @@ interface UserManagementProps {
   onSaveHoliday?: (holiday: HolidayItem) => void;
   onDeleteHoliday?: (id: string) => void;
   onBatchSaveHolidays?: (holidays: HolidayItem[]) => void;
+  onForceReloadUsers?: () => Promise<void>;
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({
@@ -122,6 +123,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   onSaveHoliday,
   onDeleteHoliday,
   onBatchSaveHolidays,
+  onForceReloadUsers,
 }) => {
   const isAdmin = isCoordenador(currentUser);
 
@@ -156,6 +158,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('ATIVOS');
+  const [isReloadingUsers, setIsReloadingUsers] = useState(false);
 
   // User Editing state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -292,13 +295,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Filtered & Sorted Users (Admin always pinned on top + alphabetical A-Z for others)
   const filteredUsers = useMemo(() => {
     const deduplicatedUsers = normalizeAndDeduplicateUsers(users || []);
+    const cleanSearch = searchTerm.toLowerCase().trim();
+
     return deduplicatedUsers
       .filter((u) => {
         if (!u) return false;
+        // Busca primária por UID fixo e E-mail cadastrado, complementada por Nome, Empresa e Telefone
         const matchesSearch =
-          (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (u.company || '').toLowerCase().includes(searchTerm.toLowerCase());
+          !cleanSearch ||
+          (u.id || '').toLowerCase().includes(cleanSearch) ||
+          (u.email || '').toLowerCase().includes(cleanSearch) ||
+          (u.name || '').toLowerCase().includes(cleanSearch) ||
+          (u.phone || '').toLowerCase().includes(cleanSearch) ||
+          (u.company || '').toLowerCase().includes(cleanSearch);
         const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
 
         let matchesStatus = true;
@@ -320,7 +329,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         const bActive = isUserActive(b) ? 1 : 0;
         if (aActive !== bActive) return bActive - aActive;
 
-        // 3. Demais usuários ordenados por nome (A-Z)
+        // 3. Demais usuários ordenados por nome estritamente em ordem alfabética (A-Z)
         return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
       });
   }, [users, searchTerm, roleFilter, statusFilter]);
@@ -467,6 +476,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
     setFormCompany(user.company || 'GADAL - Gestão e Apoio');
+  };
+
+  const handleReloadUsers = async () => {
+    try {
+      setIsReloadingUsers(true);
+      if (onForceReloadUsers) {
+        await onForceReloadUsers();
+      }
+      showToast('Lista de colaboradores atualizada diretamente do Firestore (sem cache)!', 'success');
+    } catch (err: any) {
+      console.error('Erro ao recarregar usuários:', err);
+      showToast('Erro ao sincronizar lista: ' + (err?.message || 'Falha de comunicação'), 'error');
+    } finally {
+      setIsReloadingUsers(false);
+    }
   };
 
   const handleOpenNewUserModal = () => {
@@ -616,9 +640,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     try {
       setIsSavingUser(true);
       await Promise.resolve(onSaveUser(updatedUser));
+      if (onForceReloadUsers) {
+        await onForceReloadUsers();
+      }
       setEditingUser(null);
       setIsNewUserModalOpen(false);
-      showToast(`Perfil de ${updatedUser.name} salvo com sucesso!`, 'success');
+      showToast(`Perfil de ${updatedUser.name} salvo e sincronizado com sucesso!`, 'success');
     } catch (err: any) {
       console.error('Erro ao salvar usuário:', err);
       showToast(`Erro ao gravar usuário no Firestore: ${err?.message || 'Falha de comunicação'}`, 'error');
@@ -989,6 +1016,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={handleReloadUsers}
+              disabled={isReloadingUsers}
+              title="Recarregar e sincronizar a lista de usuários diretamente do Firestore sem cache"
+              className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm rounded-2xl border border-slate-700 shadow-md transition-all cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 text-amber-400 ${isReloadingUsers ? 'animate-spin' : ''}`} />
+              <span>Sincronizar Lista</span>
+            </button>
+
             <button
               onClick={handleOpenNewUserModal}
               className="px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center space-x-2"

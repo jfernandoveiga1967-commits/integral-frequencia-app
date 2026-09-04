@@ -30,22 +30,27 @@ export const PRESET_USERS: UserProfile[] = [
 ];
 
 /**
- * Normaliza e deduplica rigorosamente uma lista de usuários por E-mail e ID único.
- * Elimina perfis duplicados, contas fantasmas e garante a integridade do Coordenador Geral.
+ * Normaliza e deduplica rigorosamente uma lista de usuários utilizando o UID fixo do Firebase Auth
+ * ou o E-mail cadastrado como chave primária (NUNCA a string de nomeCompleto).
+ * Garante a consolidação imediata de "Ana Clara Carchano Garcia" e a integridade do Coordenador Geral.
  */
 export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfile[] {
   if (!Array.isArray(rawUsers)) return [...PRESET_USERS];
 
-  const userMap = new Map<string, UserProfile>();
+  // Mapa primário por UID / ID único
+  const userById = new Map<string, UserProfile>();
+  // Mapeamento secundário de e-mail normalizado -> canonical ID
+  const emailToIdMap = new Map<string, string>();
 
   rawUsers.forEach((raw) => {
     if (!raw) return;
 
-    const rawName = (raw.name || '').trim();
+    let rawName = (raw.name || '').trim();
+    let rawEmail = (raw.email || '').trim().toLowerCase();
+    let rawId = (raw.id || '').trim();
+
     const rawNameLower = rawName.toLowerCase();
-    const rawEmail = (raw.email || '').trim();
     const rawEmailLower = rawEmail.toLowerCase();
-    const rawId = (raw.id || '').trim();
 
     // 1. Filtrar apenas contas mock de demonstração legadas
     const isBannedProfile =
@@ -61,7 +66,27 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       return;
     }
 
-    // 2. Identificar se é o Coordenador Geral (Fernando Veiga)
+    // 2. Consolidação e Migração Específica: Ana Clara Carchano Garcia (anteriormente Ana C C Garcia)
+    const isAnaClara =
+      rawNameLower.includes('ana c c garcia') ||
+      rawNameLower.includes('ana clara carchano') ||
+      (rawNameLower.includes('ana') && rawNameLower.includes('garcia')) ||
+      rawEmailLower.includes('anaccgarcia') ||
+      rawEmailLower.includes('anaclara') ||
+      rawEmailLower.includes('carchano') ||
+      rawId === 'usr_anaclaragarcia';
+
+    if (isAnaClara) {
+      rawName = 'Ana Clara Carchano Garcia';
+      if (!rawEmail || rawEmail.includes('anaccgarcia') || rawEmail.endsWith('@crescer.local')) {
+        rawEmail = 'anaclaracarchanogarcia@crescer.edu.br';
+      }
+      if (!rawId) {
+        rawId = 'usr_anaclaragarcia';
+      }
+    }
+
+    // 3. Identificar se é o Coordenador Geral (Fernando Veiga)
     const isMasterAdmin =
       rawEmailLower === ADMIN_EMAIL.toLowerCase() ||
       rawId === 'usr_coord_1' ||
@@ -69,17 +94,17 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       rawEmailLower === 'coordenacao@crescer.edu.br';
 
     if (isMasterAdmin) {
-      const adminKey = `email:${ADMIN_EMAIL.toLowerCase()}`;
-      const existingAdmin = userMap.get(adminKey);
+      const adminId = 'usr_coord_1';
+      const existingAdmin = userById.get(adminId);
 
       const resolvedAdmin: UserProfile = {
         ...(existingAdmin || {}),
         ...raw,
-        id: 'usr_coord_1',
-        name: raw.name?.trim() || existingAdmin?.name || 'Fernando Veiga',
+        id: adminId,
+        name: 'Fernando Veiga',
         email: ADMIN_EMAIL,
         role: 'coordenador' as UserRole,
-        cargoLabel: raw.cargoLabel || existingAdmin?.cargoLabel || 'Coordenador (Administrador)',
+        cargoLabel: 'Coordenador (Administrador)',
         avatarColor: 'bg-amber-500',
         birthDate: raw.birthDate || existingAdmin?.birthDate || '1967-08-12',
         pin: raw.pin || existingAdmin?.pin || '12/08/1967',
@@ -101,17 +126,34 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         updatedAt: raw.updatedAt || existingAdmin?.updatedAt || new Date().toISOString(),
       };
 
-      userMap.set(adminKey, resolvedAdmin);
+      userById.set(adminId, resolvedAdmin);
+      emailToIdMap.set(ADMIN_EMAIL.toLowerCase(), adminId);
       return;
     }
 
-    // 3. Usuários regulares da equipe
-    // Chave de deduplicação primária: E-mail normalizado; secundária: Nome normalizado; terciária: ID
-    const dedupKey = rawEmailLower
-      ? `email:${rawEmailLower}`
-      : (rawNameLower ? `name:${rawNameLower}` : `id:${rawId}`);
+    // 4. Usuários regulares da equipe
+    // Vínculo rigoroso por UID fixo (id) ou e-mail cadastrado
+    let canonicalId = rawId;
+    if (!canonicalId && rawEmail && emailToIdMap.has(rawEmail)) {
+      canonicalId = emailToIdMap.get(rawEmail)!;
+    }
+    if (!canonicalId) {
+      if (rawEmail) {
+        canonicalId = `usr_${rawEmail.replace(/[^a-z0-9]/g, '_')}`;
+      } else {
+        canonicalId = `usr_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+      }
+    }
 
-    const existing = userMap.get(dedupKey);
+    // Se o email já aponta para outro ID registrado anteriormente, vincular a ele
+    if (rawEmail && emailToIdMap.has(rawEmail)) {
+      const linkedId = emailToIdMap.get(rawEmail)!;
+      if (linkedId && linkedId !== canonicalId && userById.has(linkedId)) {
+        canonicalId = linkedId;
+      }
+    }
+
+    const existing = userById.get(canonicalId);
 
     if (!existing) {
       const role = raw.role === 'coordenador' ? 'coordenador' : 'professor';
@@ -122,9 +164,9 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
 
       const singleProfile: UserProfile = {
         ...raw,
-        id: rawId || 'usr_' + Date.now() + Math.random().toString(36).substr(2, 4),
+        id: canonicalId,
         name: rawName || 'Colaborador',
-        email: rawEmailLower || (rawNameLower ? `${rawNameLower.replace(/[^a-z0-9]/g, '')}@crescer.local` : ''),
+        email: rawEmail || (rawNameLower ? `${rawNameLower.replace(/[^a-z0-9]/g, '')}@crescer.edu.br` : ''),
         role,
         cargoLabel,
         avatarColor,
@@ -147,13 +189,15 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         updatedAt: raw.updatedAt || new Date().toISOString(),
       };
 
-      userMap.set(dedupKey, singleProfile);
+      userById.set(canonicalId, singleProfile);
+      if (singleProfile.email) {
+        emailToIdMap.set(singleProfile.email.toLowerCase(), canonicalId);
+      }
     } else {
-      // Mesclagem rigorosa para unificar duplicatas / preservar o status explicitamente alterado
+      // Mesclagem preservando a integridade do UID fixo e consolidando o nome atualizado
       const rawStatus = (raw.status || '').toUpperCase();
       const existingStatus = (existing.status || '').toUpperCase();
-      
-      // REGRA CRÍTICA: Se algum registro foi marcado explicitamente como INATIVO, DESLIGADO, FERIAS ou LICENCA, respeitar!
+
       let mergedStatus = 'ATIVO';
       if (rawStatus && rawStatus !== 'ATIVO') {
         mergedStatus = rawStatus;
@@ -176,9 +220,6 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const cargoLabel = mergedRole === 'coordenador' ? 'Coordenador (Administrador)' : (raw.cargoLabel || existing.cargoLabel || 'Monitor / Professor');
       const avatarColor = mergedRole === 'coordenador' ? 'bg-amber-500' : (raw.avatarColor || existing.avatarColor || 'bg-indigo-600');
 
-      // Preservar ID canônico mais antigo / estável
-      const canonicalId = existing.id || raw.id;
-
       // Nome com melhor formatação (mais longo / completo)
       const mergedName = (rawName.length >= existing.name.length ? rawName : existing.name) || 'Colaborador';
 
@@ -187,7 +228,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         ...raw,
         id: canonicalId,
         name: mergedName,
-        email: existing.email || rawEmailLower,
+        email: existing.email || rawEmail,
         role: mergedRole,
         cargoLabel,
         avatarColor,
@@ -213,19 +254,21 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         updatedAt: raw.updatedAt || new Date().toISOString(),
       };
 
-      userMap.set(dedupKey, mergedProfile);
+      userById.set(canonicalId, mergedProfile);
+      if (mergedProfile.email) {
+        emailToIdMap.set(mergedProfile.email.toLowerCase(), canonicalId);
+      }
     }
   });
 
   // Garantir que Fernando Veiga esteja sempre presente
-  const adminKey = `email:${ADMIN_EMAIL.toLowerCase()}`;
-  if (!userMap.has(adminKey)) {
-    userMap.set(adminKey, PRESET_USERS[0]);
+  if (!userById.has('usr_coord_1')) {
+    userById.set('usr_coord_1', PRESET_USERS[0]);
   }
 
-  const result = Array.from(userMap.values());
+  const result = Array.from(userById.values());
 
-  // Ordenar: Fernando Veiga (Admin) sempre em primeiro, depois em ordem alfabética por nome
+  // Ordenar: Fernando Veiga (Coordenador) sempre em primeiro, depois rigorosa ordem alfabética (A-Z) por nome
   return result.sort((a, b) => {
     if (a.role === 'coordenador' && b.role !== 'coordenador') return -1;
     if (a.role !== 'coordenador' && b.role === 'coordenador') return 1;

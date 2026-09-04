@@ -71,6 +71,7 @@ import {
   deleteTurmaFromFirestore,
   saveUserToFirestore,
   deleteUserFromFirestore,
+  fetchAllUsersDirectFromServer,
   saveActivityToFirestore,
   deleteActivityFromFirestore,
   saveScheduleBlockToFirestore,
@@ -844,15 +845,34 @@ export default function App() {
     setActiveTab(targetTab);
   };
 
+  const handleForceReloadUsers = async () => {
+    try {
+      const freshUsers = await fetchAllUsersDirectFromServer();
+      if (freshUsers && freshUsers.length > 0) {
+        const merged = normalizeAndDeduplicateUsers([...freshUsers, ...PRESET_USERS]);
+        setUsers(merged);
+        saveLocalUsersList(merged);
+        broadcastSyncEvent('SYNC_USERS', merged);
+      }
+    } catch (err) {
+      console.error('Erro ao recarregar usuários diretamente do Firestore:', err);
+      throw err;
+    }
+  };
+
   const handleSaveUser = async (userToSave: UserProfile) => {
+    const targetId = (userToSave.id || '').trim();
     const targetEmail = (userToSave.email || '').trim().toLowerCase();
     const existingIdx = users.findIndex(
-      (u) => u.id === userToSave.id || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
+      (u) => (targetId && u.id === targetId) || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
     );
     let updatedUsers: UserProfile[];
     if (existingIdx >= 0) {
       updatedUsers = [...users];
-      updatedUsers[existingIdx] = userToSave;
+      updatedUsers[existingIdx] = {
+        ...users[existingIdx],
+        ...userToSave,
+      };
     } else {
       updatedUsers = [userToSave, ...users];
     }
@@ -864,11 +884,11 @@ export default function App() {
     // If currentUser was saved, update state & storage immediately
     if (
       currentUser &&
-      (currentUser.id === userToSave.id ||
-        (currentUser.email && userToSave.email && currentUser.email.toLowerCase() === userToSave.email.toLowerCase()))
+      ((targetId && currentUser.id === targetId) ||
+        (currentUser.email && targetEmail && currentUser.email.toLowerCase() === targetEmail))
     ) {
       const updatedCurrent = deduplicated.find(
-        (u) => u.id === userToSave.id || (u.email && userToSave.email && u.email.toLowerCase() === userToSave.email.toLowerCase())
+        (u) => (targetId && u.id === targetId) || (u.email && targetEmail && u.email.toLowerCase() === targetEmail)
       ) || userToSave;
       setCurrentUser(updatedCurrent);
       saveStoredUser(updatedCurrent);
@@ -876,6 +896,8 @@ export default function App() {
 
     try {
       await saveUserToFirestore(userToSave);
+      // Recarregamento sem cache após gravação
+      await handleForceReloadUsers();
     } catch (err) {
       console.error('Erro ao persistir usuário no Firestore:', err);
       throw err;
@@ -1339,6 +1361,7 @@ export default function App() {
             onSaveHoliday={handleSaveHoliday}
             onDeleteHoliday={handleDeleteHoliday}
             onBatchSaveHolidays={handleBatchSaveHolidays}
+            onForceReloadUsers={handleForceReloadUsers}
           />
         )}
 

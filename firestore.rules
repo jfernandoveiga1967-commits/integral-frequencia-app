@@ -21,6 +21,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /usuarios/{userId} {
+      allow read, write: if true;
+    }
+
     match /activities/{activityId} {
       allow read, write: if true;
     }
