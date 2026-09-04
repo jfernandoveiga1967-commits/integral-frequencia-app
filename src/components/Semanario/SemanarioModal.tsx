@@ -28,6 +28,7 @@ import {
   generateCuratedProposal,
   isTurmaEligibleForProjeto,
 } from '../../utils/semanarioUtils';
+import { getWeekInfo, getWeekDays } from '../../utils/dateUtils';
 
 interface SemanarioModalProps {
   isOpen: boolean;
@@ -45,6 +46,15 @@ interface SemanarioModalProps {
   defaultDate?: string;
   defaultDayOfWeek?: DayOfWeek;
 }
+
+// Dias letivos da semana para replicação
+const SCHOOL_DAYS: { key: DayOfWeek; label: string }[] = [
+  { key: 'segunda', label: 'Segunda-feira' },
+  { key: 'terca', label: 'Terça-feira' },
+  { key: 'quarta', label: 'Quarta-feira' },
+  { key: 'quinta', label: 'Quinta-feira' },
+  { key: 'sexta', label: 'Sexta-feira' },
+];
 
 export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   isOpen,
@@ -70,9 +80,9 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   // Exact Requested Fields
   // 1. Tema da Semana
   const [weekTheme, setWeekTheme] = useState<string>('');
-  // 2. Categoria / Prefixo
+  // 2. Categoria
   const [category, setCategory] = useState<string>('');
-  // 3. Nome da Atividade / Proposta
+  // 3. Atividade Proposta
   const [title, setTitle] = useState<string>('');
   // 4. ADI Responsável
   const [adiResponsible, setAdiResponsible] = useState<string>('');
@@ -92,7 +102,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   // Copy / Replica Multiturmas State
   const [isCopySectionOpen, setIsCopySectionOpen] = useState<boolean>(false);
   const [selectedCopyTurmas, setSelectedCopyTurmas] = useState<TurmaType[]>([]);
-  const [copyExecutionRecords, setCopyExecutionRecords] = useState<boolean>(false);
+  const [copyExecutionRecords, setCopyExecutionRecords] = useState<boolean>(true);
+
+  // Copy / Replica Multidias State
+  const [isCopyDaysOpen, setIsCopyDaysOpen] = useState<boolean>(false);
+  const [selectedCopyDays, setSelectedCopyDays] = useState<DayOfWeek[]>([]);
 
   // AI Assistant Panel State
   const [showAiPanel, setShowAiPanel] = useState<boolean>(false);
@@ -101,6 +115,22 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   const [aiError, setAiError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Week date range calculations to match correct ISO dates for all weekdays
+  const weekInfo = useMemo(() => getWeekInfo(year, weekNumber), [year, weekNumber]);
+  const weekDays = useMemo(() => getWeekDays(weekInfo.startDate), [weekInfo.startDate]);
+
+  const getDateForDay = (targetDay: DayOfWeek): string => {
+    const dayIndexMap: Record<DayOfWeek, number> = {
+      segunda: 0,
+      terca: 1,
+      quarta: 2,
+      quinta: 3,
+      sexta: 4,
+    };
+    const idx = dayIndexMap[targetDay] ?? 0;
+    return weekDays[idx]?.dateStr || weekInfo.startDate;
+  };
 
   // Available categories for currently selected class strictly from Grade Horária (alphabetical)
   const availableCategories = useMemo(() => {
@@ -177,8 +207,10 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         setNotes('');
       }
       setSelectedCopyTurmas([]);
-      setCopyExecutionRecords(false);
+      setSelectedCopyDays([]);
+      setCopyExecutionRecords(true);
       setIsCopySectionOpen(false);
+      setIsCopyDaysOpen(false);
       setShowAiPanel(false);
       setAiError(null);
     }
@@ -195,6 +227,12 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     }
   };
 
+  // Adjust day of week and clear it from copy days if selected
+  const handleDayOfWeekChange = (newDay: DayOfWeek) => {
+    setDayOfWeek(newDay);
+    setSelectedCopyDays((prev) => prev.filter((d) => d !== newDay));
+  };
+
   // Multiturma Selection Helpers
   const handleSelectAllCopyTurmas = () => {
     setSelectedCopyTurmas(turmas.filter((t) => t !== turma));
@@ -208,6 +246,23 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     if (targetTurma === turma) return;
     setSelectedCopyTurmas((prev) =>
       prev.includes(targetTurma) ? prev.filter((t) => t !== targetTurma) : [...prev, targetTurma]
+    );
+  };
+
+  // Multidias Selection Helpers
+  const handleSelectAllCopyDays = () => {
+    setIsCopyDaysOpen(true);
+    setSelectedCopyDays(SCHOOL_DAYS.map((d) => d.key).filter((d) => d !== dayOfWeek));
+  };
+
+  const handleClearCopyDays = () => {
+    setSelectedCopyDays([]);
+  };
+
+  const handleToggleCopyDay = (targetDay: DayOfWeek) => {
+    if (targetDay === dayOfWeek) return;
+    setSelectedCopyDays((prev) =>
+      prev.includes(targetDay) ? prev.filter((d) => d !== targetDay) : [...prev, targetDay]
     );
   };
 
@@ -290,7 +345,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     e.preventDefault();
 
     if (!title.trim()) {
-      alert('Por favor, informe o Nome da Atividade / Proposta.');
+      alert('Por favor, informe a Atividade Proposta.');
       return;
     }
 
@@ -299,7 +354,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       turma,
       weekNumber: initialPlan?.weekNumber || weekNumber,
       year: initialPlan?.year || year,
-      date: initialPlan?.date || defaultDate || new Date().toISOString().split('T')[0],
+      date: initialPlan?.date || getDateForDay(dayOfWeek),
       dayOfWeek,
       timeSlot,
       weekTheme: weekTheme.trim() || undefined,
@@ -320,21 +375,37 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       updatedBy: currentUser?.name,
     };
 
-    const targetTurmasToReplicate = selectedCopyTurmas.filter((t) => t !== turma);
+    // Replicate across selected target turmas and selected days of the week
+    const targetTurmas = [turma, ...selectedCopyTurmas.filter((t) => t !== turma)];
+    const targetDays = [dayOfWeek, ...selectedCopyDays.filter((d) => d !== dayOfWeek)];
 
-    if (targetTurmasToReplicate.length > 0) {
-      const replicatedPlans: SemanarioPlan[] = targetTurmasToReplicate.map((targetTurma, idx) => ({
-        ...primaryPlan,
-        id: `plan_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-        turma: targetTurma,
-        status: copyExecutionRecords ? status : 'pendente',
-        substitutionReason: copyExecutionRecords && status === 'substituida' ? substitutionReason.trim() : undefined,
-        photos: copyExecutionRecords && photos.length > 0 ? [...photos] : undefined,
-        notes: copyExecutionRecords && notes.trim() ? notes.trim() : undefined,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }));
+    const replicatedPlans: SemanarioPlan[] = [];
+    let replicaIndex = 1;
 
+    for (const t of targetTurmas) {
+      for (const d of targetDays) {
+        // Skip the primary plan itself which is (turma, dayOfWeek)
+        if (t === turma && d === dayOfWeek) {
+          continue;
+        }
+
+        replicatedPlans.push({
+          ...primaryPlan,
+          id: `plan_${Date.now()}_${replicaIndex++}_${Math.random().toString(36).substring(2, 7)}`,
+          turma: t,
+          dayOfWeek: d,
+          date: getDateForDay(d),
+          status: copyExecutionRecords ? status : 'pendente',
+          substitutionReason: copyExecutionRecords && status === 'substituida' ? substitutionReason.trim() : undefined,
+          photos: copyExecutionRecords && photos.length > 0 ? [...photos] : undefined,
+          notes: copyExecutionRecords && notes.trim() ? notes.trim() : undefined,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    if (replicatedPlans.length > 0) {
       if (onBatchSave) {
         onBatchSave([primaryPlan, ...replicatedPlans]);
       } else {
@@ -472,7 +543,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               </label>
               <select
                 value={dayOfWeek}
-                onChange={(e) => setDayOfWeek(e.target.value as DayOfWeek)}
+                onChange={(e) => handleDayOfWeekChange(e.target.value as DayOfWeek)}
                 className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
               >
                 <option value="segunda">Segunda-feira</option>
@@ -513,11 +584,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
             />
           </div>
 
-          {/* 2. Categoria / Prefixo */}
+          {/* 2. Categoria */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-slate-800">
-                Categoria / Prefixo
+                Categoria
               </label>
               {isTurmaEligibleForProjeto(turma) && (
                 <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded-md border border-rose-200">
@@ -538,11 +609,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
             </select>
           </div>
 
-          {/* 3. Nome da Atividade / Proposta */}
+          {/* 3. Atividade Proposta */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-slate-800">
-                Nome da Atividade / Proposta *
+                Atividade Proposta
               </label>
               <button
                 type="button"
@@ -622,172 +693,110 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
             />
           </div>
 
-          {/* Complementos Opcionais: Objetivos & Recursos */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Objetivos de Aprendizagem & BNCC (Opcional)
-              </label>
-              <textarea
-                rows={2}
-                value={objectives}
-                onChange={(e) => setObjectives(e.target.value)}
-                placeholder="Habilidades a desenvolver (ex: empatia, coordenação motora)..."
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Recursos & Materiais Necessários (Opcional)
-              </label>
-              <textarea
-                rows={2}
-                value={materials}
-                onChange={(e) => setMaterials(e.target.value)}
-                placeholder="Ex: Folhas A3, tintas, giz de cera, almofadas..."
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-              />
-            </div>
-          </div>
-
-          {/* Status de Execução & Evidências */}
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-2">
-                Status de Execução da Atividade
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setStatus('realizada')}
-                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                    status === 'realizada'
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-500/20'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Realizada</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatus('pendente')}
-                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                    status === 'pendente'
-                      ? 'bg-slate-100 text-slate-800 border-slate-400 ring-2 ring-slate-400/20'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Clock className="w-4 h-4 text-slate-500" />
-                  <span>Pendente</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatus('substituida')}
-                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                    status === 'substituida'
-                      ? 'bg-amber-50 text-amber-900 border-amber-400 ring-2 ring-amber-500/20'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <RefreshCw className="w-4 h-4 text-amber-600" />
-                  <span>Substituída</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Substitution Reason Box */}
-            {status === 'substituida' && (
-              <div className="pt-2 border-t border-slate-200 animate-in fade-in">
-                <label className="block text-xs font-bold text-amber-900 mb-1">
-                  Motivo da Substituição da Atividade *
-                </label>
-                <input
-                  type="text"
-                  required={status === 'substituida'}
-                  value={substitutionReason}
-                  onChange={(e) => setSubstitutionReason(e.target.value)}
-                  placeholder="Ex: Condição climática chuvosa, reorganização do cronograma comemorativo..."
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
-              </div>
-            )}
-
-            {/* Photo / Media Attachments */}
-            <div className="pt-2 border-t border-slate-200">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
-                  <ImageIcon className="w-4 h-4 text-indigo-600" />
-                  <span>Evidências Pedagógicas & Fotos ({photos.length})</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Anexar Foto</span>
-                </button>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                className="hidden"
-              />
-
-              {photos.length === 0 ? (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors cursor-pointer"
-                >
-                  <Upload className="w-6 h-6 text-slate-400 mx-auto mb-1" />
-                  <p className="text-xs text-slate-500 font-semibold">
-                    Clique para anexar registros fotográficos da realização ou substituição da atividade
-                  </p>
+          {/* 1. Copiar para quais dias da semana? (Opcional) */}
+          <div className="p-4 bg-indigo-50/50 border border-indigo-200/90 rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCopyDaysOpen(!isCopyDaysOpen)}
+                className="flex items-center space-x-2 text-xs font-extrabold text-indigo-950 hover:text-indigo-700 transition-colors cursor-pointer text-left"
+              >
+                <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-xs">
+                  <Calendar className="w-4 h-4" />
                 </div>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
-                  {photos.map((photo, idx) => (
-                    <div
-                      key={idx}
-                      className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square"
-                    >
-                      <img
-                        src={photo}
-                        alt={`Evidência ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemovePhoto(idx)}
-                        className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-md"
-                        title="Remover foto"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-400 transition-colors cursor-pointer aspect-square"
-                  >
-                    <Upload className="w-5 h-5 mb-0.5" />
-                    <span className="text-[10px] font-bold">+ Adicionar</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-black text-indigo-950">Copiar para quais dias da semana?</span>
+                  {selectedCopyDays.length > 0 ? (
+                    <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-xs">
+                      {selectedCopyDays.length} {selectedCopyDays.length === 1 ? 'selecionado' : 'selecionados'}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-indigo-600/80 bg-indigo-100/70 px-2 py-0.5 rounded-full">
+                      Opcional
+                    </span>
+                  )}
+                </div>
+                {isCopyDaysOpen ? (
+                  <ChevronUp className="w-4 h-4 text-indigo-600 ml-1" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-indigo-600 ml-1" />
+                )}
+              </button>
+
+              {/* Botões Auxiliares de Ação Rápida */}
+              <div className="flex items-center space-x-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={handleSelectAllCopyDays}
+                  className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center space-x-1.5 active:scale-95"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Selecionar Todos</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearCopyDays}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
+
+            {/* Conteúdo Expansível: Grade de Dias da Semana (Checkboxes) */}
+            {isCopyDaysOpen && (
+              <div className="space-y-3 pt-3 border-t border-indigo-200/80 animate-in fade-in">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                    Selecione os dias letivos de destino para replicar esta atividade:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                    {SCHOOL_DAYS.map((d) => {
+                      const isCurrentOrigin = d.key === dayOfWeek;
+                      const isSelected = selectedCopyDays.includes(d.key);
+
+                      return (
+                        <div
+                          key={d.key}
+                          onClick={() => {
+                            if (!isCurrentOrigin) handleToggleCopyDay(d.key);
+                          }}
+                          className={`flex items-center space-x-2 p-2.5 rounded-xl border text-xs font-bold transition-all select-none ${
+                            isCurrentOrigin
+                              ? 'bg-slate-100/90 text-slate-400 border-slate-200 cursor-not-allowed opacity-75'
+                              : isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-2 ring-indigo-500/20 cursor-pointer'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 cursor-pointer'
+                          }`}
+                        >
+                          <div className="shrink-0">
+                            {isCurrentOrigin ? (
+                              <CheckCircle2 className="w-4 h-4 text-slate-400" />
+                            ) : isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-white" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                          <div className="truncate">
+                            <span className="truncate block leading-tight">{d.label}</span>
+                            {isCurrentOrigin && (
+                              <span className="text-[9px] font-medium text-slate-500 block leading-tight mt-0.5">
+                                Dia Atual
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
-          {/* Nova Seção: Copiar Proposta para Outras Turmas (Bloco Expansível) */}
+          {/* 2. Copiar para quais turmas? (Opcional) */}
           <div className="p-4 bg-indigo-50/50 border border-indigo-200/90 rounded-2xl space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <button
@@ -913,6 +922,142 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* 3. Status de Execução da Atividade */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-800 mb-2">
+                Status de Execução da Atividade
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStatus('realizada')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                    status === 'realizada'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-500/20'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Realizada</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStatus('pendente')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                    status === 'pendente'
+                      ? 'bg-slate-100 text-slate-800 border-slate-400 ring-2 ring-slate-400/20'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Clock className="w-4 h-4 text-slate-500" />
+                  <span>Pendente</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStatus('substituida')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                    status === 'substituida'
+                      ? 'bg-amber-50 text-amber-900 border-amber-400 ring-2 ring-amber-500/20'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <RefreshCw className="w-4 h-4 text-amber-600" />
+                  <span>Substituída</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Substitution Reason Box */}
+            {status === 'substituida' && (
+              <div className="pt-2 border-t border-slate-200 animate-in fade-in">
+                <label className="block text-xs font-bold text-amber-900 mb-1">
+                  Motivo da Substituição da Atividade *
+                </label>
+                <input
+                  type="text"
+                  required={status === 'substituida'}
+                  value={substitutionReason}
+                  onChange={(e) => setSubstitutionReason(e.target.value)}
+                  placeholder="Ex: Condição climática chuvosa, reorganização do cronograma comemorativo..."
+                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* 4. Registros da Atividade (com o botão de anexar fotos) */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                <ImageIcon className="w-4 h-4 text-indigo-600" />
+                <span>Registros da Atividade ({photos.length})</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Anexar Foto</span>
+              </button>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleImageUpload}
+              className="hidden"
+            />
+
+            {photos.length === 0 ? (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-200 bg-white/70 rounded-xl p-4 text-center hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors cursor-pointer"
+              >
+                <Upload className="w-6 h-6 text-slate-400 mx-auto mb-1" />
+                <p className="text-xs text-slate-500 font-semibold">
+                  Clique para anexar registros fotográficos da realização ou substituição da atividade
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+                {photos.map((photo, idx) => (
+                  <div
+                    key={idx}
+                    className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square"
+                  >
+                    <img
+                      src={photo}
+                      alt={`Evidência ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePhoto(idx)}
+                      className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-md"
+                      title="Remover foto"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-300 bg-white/70 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-400 transition-colors cursor-pointer aspect-square"
+                >
+                  <Upload className="w-5 h-5 mb-0.5" />
+                  <span className="text-[10px] font-bold">+ Adicionar</span>
+                </div>
+              </div>
+            )}
+          </div>
         </form>
 
         {/* Modal Footer */}
@@ -926,18 +1071,26 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           </button>
 
           <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>
-                {selectedCopyTurmas.length > 0
-                  ? `Salvar & Replicar (${selectedCopyTurmas.length + 1} Turmas)`
-                  : 'Salvar Proposta'}
-              </span>
-            </button>
+            {(() => {
+              const extraTurmasCount = selectedCopyTurmas.filter((t) => t !== turma).length;
+              const extraDaysCount = selectedCopyDays.filter((d) => d !== dayOfWeek).length;
+              const totalCopies = (extraTurmasCount + 1) * (extraDaysCount + 1) - 1;
+
+              return (
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {totalCopies > 0
+                      ? `Salvar & Replicar (+${totalCopies} ${totalCopies === 1 ? 'cópia' : 'cópias'})`
+                      : 'Salvar Proposta'}
+                  </span>
+                </button>
+              );
+            })()}
           </div>
         </div>
       </div>
