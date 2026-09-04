@@ -11,6 +11,11 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '20mb' }));
 
+// Static files serving directly by Express
+app.use(express.static(path.join(process.cwd(), 'public')));
+app.use('/assets', express.static(path.join(process.cwd(), 'src/assets')));
+app.use('/src/assets', express.static(path.join(process.cwd(), 'src/assets')));
+
 let aiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI | null {

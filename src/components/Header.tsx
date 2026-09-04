@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ConnectionState } from '../services/syncService';
+import { LOGO_BASE64 } from '../utils/pdfLogoData';
 import { getRoleBadgeStyle, isCoordenador } from '../utils/authUtils';
 import {
   isAudioNotificationsEnabled,
@@ -172,13 +173,32 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between py-3 gap-3">
           {/* Logo & Main Title */}
           <div className="flex items-center space-x-3 select-none">
-            <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/30 shrink-0">
+            {/* Official School Logo */}
+            <div className="bg-white rounded-xl px-2.5 py-1.5 shadow-md shrink-0 flex items-center justify-center border border-white/20">
               <img
-                src="/pwa-192.png"
-                alt="Ícone Frequência Integral"
-                className="w-full h-full object-cover"
+                src="/logo-web.png"
+                alt="Colégio Crescer"
+                className="h-7 sm:h-8 w-auto object-contain"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = LOGO_BASE64;
+                }}
               />
             </div>
+
+            {/* App Icon */}
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/30 shrink-0 ring-1 ring-white/10 bg-slate-800">
+              <img
+                src="/app-icon.png"
+                alt="Ícone Frequência Integral"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = '/pwa-192.png';
+                }}
+              />
+            </div>
+
             <div className="flex-1 min-w-0">
               <div className="flex items-center space-x-2 mb-0.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-0.5 rounded-full border border-amber-500/30">

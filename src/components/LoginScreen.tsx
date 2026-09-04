@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole } from '../types';
+import { LOGO_BASE64 } from '../utils/pdfLogoData';
 import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay } from '../utils/authUtils';
 import {
   LogIn,
@@ -186,11 +187,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
         <div className="text-center mb-6 select-none">
           {/* School Logo (white card for contrast against dark background) */}
           <div className="flex justify-center mb-4">
-            <div className="bg-white rounded-2xl px-5 py-3 shadow-lg inline-block">
+            <div className="bg-white rounded-2xl px-5 py-3 shadow-lg inline-block border border-white/20">
               <img
                 src="/logo-web.png"
                 alt="Instituto Educacional Crescer"
                 className="h-12 sm:h-14 w-auto object-contain"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = LOGO_BASE64;
+                }}
               />
             </div>
           </div>
@@ -200,8 +205,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
           </div>
           
           <div className="flex justify-center mb-3">
-            <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-xl shadow-red-500/10 ring-4 ring-slate-800">
-              <img src="/pwa-192.png" alt="Logo" className="w-full h-full object-cover" />
+            <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-xl shadow-indigo-500/20 ring-4 ring-slate-800 bg-slate-800 flex items-center justify-center">
+              <img
+                src="/app-icon.png"
+                alt="Logo do Aplicativo"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = '/pwa-192.png';
+                }}
+              />
             </div>
           </div>
 

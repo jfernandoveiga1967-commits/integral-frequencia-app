@@ -2697,6 +2697,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               src={actCustomIconUrl}
                               alt="Ícone personalizado"
                               className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
                             />
                           </div>
 
