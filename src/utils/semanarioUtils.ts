@@ -335,6 +335,57 @@ export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
 }
 
 /**
+ * Determina com rigor se um registro de atividade do Semanário é considerado "Lançado / Preenchido".
+ * Critérios exigidos:
+ * 1. O registro deve conter texto/conteúdo pedagógico salvo no campo de proposta/descrição (desenvolvimento, descrição, proposta ou conteúdo diferente de vazio/nulo).
+ * 2. A mera presença do bloco de horário padrão da grade horária NÃO pontua como atividade lançada nem soma no percentual de progresso.
+ * 3. Ignora placeholders padrão não editados ("Aguardando preenchimento", "A preencher", etc.).
+ */
+export function isPlanContentFilled(plan: SemanarioPlan | null | undefined): boolean {
+  if (!plan) return false;
+
+  // Bloco virtual / placeholder não salvo da grade
+  if ((plan as any).isPlaceholder) {
+    return false;
+  }
+
+  // Se o responsável ainda estiver com o padrão de espera do sistema e não houver usuário que salvou
+  if (
+    plan.teacherName === 'Aguardando preenchimento' &&
+    (!plan.updatedBy || plan.updatedBy === 'Coordenação Pedagógica') &&
+    !(plan as any).isSavedByUser
+  ) {
+    return false;
+  }
+
+  // Extrai o conteúdo pedagógico de todos os campos possíveis (development, descricao, conteudo, proposta, title)
+  const dev = (plan.development || '').trim();
+  const desc = ((plan as any).descricao || '').trim();
+  const cont = ((plan as any).conteudo || '').trim();
+  const prop = ((plan as any).proposta || '').trim();
+  const title = (plan.title || '').trim();
+
+  // Deve haver texto/conteúdo pedagógico salvo em ao menos um dos campos de proposta/descrição
+  const hasText = Boolean(dev || desc || cont || prop || title);
+  if (!hasText) {
+    return false;
+  }
+
+  // Se o texto for apenas um placeholder genérico do sistema, não pontua
+  const combined = `${dev} ${desc} ${cont} ${prop} ${title}`.toLowerCase().trim();
+  if (
+    combined === 'aguardando preenchimento' ||
+    combined === 'a preencher' ||
+    combined === 'sem proposta' ||
+    combined === 'pendente'
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Remove propostas que não pertencem à Grade Horária da turma correspondente.
  * Exemplo: Se houver uma proposta de "Robótica" para "Mini e Maternal Azul", ela é removida.
  */
@@ -343,19 +394,16 @@ export function cleanupInvalidTurmaPlans(plans: SemanarioPlan[], schedules?: Sch
 }
 
 /**
- * Amostras Pedagógicas Iniciais para demonstração e povoamento da grade 100% alinhadas com a Grade Horária Real.
+ * Amostras Pedagógicas Iniciais: Inicia vazio para não inflar artificialmente
+ * os contadores de atividades lançadas sem preenchimento real da equipe.
  */
 export function getInitialSamplePlans(
-  currentWeekInfo?: WeekInfo,
-  turmasToUse?: string[],
-  schedules?: ScheduleBlock[],
-  activitiesList?: ActivityItem[]
+  _currentWeekInfo?: WeekInfo,
+  _turmasToUse?: string[],
+  _schedules?: ScheduleBlock[],
+  _activitiesList?: ActivityItem[]
 ): SemanarioPlan[] {
-  const now = new Date();
-  const iso = getISOWeekNumber(now);
-  const week = currentWeekInfo || getWeekInfo(iso.year, iso.weekNumber);
-  const turmasList = turmasToUse && turmasToUse.length > 0 ? turmasToUse : TURMAS_LIST;
-  return generateCurriculumForTurmasAndWeek(turmasList, week, schedules, activitiesList);
+  return [];
 }
 
 const DAYS_OF_WEEK_ORDER: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];

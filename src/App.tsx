@@ -36,6 +36,7 @@ import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
+import { Footer } from './components/Footer';
 import { AttendanceSheet } from './components/AttendanceSheet';
 import { CurrentActivities } from './components/CurrentActivities';
 import { StudentManager } from './components/StudentManager';
@@ -1263,8 +1264,8 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
-        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente nas abas Chamada de Frequência e Atividades do Momento AO VIVO */}
-        {(activeTab === 'frequencia' || activeTab === 'momento') && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
+        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente na aba Chamada de Frequência */}
+        {activeTab === 'frequencia' && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
           <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
             <div className="flex items-start space-x-3">
               <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
@@ -1453,26 +1454,13 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-slate-400 text-xs py-4 border-t border-slate-800 text-center print:hidden">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex flex-col sm:flex-row items-center gap-2 text-left">
-            <div>
-              <span className="font-bold text-white">Programa do Integral</span> • v1.2
-            </div>
-            {firebaseConnected && (
-              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>Nuvem Conectada</span>
-              </span>
-            )}
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className="text-slate-500 text-[11px] hidden md:block">
-              Natação • Balé • Dança • Judô • Futebol • Ginástica • Flauta
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        connectionState={connectionState}
+        onForceSync={handleForceSync}
+        firebaseConnected={firebaseConnected}
+      />
 
       {/* Modal de Auditoria de Alunos com Chamada Pendente */}
       {showPendingAuditModal && (

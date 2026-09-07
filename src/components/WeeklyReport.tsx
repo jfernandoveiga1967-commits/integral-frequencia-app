@@ -593,20 +593,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         {/* Header line + Title */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full border border-indigo-200">
-                Relatórios de Frequência
-              </span>
-              <span className="text-xs text-slate-400 font-medium">
-                {totalRoutineRecords} chamadas de rotina apuradas ({activeRecords.length} lançamentos totais)
-              </span>
-            </div>
-            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-1">
-              Painel de Desempenho e Frequência do Integral
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+              Painel de Desempenho e Frequência
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Visualize estatísticas consolidadas e gere relatórios oficiais em PDF com cabeçalho do Colégio Crescer.
-            </p>
           </div>
 
           {/* Action Buttons */}
@@ -1002,7 +991,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             </div>
             <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2 mt-1">
               <BarChart3 className="w-5 h-5 text-emerald-600" />
-              Relatório Numérico de Frequência dos Alunos (Consolidado Sintético)
+              Relatório Consolidado
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Estatísticas quantitativas diárias de alunos esperados, presenças, faltas, atestados e pendentes.

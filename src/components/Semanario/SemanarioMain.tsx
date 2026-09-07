@@ -36,6 +36,7 @@ import {
   getAllCategoriesAlphabetical,
   getCategoryBadgeStyle,
   cleanupInvalidTurmaPlans,
+  isPlanContentFilled,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
@@ -230,12 +231,13 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     return cleanupInvalidTurmaPlans(raw, schedules);
   }, [plans, currentWeek, schedules]);
 
-  // General KPI Metrics for Current Week
+  // General KPI Metrics for Current Week (Apenas atividades com conteúdo salvo)
   const metrics = useMemo(() => {
-    const total = weekPlans.length;
-    const realizadas = weekPlans.filter((p) => p.status === 'realizada').length;
-    const pendentes = weekPlans.filter((p) => p.status === 'pendente').length;
-    const substituidas = weekPlans.filter((p) => p.status === 'substituida').length;
+    const filledPlans = weekPlans.filter(isPlanContentFilled);
+    const total = filledPlans.length;
+    const realizadas = filledPlans.filter((p) => p.status === 'realizada').length;
+    const pendentes = filledPlans.filter((p) => p.status === 'pendente').length;
+    const substituidas = filledPlans.filter((p) => p.status === 'substituida').length;
     const taxaRealizacao = total > 0 ? Math.round((realizadas / total) * 100) : 0;
 
     return { total, realizadas, pendentes, substituidas, taxaRealizacao };
@@ -285,9 +287,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         };
       }
 
-      // Se ainda não foi detalhado pela equipe, gera proposta com status padrão [⏳ Pendente]
-      const curated = generateCuratedProposal(activeTurma, block.activityId);
-
+      // Bloco padrão da grade horária oficial aguardando preenchimento pedagógico
       const newPlan: SemanarioPlan = {
         id: `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`,
         turma: activeTurma as TurmaType,
@@ -297,16 +297,23 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         dayOfWeek: selectedDay,
         timeSlot: officialTimeSlot,
         category: block.activityId,
-        title: curated.title,
-        objectives: curated.objectives,
-        development: curated.development,
-        materials: curated.materials,
+        title: '',
+        objectives: '',
+        development: '',
+        materials: '',
         teacherName: 'Aguardando preenchimento',
         status: 'pendente',
         photos: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        updatedBy: 'Coordenação Pedagógica',
+        ...({
+          descricao: '',
+          conteudo: '',
+          proposta: '',
+          isSavedByUser: false,
+          hasSavedContent: false,
+          isPlaceholder: true,
+        } as any),
       };
 
       return newPlan;
@@ -417,7 +424,10 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   };
 
   const handleStatusChange = (planId: string, newStatus: SemanarioStatus, reason?: string) => {
-    const target = plans.find((p) => p.id === planId);
+    let target = plans.find((p) => p.id === planId);
+    if (!target) {
+      target = activeTurmaDaySchedulePlans.find((p) => p.id === planId);
+    }
     if (!target) return;
     const updated: SemanarioPlan = {
       ...target,
@@ -538,16 +548,13 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div>
-            <div className="flex items-center space-x-2.5 mb-1.5">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Semanário Pedagógico
-              </span>
-              {activeTurma && (
+            {activeTurma && (
+              <div className="flex items-center space-x-2.5 mb-1.5">
                 <span className="text-[11px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700">
                   {activeTurma}
                 </span>
-              )}
-            </div>
+              </div>
+            )}
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
               <span>Registro de Atividades</span>
             </h1>
@@ -738,7 +745,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
               </div>
               <div>
                 <h2 className="text-sm font-extrabold text-slate-900 leading-tight">
-                  Painel de Turmas Oficiais
+                  Painel de Turmas
                 </h2>
                 <p className="text-xs text-slate-500 font-medium">
                   {sortedTurmas.length} turmas ativas • Clique em uma turma para abrir seus registros
@@ -763,17 +770,25 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {displayedTurmas.map((t) => {
               const turmaPlans = weekPlans.filter((p) => p.turma === t);
+              // Atividades que possuem texto/conteúdo pedagógico salvo (descricao, conteudo ou proposta preenchidos)
+              const filledTurmaPlans = turmaPlans.filter(isPlanContentFilled);
               const allowedCategories = getCategoriesForTurma(t, schedules, activitiesList);
               const scheduledBlocks = getScheduleBlocksForTurma(t, undefined, schedules);
               const totalExpected = scheduledBlocks.length > 0 ? scheduledBlocks.length : allowedCategories.length || 10;
-              const launchedCount = turmaPlans.length;
-              const realizadasCount = turmaPlans.filter((p) => p.status === 'realizada').length;
-              const pendentesCount = turmaPlans.filter((p) => p.status === 'pendente').length;
-              const substituidasCount = turmaPlans.filter((p) => p.status === 'substituida').length;
+              const launchedCount = filledTurmaPlans.length;
+              const realizadasCount = filledTurmaPlans.filter((p) => p.status === 'realizada').length;
+              const substituidasCount = filledTurmaPlans.filter((p) => p.status === 'substituida').length;
+              const pendentesCount = Math.max(0, totalExpected - realizadasCount - substituidasCount);
 
-              // Distinct categories launched
-              const distinctCategoriesLaunched = Array.from(new Set(turmaPlans.map((p) => p.category)));
-              const progressPercentage = Math.min(100, Math.round((launchedCount / totalExpected) * 100));
+              // Categorias Preenchidas: Apenas categorias com atividades que possuem registro de conteúdo salvo
+              const distinctCategoriesLaunched = Array.from(
+                new Set(
+                  filledTurmaPlans
+                    .map((p) => (p.category || '').trim())
+                    .filter(Boolean)
+                )
+              );
+              const progressPercentage = totalExpected > 0 ? Math.min(100, Math.round((launchedCount / totalExpected) * 100)) : 0;
 
               const stageInfo = getTurmaStageInfo(t);
 
@@ -871,15 +886,15 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                     </div>
 
                     {/* Category preview pills */}
-                    <div className="flex flex-wrap gap-1">
-                      {allowedCategories.slice(0, 4).map((cat) => {
-                        const isFilled = distinctCategoriesLaunched.includes(cat);
+                    <div className="flex flex-wrap gap-1.5 pt-0.5 max-h-48 overflow-y-auto pr-1">
+                      {allowedCategories.map((cat) => {
+                        const isFilled = distinctCategoriesLaunched.some((c) => c.toLowerCase() === cat.toLowerCase());
                         return (
                           <span
                             key={cat}
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border truncate max-w-[120px] ${
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-colors whitespace-nowrap ${
                               isFilled
-                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold'
                                 : 'bg-slate-50 text-slate-400 border-slate-200 opacity-60'
                             }`}
                           >
@@ -887,11 +902,6 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                           </span>
                         );
                       })}
-                      {allowedCategories.length > 4 && (
-                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
-                          +{allowedCategories.length - 4}
-                        </span>
-                      )}
                     </div>
                   </div>
 
@@ -941,8 +951,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  {activeTurmaPlans.length} propostas cadastradas nesta semana •{' '}
-                  {activeTurmaPlans.filter((p) => p.status === 'realizada').length} realizadas
+                  {activeTurmaPlans.filter(isPlanContentFilled).length} propostas cadastradas nesta semana •{' '}
+                  {activeTurmaPlans.filter(isPlanContentFilled).filter((p) => p.status === 'realizada').length} realizadas
                 </p>
               </div>
             </div>

@@ -1073,10 +1073,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </div>
               <div>
                 <h1 className="text-xl font-black text-slate-100 flex items-center gap-2">
-                  Fechamento de Frequência
-                  <span className="text-xs px-2.5 py-0.5 font-bold uppercase tracking-wider rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    Controle 100% Digital
-                  </span>
+                  Fechamento do Ponto
                 </h1>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Horário Oficial: <strong className="text-emerald-400">{liveClock}</strong> • Tolerância automática de 5 minutos na entrada e saída

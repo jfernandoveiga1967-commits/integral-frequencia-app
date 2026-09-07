@@ -1,6 +1,13 @@
 @import "tailwindcss";
 
 /* ========================================================================= */
+/* ELEMENTOS EXCLUSIVOS DE IMPRESSÃO (Ocultos na tela normal)               */
+/* ========================================================================= */
+.print-only {
+  display: none !important;
+}
+
+/* ========================================================================= */
 /* ESTILOS DE IMPRESSÃO PROFISSIONAL (@media print) - PADRÃO FOLHA A4        */
 /* ========================================================================= */
 @media print {
@@ -16,7 +23,7 @@
     background-color: #ffffff !important;
     color: #0f172a !important;
     font-size: 11px !important;
-    line-height: 1.3 !important;
+    line-height: 1.35 !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
@@ -27,13 +34,26 @@
     print-color-adjust: exact !important;
   }
 
-  /* Ocultar elementos desnecessários na folha impressa:
-     Cabeçalho do sistema, navegação, abas, botões de ação, filtros, banners e toasts */
+  /* Elementos exclusivos para a folha impressa (cabeçalho oficial institucional, assinaturas) */
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Ocultar elementos de navegação, cabeçalhos do app, rodapés e botões de ação */
   header,
   nav,
+  footer,
+  #app-header,
+  #app-footer,
   .print\:hidden,
+  .no-print,
+  .print-hidden,
   [data-print="hidden"],
-  button:not(.print-include) {
+  [data-print-hidden="true"],
+  button:not(.print-include),
+  input:not(.print-include),
+  select:not(.print-include) {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -41,13 +61,24 @@
     padding: 0 !important;
   }
 
-  /* Desativar sombras, bordas escuras e backgrounds pesados no print */
+  /* Desativar sombras, bordas escuras e fundos pesados */
   * {
     box-shadow: none !important;
     text-shadow: none !important;
   }
 
-  /* Expansão limpa de modais e contêineres de espelho de ponto */
+  /* Desbloquear e expandir contêineres principais */
+  main,
+  #root,
+  .app-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Expansão limpa de modais para exibição de página inteira */
   .fixed.inset-0,
   .overflow-y-auto,
   .overflow-x-auto {
@@ -63,7 +94,7 @@
     border: none !important;
   }
 
-  /* Formatação limpa de tabelas do espelho e frequências */
+  /* Formatação de tabelas institucionais */
   table {
     width: 100% !important;
     border-collapse: collapse !important;
@@ -95,7 +126,7 @@
     font-weight: bold !important;
   }
 
-  /* Cores de badges nítidas para impressão */
+  /* Cores de status nítidas para impressão */
   .bg-emerald-50, .bg-emerald-100, .bg-emerald-500\/15 {
     background-color: #ecfdf5 !important;
     color: #065f46 !important;
@@ -124,12 +155,38 @@
     background-color: #f8fafc !important;
   }
 
-  /* Evitar quebra no meio do bloco de assinaturas ou fechamento financeiro */
+  /* Evitar quebra no meio do bloco de assinaturas ou fechamentos */
   .print-avoid-break,
   .print-signatures,
   .print-summary {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
-}
 
+  /* Suporte a múltiplas páginas de PDF renderizado */
+  .pdf-printable-page {
+    page-break-after: always;
+    break-after: page;
+    margin: 0 0 10mm 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+  }
+
+  .pdf-printable-page:last-child {
+    page-break-after: avoid;
+    break-after: avoid;
+    margin-bottom: 0 !important;
+  }
+
+  .pdf-printable-page img {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    display: block !important;
+    image-rendering: -webkit-optimize-contrast;
+  }
+}

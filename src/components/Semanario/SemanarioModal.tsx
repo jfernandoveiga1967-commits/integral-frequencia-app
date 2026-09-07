@@ -170,17 +170,17 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         setCategory(initialPlan.category || validCats[0] || '');
         setStatus(initialPlan.status || 'pendente');
 
-        // Campos de texto completamente em branco / sem conteúdo prévio
-        setTitle('');
-        setDevelopment('');
-        setObjectives('');
-        setMaterials('');
-        setWeekTheme('');
-        setAdiResponsible('');
-        setMonitors('');
-        setSubstitutionReason('');
-        setPhotos([]);
-        setNotes('');
+        // Carrega conteúdo prévio existente se houver sido preenchido e salvo
+        setTitle(initialPlan.title || (initialPlan as any).proposta || '');
+        setDevelopment(initialPlan.development || (initialPlan as any).descricao || '');
+        setObjectives(initialPlan.objectives || (initialPlan as any).conteudo || '');
+        setMaterials(initialPlan.materials || '');
+        setWeekTheme(initialPlan.weekTheme || '');
+        setAdiResponsible(initialPlan.adiResponsible || '');
+        setMonitors(initialPlan.monitors || '');
+        setSubstitutionReason(initialPlan.substitutionReason || '');
+        setPhotos(initialPlan.photos || []);
+        setNotes(initialPlan.notes || '');
       } else {
         const initialTurma = turmas[0] || '1º Ano Azul';
         const cats = getCategoriesForTurma(initialTurma, schedules, activitiesList);
@@ -349,6 +349,10 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       return;
     }
 
+    const savedDesc = development.trim();
+    const savedTitle = title.trim();
+    const savedObj = objectives.trim();
+
     const primaryPlan: SemanarioPlan = {
       id: initialPlan?.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       turma,
@@ -359,12 +363,12 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       timeSlot,
       weekTheme: weekTheme.trim() || undefined,
       category: category.trim() || availableCategories[0] || 'Acolhimento',
-      title: title.trim(),
+      title: savedTitle,
       adiResponsible: adiResponsible.trim() || undefined,
       monitors: monitors.trim() || undefined,
-      teacherName: (adiResponsible.trim() || monitors.trim() || currentUser?.name || 'Monitora').trim(),
-      objectives: objectives.trim() || undefined,
-      development: development.trim(),
+      teacherName: (adiResponsible.trim() || monitors.trim() || currentUser?.name || 'Educador(a) do Integral').trim(),
+      objectives: savedObj || undefined,
+      development: savedDesc,
       materials: materials.trim() || undefined,
       status,
       substitutionReason: status === 'substituida' ? substitutionReason.trim() : undefined,
@@ -372,7 +376,15 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       notes: notes.trim() || undefined,
       createdAt: initialPlan?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      updatedBy: currentUser?.name,
+      updatedBy: currentUser?.name || 'Coordenação/Professor',
+      ...({
+        descricao: savedDesc,
+        conteudo: savedObj || savedDesc,
+        proposta: savedTitle,
+        isSavedByUser: true,
+        hasSavedContent: Boolean(savedDesc || savedTitle || savedObj),
+        isPlaceholder: false,
+      } as any),
     };
 
     // Replicate across selected target turmas and selected days of the week
@@ -401,6 +413,14 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           notes: copyExecutionRecords && notes.trim() ? notes.trim() : undefined,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          ...({
+            descricao: savedDesc,
+            conteudo: savedObj || savedDesc,
+            proposta: savedTitle,
+            isSavedByUser: true,
+            hasSavedContent: Boolean(savedDesc || savedTitle || savedObj),
+            isPlaceholder: false,
+          } as any),
         });
       }
     }
