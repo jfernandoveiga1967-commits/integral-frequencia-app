@@ -862,6 +862,14 @@ function getCurrentHHMM(): string {
                           <span className="font-medium px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
                             {student.turma}
                           </span>
+                          {student.tipoContrato === 'avulso' && (
+                            <span
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs flex items-center space-x-0.5"
+                              title={`Contrato Avulso / Temporário (${student.dataInicioContrato ? formatDateBR(student.dataInicioContrato) : ''} até ${student.dataTerminoContrato ? formatDateBR(student.dataTerminoContrato) : ''})`}
+                            >
+                              <span>⚡ Avulso</span>
+                            </span>
+                          )}
                           {student.diasFrequencia && student.diasFrequencia.length < 5 && (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200" title="Grade parcial de frequência semanal">
                               {formatDiasFrequencia(student.diasFrequencia)}

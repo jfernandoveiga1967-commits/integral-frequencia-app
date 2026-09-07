@@ -20,6 +20,17 @@
           "type": "object",
           "description": "Exit schedule per day of the week"
         },
+        "tipoContrato": {
+          "type": "string",
+          "maxLength": 32,
+          "enum": ["regular", "avulso"]
+        },
+        "dataInicioContrato": { "type": "string", "maxLength": 32 },
+        "dataTerminoContrato": { "type": "string", "maxLength": 32 },
+        "diasContratados": {
+          "type": "array",
+          "description": "Days of the week contracted for temporary students"
+        },
         "status": {
           "type": "string",
           "maxLength": 32,
@@ -179,6 +190,10 @@
     "/students/{studentId}": {
       "schema": "Student",
       "description": "Collection of all students"
+    },
+    "/alunos/{alunoId}": {
+      "schema": "Student",
+      "description": "Collection of all students (legacy / compatibility)"
     },
     "/attendanceRecords/{recordId}": {
       "schema": "AttendanceRecord",

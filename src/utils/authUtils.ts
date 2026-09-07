@@ -97,33 +97,56 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const adminId = 'usr_coord_1';
       const existingAdmin = userById.get(adminId);
 
+      // Verificar se raw é apenas o objeto estático de fallback PRESET_USERS sem dados reais do banco
+      const rawIsPresetFallback =
+        raw === PRESET_USERS[0] ||
+        (!raw.updatedAt && !raw.phone && !raw.pixKey && !raw.company);
+
+      // Se existingAdmin já possui dados reais/confirmados do Firestore, ele tem precedência sobre o fallback
+      const primary = (existingAdmin && rawIsPresetFallback) ? existingAdmin : raw;
+      const secondary = (existingAdmin && rawIsPresetFallback) ? raw : existingAdmin;
+
       const resolvedAdmin: UserProfile = {
-        ...(existingAdmin || {}),
-        ...raw,
         id: adminId,
         name: 'Fernando Veiga',
         email: ADMIN_EMAIL,
         role: 'coordenador' as UserRole,
-        cargoLabel: 'Coordenador (Administrador)',
-        avatarColor: 'bg-amber-500',
-        birthDate: raw.birthDate || existingAdmin?.birthDate || '1967-08-12',
-        pin: raw.pin || existingAdmin?.pin || '12/08/1967',
-        status: 'ATIVO',
-        phone: raw.phone !== undefined ? (raw.phone ? raw.phone.trim() : undefined) : existingAdmin?.phone,
-        pixKey: raw.pixKey !== undefined ? (raw.pixKey ? raw.pixKey.trim() : undefined) : existingAdmin?.pixKey,
-        workShiftType: raw.workShiftType || existingAdmin?.workShiftType || 'padrao_8h',
-        company: raw.company || existingAdmin?.company || 'GADAL - Gestão e Apoio',
-        contractSchedule: raw.contractSchedule || existingAdmin?.contractSchedule || '07:30 - 17:30',
-        contractDailyHours: raw.contractDailyHours !== undefined ? raw.contractDailyHours : (existingAdmin?.contractDailyHours !== undefined ? existingAdmin.contractDailyHours : 8),
-        contractDailyMinutes: raw.contractDailyMinutes !== undefined ? raw.contractDailyMinutes : (existingAdmin?.contractDailyMinutes !== undefined ? existingAdmin.contractDailyMinutes : 480),
-        contractDailyHoursFormatted: raw.contractDailyHoursFormatted || existingAdmin?.contractDailyHoursFormatted || '8h 00min',
-        baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null && !isNaN(Number(raw.baseSalary)) ? Number(raw.baseSalary) : (existingAdmin?.baseSalary !== undefined ? existingAdmin.baseSalary : 5000),
-        assignedActivities: (raw.assignedActivities && raw.assignedActivities.length > 0) ? raw.assignedActivities : (existingAdmin?.assignedActivities || MASTER_ADMIN_ACTIVITIES),
-        assignedTurmas: (raw.assignedTurmas && raw.assignedTurmas.length > 0) ? raw.assignedTurmas : (raw.allowedClassIds && raw.allowedClassIds.length > 0 ? raw.allowedClassIds : (existingAdmin?.assignedTurmas || MASTER_ADMIN_TURMAS)),
-        allowedClassIds: (raw.allowedClassIds && raw.allowedClassIds.length > 0) ? raw.allowedClassIds : (raw.assignedTurmas && raw.assignedTurmas.length > 0 ? raw.assignedTurmas : (existingAdmin?.allowedClassIds || MASTER_ADMIN_TURMAS)),
+        cargoLabel: primary.cargoLabel || secondary?.cargoLabel || 'Coordenador (Administrador)',
+        avatarColor: primary.avatarColor || secondary?.avatarColor || 'bg-amber-500',
+        birthDate: primary.birthDate || secondary?.birthDate || '1967-08-12',
+        pin: primary.pin || secondary?.pin || '12/08/1967',
+        status: primary.status || secondary?.status || 'ATIVO',
+        phone: primary.phone !== undefined ? (primary.phone ? primary.phone.trim() : '') : (secondary?.phone || ''),
+        pixKey: primary.pixKey !== undefined ? (primary.pixKey ? primary.pixKey.trim() : '') : (secondary?.pixKey || ''),
+        workShiftType: primary.workShiftType || secondary?.workShiftType || 'padrao_8h',
+        company: primary.company !== undefined ? primary.company : (secondary?.company || 'GADAL - Gestão e Apoio'),
+        contractSchedule: primary.contractSchedule !== undefined ? primary.contractSchedule : (secondary?.contractSchedule || '07:30 - 17:30'),
+        contractDailyHours: primary.contractDailyHours !== undefined ? primary.contractDailyHours : (secondary?.contractDailyHours !== undefined ? secondary.contractDailyHours : 8),
+        contractDailyMinutes: primary.contractDailyMinutes !== undefined ? primary.contractDailyMinutes : (secondary?.contractDailyMinutes !== undefined ? secondary.contractDailyMinutes : 480),
+        contractDailyHoursFormatted: primary.contractDailyHoursFormatted || secondary?.contractDailyHoursFormatted || '8h 00min',
+        baseSalary: primary.baseSalary !== undefined && primary.baseSalary !== null && !isNaN(Number(primary.baseSalary))
+          ? Number(primary.baseSalary)
+          : (secondary?.baseSalary !== undefined && secondary.baseSalary !== null && !isNaN(Number(secondary.baseSalary)) ? Number(secondary.baseSalary) : 0),
+        assignedActivities: Array.isArray(primary.assignedActivities)
+          ? primary.assignedActivities
+          : (Array.isArray(secondary?.assignedActivities) ? secondary!.assignedActivities : MASTER_ADMIN_ACTIVITIES),
+        assignedTurmas: Array.isArray(primary.allowedClassIds)
+          ? primary.allowedClassIds
+          : (Array.isArray(primary.assignedTurmas)
+              ? primary.assignedTurmas
+              : (Array.isArray(secondary?.allowedClassIds)
+                  ? secondary!.allowedClassIds
+                  : (Array.isArray(secondary?.assignedTurmas) ? secondary!.assignedTurmas : MASTER_ADMIN_TURMAS))),
+        allowedClassIds: Array.isArray(primary.allowedClassIds)
+          ? primary.allowedClassIds
+          : (Array.isArray(primary.assignedTurmas)
+              ? primary.assignedTurmas
+              : (Array.isArray(secondary?.allowedClassIds)
+                  ? secondary!.allowedClassIds
+                  : (Array.isArray(secondary?.assignedTurmas) ? secondary!.assignedTurmas : MASTER_ADMIN_TURMAS))),
         canManageStudents: true,
         canMarkAttendance: true,
-        updatedAt: raw.updatedAt || existingAdmin?.updatedAt || new Date().toISOString(),
+        updatedAt: primary.updatedAt || secondary?.updatedAt || new Date().toISOString(),
       };
 
       userById.set(adminId, resolvedAdmin);
@@ -181,10 +204,10 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         allowedClassIds: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : (Array.isArray(raw.assignedTurmas) ? raw.assignedTurmas : []),
         canManageStudents: raw.canManageStudents !== undefined ? raw.canManageStudents : true,
         canMarkAttendance: raw.canMarkAttendance !== undefined ? raw.canMarkAttendance : true,
-        phone: raw.phone ? raw.phone.trim() : undefined,
-        pixKey: raw.pixKey ? raw.pixKey.trim() : undefined,
-        contractSchedule: raw.contractSchedule ? raw.contractSchedule.trim() : undefined,
-        company: raw.company ? raw.company.trim() : 'GADAL - Gestão e Apoio',
+        phone: raw.phone !== undefined ? raw.phone.trim() : undefined,
+        pixKey: raw.pixKey !== undefined ? raw.pixKey.trim() : undefined,
+        contractSchedule: raw.contractSchedule !== undefined ? raw.contractSchedule.trim() : undefined,
+        company: raw.company !== undefined ? raw.company.trim() : 'Colégio Crescer',
         baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null && !isNaN(Number(raw.baseSalary)) ? Number(raw.baseSalary) : 1200,
         updatedAt: raw.updatedAt || new Date().toISOString(),
       };
@@ -194,64 +217,64 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         emailToIdMap.set(singleProfile.email.toLowerCase(), canonicalId);
       }
     } else {
-      // Mesclagem preservando a integridade do UID fixo e consolidando o nome atualizado
-      const rawStatus = (raw.status || '').toUpperCase();
-      const existingStatus = (existing.status || '').toUpperCase();
+      // Mesclagem inteligente: se raw tiver updatedAt mais recente ou igual, os dados de raw prevalecem
+      const rawTime = raw.updatedAt ? new Date(raw.updatedAt).getTime() : 0;
+      const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+      const rawWins = rawTime >= existingTime;
 
-      let mergedStatus = 'ATIVO';
-      if (rawStatus && rawStatus !== 'ATIVO') {
-        mergedStatus = rawStatus;
-      } else if (existingStatus && existingStatus !== 'ATIVO') {
-        mergedStatus = existingStatus;
-      }
+      const winner = rawWins ? raw : existing;
+      const fallback = rawWins ? existing : raw;
 
-      // Unir atividades e turmas sem repetições
-      const mergedActs = Array.from(
-        new Set([...(existing.assignedActivities || []), ...(raw.assignedActivities || [])])
-      );
-      const mergedTurmas = Array.from(
-        new Set([
-          ...(existing.allowedClassIds || existing.assignedTurmas || []),
-          ...(raw.allowedClassIds || raw.assignedTurmas || []),
-        ])
-      );
+      const mergedRole = winner.role || fallback.role || 'professor';
+      const cargoLabel = winner.cargoLabel || fallback.cargoLabel || (mergedRole === 'coordenador' ? 'Coordenador (Administrador)' : 'Monitor / Professor');
+      const avatarColor = winner.avatarColor || fallback.avatarColor || (mergedRole === 'coordenador' ? 'bg-amber-500' : 'bg-indigo-600');
+      const mergedStatus = winner.status || fallback.status || 'ATIVO';
 
-      const mergedRole = (existing.role === 'coordenador' || raw.role === 'coordenador') ? 'coordenador' : 'professor';
-      const cargoLabel = mergedRole === 'coordenador' ? 'Coordenador (Administrador)' : (raw.cargoLabel || existing.cargoLabel || 'Monitor / Professor');
-      const avatarColor = mergedRole === 'coordenador' ? 'bg-amber-500' : (raw.avatarColor || existing.avatarColor || 'bg-indigo-600');
+      const mergedActs = Array.isArray(winner.assignedActivities)
+        ? winner.assignedActivities
+        : (Array.isArray(fallback.assignedActivities) ? fallback.assignedActivities : []);
 
-      // Nome com melhor formatação (mais longo / completo)
-      const mergedName = (rawName.length >= existing.name.length ? rawName : existing.name) || 'Colaborador';
+      const winnerTurmas = Array.isArray(winner.allowedClassIds)
+        ? winner.allowedClassIds
+        : (Array.isArray(winner.assignedTurmas) ? winner.assignedTurmas : undefined);
+      const fallbackTurmas = Array.isArray(fallback.allowedClassIds)
+        ? fallback.allowedClassIds
+        : (Array.isArray(fallback.assignedTurmas) ? fallback.assignedTurmas : undefined);
+      const mergedTurmas = winnerTurmas !== undefined ? winnerTurmas : (fallbackTurmas !== undefined ? fallbackTurmas : []);
+
+      const mergedName = (winner.name && winner.name.trim()) || fallback.name || 'Colaborador';
 
       const mergedProfile: UserProfile = {
-        ...existing,
-        ...raw,
+        ...fallback,
+        ...winner,
         id: canonicalId,
         name: mergedName,
-        email: existing.email || rawEmail,
+        email: winner.email || fallback.email || rawEmail,
         role: mergedRole,
         cargoLabel,
         avatarColor,
         status: mergedStatus as any,
-        dataDesligamento: raw.dataDesligamento || existing.dataDesligamento || undefined,
-        motivoDesligamento: raw.motivoDesligamento || existing.motivoDesligamento || undefined,
-        workShiftType: raw.workShiftType || existing.workShiftType || undefined,
-        phone: raw.phone || existing.phone,
-        pixKey: raw.pixKey || existing.pixKey,
-        birthDate: (raw.birthDate && raw.birthDate !== '1995-01-01') ? raw.birthDate : existing.birthDate,
-        pin: (raw.pin && raw.pin !== '1234') ? raw.pin : existing.pin,
-        contractSchedule: raw.contractSchedule || existing.contractSchedule,
-        contractDailyHours: raw.contractDailyHours !== undefined ? raw.contractDailyHours : existing.contractDailyHours,
-        contractDailyMinutes: raw.contractDailyMinutes !== undefined ? raw.contractDailyMinutes : existing.contractDailyMinutes,
-        contractDailyHoursFormatted: raw.contractDailyHoursFormatted || existing.contractDailyHoursFormatted,
-        company: raw.company || existing.company || 'GADAL - Gestão e Apoio',
-        baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null ? Number(raw.baseSalary) : existing.baseSalary,
+        dataDesligamento: winner.dataDesligamento !== undefined ? winner.dataDesligamento : fallback.dataDesligamento,
+        motivoDesligamento: winner.motivoDesligamento !== undefined ? winner.motivoDesligamento : fallback.motivoDesligamento,
+        workShiftType: winner.workShiftType !== undefined ? winner.workShiftType : fallback.workShiftType,
+        phone: winner.phone !== undefined ? winner.phone : fallback.phone,
+        pixKey: winner.pixKey !== undefined ? winner.pixKey : fallback.pixKey,
+        birthDate: winner.birthDate || fallback.birthDate || '1995-01-01',
+        pin: winner.pin || fallback.pin || '1234',
+        contractSchedule: winner.contractSchedule !== undefined ? winner.contractSchedule : fallback.contractSchedule,
+        contractDailyHours: winner.contractDailyHours !== undefined ? winner.contractDailyHours : fallback.contractDailyHours,
+        contractDailyMinutes: winner.contractDailyMinutes !== undefined ? winner.contractDailyMinutes : fallback.contractDailyMinutes,
+        contractDailyHoursFormatted: winner.contractDailyHoursFormatted !== undefined ? winner.contractDailyHoursFormatted : fallback.contractDailyHoursFormatted,
+        company: winner.company !== undefined ? winner.company : fallback.company,
+        baseSalary: winner.baseSalary !== undefined && winner.baseSalary !== null && !isNaN(Number(winner.baseSalary))
+          ? Number(winner.baseSalary)
+          : (fallback.baseSalary !== undefined ? fallback.baseSalary : 1200),
         assignedActivities: mergedActs,
         assignedTurmas: mergedTurmas,
         allowedClassIds: mergedTurmas,
-        canManageStudents: raw.canManageStudents !== undefined ? raw.canManageStudents : existing.canManageStudents,
-        canMarkAttendance: raw.canMarkAttendance !== undefined ? raw.canMarkAttendance : existing.canMarkAttendance,
-        updatedAt: raw.updatedAt || new Date().toISOString(),
+        canManageStudents: winner.canManageStudents !== undefined ? winner.canManageStudents : fallback.canManageStudents,
+        canMarkAttendance: winner.canMarkAttendance !== undefined ? winner.canMarkAttendance : fallback.canMarkAttendance,
+        updatedAt: winner.updatedAt || fallback.updatedAt || new Date().toISOString(),
       };
 
       userById.set(canonicalId, mergedProfile);

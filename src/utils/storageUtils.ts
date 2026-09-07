@@ -1,14 +1,17 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, UserProfile } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, ContractType, UserProfile } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
 import { repairOverlappedPontoRecords } from './pontoUtils';
+import { db } from '../firebase';
+import { collection, getDocs, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 export { normalizeAndDeduplicateUsers };
 
 const STUDENTS_KEY = 'integral_frequencia_students_v1';
+export const DELETED_STUDENTS_KEY = 'integral_frequencia_deleted_students_v1';
 const RECORDS_KEY = 'integral_frequencia_records_v1';
 const ATTENDANCE_OUTBOX_KEY = 'integral_frequencia_attendance_outbox_v1';
 const TURMAS_KEY = 'integral_frequencia_turmas_v1';
@@ -19,6 +22,52 @@ const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 const SEMANARIO_KEY = 'integral_semanario_plans_v1';
 export const ALL_USERS_KEY = 'frequencia_integral_all_users';
+
+export function getDeletedStudentIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_STUDENTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch (e) {
+    console.error('Erro ao ler IDs de alunos excluídos:', e);
+  }
+  return new Set();
+}
+
+export function markStudentAsDeleted(id: string): void {
+  if (!id) return;
+  try {
+    const set = getDeletedStudentIds();
+    set.add(id);
+    localStorage.setItem(DELETED_STUDENTS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.error('Erro ao registrar aluno como excluído:', e);
+  }
+}
+
+/**
+ * Limpeza de Cache ao Deletar:
+ * Remove o aluno do LocalStorage e registra o ID na lista de exclusão
+ * para evitar que o cache do navegador re-sincronize o documento antigo.
+ */
+export function removeStudentFromLocalStorage(id: string): void {
+  if (!id) return;
+  try {
+    markStudentAsDeleted(id);
+    const raw = localStorage.getItem(STUDENTS_KEY);
+    if (raw) {
+      const parsed: any[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((s) => s.id !== id && !isMockStudent(s));
+        localStorage.setItem(STUDENTS_KEY, JSON.stringify(filtered));
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao remover aluno do LocalStorage:', e);
+  }
+}
 
 export interface AttendanceOutboxItem {
   id: string;
@@ -156,6 +205,25 @@ export function normalizeStudent(
   const rawStatus = s.status || s.statusMatricula || existingStudent?.status || existingStudent?.statusMatricula || 'ativo';
   const status: StudentStatus = (rawStatus === 'inativo' || rawStatus === 'cancelado') ? rawStatus : 'ativo';
 
+  // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
+  const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
+  const dataInicioContrato = s.dataInicioContrato !== undefined ? s.dataInicioContrato : (existingStudent?.dataInicioContrato || undefined);
+  const dataTerminoContrato = s.dataTerminoContrato !== undefined ? s.dataTerminoContrato : (existingStudent?.dataTerminoContrato || undefined);
+  
+  let diasContratados: DayOfWeek[] | undefined = undefined;
+  if (Array.isArray(s.diasContratados) && s.diasContratados.length > 0) {
+    diasContratados = [...s.diasContratados];
+  } else if (existingStudent && Array.isArray(existingStudent.diasContratados) && existingStudent.diasContratados.length > 0) {
+    diasContratados = [...existingStudent.diasContratados];
+  } else if (tipoContrato === 'avulso' && diasFrequencia.length > 0) {
+    diasContratados = [...diasFrequencia];
+  }
+
+  // Para alunos avulsos, garante sincronia entre diasContratados e diasFrequencia
+  if (tipoContrato === 'avulso' && diasContratados && diasContratados.length > 0) {
+    diasFrequencia = [...diasContratados];
+  }
+
   const inactivationDate = s.inactivationDate || existingStudent?.inactivationDate || undefined;
   const inactivationReason = s.inactivationReason || existingStudent?.inactivationReason || undefined;
   const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
@@ -165,6 +233,10 @@ export function normalizeStudent(
     name,
     turma,
     activities,
+    tipoContrato,
+    dataInicioContrato,
+    dataTerminoContrato,
+    diasContratados,
     diasFrequencia,
     horariosSaida,
     status,
@@ -215,6 +287,13 @@ export function mergeStudentData(
 
   const status = incomingStudent.status || (incomingStudent as any).statusMatricula || existingStudent.status || existingStudent.statusMatricula || 'ativo';
 
+  const tipoContrato: ContractType = incomingStudent.tipoContrato || existingStudent.tipoContrato || 'regular';
+  const dataInicioContrato = incomingStudent.dataInicioContrato !== undefined ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;
+  const dataTerminoContrato = incomingStudent.dataTerminoContrato !== undefined ? incomingStudent.dataTerminoContrato : existingStudent.dataTerminoContrato;
+  const diasContratados = Array.isArray(incomingStudent.diasContratados) && incomingStudent.diasContratados.length > 0
+    ? incomingStudent.diasContratados
+    : (existingStudent.diasContratados || (tipoContrato === 'avulso' ? incomingDays : undefined));
+
   return {
     ...existingStudent,
     ...incomingStudent,
@@ -222,7 +301,13 @@ export function mergeStudentData(
     name: incomingStudent.name !== undefined ? incomingStudent.name : existingStudent.name,
     turma: incomingStudent.turma !== undefined ? incomingStudent.turma : existingStudent.turma,
     activities: mergedActivities,
-    diasFrequencia: incomingDays && incomingDays.length > 0 ? incomingDays : (existingStudent.diasFrequencia || [...DEFAULT_DIAS_FREQUENCIA]),
+    tipoContrato,
+    dataInicioContrato,
+    dataTerminoContrato,
+    diasContratados,
+    diasFrequencia: (tipoContrato === 'avulso' && diasContratados && diasContratados.length > 0)
+      ? diasContratados
+      : (incomingDays && incomingDays.length > 0 ? incomingDays : (existingStudent.diasFrequencia || [...DEFAULT_DIAS_FREQUENCIA])),
     horariosSaida: mergedHorarios,
     status,
     statusMatricula: status,
@@ -233,19 +318,317 @@ export function mergeStudentData(
 }
 
 /**
+ * Rotina de verificação para alunos de contrato avulso/temporário.
+ * Identifica alunos temporários ativos cuja Data de Término seja anterior à data atual (Data de Término < Data Atual)
+ * e atualiza seu status para 'inativo' com motivo 'Contrato Concluído', sem alterar históricos de chamadas passadas.
+ */
+export function checkAndInactivateExpiredTemporaryStudents(
+  students: Student[],
+  referenceDateStr?: string
+): { updatedStudents: Student[]; inactivatedStudents: Student[] } {
+  const today = referenceDateStr || toISODateString(new Date());
+  const inactivated: Student[] = [];
+
+  const updated = (students || []).map((student) => {
+    if (!student) return student;
+    const isAvulso = student.tipoContrato === 'avulso';
+    const isActive = (student.status || 'ativo') === 'ativo';
+    const hasEndDate = Boolean(student.dataTerminoContrato && student.dataTerminoContrato.trim().length > 0);
+    const isExpired = hasEndDate && student.dataTerminoContrato!.trim() < today;
+
+    if (isAvulso && isActive && isExpired) {
+      const inactivatedStudent: Student = {
+        ...student,
+        status: 'inativo',
+        statusMatricula: 'inativo',
+        inactivationDate: student.dataTerminoContrato!.trim(),
+        inactivationReason: 'Contrato Concluído',
+      };
+      inactivated.push(inactivatedStudent);
+      return inactivatedStudent;
+    }
+    return student;
+  });
+
+  return { updatedStudents: updated, inactivatedStudents: inactivated };
+}
+
+/**
+ * Extrai o timestamp de um aluno para ordenação (mais recente primeiro).
+ * Avalia campos de data e o timestamp no ID (ex: st-1788527089570-ctsi).
+ */
+export function extractStudentTimestamp(student: any): number {
+  if (!student) return 0;
+  if (student.updatedAt) {
+    const t = new Date(student.updatedAt).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (student.createdAt) {
+    const t = new Date(student.createdAt).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (student.id && typeof student.id === 'string') {
+    const match = student.id.match(/st-(\d{10,14})/);
+    if (match && match[1]) {
+      const num = Number(match[1]);
+      if (!isNaN(num)) return num;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Chave de deduplicação de cadastro:
+ * Agrupa pelo e-mail do responsável ou por nomeCompleto + turma.
+ */
+export function getStudentDeduplicationKey(student: any): string {
+  const emailResp = student?.emailResponsavel || student?.parentEmail || student?.email;
+  if (emailResp && typeof emailResp === 'string' && emailResp.trim().includes('@')) {
+    return `email:${emailResp.trim().toLowerCase()}`;
+  }
+  const normName = (student?.name || student?.nomeCompleto || student?.nome || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  const normTurma = (student?.turma || '').toString().trim().toLowerCase();
+  return `name_turma:${normName}__${normTurma}`;
+}
+
+/**
+ * Agrupa registros pelo e-mail do responsável ou nomeCompleto + turma.
+ * Se existirem dois ou mais documentos com o mesmo nome na mesma turma,
+ * consolida-os mantendo apenas o ID mais recente.
+ */
+export function deduplicateStudentsList(
+  students: Student[],
+  onDuplicateFound?: (winner: Student, olderDuplicates: Student[]) => void
+): Student[] {
+  const groups = new Map<string, Student[]>();
+  const deletedIds = getDeletedStudentIds();
+
+  (students || []).forEach((student) => {
+    if (!student || !student.id || isMockStudent(student) || deletedIds.has(student.id)) return;
+    const key = getStudentDeduplicationKey(student);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key)!.push(student);
+  });
+
+  const consolidated: Student[] = [];
+
+  groups.forEach((group) => {
+    if (group.length === 1) {
+      consolidated.push(group[0]);
+      return;
+    }
+
+    // Ordenar: mais recente primeiro
+    const sorted = [...group].sort((a, b) => {
+      const tA = extractStudentTimestamp(a);
+      const tB = extractStudentTimestamp(b);
+      return tB - tA;
+    });
+
+    const mostRecent = sorted[0];
+    const olderDuplicates = sorted.slice(1);
+
+    let winner = { ...mostRecent };
+    olderDuplicates.forEach((old) => {
+      winner = mergeStudentData(old, winner);
+    });
+
+    consolidated.push(winner);
+
+    if (onDuplicateFound) {
+      onDuplicateFound(winner, olderDuplicates);
+    }
+  });
+
+  return consolidated;
+}
+
+/**
+ * Busca inicial de alunos (fetchStudents) com Deduplicação de Cadastro:
+ * Agrupa registros pelo e-mail do responsável ou nomeCompleto + turma.
+ * Caso existam dois documentos com o mesmo nome na mesma turma, consolida-os
+ * automaticamente mantendo apenas o ID mais recente no Firestore e deletando
+ * os documentos duplicados antigos no Firestore de forma assíncrona.
+ */
+export async function fetchStudents(): Promise<Student[]> {
+  try {
+    const studentsCol = collection(db, 'students');
+    const alunosCol = collection(db, 'alunos');
+
+    const [snapStudents, snapAlunos] = await Promise.allSettled([
+      getDocs(studentsCol),
+      getDocs(alunosCol),
+    ]);
+
+    const rawDocsMap = new Map<string, any>();
+
+    if (snapStudents.status === 'fulfilled') {
+      snapStudents.value.forEach((d) => {
+        rawDocsMap.set(d.id, { ...d.data(), id: d.id });
+      });
+    }
+
+    if (snapAlunos.status === 'fulfilled') {
+      snapAlunos.value.forEach((d) => {
+        rawDocsMap.set(d.id, { ...d.data(), id: d.id });
+      });
+    }
+
+    const deletedIds = getDeletedStudentIds();
+    const allList: Student[] = [];
+
+    rawDocsMap.forEach((data, id) => {
+      if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
+        allList.push(normalizeStudent({ ...data, id }));
+      }
+    });
+
+    if (allList.length === 0) {
+      const local = loadStudents();
+      const dedupedLocal = deduplicateStudentsList(local);
+      saveStudents(dedupedLocal);
+      return dedupedLocal;
+    }
+
+    const duplicatesToDelete: string[] = [];
+    const consolidated = deduplicateStudentsList(allList, (winner, olderDuplicates) => {
+      olderDuplicates.forEach((old) => {
+        duplicatesToDelete.push(old.id);
+      });
+    });
+
+    // Se existirem duplicatas com o mesmo nome na mesma turma,
+    // consolida mantendo apenas o ID mais recente e remove as duplicatas antigas do Firestore
+    if (duplicatesToDelete.length > 0) {
+      console.info(
+        `[fetchStudents] Deduplicação automática: consolidando e removendo ${duplicatesToDelete.length} registros duplicados do Firestore:`,
+        duplicatesToDelete
+      );
+
+      for (const oldId of duplicatesToDelete) {
+        removeStudentFromLocalStorage(oldId);
+        markStudentAsDeleted(oldId);
+        try {
+          await deleteDoc(doc(db, 'alunos', oldId));
+          await deleteDoc(doc(db, 'students', oldId));
+        } catch (delErr) {
+          console.warn(`[fetchStudents] Erro ao remover documento duplicado ${oldId} do Firestore:`, delErr);
+        }
+      }
+    }
+
+    // Força atualização imediata da coleção local
+    saveStudents(consolidated);
+    return consolidated;
+  } catch (error) {
+    console.error('Erro na rotina fetchStudents:', error);
+    const local = loadStudents();
+    return deduplicateStudentsList(local);
+  }
+}
+
+/**
+ * Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos:
+ * Substitui as chamadas estáticas getDocs na busca da coleção de alunos por um escutador contínuo em tempo real onSnapshot(collection(db, "alunos"), ...).
+ * 
+ * - Reflexo Imediato de Exclusões: Quando um aluno for excluído ou inativado no painel do administrador,
+ *   o ouvinte remove/atualiza automaticamente esse registro na tela de todos os outros dispositivos conectados sem exigir ação manual.
+ * - Gestão do Evento (Unsubscribe): Retorna uma função unsubscribe() para limpar o escutador na desmontagem (useEffect).
+ */
+export function subscribeAlunos(
+  onData: (students: Student[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  const alunosDocs = new Map<string, any>();
+  const studentsDocs = new Map<string, any>();
+
+  const emit = () => {
+    const combinedMap = new Map<string, any>();
+    // Preenche com 'students' e mescla com 'alunos' para sincronização e integridade total
+    studentsDocs.forEach((val, id) => combinedMap.set(id, val));
+    alunosDocs.forEach((val, id) => combinedMap.set(id, val));
+
+    const deletedIds = getDeletedStudentIds();
+    const list: Student[] = [];
+
+    combinedMap.forEach((data, id) => {
+      if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
+        list.push(normalizeStudent({ ...data, id }));
+      }
+    });
+
+    const deduped = deduplicateStudentsList(list);
+    saveStudents(deduped);
+    onData(deduped);
+  };
+
+  const unsubAlunos = onSnapshot(
+    collection(db, 'alunos'),
+    (snapshot) => {
+      alunosDocs.clear();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data) {
+          alunosDocs.set(docSnap.id, { ...data, id: docSnap.id });
+        }
+      });
+      emit();
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.error('Erro no listener onSnapshot da coleção alunos:', error);
+    }
+  );
+
+  const unsubStudents = onSnapshot(
+    collection(db, 'students'),
+    (snapshot) => {
+      studentsDocs.clear();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data) {
+          studentsDocs.set(docSnap.id, { ...data, id: docSnap.id });
+        }
+      });
+      emit();
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.error('Erro no listener onSnapshot da coleção students:', error);
+    }
+  );
+
+  return () => {
+    unsubAlunos();
+    unsubStudents();
+  };
+}
+
+export const subscribeStudents = subscribeAlunos;
+
+/**
  * Mescla uma lista de alunos recebida (ex: do Firestore ou importação) com a lista local existente,
  * preservando todas as configurações customizadas já salvas de cada aluno.
+ * Se o Firestore trouxer dados, ele é a fonte de verdade para a lista de alunos cadastrados,
+ * evitando ressuscitar alunos que já foram excluídos.
  */
 export function mergeStudentsList(
   currentStudents: Student[],
   incomingStudents: Student[]
 ): Student[] {
+  const deletedIds = getDeletedStudentIds();
   const currentMap = new Map<string, Student>();
   const nameTurmaMap = new Map<string, Student>();
 
   (currentStudents || []).forEach((s) => {
-    if (s.id) currentMap.set(s.id, s);
-    if (s.name && s.turma) {
+    if (s.id && !deletedIds.has(s.id)) currentMap.set(s.id, s);
+    if (s.name && s.turma && !deletedIds.has(s.id)) {
       const key = `${s.name.toLowerCase().trim()}_${s.turma.toLowerCase().trim()}`;
       nameTurmaMap.set(key, s);
     }
@@ -255,8 +638,9 @@ export function mergeStudentsList(
   const mergedList: Student[] = [];
 
   (incomingStudents || []).forEach((incoming) => {
-    if (!incoming) return;
+    if (!incoming || !incoming.id) return;
     if (isMockStudent(incoming)) return;
+    if (deletedIds.has(incoming.id)) return;
 
     let existing = incoming.id ? currentMap.get(incoming.id) : undefined;
     if (!existing && incoming.name && incoming.turma) {
@@ -269,14 +653,19 @@ export function mergeStudentsList(
     mergedList.push(merged);
   });
 
-  // Preservar alunos locais que não estejam no incoming (para não perder dados offline ou de lotes parciais)
-  (currentStudents || []).forEach((localStudent) => {
-    if (!isMockStudent(localStudent) && !processedIds.has(localStudent.id)) {
-      mergedList.push(normalizeStudent(localStudent));
-    }
-  });
+  // Se incomingStudents estiver vazio (ex: offline ou snapshot ainda carregando),
+  // mantém os alunos locais que não foram deletados.
+  // MAS se incomingStudents tem dados do Firestore, ele é a fonte de verdade:
+  // NÃO ressuscita alunos excluídos que existiam apenas em cache local!
+  if (!incomingStudents || incomingStudents.length === 0) {
+    (currentStudents || []).forEach((localStudent) => {
+      if (!isMockStudent(localStudent) && !deletedIds.has(localStudent.id) && !processedIds.has(localStudent.id)) {
+        mergedList.push(normalizeStudent(localStudent));
+      }
+    });
+  }
 
-  return mergedList;
+  return deduplicateStudentsList(mergedList);
 }
 
 export function loadHolidays(): HolidayItem[] {
@@ -471,8 +860,9 @@ export function loadStudents(): Student[] {
         let migrated = false;
         const newTurmas: TurmaType[] = ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul'];
 
-        // Filter out any mock/fictional model students
-        const nonMock = parsed.filter((s) => !isMockStudent(s));
+        // Filter out any mock/fictional model students and deleted students
+        const deletedIds = getDeletedStudentIds();
+        const nonMock = parsed.filter((s) => !isMockStudent(s) && !deletedIds.has(s.id));
         if (nonMock.length !== parsed.length) migrated = true;
 
         const normalized = nonMock.map((s, idx) => {
@@ -487,7 +877,7 @@ export function loadStudents(): Student[] {
         if (migrated) {
           saveStudents(normalized);
         }
-        return normalized;
+        return deduplicateStudentsList(normalized);
       }
     }
   } catch (e) {
@@ -500,8 +890,10 @@ export function loadStudents(): Student[] {
 
 export function saveStudents(students: Student[]): void {
   try {
-    const nonMock = (students || []).filter((s) => !isMockStudent(s));
-    const normalized = nonMock.map((s) => normalizeStudent(s));
+    const deletedIds = getDeletedStudentIds();
+    const nonMock = (students || []).filter((s) => !isMockStudent(s) && !deletedIds.has(s.id));
+    const deduped = deduplicateStudentsList(nonMock);
+    const normalized = deduped.map((s) => normalizeStudent(s));
     localStorage.setItem(STUDENTS_KEY, JSON.stringify(normalized));
   } catch (e) {
     console.error('Erro ao salvar alunos:', e);
@@ -624,3 +1016,15 @@ export function resetAllData(): void {
 function generateInitialSeedRecords(): AttendanceRecord[] {
   return [];
 }
+
+/**
+ * Operações de Usuários com Persistência Robusta no Firestore e Invalidação de Cache:
+ * Garante gravação prioritária em 'usuarios' (com updateDoc / setDoc),
+ * mapeamento correto de ID (Auth UID, e-mail ou canonical) e sincronia sem simulação em tela.
+ */
+export {
+  saveUserToFirestore,
+  fetchAllUsersDirectFromServer,
+  deleteUserFromFirestore,
+  resolveUserFirestoreDocId,
+} from '../firebase';

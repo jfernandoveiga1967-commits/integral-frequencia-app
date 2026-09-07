@@ -5,6 +5,9 @@ import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import {
   loadStudents,
   saveStudents,
+  fetchStudents,
+  removeStudentFromLocalStorage,
+  markStudentAsDeleted,
   normalizeStudent,
   mergeStudentData,
   mergeStudentsList,
@@ -26,6 +29,7 @@ import {
   saveSemanarioPlans,
   resetAllData,
   isMockStudent,
+  checkAndInactivateExpiredTemporaryStudents,
 } from './utils/storageUtils';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
@@ -142,6 +146,20 @@ export default function App() {
     setCurrentUser(finalUser);
     saveStoredUser(finalUser);
 
+    // Verificação de expiração de contratos avulsos ao realizar login
+    const currentStudents = loadStudents();
+    const { updatedStudents: postLoginStudents, inactivatedStudents: loginInactivated } =
+      checkAndInactivateExpiredTemporaryStudents(currentStudents);
+    if (loginInactivated.length > 0) {
+      setStudents(postLoginStudents);
+      saveStudents(postLoginStudents);
+      loginInactivated.forEach((st) => {
+        saveStudentToFirestore(st).catch((err) =>
+          console.error('Erro ao salvar inativação automática no login:', err)
+        );
+      });
+    }
+
     // Redirect user to appropriate initial tab:
     // Non-admin / non-coordenador users (Monitor / Professor) are directed to 'momento' (or 'frequencia')
     if (finalUser.role !== 'coordenador') {
@@ -179,10 +197,18 @@ export default function App() {
 
   // Load initial local data & sync with Firebase Firestore real-time listeners
   useEffect(() => {
-    const loadedStudents = loadStudents();
+    const rawLoadedStudents = loadStudents();
+    const { updatedStudents: loadedStudents, inactivatedStudents: initInactivated } =
+      checkAndInactivateExpiredTemporaryStudents(rawLoadedStudents);
     const loadedRecords = loadAttendanceRecords();
     const loadedTurmas = sortTurmasPedagogical(loadTurmas());
     setStudents(loadedStudents);
+    if (initInactivated.length > 0) {
+      saveStudents(loadedStudents);
+      initInactivated.forEach((st) => {
+        saveStudentToFirestore(st).catch(() => {});
+      });
+    }
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
 
@@ -313,14 +339,35 @@ export default function App() {
     let hasCleanedMockProfiles = false;
     let hasHealedActivitiesList = false;
 
+    // Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos:
+    // Substitui chamadas estáticas getDocs por escutador reativo contínuo onSnapshot(collection(db, "alunos"), ...)
+    // Garantindo reflexo imediato de exclusões, inativações e inclusões em todos os dispositivos conectados.
     const unsubStudents = subscribeStudents((fsStudents) => {
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
-      // Deep merge Firestore students with localStorage students to preserve custom attributes
-      const currentLocal = loadStudents();
-      const mergedStudents = mergeStudentsList(currentLocal, realStudents);
+      
+      // Quando o Firestore retorna dados reativos em tempo real, ele é a autoridade máxima.
+      // Se a lista estiver vazia por ser o primeiro carregamento offline, faz fallback seguro ao storage local.
+      let effectiveList: Student[];
+      if (realStudents.length > 0) {
+        effectiveList = realStudents;
+      } else if (isInitialStudentsSync) {
+        const currentLocal = loadStudents();
+        effectiveList = currentLocal.filter((s) => !isMockStudent(s));
+      } else {
+        effectiveList = [];
+      }
 
-      setStudents(mergedStudents);
-      saveStudents(mergedStudents);
+      const { updatedStudents: verifiedStudents, inactivatedStudents: syncInactivated } =
+        checkAndInactivateExpiredTemporaryStudents(effectiveList);
+
+      setStudents(verifiedStudents);
+      saveStudents(verifiedStudents);
+
+      if (syncInactivated.length > 0) {
+        syncInactivated.forEach((st) => {
+          saveStudentToFirestore(st).catch(() => {});
+        });
+      }
       isInitialStudentsSync = false;
     });
 
@@ -624,7 +671,17 @@ export default function App() {
     }
   };
 
-  const handleDeleteStudent = async (id: string) => {
+  const handleDeleteStudent = async (id: string): Promise<void> => {
+    // 1. Exclusão assíncrona no Firestore (coleções 'alunos' e 'students')
+    // Se a remoção falhar (permissão ou rede), propaga o erro para exibir toast e não remover da tela
+    await deleteStudentFromFirestore(id);
+
+    // 2. Limpeza de Cache ao Deletar:
+    // Remove imediatamente do storage local e marca ID para não ressincronizar
+    removeStudentFromLocalStorage(id);
+    markStudentAsDeleted(id);
+
+    // 3. Atualiza estado da tela apenas após confirmação
     let updatedList: Student[] = [];
     setStudents((prev) => {
       const updated = prev.filter((s) => s.id !== id);
@@ -633,11 +690,6 @@ export default function App() {
       return updated;
     });
     broadcastSyncEvent('SYNC_STUDENTS', updatedList);
-    try {
-      await deleteStudentFromFirestore(id);
-    } catch (err) {
-      console.error('Error deleting student from Firestore:', err);
-    }
   };
 
   // Save attendance record modifications
@@ -861,44 +913,53 @@ export default function App() {
   };
 
   const handleSaveUser = async (userToSave: UserProfile) => {
-    const targetId = (userToSave.id || '').trim();
-    const targetEmail = (userToSave.email || '').trim().toLowerCase();
-    const existingIdx = users.findIndex(
-      (u) => (targetId && u.id === targetId) || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
-    );
-    let updatedUsers: UserProfile[];
-    if (existingIdx >= 0) {
-      updatedUsers = [...users];
-      updatedUsers[existingIdx] = {
-        ...users[existingIdx],
-        ...userToSave,
-      };
-    } else {
-      updatedUsers = [userToSave, ...users];
-    }
-    const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
-    setUsers(deduplicated);
-    saveLocalUsersList(deduplicated);
-    broadcastSyncEvent('SYNC_USERS', deduplicated);
-
-    // If currentUser was saved, update state & storage immediately
-    if (
-      currentUser &&
-      ((targetId && currentUser.id === targetId) ||
-        (currentUser.email && targetEmail && currentUser.email.toLowerCase() === targetEmail))
-    ) {
-      const updatedCurrent = deduplicated.find(
-        (u) => (targetId && u.id === targetId) || (u.email && targetEmail && u.email.toLowerCase() === targetEmail)
-      ) || userToSave;
-      setCurrentUser(updatedCurrent);
-      saveStoredUser(updatedCurrent);
-    }
-
     try {
-      await saveUserToFirestore(userToSave);
-      // Recarregamento sem cache após gravação
+      // 1. Gravação no Firestore primeiro (com mapeamento correto de ID no Firestore e updateDoc/setDoc)
+      const confirmedUser = await saveUserToFirestore(userToSave);
+
+      // 2. Atualiza estado da tela apenas APÓS o Firestore confirmar a alteração (sem simular salvamento falso)
+      const targetId = (confirmedUser.id || userToSave.id || '').trim();
+      const targetEmail = (confirmedUser.email || userToSave.email || '').trim().toLowerCase();
+
+      let finalUsersList: UserProfile[] = [];
+      setUsers((prev) => {
+        const existingIdx = prev.findIndex(
+          (u) => (targetId && u.id === targetId) || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
+        );
+        let updatedUsers: UserProfile[];
+        if (existingIdx >= 0) {
+          updatedUsers = [...prev];
+          updatedUsers[existingIdx] = {
+            ...prev[existingIdx],
+            ...confirmedUser,
+          };
+        } else {
+          updatedUsers = [confirmedUser, ...prev];
+        }
+        const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
+        finalUsersList = deduplicated;
+        saveLocalUsersList(deduplicated);
+        broadcastSyncEvent('SYNC_USERS', deduplicated);
+        return deduplicated;
+      });
+
+      // Se for o usuário atualmente autenticado, atualiza perfil logado
+      if (
+        currentUser &&
+        ((targetId && currentUser.id === targetId) ||
+          (currentUser.email && targetEmail && currentUser.email.toLowerCase() === targetEmail))
+      ) {
+        const updatedCurrent = {
+          ...currentUser,
+          ...confirmedUser,
+        };
+        setCurrentUser(updatedCurrent);
+        saveStoredUser(updatedCurrent);
+      }
+
+      // 3. Invalidação de Cache: Força atualização imediata da lista de usuários ativos sem cache
       await handleForceReloadUsers();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao persistir usuário no Firestore:', err);
       throw err;
     }
@@ -916,19 +977,26 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    const targetUser = users.find((u) => u.id === userId);
-    const targetEmail = (targetUser?.email || '').trim().toLowerCase();
-    const updatedUsers = users.filter(
-      (u) => u.id !== userId && (!targetEmail || !u.email || u.email.trim().toLowerCase() !== targetEmail)
-    );
-    const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
-    setUsers(deduplicated);
-    saveLocalUsersList(deduplicated);
-    broadcastSyncEvent('SYNC_USERS', deduplicated);
     try {
+      // 1. Exclui no Firestore primeiro
       await deleteUserFromFirestore(userId);
-    } catch (err) {
+
+      // 2. Atualiza estado e cache local após confirmação
+      const targetUser = users.find((u) => u.id === userId);
+      const targetEmail = (targetUser?.email || '').trim().toLowerCase();
+      const updatedUsers = users.filter(
+        (u) => u.id !== userId && (!targetEmail || !u.email || u.email.trim().toLowerCase() !== targetEmail)
+      );
+      const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
+      setUsers(deduplicated);
+      saveLocalUsersList(deduplicated);
+      broadcastSyncEvent('SYNC_USERS', deduplicated);
+
+      // 3. Força recarga sem cache
+      await handleForceReloadUsers();
+    } catch (err: any) {
       console.error('Erro ao excluir usuário no Firestore:', err);
+      throw err;
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
+import { UserProfile, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import {
   getRoleBadgeStyle,
@@ -186,6 +186,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formContractDailyHoursFormatted, setFormContractDailyHoursFormatted] = useState('6h 00min');
   const [formContractDailyMinutes, setFormContractDailyMinutes] = useState(360);
   const [formBaseSalary, setFormBaseSalary] = useState<number | string>(1200);
+  const [formRegimeTrabalho, setFormRegimeTrabalho] = useState<RegimeTrabalho>('mensalista');
+  const [formValorHoraAula, setFormValorHoraAula] = useState<number | string>('');
+  const [formDuracaoAulaMinutos, setFormDuracaoAulaMinutos] = useState<number | string>(50);
+  const [formContractDivisorHours, setFormContractDivisorHours] = useState<number | string>(220);
+  const [formAjudaDeCusto, setFormAjudaDeCusto] = useState<number | string>(150);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
 
   // Dynamic calculation for schedule and lunch interval
@@ -475,6 +480,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
+    setFormRegimeTrabalho(user.regimeTrabalho || 'mensalista');
+    setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
+    setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
+    setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
+    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150);
     setFormCompany(user.company || 'GADAL - Gestão e Apoio');
   };
 
@@ -515,6 +525,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormContractDailyHoursFormatted('6h00min');
     setFormContractDailyMinutes(360);
     setFormBaseSalary(1200);
+    setFormRegimeTrabalho('mensalista');
+    setFormValorHoraAula('');
+    setFormDuracaoAulaMinutos(50);
+    setFormContractDivisorHours(220);
+    setFormAjudaDeCusto(150);
     setFormCompany('GADAL - Gestão e Apoio');
     setIsNewUserModalOpen(true);
   };
@@ -578,6 +593,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail && (!editingUser || u.id !== editingUser.id)
     );
 
+    if (formRegimeTrabalho === 'professor_horista') {
+      const parsedHoraAula = Number(formValorHoraAula);
+      if (!formValorHoraAula || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
+        showToast('Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero.', 'error');
+        return;
+      }
+    }
+
     const targetId = isMasterAdmin
       ? 'usr_coord_1'
       : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
@@ -586,15 +609,43 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       ? formActivities
       : (isMasterAdmin ? ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'] : []);
 
-    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : (isMasterAdmin ? 5000 : 1200);
+    const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : (isMasterAdmin ? 0 : 1200);
     
-    // Resolve precise minutes and formatted daily hours string (Model: 8h40min)
-    let resolvedMinutes = formContractDailyMinutes > 0 ? formContractDailyMinutes : (isMasterAdmin ? 480 : 360);
-    if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
-      resolvedMinutes = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
-    } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
-      resolvedMinutes = parseHoursAndMinutesStringToMinutes(Number(formContractDailyHours));
+    // Resolve precise minutes and formatted daily hours string
+    let resolvedMinutes = formWorkShiftType === 'padrao_8h' ? 528 : (isMasterAdmin ? 480 : 360);
+    if (formContractDailyMinutes && !isNaN(Number(formContractDailyMinutes)) && Number(formContractDailyMinutes) > 0) {
+      resolvedMinutes = Math.round(Number(formContractDailyMinutes));
     }
+    
+    if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
+      try {
+        const parsed = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
+        if (!isNaN(parsed) && parsed > 0) {
+          resolvedMinutes = parsed;
+        }
+      } catch (err) {
+        console.warn('Formato de carga horária inválido, mantendo valor calculado:', err);
+      }
+    } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
+      const parsedHours = Number(formContractDailyHours);
+      if (parsedHours > 0) {
+        resolvedMinutes = Math.round(parsedHours * 60);
+      }
+    } else if (formContractSchedule.trim()) {
+      try {
+        const calc = calculateDailyHoursFromSchedule(formContractSchedule);
+        if (calc.workedMinutes > 0) {
+          resolvedMinutes = calc.workedMinutes;
+        }
+      } catch (err) {
+        console.warn('Cálculo a partir do horário contratual falhou:', err);
+      }
+    }
+
+    if (isMasterAdmin && resolvedMinutes <= 360) {
+      resolvedMinutes = 480;
+    }
+
     const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
     const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
 
@@ -632,6 +683,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
+      regimeTrabalho: formRegimeTrabalho,
+      valorHoraAula: formRegimeTrabalho === 'professor_horista' ? Number(formValorHoraAula) : undefined,
+      duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
+      contractDivisorHours: Number(formContractDivisorHours) || 220,
+      hourlyRate: formRegimeTrabalho === 'professor_horista'
+        ? (Number(formValorHoraAula) || 0)
+        : Number((parsedSalary / (Number(formContractDivisorHours) || 220)).toFixed(4)),
+      ajudaDeCusto: Number(formAjudaDeCusto) >= 0 ? Number(formAjudaDeCusto) : 150,
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
       workShiftType: formWorkShiftType,
       updatedAt: new Date().toISOString(),
@@ -647,14 +706,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setIsNewUserModalOpen(false);
       showToast(`Perfil de ${updatedUser.name} salvo e sincronizado com sucesso!`, 'success');
     } catch (err: any) {
-      console.error('Erro ao salvar usuário:', err);
-      showToast(`Erro ao gravar usuário no Firestore: ${err?.message || 'Falha de comunicação'}`, 'error');
+      console.error('Erro ao salvar usuário no Firestore:', err);
+      showToast(`Erro ao gravar usuário no Firestore: ${err?.message || 'Falha de comunicação ou permissão'}`, 'error');
     } finally {
       setIsSavingUser(false);
     }
   };
 
-  const handleQuickRoleChange = (user: UserProfile, newRole: UserRole) => {
+  const handleQuickRoleChange = async (user: UserProfile, newRole: UserRole) => {
     if (user.role === newRole) return;
     if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
       showToast('O perfil do Coordenador Geral não pode ser alterado para Monitor/Professor.', 'error');
@@ -679,11 +738,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    onSaveUser(updated);
-    showToast(`Cargo de ${user.name} alterado para ${roleLabels[newRole]}!`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Cargo de ${user.name} alterado para ${roleLabels[newRole]}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao alterar cargo:', err);
+      showToast(`Erro ao alterar cargo no Firestore: ${err?.message || 'Falha de rede ou permissão'}`, 'error');
+    }
   };
 
-  const handleQuickStatusChange = (user: UserProfile, newStatus: UserStatus) => {
+  const handleQuickStatusChange = async (user: UserProfile, newStatus: UserStatus) => {
     if (user.status === newStatus) return;
     if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
       showToast('O status do Coordenador Geral não pode ser alterado.', 'error');
@@ -698,33 +762,48 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    onSaveUser(updated);
-    showToast(`Status de ${user.name} alterado para ${newStatus}!`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Status de ${user.name} alterado para ${newStatus}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao alterar status:', err);
+      showToast(`Erro ao alterar status no Firestore: ${err?.message || 'Falha de rede ou permissão'}`, 'error');
+    }
   };
 
-  const handleToggleCanManageStudents = (user: UserProfile) => {
+  const handleToggleCanManageStudents = async (user: UserProfile) => {
     const currentVal = canManageStudents(user);
     const updated: UserProfile = {
       ...user,
       canManageStudents: !currentVal,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Permissão de cadastro de alunos para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Permissão de cadastro de alunos para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao atualizar permissão:', err);
+      showToast(`Erro ao gravar permissão no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleToggleCanMarkAttendance = (user: UserProfile) => {
+  const handleToggleCanMarkAttendance = async (user: UserProfile) => {
     const currentVal = canMarkAttendance(user);
     const updated: UserProfile = {
       ...user,
       canMarkAttendance: !currentVal,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Permissão de lançamento de chamada para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Permissão de lançamento de chamada para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao atualizar permissão:', err);
+      showToast(`Erro ao gravar permissão no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleToggleUserActivity = (user: UserProfile, activityId: ActivityType) => {
+  const handleToggleUserActivity = async (user: UserProfile, activityId: ActivityType) => {
     const currentList = user.assignedActivities || activitiesList.map((a) => a.id);
     const exists = currentList.includes(activityId);
     const newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
@@ -734,32 +813,47 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       assignedActivities: newList,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Modalidade ${activityId} ${!exists ? 'atribuída a' : 'removida de'} ${user.name}`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Modalidade ${activityId} ${!exists ? 'atribuída a' : 'removida de'} ${user.name}`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao atualizar atividade do usuário:', err);
+      showToast(`Erro ao salvar alteração no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleAssignAllActivities = (user: UserProfile) => {
+  const handleAssignAllActivities = async (user: UserProfile) => {
     const allIds = activitiesList.map((a) => a.id);
     const updated: UserProfile = {
       ...user,
       assignedActivities: allIds,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Todas as modalidades foram liberadas para ${user.name}!`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Todas as modalidades foram liberadas para ${user.name}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao liberar modalidades:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleClearAllActivities = (user: UserProfile) => {
+  const handleClearAllActivities = async (user: UserProfile) => {
     const updated: UserProfile = {
       ...user,
       assignedActivities: [],
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Modalidades de ${user.name} foram limpas.`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Modalidades de ${user.name} foram limpas.`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao limpar modalidades:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleToggleUserTurma = (user: UserProfile, turmaName: string) => {
+  const handleToggleUserTurma = async (user: UserProfile, turmaName: string) => {
     const currentList = Array.isArray(user.allowedClassIds)
       ? user.allowedClassIds
       : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas);
@@ -772,42 +866,62 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: newList,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Turma ${turmaName} ${!exists ? 'liberada para' : 'revogada de'} ${user.name}`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Turma ${turmaName} ${!exists ? 'liberada para' : 'revogada de'} ${user.name}`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao atualizar turma do usuário:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleAssignAllTurmas = (user: UserProfile) => {
+  const handleAssignAllTurmas = async (user: UserProfile) => {
     const updated: UserProfile = {
       ...user,
       assignedTurmas: availableTurmas,
       allowedClassIds: availableTurmas,
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Todas as turmas foram liberadas para ${user.name}!`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Todas as turmas foram liberadas para ${user.name}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao liberar turmas:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const handleClearAllTurmas = (user: UserProfile) => {
+  const handleClearAllTurmas = async (user: UserProfile) => {
     const updated: UserProfile = {
       ...user,
       assignedTurmas: [],
       allowedClassIds: [],
       updatedAt: new Date().toISOString(),
     };
-    onSaveUser(updated);
-    showToast(`Turmas de ${user.name} foram limpas.`);
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Turmas de ${user.name} foram limpas.`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao limpar turmas:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
   };
 
-  const confirmDeleteUser = () => {
+  const confirmDeleteUser = async () => {
     if (!userToDelete) return;
     if (userToDelete.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || userToDelete.id === 'usr_coord_1') {
       showToast('O perfil do Coordenador Geral não pode ser excluído.', 'error');
       setUserToDelete(null);
       return;
     }
-    onDeleteUser(userToDelete.id);
-    showToast(`Usuário ${userToDelete.name} removido.`);
-    setUserToDelete(null);
+    try {
+      await Promise.resolve(onDeleteUser(userToDelete.id));
+      showToast(`Usuário ${userToDelete.name} removido com sucesso.`, 'success');
+      setUserToDelete(null);
+    } catch (err: any) {
+      console.error('Erro ao excluir usuário:', err);
+      showToast(`Erro ao excluir usuário no Firestore: ${err?.message || 'Falha de comunicação ou permissão'}`, 'error');
+    }
   };
 
   // Handlers for Activity Modal
@@ -1433,7 +1547,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
-                              <span>Bolsa: <strong className="text-emerald-800">R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+                              {user.regimeTrabalho === 'professor_horista' ? (
+                                <span>
+                                  Regime: <strong className="text-indigo-900">Prof. Horista</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </span>
+                              ) : (
+                                <span>
+                                  Regime: <strong className="text-slate-900">Mensalista (220h)</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </span>
+                              )}
                             </div>
                           </div>
                           {user.pixKey && (
@@ -2304,21 +2426,188 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Bolsa Auxílio Base Mensal (R$):</span>
+                {/* Seleção de Regime de Trabalho (Mensalista 220h vs Professor Horista) */}
+                <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-indigo-950 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <GraduationCap className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>Regime de Trabalho Contratual:</span>
                     </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formBaseSalary}
-                      onChange={(e) => setFormBaseSalary(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
-                      placeholder="Ex: 1200.00 (ou 0.00)"
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    <span className="text-[10px] font-semibold text-indigo-700 bg-white/80 px-2 py-0.5 rounded-md border border-indigo-100">
+                      {formRegimeTrabalho === 'professor_horista'
+                        ? 'Aulas Reais + 5% Hora-Ativ. + 1/6 DSR'
+                        : 'Jornada Padrão • Divisor 220h'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormRegimeTrabalho('mensalista')}
+                      className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                        formRegimeTrabalho === 'mensalista'
+                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-xs">Mensalista</div>
+                        <div className={`text-[10px] ${formRegimeTrabalho === 'mensalista' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                          Jornada Padrão (220h)
+                        </div>
+                      </div>
+                      {formRegimeTrabalho === 'mensalista' && <Check className="w-4 h-4 text-white" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormRegimeTrabalho('professor_horista')}
+                      className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                        formRegimeTrabalho === 'professor_horista'
+                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-xs">Professor Horista</div>
+                        <div className={`text-[10px] ${formRegimeTrabalho === 'professor_horista' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                          Por Aulas Dadas (CLT/CCT)
+                        </div>
+                      </div>
+                      {formRegimeTrabalho === 'professor_horista' && <Check className="w-4 h-4 text-white" />}
+                    </button>
+                  </div>
+
+                  {/* Campos Condicionais conforme o Regime */}
+                  {formRegimeTrabalho === 'professor_horista' ? (
+                    <div className="p-3 bg-white border border-indigo-200 rounded-xl space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block font-bold text-indigo-950 text-[11px] mb-1 flex items-center justify-between">
+                            <span>Valor da Hora-Aula (R$): *</span>
+                            <span className="text-[9px] text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded">Obrigatório</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="1"
+                            required
+                            value={formValorHoraAula}
+                            onChange={(e) => setFormValorHoraAula(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                            placeholder="Ex: 45.00"
+                            className="w-full px-3 py-2 bg-indigo-50/40 border border-indigo-300 rounded-xl text-indigo-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            Remuneração devida por hora-aula ministrada
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-[11px] mb-1">
+                            Duração da Hora-Aula (minutos):
+                          </label>
+                          <input
+                            type="number"
+                            min="30"
+                            max="120"
+                            value={formDuracaoAulaMinutos}
+                            onChange={(e) => setFormDuracaoAulaMinutos(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                            placeholder="50"
+                            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="text-[9px] text-slate-400 block mt-0.5">
+                            Padrão curricular: 50 minutos por aula
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 bg-indigo-50/60 rounded-lg text-[10px] text-indigo-900 space-y-0.5">
+                        <div className="font-bold flex items-center gap-1 text-indigo-950">
+                          <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          Regras de Apuração do Professor Horista:
+                        </div>
+                        <p>
+                          • <strong>Salário de Aulas:</strong> Aulas Reais dadas no mês (N) × Valor da Hora-Aula.
+                        </p>
+                        <p>
+                          • <strong>Hora-Atividade (5%):</strong> Salário de Aulas × 0,05 (preparação e correção).
+                        </p>
+                        <p>
+                          • <strong>DSR (1/6):</strong> (Salário de Aulas + Hora-Atividade) ÷ 6 (Lei 605/49 / Súmula 351 TST).
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-1 flex items-center gap-1">
+                            <DollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Salário Base Mensal (R$):</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={formBaseSalary}
+                            onChange={(e) => setFormBaseSalary(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                            placeholder="Ex: 1200.00"
+                            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="text-[9px] text-slate-400 block mt-0.5">
+                            {formBaseSalary ? `Hora contratual: R$ ${(Number(formBaseSalary) / (Number(formContractDivisorHours) || 220)).toFixed(2)}/h` : 'Referência 220h'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-[11px] mb-1">
+                            Divisor Mensal (Horas):
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={formContractDivisorHours}
+                            onChange={(e) => setFormContractDivisorHours(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                            placeholder="220"
+                            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="text-[9px] text-slate-400 block mt-0.5">
+                            Padrão contratual CLT: 220h (Carga 8,8h/dia)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ajuda de Custo Fixa (Válida para Ambos os Regimes) */}
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="p-1.5 bg-emerald-100 rounded-lg text-emerald-700 shrink-0">
+                        <DollarSign className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-emerald-950 text-xs">
+                          Ajuda de Custo Fixa Mensal (R$):
+                        </label>
+                        <span className="text-[10px] text-emerald-700 block">
+                          Verba não salarial • Paga 100% líquida (sem descontos INSS/FGTS e sem compor base de horas extras/faltas/DSR).
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-full sm:w-36">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formAjudaDeCusto}
+                        onChange={(e) => setFormAjudaDeCusto(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                        placeholder="150.00"
+                        className="w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <span className="text-[9px] text-emerald-700 block text-right mt-0.5">Padrão: R$ 150,00</span>
+                    </div>
                   </div>
                 </div>
 
@@ -2330,7 +2619,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       {formWorkShiftType === 'continua_6h'
                         ? '2 Batidas (Entrada e Saída Direta • Sem Almoço)'
                         : formWorkShiftType === 'padrao_8h'
-                        ? '4 Batidas (Com Intervalo de Almoço)'
+                        ? '4 Batidas (Entrada 1, Almoço, Retorno, Saída 2 • 8h48/dia)'
                         : 'Horário Livre'}
                     </span>
                   </label>
@@ -2339,7 +2628,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       type="button"
                       onClick={() => {
                         setFormWorkShiftType('continua_6h');
-                        setFormContractSchedule('11:40 - 17:40');
+                        if (!formContractSchedule || formContractSchedule.includes('/')) {
+                          setFormContractSchedule('11:40 - 17:40');
+                        }
                         setFormContractDailyHoursFormatted('6h00min');
                         setFormContractDailyMinutes(360);
                         setFormContractDailyHours(6);
@@ -2360,7 +2651,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                         )}
                       </div>
                       <p className="text-[10px] text-slate-500 leading-tight">
-                        Exige apenas 2 batidas diárias. Sem intervalo de almoço obrigatório (11:40 - 17:40).
+                        Exige apenas 2 batidas diárias (Entrada e Saída Direta). Sem intervalo de almoço obrigatório.
                       </p>
                     </button>
 
@@ -2368,10 +2659,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       type="button"
                       onClick={() => {
                         setFormWorkShiftType('padrao_8h');
-                        setFormContractSchedule('07:30 - 11:30 / 13:00 - 17:42');
-                        setFormContractDailyHoursFormatted('8h42min');
-                        setFormContractDailyMinutes(522);
-                        setFormContractDailyHours(8.7);
+                        // Preenchimento livre sem horários fixos engessados
+                        if (formContractSchedule === '11:40 - 17:40') {
+                          setFormContractSchedule('');
+                        }
+                        setFormContractDailyHoursFormatted('8h48min');
+                        setFormContractDailyMinutes(528);
+                        setFormContractDailyHours(8.8);
                       }}
                       className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
                         formWorkShiftType === 'padrao_8h'
@@ -2382,14 +2676,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="font-extrabold text-xs flex items-center gap-1.5">
                           <span>🍴</span>
-                          <span>Jornada Padrão (8h+)</span>
+                          <span>Jornada Padrão</span>
                         </span>
                         {formWorkShiftType === 'padrao_8h' && (
                           <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                         )}
                       </div>
                       <p className="text-[10px] text-slate-500 leading-tight">
-                        4 batidas (Entrada 1, Almoço, Retorno, Saída 2). Desconta intervalo (8h42min).
+                        4 batidas (Entrada 1, Almoço, Retorno, Saída 2). Carga diária padrão de 8h48min (44h semanais / 220h mensais).
                       </p>
                     </button>
 
@@ -2423,17 +2717,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1 text-[11px] flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span>Horário Contratual (1 ou 2 turnos com almoço):</span>
+                      <span>Horário Contratual (Preenchimento Livre):</span>
                     </label>
                     <input
                       type="text"
                       value={formContractSchedule}
                       onChange={(e) => handleScheduleInputChange(e.target.value)}
-                      placeholder="Ex: 11:40 - 17:40 ou 07:30 - 11:30 / 13:00 - 17:42"
+                      placeholder="Ex: 07:00 - 12:00 / 13:00 - 16:48 (livre preenchimento pelo gestor)"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                     <span className="text-[10px] text-slate-500 mt-1 block">
-                      Detecta automaticamente turnos divididos (ex: 07:30 - 11:30 / 13:00 - 17:42)
+                      Preenchimento flexível pelo gestor. Detecta automaticamente 1 ou 2 turnos com intervalo de almoço.
                     </span>
                   </div>
 
@@ -2448,7 +2742,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       type="text"
                       value={formContractDailyHoursFormatted}
                       onChange={(e) => handleDailyHoursChange(e.target.value)}
-                      placeholder="Ex: 8h 42min ou 6h 00min"
+                      placeholder="Ex: 8h 48min ou 6h 00min"
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                     <span className="text-[10px] text-slate-500 mt-1 block">

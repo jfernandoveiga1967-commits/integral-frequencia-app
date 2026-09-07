@@ -66,30 +66,37 @@ export function resolveStudentAttendanceCategory(
   record: AttendanceRecord | undefined,
   dateStr: string
 ): AttendanceCategory {
+  // If there is an explicit recorded status on this date, respect it directly
+  if (record && record.status) {
+    if (isPresencaStatus(record.status)) {
+      return 'PRESENTE';
+    }
+    if (isFaltaStatus(record.status)) {
+      return 'FALTA';
+    }
+    if (isJustificadoStatus(record.status)) {
+      return 'JUSTIFICADO';
+    }
+  }
+
   if (!isStudentActiveOnDate(student, dateStr)) {
     return 'PENDENTE';
   }
   const isScheduled = isStudentScheduledForDate(student, dateStr);
   if (!isScheduled) {
-    // If student isn't scheduled for this day of week, they are not expected
+    // If student isn't scheduled for this day of week and has no record, they are not expected
     return 'PENDENTE';
-  }
-
-  if (!record || !record.status) {
-    return 'PENDENTE';
-  }
-
-  if (isPresencaStatus(record.status)) {
-    return 'PRESENTE';
-  }
-  if (isFaltaStatus(record.status)) {
-    return 'FALTA';
-  }
-  if (isJustificadoStatus(record.status)) {
-    return 'JUSTIFICADO';
   }
 
   return 'PENDENTE';
+}
+
+/**
+ * Options for calculating daily consolidated attendance
+ */
+export interface DailyConsolidatedOptions {
+  /** When true, students without roll call on past/closed days are treated as Falta */
+  convertPastPendingToAbsence?: boolean;
 }
 
 /**
@@ -103,7 +110,7 @@ export interface DailyConsolidatedMetrics {
   totalMatriculados: number;
   /** Total active students in scope scheduled for this date (Base Esperada Hoje por dia de frequência) */
   totalAtivos: number;
-  /** Alias explícito para Base Esperada Hoje */
+  /** Alias explícito para Base Esperada Hoje (Garantido: presentes + faltas + justificados + pendentes) */
   totalEsperados: number;
   /** Total present (Presente normal + Saída antecipada + Sem equipamento) */
   presentes: number;
@@ -117,6 +124,8 @@ export interface DailyConsolidatedMetrics {
   justificados: number;
   /** Total scheduled students without a routine roll call record */
   pendentes: number;
+  /** Quantidade de pendências que foram computadas como falta (se regra de encerramento ativada) */
+  pendenciasConvertidas?: number;
   /** Total processed records (Presentes + Faltas + Justificados) */
   apurados: number;
   /** Attendance percentage over total active scheduled (0 to 100) */
@@ -127,8 +136,10 @@ export interface DailyConsolidatedMetrics {
   pendingStudents: Student[];
   /** Detailed array of all students and their evaluated status */
   studentDetails: StudentDailyAttendance[];
-  /** Rigid formula validation flag: (presentes + faltas + justificados + pendentes === totalAtivos) */
+  /** Rigid formula validation flag: (presentes + faltas + justificados + pendentes === totalEsperados) */
   isAuditStrictlyValid: boolean;
+  /** Se o dia é passado ou chamada já encerrada */
+  isPastOrClosed?: boolean;
 }
 
 /**
@@ -139,7 +150,8 @@ export function getDailyConsolidatedMetrics(
   dateStr: string,
   students: Student[],
   records: AttendanceRecord[],
-  turmaFilter?: string
+  turmaFilter?: string,
+  options?: DailyConsolidatedOptions
 ): DailyConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
   const targetStudents = isAllTurmas
@@ -167,14 +179,43 @@ export function getDailyConsolidatedMetrics(
   let faltas = 0;
   let justificados = 0;
   let pendentes = 0;
+  let pendenciasConvertidas = 0;
 
-  // Filter only students who are active and scheduled to attend on this specific date (diasFrequencia check)
+  // Build the unified list of students to evaluate for this date:
+  // 1. All active enrolled students scheduled for this specific date (diasFrequencia check)
   const scheduledStudents = activeEnrolledStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
-  const totalAtivos = scheduledStudents.length;
+  const evaluatedMap = new Map<string, Student>();
 
-  scheduledStudents.forEach((student) => {
+  scheduledStudents.forEach((st) => {
+    evaluatedMap.set(st.id, st);
+  });
+
+  // 2. Plus any enrolled student who actually has an attendance record on this date (e.g. extra / replacement day)
+  activeEnrolledStudents.forEach((st) => {
+    if (!evaluatedMap.has(st.id) && routineRecordMap.has(st.id)) {
+      evaluatedMap.set(st.id, st);
+    }
+  });
+
+  // 3. And any student in targetStudents if they have a record on this date
+  targetStudents.forEach((st) => {
+    if (!evaluatedMap.has(st.id) && routineRecordMap.has(st.id)) {
+      evaluatedMap.set(st.id, st);
+    }
+  });
+
+  const evaluatedStudents = Array.from(evaluatedMap.values());
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isPastDate = dateStr < todayStr;
+  const hasRecordsOnDate = routineRecordMap.size > 0;
+  // A roll call is closed if it is in the past, or if roll call was conducted (records exist on that day)
+  const isCallClosed = isPastDate || (hasRecordsOnDate && dateStr <= todayStr);
+  const shouldConvertPending = Boolean(options?.convertPastPendingToAbsence && isCallClosed);
+
+  evaluatedStudents.forEach((student) => {
     const rec = routineRecordMap.get(student.id);
-    const category = resolveStudentAttendanceCategory(student, rec, dateStr);
+    let category = resolveStudentAttendanceCategory(student, rec, dateStr);
 
     if (category === 'PRESENTE') {
       presentes++;
@@ -188,8 +229,15 @@ export function getDailyConsolidatedMetrics(
     } else if (category === 'JUSTIFICADO') {
       justificados++;
     } else {
-      pendentes++;
-      pendingStudents.push(student);
+      // Pending case (unmarked / without record)
+      if (shouldConvertPending) {
+        faltas++;
+        pendenciasConvertidas++;
+        category = 'FALTA';
+      } else {
+        pendentes++;
+        pendingStudents.push(student);
+      }
     }
 
     studentDetails.push({
@@ -197,18 +245,21 @@ export function getDailyConsolidatedMetrics(
       record: rec,
       category,
       rawStatus: rec?.status,
-      isScheduled: true,
+      isScheduled: isStudentScheduledForDate(student, dateStr),
     });
   });
 
   // Guarantee strictly alphabetical sorting (A-Z) for pending students
   pendingStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
 
+  // CONSISTÊNCIA DE TOTAIS: O Total de Esperados é RIGOROSAMENTE a soma exata dos registros apurados + pendentes
+  const totalEsperados = presentes + faltas + justificados + pendentes;
+  const totalAtivos = totalEsperados;
   const apurados = presentes + faltas + justificados;
-  const isAuditStrictlyValid = presentes + faltas + justificados + pendentes === totalAtivos;
+  const isAuditStrictlyValid = presentes + faltas + justificados + pendentes === totalEsperados;
 
   // Percentage calculations
-  const taxaPresenca = totalAtivos > 0 ? Math.round((presentes / totalAtivos) * 100) : 0;
+  const taxaPresenca = totalEsperados > 0 ? Math.round((presentes / totalEsperados) * 100) : 0;
   const taxaApurada = apurados > 0 ? Math.round((presentes / apurados) * 100) : 0;
 
   const dayOfWeek = getDayOfWeekFromDate(dateStr);
@@ -227,19 +278,21 @@ export function getDailyConsolidatedMetrics(
     dayShort,
     totalMatriculados,
     totalAtivos,
-    totalEsperados: totalAtivos,
+    totalEsperados,
     presentes,
     saidasAntecipadas,
     semEquipamento,
     faltas,
     justificados,
     pendentes,
+    pendenciasConvertidas,
     apurados,
     taxaPresenca,
     taxaApurada,
     pendingStudents,
     studentDetails,
     isAuditStrictlyValid,
+    isPastOrClosed: isPastDate,
   };
 }
 
@@ -261,6 +314,7 @@ export interface PeriodConsolidatedMetrics {
   totalFaltasAcumuladas: number;
   totalJustificadosAcumulados: number;
   totalPendentesAcumulados: number;
+  totalPendenciasConvertidasAcumuladas: number;
   totalApuradosAcumulados: number;
   taxaPresencaGeral: number;
   /** Days in the period that have unrecorded / pending student attendance */
@@ -282,7 +336,8 @@ export function getPeriodConsolidatedMetrics(
   students: Student[],
   records: AttendanceRecord[],
   holidays: HolidayItem[] = [],
-  turmaFilter: string = 'all'
+  turmaFilter: string = 'all',
+  options?: DailyConsolidatedOptions
 ): PeriodConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
   const targetStudents = isAllTurmas
@@ -302,18 +357,20 @@ export function getPeriodConsolidatedMetrics(
   let totalFaltasAcumuladas = 0;
   let totalJustificadosAcumulados = 0;
   let totalPendentesAcumulados = 0;
+  let totalPendenciasConvertidasAcumuladas = 0;
 
   effectiveDays.forEach((day) => {
-    const daily = getDailyConsolidatedMetrics(day.dateStr, targetStudents, records, turmaFilter);
+    const daily = getDailyConsolidatedMetrics(day.dateStr, targetStudents, records, turmaFilter, options);
     dailyMetrics.push(daily);
 
-    totalEsperadosAcumulados += daily.totalAtivos;
+    totalEsperadosAcumulados += daily.totalEsperados;
     totalPresentesAcumulados += daily.presentes;
     totalSaidasAntecipadasAcumuladas += daily.saidasAntecipadas;
     totalSemEquipamentoAcumuladas += daily.semEquipamento;
     totalFaltasAcumuladas += daily.faltas;
     totalJustificadosAcumulados += daily.justificados;
     totalPendentesAcumulados += daily.pendentes;
+    totalPendenciasConvertidasAcumuladas += daily.pendenciasConvertidas || 0;
 
     if (daily.pendentes > 0) {
       daysWithPendingRollCall.push({
@@ -350,6 +407,7 @@ export function getPeriodConsolidatedMetrics(
     totalFaltasAcumuladas,
     totalJustificadosAcumulados,
     totalPendentesAcumulados,
+    totalPendenciasConvertidasAcumuladas,
     totalApuradosAcumulados,
     taxaPresencaGeral,
     daysWithPendingRollCall,

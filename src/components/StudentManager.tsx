@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
@@ -7,17 +7,18 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida } from '../utils/dateUtils';
+import { subscribeAlunos } from '../firebase';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock } from 'lucide-react';
 
 interface StudentManagerProps {
-  students: Student[];
+  students?: Student[];
   records?: AttendanceRecord[];
   turmas?: string[];
   activitiesList?: ActivityItem[];
   currentWeek?: WeekInfo;
   currentUser?: UserProfile | null;
   onAddStudent: (student: Omit<Student, 'id'>) => void | Promise<void>;
-  onBatchAddStudents: (names: string[], turma: TurmaType, activities: ActivityType[], diasFrequencia?: DayOfWeek[]) => void | Promise<void>;
+  onBatchAddStudents?: (names: string[], turma: TurmaType, activities: ActivityType[], diasFrequencia?: DayOfWeek[]) => void | Promise<void>;
   onUpdateStudent: (student: Student) => void | Promise<void>;
   onDeleteStudent: (id: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;
@@ -25,7 +26,7 @@ interface StudentManagerProps {
 }
 
 export const StudentManager: React.FC<StudentManagerProps> = ({
-  students,
+  students: initialStudents = [],
   records = [],
   turmas,
   activitiesList = ACTIVITIES_LIST,
@@ -38,6 +39,33 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onAddTurma,
   onDeleteTurma,
 }) => {
+  const [students, setStudents] = useState<Student[]>(initialStudents);
+
+  // Ouvinte em Tempo Real (onSnapshot): Sincronização reativa contínua da coleção "alunos"
+  // Quando um aluno for excluído ou inativado no painel do administrador,
+  // o ouvinte remove/atualiza automaticamente o registro na tela de todos os outros aparelhos conectados sem exigir ação manual.
+  useEffect(() => {
+    const unsubscribe = subscribeAlunos(
+      (liveStudents) => {
+        setStudents(liveStudents);
+      },
+      (error) => {
+        console.error('Erro no ouvinte em tempo real onSnapshot de alunos (StudentManager):', error);
+      }
+    );
+
+    // Gestão do Evento (Unsubscribe): Limpeza rigorosa do escutador na desmontagem para evitar vazamento de memória
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Sincroniza se a prop externa students for atualizada
+  useEffect(() => {
+    if (initialStudents && initialStudents.length > 0) {
+      setStudents(initialStudents);
+    }
+  }, [initialStudents]);
   const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
   const userCanManageStudents = canManageStudents(currentUser);
   const userCanManageTurmas = canManageTurmas(currentUser);
@@ -104,6 +132,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+  const [newTipoContrato, setNewTipoContrato] = useState<ContractType>('regular');
+  const [newDataInicio, setNewDataInicio] = useState<string>(toISODateString(new Date()));
+  const [newDataTermino, setNewDataTermino] = useState<string>(toISODateString(new Date()));
+  const [newDiasContratados, setNewDiasContratados] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [newDiasFrequencia, setNewDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
@@ -164,6 +196,52 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toastMsg) {
+      const timer = setTimeout(() => setToastMsg(null), 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMsg]);
+
+  const handleConfirmDeleteStudent = async () => {
+    if (!studentToDelete || isDeletingStudent) return;
+    if (!isCoordenador && currentUser && !allowedTurmas.includes(studentToDelete.turma)) {
+      setStudentToDelete(null);
+      return;
+    }
+
+    const studentName = studentToDelete.name;
+    const studentId = studentToDelete.id;
+    setIsDeletingStudent(true);
+
+    try {
+      // Exclusão efetiva no Firestore de forma assíncrona
+      await onDeleteStudent(studentId);
+      setToastMsg({
+        text: `Aluno "${studentName}" excluído permanentemente com sucesso.`,
+        type: 'success',
+      });
+      setStudentToDelete(null);
+    } catch (err: any) {
+      console.error('Falha ao excluir aluno no Firestore:', err);
+      const isPermError =
+        err?.code === 'permission-denied' ||
+        err?.message?.toLowerCase()?.includes('permission') ||
+        err?.message?.toLowerCase()?.includes('permissão');
+      const errorMsg = isPermError
+        ? 'Erro de permissão no Firestore. O aluno não foi excluído.'
+        : `Erro de rede ou conexão ao excluir no Firestore: ${err?.message || 'Falha de comunicação'}. O aluno permanece no cadastro.`;
+
+      setToastMsg({ text: errorMsg, type: 'error' });
+      // Se a remoção no Firestore falhar, exibe toast de erro e NÃO remove o aluno da tela
+      setStudentToDelete(null);
+    } finally {
+      setIsDeletingStudent(false);
+    }
+  };
+
   const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
   const [targetTransferTurma, setTargetTransferTurma] = useState<string>('');
   const [isSavingTransfer, setIsSavingTransfer] = useState(false);
@@ -186,13 +264,48 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     title: '',
   });
 
+  // Inativação Automática Pós-Período de Contratos Avulsos/Temporários
+  React.useEffect(() => {
+    const today = toISODateString(new Date());
+    const expiredStudents = (students || []).filter(
+      (s) =>
+        s.tipoContrato === 'avulso' &&
+        (s.status || 'ativo') === 'ativo' &&
+        s.dataTerminoContrato &&
+        s.dataTerminoContrato.trim().length > 0 &&
+        s.dataTerminoContrato.trim() < today
+    );
+
+    if (expiredStudents.length > 0 && userCanManageStudents) {
+      expiredStudents.forEach((student) => {
+        onUpdateStudent({
+          ...student,
+          status: 'inativo',
+          statusMatricula: 'inativo',
+          inactivationDate: student.dataTerminoContrato?.trim() || today,
+          inactivationReason: 'Contrato Concluído',
+        });
+      });
+    }
+  }, [students, userCanManageStudents, onUpdateStudent]);
+
   const handleOpenEdit = (student: Student) => {
     if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
       return;
     }
     setEditFormError(null);
+    const today = toISODateString(new Date());
     setEditingStudent({
       ...student,
+      tipoContrato: student.tipoContrato || 'regular',
+      dataInicioContrato: student.dataInicioContrato || today,
+      dataTerminoContrato: student.dataTerminoContrato || today,
+      diasContratados:
+        student.diasContratados && student.diasContratados.length > 0
+          ? student.diasContratados
+          : student.diasFrequencia && student.diasFrequencia.length > 0
+          ? student.diasFrequencia
+          : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
       diasFrequencia:
         student.diasFrequencia && student.diasFrequencia.length > 0
           ? student.diasFrequencia
@@ -327,22 +440,57 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setSingleFormError('Você só tem permissão para cadastrar alunos nas suas turmas vinculadas.');
       return;
     }
+
+    if (newTipoContrato === 'avulso') {
+      if (!newDataInicio || !newDataInicio.trim()) {
+        setSingleFormError('Para contrato Avulso / Temporário, informe a Data de Início obrigatória.');
+        return;
+      }
+      if (!newDataTermino || !newDataTermino.trim()) {
+        setSingleFormError('Para contrato Avulso / Temporário, informe a Data de Término obrigatória.');
+        return;
+      }
+      if (newDataInicio > newDataTermino) {
+        setSingleFormError('A Data de Início não pode ser posterior à Data de Término.');
+        return;
+      }
+      if (!newDiasContratados || newDiasContratados.length === 0) {
+        setSingleFormError('Selecione pelo menos um Dia da Semana Contratado (Segunda a Sexta).');
+        return;
+      }
+    }
+
     setIsSavingSingle(true);
     try {
       const finalActivities = newActivities.includes('Rotina')
         ? Array.from(new Set(newActivities))
         : ['Rotina', ...Array.from(new Set(newActivities))];
+
+      const defaultWeekDays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      const effectiveDias: DayOfWeek[] =
+        newTipoContrato === 'avulso'
+          ? (newDiasContratados && newDiasContratados.length > 0 ? newDiasContratados : defaultWeekDays)
+          : (newDiasFrequencia && newDiasFrequencia.length > 0 ? newDiasFrequencia : defaultWeekDays);
+
       await Promise.resolve(
         onAddStudent({
           name: trimmedName,
           turma: newTurma,
           activities: finalActivities,
-          diasFrequencia: newDiasFrequencia,
+          tipoContrato: newTipoContrato,
+          dataInicioContrato: newTipoContrato === 'avulso' ? newDataInicio : undefined,
+          dataTerminoContrato: newTipoContrato === 'avulso' ? newDataTermino : undefined,
+          diasContratados: newTipoContrato === 'avulso' ? newDiasContratados : undefined,
+          diasFrequencia: effectiveDias,
           horariosSaida: newHorariosSaida,
           status: 'ativo',
         })
       );
       setNewName('');
+      setNewTipoContrato('regular');
+      setNewDataInicio(toISODateString(new Date()));
+      setNewDataTermino(toISODateString(new Date()));
+      setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewHorariosSaida({});
       setShowAddForm(false);
@@ -406,6 +554,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       return;
     }
 
+    if (editingStudent.tipoContrato === 'avulso') {
+      if (!editingStudent.dataInicioContrato || !editingStudent.dataInicioContrato.trim()) {
+        setEditFormError('Para contrato Avulso / Temporário, informe a Data de Início obrigatória.');
+        return;
+      }
+      if (!editingStudent.dataTerminoContrato || !editingStudent.dataTerminoContrato.trim()) {
+        setEditFormError('Para contrato Avulso / Temporário, informe a Data de Término obrigatória.');
+        return;
+      }
+      if (editingStudent.dataInicioContrato > editingStudent.dataTerminoContrato) {
+        setEditFormError('A Data de Início não pode ser posterior à Data de Término.');
+        return;
+      }
+      if (!editingStudent.diasContratados || editingStudent.diasContratados.length === 0) {
+        setEditFormError('Selecione pelo menos um Dia da Semana Contratado (Segunda a Sexta).');
+        return;
+      }
+    }
+
     setIsSavingEdit(true);
     try {
       const currentActs = Array.isArray(editingStudent.activities) ? editingStudent.activities : [];
@@ -413,12 +580,26 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         ? Array.from(new Set(currentActs))
         : ['Rotina', ...Array.from(new Set(currentActs))];
 
+      const isAvulso = editingStudent.tipoContrato === 'avulso';
+      const defaultWeekDays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      const effectiveDias: DayOfWeek[] = isAvulso
+        ? (editingStudent.diasContratados && editingStudent.diasContratados.length > 0
+            ? editingStudent.diasContratados
+            : defaultWeekDays)
+        : (editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+            ? editingStudent.diasFrequencia
+            : defaultWeekDays);
+
       const newStatus = editingStudent.status || 'ativo';
       const studentToSave: Student = {
         ...editingStudent,
         name: trimmedName,
         turma: editingStudent.turma,
         activities: finalActivities,
+        tipoContrato: editingStudent.tipoContrato || 'regular',
+        dataInicioContrato: isAvulso ? editingStudent.dataInicioContrato : undefined,
+        dataTerminoContrato: isAvulso ? editingStudent.dataTerminoContrato : undefined,
+        diasContratados: isAvulso ? editingStudent.diasContratados : undefined,
         status: newStatus,
         inactivationDate:
           newStatus === 'inativo' || newStatus === 'cancelado'
@@ -428,10 +609,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           newStatus === 'inativo' || newStatus === 'cancelado'
             ? editingStudent.inactivationReason
             : undefined,
-        diasFrequencia:
-          editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
-            ? editingStudent.diasFrequencia
-            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+        diasFrequencia: effectiveDias,
         horariosSaida: editingStudent.horariosSaida || {},
       };
 
@@ -463,7 +641,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Toast de Notificação do Gerenciador de Alunos */}
+      {toastMsg && (
+        <div
+          id="student-manager-toast"
+          className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-2xl shadow-xl border flex items-center space-x-3 text-xs font-bold transition-all animate-in fade-in slide-in-from-top-3 ${
+            toastMsg.type === 'success'
+              ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+              : 'bg-rose-950 text-rose-300 border-rose-800'
+          }`}
+        >
+          {toastMsg.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          )}
+          <span>{toastMsg.text}</span>
+        </div>
+      )}
       {/* Top Banner and Quick Add Buttons */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
@@ -587,6 +783,166 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Tipo de Contrato: Regular (Contínuo) ou Avulso / Temporário */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                <Calendar className="w-4 h-4 text-indigo-600" />
+                <span>Tipo de Contrato:</span>
+              </label>
+              <span className="text-[11px] text-slate-500 font-medium">
+                Selecione se a matrícula é contínua ou temporária
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setNewTipoContrato('regular')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                  newTipoContrato === 'regular'
+                    ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                  newTipoContrato === 'regular' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {newTipoContrato === 'regular' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-slate-900">Regular (Contínuo)</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Matrícula contínua ao longo do ano letivo.
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNewTipoContrato('avulso')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                  newTipoContrato === 'avulso'
+                    ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                  newTipoContrato === 'avulso' ? 'border-amber-600 bg-amber-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {newTipoContrato === 'avulso' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-slate-900">Avulso / Temporário</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Período delimitado com inativação automática pós-término.
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {/* Campos Obrigatórios para Avulso / Temporário */}
+            {newTipoContrato === 'avulso' && (
+              <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3 animate-in fade-in duration-150">
+                <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Configuração do Período e Dias Contratados (Obrigatórios):</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Data de Início: <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={newDataInicio}
+                      onChange={(e) => setNewDataInicio(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Data de Término: <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={newDataTermino}
+                      onChange={(e) => setNewDataTermino(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Dias da Semana Contratados */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Dias da Semana Contratados: <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                        className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
+                      >
+                        Seg a Sex
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewDiasContratados(['segunda', 'quarta', 'sexta'])}
+                        className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
+                      >
+                        Seg / Qua / Sex
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewDiasContratados(['terca', 'quinta'])}
+                        className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
+                      >
+                        Ter / Qui
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[
+                      { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                      { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                      { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                      { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                      { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+                    ].map((d) => {
+                      const isSelected = newDiasContratados.includes(d.id);
+                      return (
+                        <button
+                          type="button"
+                          key={d.id}
+                          onClick={() => setNewDiasContratados(toggleDayInList(newDiasContratados, d.id))}
+                          className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                            isSelected
+                              ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50'
+                          }`}
+                        >
+                          <span className="hidden sm:inline">{d.label}</span>
+                          <span className="sm:hidden">{d.short}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <p className="text-[10.5px] text-amber-900 leading-relaxed pt-0.5">
+                  ℹ️ <strong>Regra do Contrato Avulso:</strong> O aluno constará na chamada estritamente entre {formatDateBR(newDataInicio)} e {formatDateBR(newDataTermino)} nos dias contratados. Após {formatDateBR(newDataTermino)}, o aluno será inativado automaticamente como <em>"Contrato Concluído"</em>, preservando todo o histórico de chamadas passadas.
+                </p>
+              </div>
+            )}
           </div>
 
           <div>
@@ -1141,6 +1497,231 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 )}
               </div>
 
+              {/* Tipo de Contrato: Regular (Contínuo) ou Avulso / Temporário */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                    <Calendar className="w-4 h-4 text-indigo-600" />
+                    <span>Tipo de Contrato:</span>
+                  </label>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Modalidade de matrícula do aluno
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={() =>
+                      setEditingStudent({
+                        ...editingStudent,
+                        tipoContrato: 'regular',
+                      })
+                    }
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                      (editingStudent.tipoContrato || 'regular') === 'regular'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                      (editingStudent.tipoContrato || 'regular') === 'regular'
+                        ? 'border-indigo-600 bg-indigo-600 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {(editingStudent.tipoContrato || 'regular') === 'regular' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div>
+                      <span className="font-bold text-xs block text-slate-900">Regular (Contínuo)</span>
+                      <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                        Matrícula padrão contínua ao longo do ano letivo.
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={() => {
+                      const today = toISODateString(new Date());
+                      setEditingStudent({
+                        ...editingStudent,
+                        tipoContrato: 'avulso',
+                        dataInicioContrato: editingStudent.dataInicioContrato || today,
+                        dataTerminoContrato: editingStudent.dataTerminoContrato || today,
+                        diasContratados:
+                          editingStudent.diasContratados && editingStudent.diasContratados.length > 0
+                            ? editingStudent.diasContratados
+                            : editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+                            ? editingStudent.diasFrequencia
+                            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+                      });
+                    }}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                      editingStudent.tipoContrato === 'avulso'
+                        ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                      editingStudent.tipoContrato === 'avulso'
+                        ? 'border-amber-600 bg-amber-600 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {editingStudent.tipoContrato === 'avulso' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div>
+                      <span className="font-bold text-xs block text-slate-900">Avulso / Temporário</span>
+                      <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                        Período delimitado com inativação automática pós-término.
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
+                {editingStudent.tipoContrato === 'avulso' && (
+                  <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3 animate-in fade-in duration-150">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Configuração do Período e Dias Contratados (Obrigatórios):</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Data de Início: <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={editingStudent.dataInicioContrato || toISODateString(new Date())}
+                          disabled={isSavingEdit}
+                          onChange={(e) =>
+                            setEditingStudent({
+                              ...editingStudent,
+                              dataInicioContrato: e.target.value,
+                            })
+                          }
+                          required
+                          className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Data de Término: <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={editingStudent.dataTerminoContrato || toISODateString(new Date())}
+                          disabled={isSavingEdit}
+                          onChange={(e) =>
+                            setEditingStudent({
+                              ...editingStudent,
+                              dataTerminoContrato: e.target.value,
+                            })
+                          }
+                          required
+                          className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dias da Semana Contratados */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <label className="block text-xs font-semibold text-slate-700">
+                          Dias da Semana Contratados: <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingStudent({
+                                ...editingStudent,
+                                diasContratados: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+                              })
+                            }
+                            className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
+                          >
+                            Seg a Sex
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingStudent({
+                                ...editingStudent,
+                                diasContratados: ['segunda', 'quarta', 'sexta'],
+                              })
+                            }
+                            className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
+                          >
+                            Seg / Qua / Sex
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingStudent({
+                                ...editingStudent,
+                                diasContratados: ['terca', 'quinta'],
+                              })
+                            }
+                            className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
+                          >
+                            Ter / Qui
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {[
+                          { id: 'segunda' as DayOfWeek, label: 'Segunda', short: 'Seg' },
+                          { id: 'terca' as DayOfWeek, label: 'Terça', short: 'Ter' },
+                          { id: 'quarta' as DayOfWeek, label: 'Quarta', short: 'Qua' },
+                          { id: 'quinta' as DayOfWeek, label: 'Quinta', short: 'Qui' },
+                          { id: 'sexta' as DayOfWeek, label: 'Sexta', short: 'Sex' },
+                        ].map((d) => {
+                          const currentContratados =
+                            editingStudent.diasContratados && editingStudent.diasContratados.length > 0
+                              ? editingStudent.diasContratados
+                              : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+                          const isSelected = currentContratados.includes(d.id);
+                          return (
+                            <button
+                              type="button"
+                              key={d.id}
+                              disabled={isSavingEdit}
+                              onClick={() =>
+                                setEditingStudent({
+                                  ...editingStudent,
+                                  diasContratados: toggleDayInList(editingStudent.diasContratados, d.id),
+                                })
+                              }
+                              className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50'
+                              }`}
+                            >
+                              <span className="hidden sm:inline">{d.label}</span>
+                              <span className="sm:hidden">{d.short}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <p className="text-[10.5px] text-amber-900 leading-relaxed pt-0.5">
+                      ℹ️ O aluno constará na chamada estritamente entre {formatDateBR(editingStudent.dataInicioContrato || '')} e {formatDateBR(editingStudent.dataTerminoContrato || '')} nos dias contratados. Após {formatDateBR(editingStudent.dataTerminoContrato || '')}, será inativado como <em>"Contrato Concluído"</em>, preservando todo o histórico anterior.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-xs font-semibold text-slate-700">
@@ -1557,6 +2138,23 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                         {student.turma}
                       </span>
+
+                      {/* Contract Type Badge */}
+                      {student.tipoContrato === 'avulso' ? (
+                        <span
+                          className="text-[10.5px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                          title={`Contrato Avulso / Temporário: ${student.dataInicioContrato ? formatDateBR(student.dataInicioContrato) : ''} até ${student.dataTerminoContrato ? formatDateBR(student.dataTerminoContrato) : ''}`}
+                        >
+                          <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span>
+                            Avulso ({student.dataInicioContrato ? formatDateBR(student.dataInicioContrato) : ''} a {student.dataTerminoContrato ? formatDateBR(student.dataTerminoContrato) : ''})
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                          Regular
+                        </span>
+                      )}
                       
                       {/* Status Badges */}
                       {stStatus === 'ativo' && (
@@ -1832,26 +2430,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
+                disabled={isDeletingStudent}
                 onClick={() => setStudentToDelete(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 rounded-xl cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  if (!studentToDelete) return;
-                  if (!isCoordenador && currentUser && !allowedTurmas.includes(studentToDelete.turma)) {
-                    setStudentToDelete(null);
-                    return;
-                  }
-                  onDeleteStudent(studentToDelete.id);
-                  setStudentToDelete(null);
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
+                id="btn-confirm-delete-student"
+                disabled={isDeletingStudent}
+                onClick={handleConfirmDeleteStudent}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Sim, Excluir Aluno</span>
+                {isDeletingStudent ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isDeletingStudent ? 'Excluindo no Firestore...' : 'Sim, Excluir Aluno'}</span>
               </button>
             </div>
           </div>

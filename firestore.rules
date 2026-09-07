@@ -9,6 +9,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /alunos/{alunoId} {
+      allow read, write: if true;
+    }
+
     match /attendanceRecords/{recordId} {
       allow read, write: if true;
     }

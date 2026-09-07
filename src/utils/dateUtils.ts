@@ -1,4 +1,4 @@
-import { WeekInfo, HolidayItem, DayOfWeek, Student } from '../types';
+import { WeekInfo, HolidayItem, DayOfWeek, Student, ContractType } from '../types';
 
 export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
@@ -37,25 +37,51 @@ export function formatDiasFrequencia(dias?: (DayOfWeek | string)[]): string {
 
 /**
  * Checks whether a student is active on a given date.
+ * - For temporary/casual contracts ('avulso'), strictly checks: dataInicioContrato <= date <= dataTerminoContrato.
  * - Active students return true.
- * - Inactive / Cancelled students return true for past dates BEFORE their inactivationDate,
- *   and false on or after their inactivationDate (or false if no inactivationDate is set).
+ * - Inactive / Cancelled students return true for past dates during their enrolled period or BEFORE their inactivationDate,
+ *   and false on or after their inactivationDate.
  */
 export function isStudentActiveOnDate(
-  student: { status?: 'ativo' | 'inativo' | 'cancelado'; inactivationDate?: string } | null | undefined,
+  student:
+    | (Partial<Student> & {
+        status?: 'ativo' | 'inativo' | 'cancelado';
+        inactivationDate?: string;
+        tipoContrato?: ContractType;
+        dataInicioContrato?: string;
+        dataTerminoContrato?: string;
+      })
+    | null
+    | undefined,
   date: Date | string
 ): boolean {
   if (!student) return false;
+  const dateStr = typeof date === 'string' ? date : toISODateString(date);
+
+  // Alunos com contrato avulso / temporário só estão ativos dentro do intervalo contratado
+  if (student.tipoContrato === 'avulso') {
+    if (student.dataInicioContrato && dateStr < student.dataInicioContrato) {
+      return false;
+    }
+    if (student.dataTerminoContrato && dateStr > student.dataTerminoContrato) {
+      return false;
+    }
+  }
+
   const status = student.status || 'ativo';
   if (status === 'ativo') return true;
 
   if (status === 'inativo' || status === 'cancelado') {
+    // Alunos avulsos que foram inativados por conclusão de contrato
+    // continuam ativos nas datas históricas do intervalo em que estiveram contratados
+    if (student.tipoContrato === 'avulso' && student.dataInicioContrato && student.dataTerminoContrato) {
+      return dateStr >= student.dataInicioContrato && dateStr <= student.dataTerminoContrato;
+    }
     if (!student.inactivationDate) {
       return false;
     }
-    const dateStr = typeof date === 'string' ? date : toISODateString(date);
-    // If the check date is strictly before the inactivation date, student was still active!
-    return dateStr < student.inactivationDate;
+    // Se a data de consulta for anterior ou igual à data de inativação, aluno ainda constava ativo
+    return dateStr <= student.inactivationDate;
   }
 
   return true;
@@ -76,10 +102,40 @@ export function isStudentScheduledForDay(
 }
 
 export function isStudentScheduledForDate(
-  student: { diasFrequencia?: (DayOfWeek | string)[] } | null | undefined,
+  student:
+    | (Partial<Student> & {
+        diasFrequencia?: (DayOfWeek | string)[];
+        tipoContrato?: ContractType;
+        dataInicioContrato?: string;
+        dataTerminoContrato?: string;
+        diasContratados?: DayOfWeek[];
+      })
+    | null
+    | undefined,
   date: Date | string
 ): boolean {
   if (!student) return false;
+  const dateStr = typeof date === 'string' ? date : toISODateString(date);
+
+  // Filtro Dinâmico de Esperados na Chamada para Contratos Avulsos / Temporários:
+  // Alunos com contrato avulso só aparecem nas listas de chamada se a data atual estiver
+  // dentro do intervalo contratado (Data de Início <= Data Atual <= Data de Término)
+  // e no dia da semana correspondente.
+  if (student.tipoContrato === 'avulso') {
+    if (student.dataInicioContrato && dateStr < student.dataInicioContrato) {
+      return false;
+    }
+    if (student.dataTerminoContrato && dateStr > student.dataTerminoContrato) {
+      return false;
+    }
+    const dayOfWeek = getDayOfWeekFromDate(date);
+    const contractedDays =
+      Array.isArray(student.diasContratados) && student.diasContratados.length > 0
+        ? student.diasContratados
+        : (Array.isArray(student.diasFrequencia) && student.diasFrequencia.length > 0 ? student.diasFrequencia : undefined);
+    return isStudentScheduledForDay({ diasFrequencia: contractedDays }, dayOfWeek);
+  }
+
   const dayOfWeek = getDayOfWeekFromDate(date);
   return isStudentScheduledForDay(student, dayOfWeek);
 }

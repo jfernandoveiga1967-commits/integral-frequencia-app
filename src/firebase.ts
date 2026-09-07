@@ -3,23 +3,35 @@ import { getAuth } from 'firebase/auth';
 import {
   getFirestore,
   doc,
+  getDoc,
   getDocFromServer,
   collection,
   getDocs,
   onSnapshot,
   setDoc,
+  updateDoc,
   deleteDoc,
   writeBatch,
+  query,
+  where,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords } from './utils/pontoUtils';
-import { normalizeStudent, addToAttendanceOutbox, removeFromAttendanceOutbox, getAttendanceOutbox } from './utils/storageUtils';
+import {
+  normalizeStudent,
+  addToAttendanceOutbox,
+  removeFromAttendanceOutbox,
+  getAttendanceOutbox,
+  isMockStudent,
+  getDeletedStudentIds,
+  deduplicateStudentsList,
+} from './utils/storageUtils';
 import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
 
-export { doc, deleteDoc };
+export { doc, getDoc, updateDoc, deleteDoc };
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -88,32 +100,85 @@ export async function testFirestoreConnection(): Promise<boolean> {
 
 // Firestore Realtime Subscription & Operations
 
-export function subscribeStudents(
+/**
+ * Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos:
+ * Substitui chamadas estáticas por escutador contínuo em tempo real onSnapshot(collection(db, "alunos"), ...).
+ * Sincroniza em tempo real tanto a coleção 'alunos' quanto a coleção 'students' no Firestore,
+ * aplicando deduplicação e normalização imediatas.
+ * 
+ * - Reflexo Imediato de Exclusões: Quando um aluno for excluído ou inativado no painel do administrador,
+ *   o ouvinte remove/atualiza automaticamente o registro na tela de todos os outros aparelhos conectados sem exigir ação manual.
+ * - Gestão do Evento (Unsubscribe): Retorna uma função unsubscribe() para limpar o escutador na desmontagem (useEffect).
+ */
+export function subscribeAlunos(
   onData: (students: Student[]) => void,
   onError?: (err: Error) => void
-) {
-  const colRef = collection(db, 'students');
-  return onSnapshot(
-    colRef,
+): () => void {
+  const alunosDocs = new Map<string, any>();
+  const studentsDocs = new Map<string, any>();
+
+  const emit = () => {
+    const combinedMap = new Map<string, any>();
+    // Preenche 'students' e mescla com 'alunos' para integridade total
+    studentsDocs.forEach((val, id) => combinedMap.set(id, val));
+    alunosDocs.forEach((val, id) => combinedMap.set(id, val));
+
+    const deletedIds = getDeletedStudentIds();
+    const list: Student[] = [];
+
+    combinedMap.forEach((data, id) => {
+      if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
+        list.push(normalizeStudent({ ...data, id }));
+      }
+    });
+
+    const deduped = deduplicateStudentsList(list);
+    onData(deduped);
+  };
+
+  const unsubAlunos = onSnapshot(
+    collection(db, 'alunos'),
     (snapshot) => {
-      const list: Student[] = [];
+      alunosDocs.clear();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (!data) return;
-        const normalized = normalizeStudent({
-          ...data,
-          id: docSnap.id,
-        });
-        list.push(normalized);
+        if (data) {
+          alunosDocs.set(docSnap.id, { ...data, id: docSnap.id });
+        }
       });
-      onData(list);
+      emit();
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'alunos');
+    }
+  );
+
+  const unsubStudents = onSnapshot(
+    collection(db, 'students'),
+    (snapshot) => {
+      studentsDocs.clear();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data) {
+          studentsDocs.set(docSnap.id, { ...data, id: docSnap.id });
+        }
+      });
+      emit();
     },
     (error) => {
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.GET, 'students');
     }
   );
+
+  return () => {
+    unsubAlunos();
+    unsubStudents();
+  };
 }
+
+export const subscribeStudents = subscribeAlunos;
 
 export function subscribeRecords(
   onData: (records: AttendanceRecord[]) => void,
@@ -211,33 +276,31 @@ export function subscribeUsers(
             userEmail === 'coordenacao@crescer.edu.br';
 
           const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-          const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
-          const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
+          const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
+          const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
 
-          let assignedActivities = Array.isArray(data.assignedActivities) ? data.assignedActivities : [];
-          if (isMasterAdmin) {
-            assignedActivities = MASTER_ADMIN_ACTIVITIES;
-          }
+          let assignedActivities = Array.isArray(data.assignedActivities)
+            ? data.assignedActivities
+            : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
 
           let assignedTurmas = Array.isArray(data.allowedClassIds)
             ? data.allowedClassIds
-            : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined);
-          if (isMasterAdmin && (!assignedTurmas || assignedTurmas.length === 0)) {
-            assignedTurmas = MASTER_ADMIN_TURMAS;
-          }
+            : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
           const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
             ? Number(data.contractDailyMinutes)
-            : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours)) ? Math.round(Number(data.contractDailyHours) * 60) : 360);
-          const formattedHours = data.contractDailyHoursFormatted
-            ? formatMinutesToHoursAndMinutes(parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted))
-            : formatMinutesToHoursAndMinutes(rawMinutes);
+            : (data.contractDailyHoursFormatted
+                ? parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted)
+                : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours))
+                    ? Math.round(Number(data.contractDailyHours) * 60)
+                    : (isMasterAdmin ? 480 : (data.workShiftType === 'padrao_8h' ? 528 : 360))));
+          const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
 
           const profile: UserProfile = {
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
             name: (data.name && data.name.trim()) || (isMasterAdmin ? 'Fernando Veiga' : ''),
             email: isMasterAdmin ? ADMIN_EMAIL : (data.email || ''),
-            phone: data.phone || undefined,
+            phone: data.phone !== undefined ? data.phone : undefined,
             role,
             cargoLabel,
             avatarColor,
@@ -253,12 +316,20 @@ export function subscribeUsers(
             canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             pixKey: data.pixKey || data.phone || undefined,
-            contractSchedule: data.contractSchedule || undefined,
+            contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
             contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
             contractDailyMinutes: rawMinutes,
             contractDailyHoursFormatted: formattedHours,
-            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : (isMasterAdmin ? 5000 : 1200),
-            company: data.company || 'GADAL - Gestão e Apoio',
+            baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
+              ? Number(data.baseSalary)
+              : (isMasterAdmin ? 0 : 1200),
+            regimeTrabalho: data.regimeTrabalho || 'mensalista',
+            valorHoraAula: data.valorHoraAula !== undefined ? Number(data.valorHoraAula) : undefined,
+            duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
+            contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
+            hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
+            ajudaDeCusto: data.ajudaDeCusto !== undefined ? Number(data.ajudaDeCusto) : 150,
+            company: data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
 
@@ -278,63 +349,156 @@ export function subscribeUsers(
 }
 
 /**
- * Salva o perfil do colaborador no Firestore garantindo gravação simultânea
- * nas coleções 'users' e 'usuarios' para máxima compatibilidade e semântica de UID fixo.
+ * Mapeamento Correto de ID no Firestore:
+ * Identifica corretamente o ID do documento do usuário no Firestore, quer o cadastro
+ * utilize o uid do Firebase Auth, o email como chave principal, ou o id canônico (ex: usr_coord_1).
  */
-export async function saveUserToFirestore(user: UserProfile): Promise<void> {
-  const isMasterAdmin =
-    (user.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
-    user.id === 'usr_coord_1' ||
-    (user.name && user.name.toLowerCase().includes('fernando veiga'));
+export async function resolveUserFirestoreDocId(user: UserProfile): Promise<string> {
+  const emailLower = (user.email || '').trim().toLowerCase();
+  const rawId = (user.id || '').trim();
+  const authUid = auth.currentUser?.uid;
+  const isAuthUser = Boolean(
+    auth.currentUser &&
+    auth.currentUser.email &&
+    auth.currentUser.email.toLowerCase() === emailLower
+  );
 
-  const canonicalId = isMasterAdmin ? 'usr_coord_1' : (user.id || 'usr_' + Date.now());
+  // 1. Se for o Coordenador Geral Fernando Veiga
+  if (
+    emailLower === ADMIN_EMAIL.toLowerCase() ||
+    rawId === 'usr_coord_1' ||
+    (user.name && user.name.toLowerCase().includes('fernando veiga')) ||
+    emailLower === 'coordenacao@crescer.edu.br'
+  ) {
+    return 'usr_coord_1';
+  }
 
-  // Limpar eventual doc legado com ID divergente
-  if (user.id && user.id !== canonicalId) {
+  // 2. Se for Ana Clara Carchano Garcia
+  const lowerName = (user.name || '').toLowerCase();
+  if (
+    rawId === 'usr_anaclaragarcia' ||
+    emailLower.includes('anaccgarcia') ||
+    emailLower.includes('anaclaracarchano') ||
+    emailLower.includes('anaclara') ||
+    emailLower.includes('carchano') ||
+    lowerName.includes('ana clara carchano') ||
+    lowerName.includes('ana c c garcia') ||
+    (lowerName.includes('ana') && lowerName.includes('garcia'))
+  ) {
+    return 'usr_anaclaragarcia';
+  }
+
+  // 3. Verificar se já existe documento na coleção 'usuarios' ou 'users' com o ID informado
+  if (rawId) {
     try {
-      await deleteDoc(doc(db, 'users', user.id));
-      await deleteDoc(doc(db, 'usuarios', user.id));
+      const snapU = await getDoc(doc(db, 'usuarios', rawId));
+      if (snapU.exists()) return snapU.id;
+      const snapUsers = await getDoc(doc(db, 'users', rawId));
+      if (snapUsers.exists()) return snapUsers.id;
     } catch {
-      // Ignora se não existir
+      // Ignora erro de verificação rápida
     }
   }
 
+  // 4. Se o usuário autenticado no Firebase Auth coincidir com este perfil, verificar se o doc é o Auth UID
+  if (isAuthUser && authUid) {
+    try {
+      const snapAuthU = await getDoc(doc(db, 'usuarios', authUid));
+      if (snapAuthU.exists()) return snapAuthU.id;
+      const snapAuthUsers = await getDoc(doc(db, 'users', authUid));
+      if (snapAuthUsers.exists()) return snapAuthUsers.id;
+    } catch {
+      // Ignora erro de verificação rápida
+    }
+  }
+
+  // 5. Verificar se o doc no Firestore está registrado com o e-mail como chave primária
+  if (emailLower) {
+    try {
+      const snapEmailU = await getDoc(doc(db, 'usuarios', emailLower));
+      if (snapEmailU.exists()) return snapEmailU.id;
+      const snapEmailUsers = await getDoc(doc(db, 'users', emailLower));
+      if (snapEmailUsers.exists()) return snapEmailUsers.id;
+
+      // Buscar por query no campo email em 'usuarios'
+      const qU = query(collection(db, 'usuarios'), where('email', '==', emailLower));
+      const qSnapU = await getDocs(qU);
+      if (!qSnapU.empty) {
+        return qSnapU.docs[0].id;
+      }
+
+      // Buscar por query no campo email em 'users'
+      const qUsers = query(collection(db, 'users'), where('email', '==', emailLower));
+      const qSnapUsers = await getDocs(qUsers);
+      if (!qSnapUsers.empty) {
+        return qSnapUsers.docs[0].id;
+      }
+    } catch {
+      // Ignora erro de query
+    }
+  }
+
+  // 6. Fallback final: usar rawId existente, ou authUid, ou gerar novo identificador
+  return rawId || (isAuthUser && authUid ? authUid : `usr_${Date.now()}`);
+}
+
+/**
+ * Salva o perfil do colaborador no Firestore garantindo gravação com sucesso
+ * na coleção 'usuarios' (via updateDoc se o documento existir, ou setDoc se for novo)
+ * e espelhamento síncrono em 'users' para retrocompatibilidade e semântica de UID fixo.
+ * Retorna os dados confirmados para atualização do estado.
+ */
+export async function saveUserToFirestore(user: UserProfile): Promise<UserProfile> {
+  const targetDocId = await resolveUserFirestoreDocId(user);
+  const emailLower = (user.email || '').trim().toLowerCase();
+
+  const isMasterAdmin =
+    emailLower === ADMIN_EMAIL.toLowerCase() ||
+    targetDocId === 'usr_coord_1' ||
+    (user.name && user.name.toLowerCase().includes('fernando veiga')) ||
+    emailLower === 'coordenacao@crescer.edu.br';
+
   const role: UserRole = isMasterAdmin ? 'coordenador' : (user.role || 'professor');
-  const cargoLabel = isMasterAdmin ? (user.cargoLabel || 'Coordenador (Administrador)') : (user.cargoLabel || 'Monitor / Professor');
-  const avatarColor = isMasterAdmin ? 'bg-amber-500' : (user.avatarColor || 'bg-indigo-600');
-  const assignedActivities = (user.assignedActivities && user.assignedActivities.length > 0)
+  const cargoLabel = user.cargoLabel || (role === 'coordenador' ? 'Coordenador (Administrador)' : 'Monitor / Professor');
+  const avatarColor = user.avatarColor || (role === 'coordenador' ? 'bg-amber-500' : 'bg-indigo-600');
+
+  const assignedActivities = Array.isArray(user.assignedActivities)
     ? user.assignedActivities
     : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
-  const assignedTurmas = (user.allowedClassIds && user.allowedClassIds.length > 0)
+
+  const assignedTurmas = Array.isArray(user.allowedClassIds)
     ? user.allowedClassIds
-    : ((user.assignedTurmas && user.assignedTurmas.length > 0) ? user.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
+    : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
   const resolvedMinutes = user.contractDailyMinutes !== undefined && Number(user.contractDailyMinutes) > 0
     ? Number(user.contractDailyMinutes)
-    : (user.contractDailyHoursFormatted ? parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted) : (user.contractDailyHours ? Math.round(Number(user.contractDailyHours) * 60) : (isMasterAdmin ? 480 : 360)));
+    : (user.contractDailyHoursFormatted
+        ? parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted)
+        : (user.contractDailyHours !== undefined && !isNaN(Number(user.contractDailyHours))
+            ? Math.round(Number(user.contractDailyHours) * 60)
+            : (isMasterAdmin ? 480 : (user.workShiftType === 'padrao_8h' ? 528 : 360))));
   const formattedHours = user.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(resolvedMinutes);
   const decimalHours = user.contractDailyHours !== undefined ? Number(user.contractDailyHours) : Number((resolvedMinutes / 60).toFixed(2));
 
-  // Verificar e consolidar Ana Clara se aplicável
   let cleanName = user.name ? user.name.trim() : (isMasterAdmin ? 'Fernando Veiga' : 'Colaborador');
   const lowerName = cleanName.toLowerCase();
-  const lowerEmail = (user.email || '').toLowerCase();
   if (
     lowerName.includes('ana c c garcia') ||
     lowerName.includes('ana clara carchano') ||
     (lowerName.includes('ana') && lowerName.includes('garcia')) ||
-    lowerEmail.includes('anaccgarcia') ||
-    lowerEmail.includes('anaclara') ||
-    lowerEmail.includes('carchano')
+    emailLower.includes('anaccgarcia') ||
+    emailLower.includes('anaclara') ||
+    emailLower.includes('carchano')
   ) {
     cleanName = 'Ana Clara Carchano Garcia';
   }
 
-  const docData: any = {
-    id: canonicalId,
+  const updatedData: UserProfile = {
+    ...user,
+    id: targetDocId,
     name: cleanName,
-    email: isMasterAdmin ? ADMIN_EMAIL : (user.email || '').trim().toLowerCase(),
-    phone: user.phone ? user.phone.trim() : '',
+    email: isMasterAdmin ? ADMIN_EMAIL : emailLower,
+    phone: user.phone !== undefined ? user.phone.trim() : '',
     role,
     cargoLabel,
     avatarColor,
@@ -345,38 +509,70 @@ export async function saveUserToFirestore(user: UserProfile): Promise<void> {
     allowedClassIds: assignedTurmas,
     canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
     canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
-    pixKey: user.pixKey ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
-    status: isMasterAdmin ? 'ATIVO' : (user.status || 'ATIVO'),
+    pixKey: user.pixKey !== undefined ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
+    status: user.status || 'ATIVO',
     dataDesligamento: user.dataDesligamento || '',
     motivoDesligamento: user.motivoDesligamento || '',
     workShiftType: user.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
-    contractSchedule: user.contractSchedule ? user.contractSchedule.trim() : (isMasterAdmin ? '07:30 - 17:30' : '11:40 - 17:40'),
+    contractSchedule: user.contractSchedule !== undefined ? user.contractSchedule.trim() : (isMasterAdmin ? '07:30 - 17:30' : ''),
     contractDailyHours: decimalHours,
     contractDailyMinutes: resolvedMinutes,
     contractDailyHoursFormatted: formattedHours,
-    baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary)) ? Number(user.baseSalary) : (isMasterAdmin ? 5000 : 1200),
+    baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary))
+      ? Number(user.baseSalary)
+      : (isMasterAdmin ? 0 : 1200),
+    regimeTrabalho: user.regimeTrabalho || 'mensalista',
+    valorHoraAula: user.valorHoraAula !== undefined ? Number(user.valorHoraAula) : null,
+    duracaoAulaMinutos: user.duracaoAulaMinutos !== undefined ? Number(user.duracaoAulaMinutos) : 50,
+    contractDivisorHours: user.contractDivisorHours !== undefined ? Number(user.contractDivisorHours) : 220,
+    hourlyRate: user.hourlyRate !== undefined ? Number(user.hourlyRate) : (user.baseSalary ? Number((user.baseSalary / 220).toFixed(4)) : 0),
+    ajudaDeCusto: user.ajudaDeCusto !== undefined ? Number(user.ajudaDeCusto) : 150,
     company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
-    updatedAt: user.updatedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   try {
-    // Gravação espelhada atômica em 'users' e 'usuarios'
-    await Promise.all([
-      setDoc(doc(db, 'users', canonicalId), docData, { merge: true }),
-      setDoc(doc(db, 'usuarios', canonicalId), docData, { merge: true }),
-    ]);
+    // 1. Garantir Gravação no Firestore na coleção 'usuarios'
+    // Executa updateDoc se já existir ou setDoc se for novo
+    const usuarioDocRef = doc(db, 'usuarios', targetDocId);
+    const usuarioSnap = await getDoc(usuarioDocRef);
+    if (usuarioSnap.exists()) {
+      await updateDoc(usuarioDocRef, updatedData as any);
+    } else {
+      await setDoc(usuarioDocRef, updatedData, { merge: true });
+    }
+
+    // 2. Gravação espelhada na coleção 'users' para total sincronia
+    const userDocRef = doc(db, 'users', targetDocId);
+    const userSnap = await getDoc(userDocRef);
+    if (userSnap.exists()) {
+      await updateDoc(userDocRef, updatedData as any);
+    } else {
+      await setDoc(userDocRef, updatedData, { merge: true });
+    }
+
+    // 3. Se havia documento legado com ID diferente de targetDocId, remover para evitar duplicações
+    if (user.id && user.id !== targetDocId) {
+      try {
+        await deleteDoc(doc(db, 'usuarios', user.id));
+        await deleteDoc(doc(db, 'users', user.id));
+      } catch {
+        // Ignora se não existir
+      }
+    }
+
+    return updatedData;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${canonicalId}`);
+    handleFirestoreError(error, OperationType.WRITE, `usuarios/${targetDocId}`);
     throw error;
   }
 }
 
 /**
  * Varredura e Migração no Firestore:
- * Busca na coleção 'usuarios' e na coleção 'users' qualquer documento cujo e-mail ou nome coincida
- * com a colaboradora Ana Clara Carchano Garcia (anteriormente cadastrada como Ana C C Garcia)
- * ou com outros perfis legados, consolidando o nome atualizado para "Ana Clara Carchano Garcia",
- * status "ATIVO" e garantindo a persistência imediata em ambas as coleções.
+ * Busca na coleção 'usuarios' e na coleção 'users' documentos de usuários cadastrados,
+ * preservando todas as propriedades customizadas salvas (salário, turmas, modalidades, horários)
+ * e consolidando nomes legados.
  */
 export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
   try {
@@ -418,28 +614,24 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
 
       if (isAnaClaraMatch) {
         anaClaraFound = true;
-        rawName = 'Ana Clara Carchano Garcia';
-        if (!rawEmail || rawEmail.includes('anaccgarcia') || rawEmail.endsWith('@crescer.local')) {
-          rawEmail = 'anaclaracarchanogarcia@crescer.edu.br';
-        }
-        if (!rawId) {
-          rawId = 'usr_anaclaragarcia';
-        }
+        const needsNameFix = rawNameLower.includes('ana c c garcia') || !rawName;
+        const needsEmailFix = !rawEmail || rawEmail.includes('anaccgarcia') || rawEmail.endsWith('@crescer.local');
+        
+        if (needsNameFix) rawName = 'Ana Clara Carchano Garcia';
+        if (needsEmailFix) rawEmail = 'anaclaracarchanogarcia@crescer.edu.br';
+        if (!rawId) rawId = 'usr_anaclaragarcia';
 
-        const consolidatedDocData: any = {
-          ...data,
-          id: rawId,
-          name: 'Ana Clara Carchano Garcia',
-          email: rawEmail,
-          role: 'professor',
-          status: 'ATIVO',
-          cargoLabel: 'Monitor / Professor',
-          updatedAt: new Date().toISOString(),
-        };
-
-        // Salvar em ambas as coleções para garantir compatibilidade total
-        batchOps.push(setDoc(doc(db, 'users', rawId), consolidatedDocData, { merge: true }));
-        batchOps.push(setDoc(doc(db, 'usuarios', rawId), consolidatedDocData, { merge: true }));
+        if (needsNameFix || needsEmailFix) {
+          const migrationDocData: any = {
+            ...data,
+            id: rawId,
+            name: rawName,
+            email: rawEmail,
+            updatedAt: new Date().toISOString(),
+          };
+          batchOps.push(setDoc(doc(db, 'users', rawId), migrationDocData, { merge: true }));
+          batchOps.push(setDoc(doc(db, 'usuarios', rawId), migrationDocData, { merge: true }));
+        }
       }
 
       const isMasterAdmin =
@@ -449,37 +641,37 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         rawEmailLower === 'coordenacao@crescer.edu.br';
 
       const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-      const cargoLabel = isMasterAdmin ? 'Coordenador (Administrador)' : (data.cargoLabel || 'Monitor / Professor');
-      const avatarColor = isMasterAdmin ? 'bg-amber-500' : (data.avatarColor || 'bg-indigo-600');
+      const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
+      const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
 
-      let assignedActivities = Array.isArray(data.assignedActivities) ? data.assignedActivities : [];
-      if (isMasterAdmin) assignedActivities = MASTER_ADMIN_ACTIVITIES;
+      let assignedActivities = Array.isArray(data.assignedActivities)
+        ? data.assignedActivities
+        : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
 
       let assignedTurmas = Array.isArray(data.allowedClassIds)
         ? data.allowedClassIds
-        : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : undefined);
-      if (isMasterAdmin && (!assignedTurmas || assignedTurmas.length === 0)) {
-        assignedTurmas = MASTER_ADMIN_TURMAS;
-      }
+        : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
       const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
         ? Number(data.contractDailyMinutes)
-        : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours)) ? Math.round(Number(data.contractDailyHours) * 60) : 360);
-      const formattedHours = data.contractDailyHoursFormatted
-        ? formatMinutesToHoursAndMinutes(parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted))
-        : formatMinutesToHoursAndMinutes(rawMinutes);
+        : (data.contractDailyHoursFormatted
+            ? parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted)
+            : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours))
+                ? Math.round(Number(data.contractDailyHours) * 60)
+                : (isMasterAdmin ? 480 : (data.workShiftType === 'padrao_8h' ? 528 : 360))));
+      const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
 
       const profile: UserProfile = {
         id: isMasterAdmin ? 'usr_coord_1' : rawId,
         name: isMasterAdmin ? 'Fernando Veiga' : (isAnaClaraMatch ? 'Ana Clara Carchano Garcia' : rawName || 'Colaborador'),
         email: isMasterAdmin ? ADMIN_EMAIL : rawEmail,
-        phone: data.phone || undefined,
+        phone: data.phone !== undefined ? data.phone : undefined,
         role,
         cargoLabel,
         avatarColor,
         birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : (isAnaClaraMatch ? '1998-05-15' : '1995-01-01')),
         pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-        status: isAnaClaraMatch ? 'ATIVO' : (data.status || 'ATIVO'),
+        status: data.status || 'ATIVO',
         dataDesligamento: data.dataDesligamento || undefined,
         motivoDesligamento: data.motivoDesligamento || undefined,
         workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
@@ -489,12 +681,14 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
         canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
         pixKey: data.pixKey || data.phone || undefined,
-        contractSchedule: data.contractSchedule || (isAnaClaraMatch ? '11:40 - 17:40' : undefined),
+        contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
         contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
         contractDailyMinutes: rawMinutes,
         contractDailyHoursFormatted: formattedHours,
-        baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : (isMasterAdmin ? 5000 : 1200),
-        company: data.company || 'GADAL - Gestão e Apoio',
+        baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
+          ? Number(data.baseSalary)
+          : (isMasterAdmin ? 0 : 1200),
+        company: data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
         updatedAt: data.updatedAt || new Date().toISOString(),
       };
 
@@ -559,6 +753,21 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
   return await scanAndConsolidateUsers();
 }
 
+/**
+ * Remove um usuário tanto da coleção 'usuarios' quanto da coleção 'users' no Firestore.
+ */
+export async function deleteUserFromFirestore(userId: string): Promise<void> {
+  try {
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'usuarios', userId)),
+      deleteDoc(doc(db, 'users', userId)),
+    ]);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `usuarios/${userId}`);
+    throw error;
+  }
+}
+
 export function subscribeActivities(
   onData: (activities: ActivityItem[]) => void,
   onError?: (err: Error) => void
@@ -619,24 +828,18 @@ export async function deleteActivityFromFirestore(activityId: string) {
   }
 }
 
-export async function deleteUserFromFirestore(userId: string) {
-  try {
-    const docRef = doc(db, 'users', userId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
-  }
-}
-
-export async function saveStudentToFirestore(student: Student) {
+export async function saveStudentToFirestore(student: Student): Promise<void> {
   try {
     const normalized = normalizeStudent(student);
-    const docRef = doc(db, 'students', normalized.id);
-    await setDoc(docRef, {
+    const payload = {
       id: normalized.id,
       name: normalized.name,
       turma: normalized.turma,
       activities: normalized.activities,
+      tipoContrato: normalized.tipoContrato || 'regular',
+      dataInicioContrato: normalized.dataInicioContrato || '',
+      dataTerminoContrato: normalized.dataTerminoContrato || '',
+      diasContratados: normalized.diasContratados || [],
       diasFrequencia: normalized.diasFrequencia,
       horariosSaida: normalized.horariosSaida || {},
       status: normalized.status || 'ativo',
@@ -644,18 +847,28 @@ export async function saveStudentToFirestore(student: Student) {
       inactivationDate: normalized.inactivationDate || '',
       inactivationReason: normalized.inactivationReason || '',
       notes: normalized.notes || '',
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    await Promise.allSettled([
+      setDoc(doc(db, 'alunos', normalized.id), payload, { merge: true }),
+      setDoc(doc(db, 'students', normalized.id), payload, { merge: true }),
+    ]);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `students/${student.id}`);
+    handleFirestoreError(error, OperationType.WRITE, `alunos/${student.id}`);
+    throw error;
   }
 }
 
-export async function deleteStudentFromFirestore(studentId: string) {
+export async function deleteStudentFromFirestore(alunoId: string): Promise<void> {
   try {
-    const docRef = doc(db, 'students', studentId);
-    await deleteDoc(docRef);
+    const docRefAlunos = doc(db, 'alunos', alunoId);
+    const docRefStudents = doc(db, 'students', alunoId);
+    await deleteDoc(docRefAlunos);
+    await deleteDoc(docRefStudents);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `students/${studentId}`);
+    handleFirestoreError(error, OperationType.DELETE, `alunos/${alunoId}`);
+    throw error;
   }
 }
 
@@ -1306,7 +1519,18 @@ export function subscribePontoClosings(callback: (closings: PontoMonthClosing[])
             year: data.year || Number(data.monthKey.split('-')[0]),
             month: data.month || Number(data.monthKey.split('-')[1]),
             baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary)) ? Number(data.baseSalary) : 1200,
+            regimeTrabalho: data.regimeTrabalho || 'mensalista',
+            valorHoraAula: data.valorHoraAula !== undefined ? Number(data.valorHoraAula) : undefined,
+            duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
+            totalAulas: data.totalAulas !== undefined ? Number(data.totalAulas) : undefined,
+            salarioAulas: data.salarioAulas !== undefined ? Number(data.salarioAulas) : undefined,
+            horaAtividade: data.horaAtividade !== undefined ? Number(data.horaAtividade) : undefined,
+            dsr: data.dsr !== undefined ? Number(data.dsr) : undefined,
+            divisorHours: data.divisorHours !== undefined ? Number(data.divisorHours) : 220,
             divisorDays: Number(data.divisorDays) || 30,
+            hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
+            ajudaDeCusto: data.ajudaDeCusto !== undefined ? Number(data.ajudaDeCusto) : 150,
+            extraHoursRateMultiplier: data.extraHoursRateMultiplier !== undefined ? Number(data.extraHoursRateMultiplier) : 1.5,
             contractDailyHours: Number(data.contractDailyHours) || 6,
             contractDailyMinutes: data.contractDailyMinutes !== undefined ? Number(data.contractDailyMinutes) : undefined,
             contractDailyHoursFormatted: data.contractDailyHoursFormatted || undefined,
@@ -1364,7 +1588,18 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
         year: closing.year,
         month: closing.month,
         baseSalary: closing.baseSalary !== undefined && closing.baseSalary !== null && !isNaN(Number(closing.baseSalary)) ? Number(closing.baseSalary) : 1200,
+        regimeTrabalho: closing.regimeTrabalho || 'mensalista',
+        valorHoraAula: closing.valorHoraAula !== undefined ? Number(closing.valorHoraAula) : null,
+        duracaoAulaMinutos: closing.duracaoAulaMinutos !== undefined ? Number(closing.duracaoAulaMinutos) : 50,
+        totalAulas: closing.totalAulas !== undefined ? Number(closing.totalAulas) : null,
+        salarioAulas: closing.salarioAulas !== undefined ? Number(closing.salarioAulas) : null,
+        horaAtividade: closing.horaAtividade !== undefined ? Number(closing.horaAtividade) : null,
+        dsr: closing.dsr !== undefined ? Number(closing.dsr) : null,
+        divisorHours: closing.divisorHours !== undefined ? Number(closing.divisorHours) : 220,
         divisorDays: Number(closing.divisorDays) || 30,
+        hourlyRate: closing.hourlyRate !== undefined ? Number(closing.hourlyRate) : (closing.baseSalary ? Number((closing.baseSalary / 220).toFixed(4)) : 0),
+        ajudaDeCusto: closing.ajudaDeCusto !== undefined ? Number(closing.ajudaDeCusto) : 150,
+        extraHoursRateMultiplier: closing.extraHoursRateMultiplier !== undefined ? Number(closing.extraHoursRateMultiplier) : 1.5,
         contractDailyHours: Number(closing.contractDailyHours) || 6,
         contractDailyMinutes: closing.contractDailyMinutes !== undefined ? Number(closing.contractDailyMinutes) : null,
         contractDailyHoursFormatted: closing.contractDailyHoursFormatted || null,

@@ -22,18 +22,24 @@ export type AttendanceStatus =
 
 export type StudentStatus = 'ativo' | 'inativo' | 'cancelado';
 
+export type ContractType = 'regular' | 'avulso';
+
 export interface Student {
   id: string;
   name: string;
   turma: TurmaType;
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
+  tipoContrato?: ContractType; // 'regular' | 'avulso' (padrão: 'regular')
+  dataInicioContrato?: string; // Data de início do contrato avulso/temporário (YYYY-MM-DD)
+  dataTerminoContrato?: string; // Data de término do contrato avulso/temporário (YYYY-MM-DD)
+  diasContratados?: DayOfWeek[]; // Dias da semana contratados (ex: Segunda a Sexta)
   diasFrequencia?: DayOfWeek[]; // Dias da semana em que o aluno frequenta o Integral (ex: ['segunda', 'quarta', 'sexta'])
   horariosSaida?: Partial<Record<DayOfWeek, string>>; // Horário de saída por dia da semana (ex: { segunda: '17:00', terca: '18:00' })
   horarioSaida?: string; // Horário de saída fixo/padrão único (para compatibilidade)
   status?: StudentStatus; // 'ativo' | 'inativo' | 'cancelado' (padrão: 'ativo')
   statusMatricula?: StudentStatus; // Alias de compatibilidade com sistemas legados/importações
   inactivationDate?: string; // Data da inativação/cancelamento (YYYY-MM-DD)
-  inactivationReason?: string; // Motivo opcional da inativação/cancelamento
+  inactivationReason?: string; // Motivo opcional da inativação/cancelamento (ex: 'Contrato Concluído')
   notes?: string;
 }
 
@@ -76,6 +82,8 @@ export interface ScheduleBlock {
 }
 
 export type UserRole = 'coordenador' | 'professor';
+
+export type RegimeTrabalho = 'mensalista' | 'professor_horista';
 
 export type HolidayType = 'feriado' | 'recesso';
 
@@ -131,10 +139,21 @@ export interface PontoMonthClosing {
   year: number;
   month: number; // 1-12
   baseSalary: number; // default R$ 1200
-  divisorDays: number; // default 30
-  contractDailyHours: number; // default 6
-  contractDailyMinutes?: number; // e.g. 522 (8h 42min)
-  contractDailyHoursFormatted?: string; // e.g. "8h 42min"
+  regimeTrabalho?: RegimeTrabalho; // 'mensalista' (220h) | 'professor_horista' (Aulas Dadas)
+  valorHoraAula?: number; // Valor da Hora-Aula (R$) obrigatório para Professor Horista
+  duracaoAulaMinutos?: number; // Duração de cada aula em minutos (padrão: 50min)
+  totalAulas?: number; // Total de aulas reais dadas apuradas no mês (N)
+  salarioAulas?: number; // N * valorHoraAula
+  horaAtividade?: number; // salarioAulas * 0.05 (5%)
+  dsr?: number; // (salarioAulas + horaAtividade) / 6 (1/6)
+  divisorDays?: number; // legacy divisor (30 dias)
+  divisorHours?: number; // Divisor mensal contratual (padrão 220h)
+  hourlyRate?: number; // Valor unitário da hora apurada
+  ajudaDeCusto?: number; // Ajuda de Custo mensal não indenizatória (padrão R$ 150,00)
+  extraHoursRateMultiplier?: number; // Multiplicador de horas extras (padrão 1.5 - adicional 50%)
+  contractDailyHours: number; // default 8.8 (Jornada Padrão) ou 6 (Contínua)
+  contractDailyMinutes?: number; // e.g. 528 (8h 48min)
+  contractDailyHoursFormatted?: string; // e.g. "8h 48min"
   contractSchedule: string; // default "11:40 - 17:40"
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada';
   companyName: string; // default "GADAL - Gestão e Apoio"
@@ -198,6 +217,12 @@ export interface UserProfile {
   contractDailyMinutes?: number; // Horas diárias em minutos totais exatos (ex: 522)
   contractDailyHoursFormatted?: string; // Formato amigável (ex: "8h 42min" ou "6h 00min")
   baseSalary?: number; // Bolsa Auxílio Base (ex: 1200)
+  regimeTrabalho?: RegimeTrabalho; // 'mensalista' (220h) | 'professor_horista' (Aulas Dadas)
+  valorHoraAula?: number; // Valor da Hora-Aula (R$) obrigatório para Professor Horista
+  duracaoAulaMinutos?: number; // Duração padrão de cada aula em minutos (padrão: 50min)
+  hourlyRate?: number; // Valor da hora contratual (ex: baseSalary / 220)
+  contractDivisorHours?: number; // Divisor contratual em horas (padrão: 220h)
+  ajudaDeCusto?: number; // Valor fixo mensal da Ajuda de Custo (padrão R$ 150,00)
   company?: string; // Empresa conveniada (ex: "GADAL")
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
   updatedAt?: string;

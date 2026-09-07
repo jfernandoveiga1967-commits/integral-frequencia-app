@@ -1,5 +1,23 @@
-import { PontoRecord, PontoMonthClosing, HolidayItem, UserProfile, PontoStatus } from '../types';
+import { PontoRecord, PontoMonthClosing, HolidayItem, UserProfile, PontoStatus, RegimeTrabalho } from '../types';
 import { isWeekend, isSaturday, isSunday, isHolidayOrRecess, toISODateString } from './dateUtils';
+export * from './calculosHoras';
+import {
+  DIVISOR_MENSAL_PADRAO,
+  CARGA_DIARIA_PADRAO_HORAS,
+  CARGA_DIARIA_PADRAO_MINUTOS,
+  CARGA_DIARIA_PADRAO_FORMATADA,
+  VALOR_AJUDA_DE_CUSTO_PADRAO,
+  FATOR_HORA_EXTRA_50,
+  DURACAO_AULA_PADRAO_MINUTOS,
+  PERCENTUAL_HORA_ATIVIDADE,
+  FATOR_DSR_PROFESSOR,
+  calcularValorHora,
+  calcularHoraExtra50PorMinutos,
+  calcularAulasDeMinutos,
+  calcularSalarioAulas,
+  calcularHoraAtividade,
+  calcularDsrProfessor,
+} from './calculosHoras';
 
 /**
  * Converts "HH:MM" time string to minutes from 00:00 (e.g. "11:40" -> 700)
@@ -918,18 +936,27 @@ export function processSequentialPunch({
 
 /**
  * Calculates complete financial breakdown for the monthly closing
+ * Jornada Padrão: 220h divisor, carga diária de 8,8h (8h48min = 528min),
+ * horas extras 50%, e Ajuda de Custo fixa mensal de R$ 150,00 não salarial.
  */
 export function calculateMonthlyPontoFinancials({
   records,
   holidays,
   year,
   month,
+  regimeTrabalho = 'mensalista',
+  valorHoraAula,
+  duracaoAulaMinutos = DURACAO_AULA_PADRAO_MINUTOS,
+  customTotalAulas,
   baseSalary = 1200,
+  divisorHours = DIVISOR_MENSAL_PADRAO,
   divisorDays = 30,
-  contractDailyHours = 6,
+  contractDailyHours = CARGA_DIARIA_PADRAO_HORAS,
   contractDailyMinutes,
   contractDailyHoursFormatted,
   contractSchedule = '11:40 - 17:40',
+  ajudaDeCusto = VALOR_AJUDA_DE_CUSTO_PADRAO,
+  extraHoursRateMultiplier = FATOR_HORA_EXTRA_50,
   manualAddition = 0,
   manualDiscount = 0,
 }: {
@@ -937,16 +964,31 @@ export function calculateMonthlyPontoFinancials({
   holidays: HolidayItem[];
   year: number;
   month: number; // 1-12
+  regimeTrabalho?: RegimeTrabalho;
+  valorHoraAula?: number;
+  duracaoAulaMinutos?: number;
+  customTotalAulas?: number;
   baseSalary?: number;
+  divisorHours?: number;
   divisorDays?: number;
   contractDailyHours?: number;
   contractDailyMinutes?: number;
   contractDailyHoursFormatted?: string;
   contractSchedule?: string;
+  ajudaDeCusto?: number;
+  extraHoursRateMultiplier?: number;
   manualAddition?: number;
   manualDiscount?: number;
 }): {
+  regimeTrabalho: RegimeTrabalho;
+  valorHoraAula?: number;
+  duracaoAulaMinutos?: number;
+  totalAulas?: number;
+  salarioAulas?: number;
+  horaAtividade?: number;
+  dsr?: number;
   baseSalary: number;
+  divisorHours: number;
   divisorDays: number;
   contractDailyHours: number;
   contractDailyMinutes: number;
@@ -954,6 +996,8 @@ export function calculateMonthlyPontoFinancials({
   diariaRate: number;
   hourlyRate: number;
   minuteRate: number;
+  ajudaDeCusto: number;
+  extraHoursRateMultiplier: number;
   unjustifiedAbsencesCount: number;
   unjustifiedAbsencesDiscount: number;
   totalWorkedMinutes: number;
@@ -970,23 +1014,50 @@ export function calculateMonthlyPontoFinancials({
   workedDaysCount: number;
   manualAddition: number;
   manualDiscount: number;
+  totalDescontos: number;
+  subtotalSalarial: number;
   netTotal: number;
 } {
+  const isProfessor = regimeTrabalho === 'professor_horista';
+  const safeValorHoraAula = Math.max(0, Number(valorHoraAula) || 0);
+  const safeDuracaoAula = Number(duracaoAulaMinutos) > 0 ? Number(duracaoAulaMinutos) : DURACAO_AULA_PADRAO_MINUTOS;
+
   const safeBase = (baseSalary !== undefined && baseSalary !== null && !isNaN(Number(baseSalary)))
     ? Math.max(0, Number(baseSalary))
     : 1200;
-  const safeDivisor = Number(divisorDays) > 0 ? Number(divisorDays) : 30;
 
+  // Divisor contratual mensal padrão: 220 horas
+  const safeDivisorHours = (divisorHours !== undefined && Number(divisorHours) > 0)
+    ? Number(divisorHours)
+    : DIVISOR_MENSAL_PADRAO;
+
+  const safeDivisorDays = Number(divisorDays) > 0 ? Number(divisorDays) : 30;
+
+  // Carga diária padrão: 8,8 horas (528 minutos)
   const safeMinutes = (contractDailyMinutes !== undefined && Number(contractDailyMinutes) > 0)
     ? Number(contractDailyMinutes)
-    : (Number(contractDailyHours) > 0 ? Math.round(Number(contractDailyHours) * 60) : 360);
+    : (Number(contractDailyHours) > 0 ? Math.round(Number(contractDailyHours) * 60) : CARGA_DIARIA_PADRAO_MINUTOS);
 
   const safeHours = safeMinutes / 60;
   const formattedContractHours = contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(safeMinutes);
 
-  const diariaRate = safeBase / safeDivisor; // e.g. 1200 / 30 = 40.00
-  const minuteRate = diariaRate / safeMinutes; // Exact minute rate without decimal hour approximations
-  const hourlyRate = minuteRate * 60;
+  // Valor da Hora: Salário Base / 220 (ou divisor horas contratual) ou Valor da Hora-Aula se professor
+  const hourlyRate = isProfessor
+    ? safeValorHoraAula
+    : safeBase / safeDivisorHours;
+  const minuteRate = hourlyRate / 60;
+
+  // Diária: computada com base na carga diária (ex: 8,8h = 528min)
+  const diariaRate = safeHours * hourlyRate;
+
+  // Ajuda de Custo: R$ 150,00 fixo mensal (não salarial / não indenizatória)
+  const safeAjudaDeCusto = (ajudaDeCusto !== undefined && ajudaDeCusto !== null)
+    ? Math.max(0, Number(ajudaDeCusto))
+    : VALOR_AJUDA_DE_CUSTO_PADRAO;
+
+  const safeExtraMultiplier = (extraHoursRateMultiplier !== undefined && Number(extraHoursRateMultiplier) > 0)
+    ? Number(extraHoursRateMultiplier)
+    : FATOR_HORA_EXTRA_50;
 
   let unjustifiedAbsencesCount = 0;
   let totalWorkedMinutes = 0;
@@ -1031,33 +1102,122 @@ export function calculateMonthlyPontoFinancials({
     }
   });
 
-  const unjustifiedAbsencesDiscount = unjustifiedAbsencesCount * diariaRate;
   const totalWorkedFormatted = formatMinutesToHoursAndMinutes(totalWorkedMinutes);
+
+  if (isProfessor) {
+    // =========================================================================
+    // REGIME PROFESSOR HORISTA (POR AULAS DADAS)
+    // =========================================================================
+    // Total de Aulas Reais (N): apurado pelas batidas validadas (ou informado manualmente)
+    const totalAulas = customTotalAulas !== undefined && customTotalAulas !== null
+      ? Math.max(0, Number(customTotalAulas))
+      : calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula);
+
+    // Salário de Aulas: N * Valor da Hora-Aula
+    const salarioAulas = calcularSalarioAulas(totalAulas, safeValorHoraAula);
+
+    // Hora-Atividade (5%): Salário de Aulas * 0,05
+    const horaAtividade = calcularHoraAtividade(salarioAulas);
+
+    // DSR (Descanso Semanal Remunerado - 1/6): (Salário de Aulas + Hora-Atividade) / 6
+    const dsr = calcularDsrProfessor(salarioAulas, horaAtividade);
+
+    const safeManualAdd = Number(manualAddition) || 0;
+    const safeManualDesc = Number(manualDiscount) || 0;
+
+    // Descontos do Professor: descontos manuais (não se aplicam faltas de 8,8h por ser horista de aulas)
+    const totalDescontos = safeManualDesc;
+
+    // Subtotal Salarial: Salário Aulas + Hora-Atividade + DSR + Adicionais - Descontos
+    const subtotalSalarial = Math.max(
+      0,
+      salarioAulas + horaAtividade + dsr + safeManualAdd - totalDescontos
+    );
+
+    // Total Líquido Estimado: Subtotal Salarial + Ajuda de Custo (R$ 150,00 fixo não salarial)
+    const netTotal = subtotalSalarial + safeAjudaDeCusto;
+
+    return {
+      regimeTrabalho: 'professor_horista',
+      valorHoraAula: safeValorHoraAula,
+      duracaoAulaMinutos: safeDuracaoAula,
+      totalAulas,
+      salarioAulas,
+      horaAtividade,
+      dsr,
+      baseSalary: salarioAulas, // Base contratual do mês é o Salário de Aulas
+      divisorHours: safeDivisorHours,
+      divisorDays: safeDivisorDays,
+      contractDailyHours: Number(safeHours.toFixed(2)),
+      contractDailyMinutes: safeMinutes,
+      contractDailyHoursFormatted: formattedContractHours,
+      diariaRate: 0,
+      hourlyRate: safeValorHoraAula,
+      minuteRate: safeValorHoraAula / 60,
+      ajudaDeCusto: safeAjudaDeCusto,
+      extraHoursRateMultiplier: safeExtraMultiplier,
+      unjustifiedAbsencesCount,
+      unjustifiedAbsencesDiscount: 0,
+      totalWorkedMinutes,
+      totalWorkedFormatted,
+      totalExtraMinutes: 0,
+      extraHoursDecimal: 0,
+      extraHoursFormatted: '0h00min',
+      extraHoursAmount: 0,
+      totalMissingMinutes: 0,
+      missingHoursFormatted: '0h00min',
+      missingHoursDiscount: 0,
+      paidHolidaysCount,
+      paidRecessDaysCount,
+      workedDaysCount,
+      manualAddition: safeManualAdd,
+      manualDiscount: safeManualDesc,
+      totalDescontos,
+      subtotalSalarial: Math.round(subtotalSalarial * 100) / 100,
+      netTotal: Math.round(netTotal * 100) / 100,
+    };
+  }
+
+  // =========================================================================
+  // REGIME MENSALISTA (JORNADA PADRÃO - 220H)
+  // =========================================================================
+  // Faltas integrais descontadas com base na carga diária de 8,8h (diariaRate)
+  const unjustifiedAbsencesDiscount = unjustifiedAbsencesCount * diariaRate;
+
+  // Atrasos e minutos faltantes computados sobre a taxa do minuto contratual
+  const missingHoursDiscount = totalMissingMinutes * minuteRate;
+  const missingHoursFormatted = formatMinutesToHoursAndMinutes(totalMissingMinutes);
+
+  // Horas Extras (50%): (Valor da Hora * 1,5) * Horas Excedentes
   const extraHoursDecimal = totalExtraMinutes / 60;
   const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
-  const extraHoursAmount = totalExtraMinutes * minuteRate;
-  const missingHoursFormatted = formatMinutesToHoursAndMinutes(totalMissingMinutes);
-  const missingHoursDiscount = totalMissingMinutes * minuteRate;
+  const extraHoursAmount = (totalExtraMinutes / 60) * (hourlyRate * safeExtraMultiplier);
 
-  const netTotal = Math.max(
+  const totalDescontos = unjustifiedAbsencesDiscount + missingHoursDiscount + (Number(manualDiscount) || 0);
+
+  // Subtotal Salarial sujeito a reflexos: (Salário Base + Horas Extras - Descontos)
+  const subtotalSalarial = Math.max(
     0,
-    safeBase -
-      unjustifiedAbsencesDiscount -
-      missingHoursDiscount +
-      extraHoursAmount +
-      (Number(manualAddition) || 0) -
-      (Number(manualDiscount) || 0)
+    safeBase + extraHoursAmount + (Number(manualAddition) || 0) - totalDescontos
   );
 
+  // Total Líquido Estimado: (Salário Base + Horas Extras - Descontos) + R$ 150,00 (Ajuda de Custo)
+  // Ajuda de Custo é verba não salarial / não indenizatória: entra líquida sem sofrer deduções
+  const netTotal = subtotalSalarial + safeAjudaDeCusto;
+
   return {
+    regimeTrabalho: 'mensalista',
     baseSalary: safeBase,
-    divisorDays: safeDivisor,
+    divisorHours: safeDivisorHours,
+    divisorDays: safeDivisorDays,
     contractDailyHours: Number(safeHours.toFixed(2)),
     contractDailyMinutes: safeMinutes,
     contractDailyHoursFormatted: formattedContractHours,
     diariaRate,
     hourlyRate,
     minuteRate,
+    ajudaDeCusto: safeAjudaDeCusto,
+    extraHoursRateMultiplier: safeExtraMultiplier,
     unjustifiedAbsencesCount,
     unjustifiedAbsencesDiscount,
     totalWorkedMinutes,
@@ -1074,6 +1234,8 @@ export function calculateMonthlyPontoFinancials({
     workedDaysCount,
     manualAddition: Number(manualAddition) || 0,
     manualDiscount: Number(manualDiscount) || 0,
+    totalDescontos,
+    subtotalSalarial: Math.round(subtotalSalarial * 100) / 100,
     netTotal: Math.round(netTotal * 100) / 100,
   };
 }

@@ -411,10 +411,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // 4. Numerical Consolidated Report State & Table Calculation
   const [numericTurmaFilter, setNumericTurmaFilter] = useState<string>('all');
+  const [convertPastPendingToAbsence, setConvertPastPendingToAbsence] = useState<boolean>(true);
   const [showNumericModal, setShowNumericModal] = useState(false);
   const [pdfNumericTurma, setPdfNumericTurma] = useState<string>('all');
   const [pdfNumericStartDate, setPdfNumericStartDate] = useState<string>(effectiveStartDate);
   const [pdfNumericEndDate, setPdfNumericEndDate] = useState<string>(effectiveEndDate);
+  const [pdfNumericConvertPending, setPdfNumericConvertPending] = useState<boolean>(true);
 
   // 5. Meal Financial Report Modal State
   const [showMealReportModal, setShowMealReportModal] = useState(false);
@@ -435,7 +437,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       numericTargetStudents,
       activeRecords,
       holidays,
-      numericTurmaFilter
+      numericTurmaFilter,
+      { convertPastPendingToAbsence }
     );
   }, [
     effectiveStartDate,
@@ -444,6 +447,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     activeRecords,
     holidays,
     numericTurmaFilter,
+    convertPastPendingToAbsence,
   ]);
 
   // On-screen PDF Viewer State
@@ -493,17 +497,25 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     setPdfNumericTurma(turma || numericTurmaFilter || 'all');
     setPdfNumericStartDate(effectiveStartDate);
     setPdfNumericEndDate(effectiveEndDate);
+    setPdfNumericConvertPending(convertPastPendingToAbsence);
     setShowNumericModal(true);
   };
 
   const handleGenerateNumericPDF = (
     turmaParam?: string,
     startParam?: string,
-    endParam?: string
+    endParam?: string,
+    convertPendingParam?: boolean
   ) => {
     const targetTurma = turmaParam !== undefined ? turmaParam : pdfNumericTurma;
     const targetStart = startParam || pdfNumericStartDate || effectiveStartDate;
     const targetEnd = endParam || pdfNumericEndDate || effectiveEndDate;
+    const targetConvert =
+      convertPendingParam !== undefined
+        ? convertPendingParam
+        : pdfNumericConvertPending !== undefined
+        ? pdfNumericConvertPending
+        : convertPastPendingToAbsence;
 
     const result = generateNumericAttendanceConsolidatedPDFReport({
       startDate: targetStart,
@@ -513,6 +525,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       students,
       records,
       holidays,
+      convertPastPendingToAbsence: targetConvert,
     });
 
     const isAll = !targetTurma || targetTurma === 'all' || targetTurma === 'Todas as Turmas';
@@ -992,7 +1005,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               Relatório Numérico de Frequência dos Alunos (Consolidado Sintético)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Estatísticas quantitativas diárias de alunos esperados, presenças, faltas e atestados (sem exibição de nomes individuais).
+              Estatísticas quantitativas diárias de alunos esperados, presenças, faltas, atestados e pendentes.
             </p>
           </div>
 
@@ -1014,6 +1027,25 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               </select>
             </div>
 
+            {/* Toggle: Chamadas passadas / pendências */}
+            <button
+              type="button"
+              onClick={() => setConvertPastPendingToAbsence((prev) => !prev)}
+              className={`px-3 py-1.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer flex items-center space-x-1.5 ${
+                convertPastPendingToAbsence
+                  ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+              title={
+                convertPastPendingToAbsence
+                  ? 'Ativo: Em chamadas encerradas, alunos sem marcação são computados como falta para somar 100% dos esperados.'
+                  : 'Inativo: Pendências são mantidas em coluna separada.'
+              }
+            >
+              <CheckCircle2 className={`w-3.5 h-3.5 ${convertPastPendingToAbsence ? 'text-amber-600' : 'text-slate-400'}`} />
+              <span>{convertPastPendingToAbsence ? 'Encerrar Pendências como Falta' : 'Exibir Pendentes Separado'}</span>
+            </button>
+
             <button
               onClick={() => handleOpenNumericModal(numericTurmaFilter)}
               className="px-3.5 py-1.5 rounded-2xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1"
@@ -1024,7 +1056,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             </button>
 
             <button
-              onClick={() => handleGenerateNumericPDF(numericTurmaFilter, effectiveStartDate, effectiveEndDate)}
+              onClick={() => handleGenerateNumericPDF(numericTurmaFilter, effectiveStartDate, effectiveEndDate, convertPastPendingToAbsence)}
               className="px-3.5 py-1.5 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
               title="Gerar e pré-visualizar PDF do Relatório Numérico Consolidado"
             >
@@ -1034,8 +1066,23 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           </div>
         </div>
 
+        {/* Informative Audit Note */}
+        <div className="flex items-center justify-between p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl text-xs text-emerald-900">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">
+              Consistência de Totais Garantida: Total Esperados = Presenças + Faltas + Atestados + Pendentes.
+            </span>
+          </div>
+          <span className="text-[11px] text-emerald-700 hidden md:inline">
+            {convertPastPendingToAbsence
+              ? 'Chamadas encerradas: registros não marcados computados automaticamente como Falta.'
+              : 'Modo auditoria: pendências sem marcação exibidas na coluna Pendentes.'}
+          </span>
+        </div>
+
         {/* Mini Summary Banner */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Dias Letivos</span>
             <span className="text-sm font-extrabold text-slate-800">{numericDailyStats.schoolDaysCount} dias</span>
@@ -1054,11 +1101,24 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Faltas Totais</span>
-            <span className="text-sm font-extrabold text-rose-600">{numericDailyStats.totalFaltasAcumuladas}</span>
+            <span className="text-sm font-extrabold text-rose-600">
+              {numericDailyStats.totalFaltasAcumuladas}
+              {numericDailyStats.totalPendenciasConvertidasAcumuladas > 0 && (
+                <span className="text-[10px] text-rose-500 font-normal block">
+                  (+{numericDailyStats.totalPendenciasConvertidasAcumuladas} pendências convertidas)
+                </span>
+              )}
+            </span>
           </div>
           <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Taxa Geral do Período</span>
-            <span className="text-sm font-extrabold text-emerald-800">{numericDailyStats.taxaPresencaGeral}%</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Atestados Totais</span>
+            <span className="text-sm font-extrabold text-amber-800">{numericDailyStats.totalJustificadosAcumulados}</span>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pendentes Totais</span>
+            <span className={`text-sm font-extrabold ${numericDailyStats.totalPendentesAcumulados > 0 ? 'text-amber-600' : 'text-slate-600'}`}>
+              {numericDailyStats.totalPendentesAcumulados}
+            </span>
           </div>
         </div>
 
@@ -1072,13 +1132,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 <th className="px-4 py-3 text-center text-emerald-700">Presenças</th>
                 <th className="px-4 py-3 text-center text-rose-700">Faltas</th>
                 <th className="px-4 py-3 text-center text-amber-800">Atestados / Saúde</th>
+                <th className="px-4 py-3 text-center text-amber-600">Pendentes</th>
                 <th className="px-4 py-3 text-center">% Assiduidade</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {numericDailyStats.dailyMetrics.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-medium">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400 font-medium">
                     Nenhum dia letivo encontrado no período selecionado.
                   </td>
                 </tr>
@@ -1096,8 +1157,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center font-bold text-slate-700">
-                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-extrabold">
-                          {d.totalAtivos}
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-extrabold" title="Base Esperada: Soma exata das presenças, faltas, atestados e pendentes">
+                          {d.totalEsperados}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -1113,12 +1174,29 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       <td className="px-4 py-3 text-center">
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 font-extrabold border border-rose-200">
                           {d.faltas}
+                          {d.pendenciasConvertidas !== undefined && d.pendenciasConvertidas > 0 && (
+                            <span className="text-[10px] font-normal text-rose-600 ml-1">
+                              (+{d.pendenciasConvertidas} pend.)
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-extrabold border border-amber-200">
                           {d.justificados}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {d.pendentes > 0 ? (
+                          <span
+                            className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold border border-amber-300 cursor-help"
+                            title={`Alunos sem registro: ${d.pendingStudents.map((s) => s.name).join(', ')}`}
+                          >
+                            {d.pendentes} pendente{d.pendentes > 1 ? 's' : ''}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">0</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center font-extrabold">
                         {hasRollCall ? (
@@ -1173,6 +1251,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 </td>
                 <td className="px-4 py-3.5 text-center text-amber-300">
                   {numericDailyStats.totalJustificadosAcumulados}
+                </td>
+                <td className="px-4 py-3.5 text-center text-amber-300">
+                  {numericDailyStats.totalPendentesAcumulados}
                 </td>
                 <td className="px-4 py-3.5 text-center text-emerald-300 text-sm">
                   {numericDailyStats.taxaPresencaGeral}%
@@ -1877,11 +1958,29 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 </div>
               </div>
 
+              {/* Option: Past Pending Roll Calls */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="pr-3">
+                  <span className="text-xs font-bold text-slate-800 block">
+                    Tratar pendências passadas como Falta
+                  </span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed">
+                    Em chamadas de dias passados, computa alunos sem registro como falta para que a soma de presenças, faltas e atestados totalize exatamente 100% dos esperados.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={pdfNumericConvertPending}
+                  onChange={(e) => setPdfNumericConvertPending(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
+                />
+              </div>
+
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1">
                 <p className="font-bold text-slate-800">Especificações do Relatório Sintético:</p>
                 <ul className="list-disc list-inside space-y-0.5 text-slate-500 text-[11px]">
                   <li>Tabela quantitativa pura com lista de cada dia letivo do intervalo</li>
-                  <li>Contabilização estrita de alunos esperados, presenças, faltas e atestados</li>
+                  <li>Contabilização estrita: Total Esperados = Presenças + Faltas + Atestados + Pendentes</li>
                   <li>Linha de Totais Acumulados do Período no rodapé</li>
                   <li>Cabeçalho institucional e campo oficial para assinatura da coordenação</li>
                 </ul>
@@ -1899,7 +1998,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => handleGenerateNumericPDF(pdfNumericTurma, pdfNumericStartDate, pdfNumericEndDate)}
+                onClick={() =>
+                  handleGenerateNumericPDF(
+                    pdfNumericTurma,
+                    pdfNumericStartDate,
+                    pdfNumericEndDate,
+                    pdfNumericConvertPending
+                  )
+                }
                 className="px-5 py-2.5 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5"
               >
                 <Download className="w-4 h-4" />

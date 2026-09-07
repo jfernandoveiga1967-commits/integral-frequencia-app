@@ -2082,10 +2082,13 @@ export function generateReciboBolsaPDF({
   doc.setDrawColor(203, 213, 225);
   doc.roundedRect(14, startY, 182, 21, 2, 2, 'FD');
 
+  const isProfessor = (financials.regimeTrabalho || closingRecord?.regimeTrabalho || user?.regimeTrabalho) === 'professor_horista';
+
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text(`BENEFICIÁRIA / ESTAGIÁRIA: ${userName.toUpperCase()} (${userCargo})`, 18, startY + 5.5);
+  const rolePrefix = isProfessor ? 'BENEFICIÁRIO(A) / PROFESSOR(A) HORISTA' : 'BENEFICIÁRIA / ESTAGIÁRIA';
+  doc.text(`${rolePrefix}: ${userName.toUpperCase()} (${userCargo})`, 18, startY + 5.5);
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
@@ -2095,45 +2098,100 @@ export function generateReciboBolsaPDF({
     18,
     startY + 11
   );
-  doc.text(
-    `Jornada: ${contractSchedule} (${contractDailyHoursFormatted}/dia)   |   Chave PIX: ${pixKey}   |   Base (30d): ${formatCurrencyBR(
-      financials.baseSalary
-    )}`,
-    18,
-    startY + 16.5
-  );
+
+  if (isProfessor) {
+    const horaAulaVal = financials.valorHoraAula || 0;
+    const durAula = financials.duracaoAulaMinutos || 50;
+    const aulasTotal = financials.totalAulas || 0;
+    doc.text(
+      `Regime: Professor Horista   |   Hora-Aula: ${formatCurrencyBR(horaAulaVal)} (${durAula}min)   |   Aulas no Mês: ${aulasTotal}   |   Chave PIX: ${pixKey}`,
+      18,
+      startY + 16.5
+    );
+  } else {
+    doc.text(
+      `Jornada: ${contractSchedule} (${contractDailyHoursFormatted}/dia)   |   Divisor: ${financials.divisorHours || 220}h (${formatCurrencyBR(financials.hourlyRate || (financials.baseSalary / 220))}/h)   |   Chave PIX: ${pixKey}`,
+      18,
+      startY + 16.5
+    );
+  }
 
   startY += 25;
 
   // 3. Breakdown Table
-  const tableData: any[] = [
-    [
-      'Bolsa Auxílio Estágio / Monitoria Integral (30 dias)',
-      '30 dias',
-      formatCurrencyBR(financials.baseSalary),
-      '-',
-    ],
-    [
-      `Feriados e Recessos Escolares Garantidos e Abonados (${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias)`,
-      `${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias`,
-      'Incluso na Bolsa',
-      '-',
-    ],
-  ];
+  const tableData: any[] = isProfessor
+    ? [
+        [
+          `Salário Base de Aulas (${financials.totalAulas || 0} aulas ministradas no mês)`,
+          `${financials.totalAulas || 0} aulas`,
+          formatCurrencyBR(financials.salarioAulas || 0),
+          '-',
+        ],
+        [
+          'Adicional de Hora-Atividade (5% s/ Salário de Aulas - CCT/CLT)',
+          '5%',
+          formatCurrencyBR(financials.horaAtividade || 0),
+          '-',
+        ],
+        [
+          'Descanso Semanal Remunerado - D.S.R. (1/6 - Lei 605/49 e Súmula 351 TST)',
+          '1/6 (16,67%)',
+          formatCurrencyBR(financials.dsr || 0),
+          '-',
+        ],
+        [
+          'Ajuda de Custo (Verba Indenizatória / Não Salarial - 100% Líquida)',
+          'Fixo Mensal',
+          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0),
+          '-',
+        ],
+      ]
+    : [
+        [
+          `Bolsa Auxílio Contratual (Divisor Mensal ${financials.divisorHours || 220}h)`,
+          `${financials.divisorHours || 220}h`,
+          formatCurrencyBR(financials.baseSalary),
+          '-',
+        ],
+        [
+          'Ajuda de Custo (Verba Não Salarial / Não Indenizatória - 100% Líquida)',
+          'Fixo Mensal',
+          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0),
+          '-',
+        ],
+        [
+          `Feriados e Recessos Escolares Garantidos e Abonados (${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias)`,
+          `${financials.paidHolidaysCount + financials.paidRecessDaysCount} dias`,
+          'Incluso na Bolsa',
+          '-',
+        ],
+      ];
 
   if (financials.unjustifiedAbsencesCount > 0) {
+    const faltasLabel = isProfessor
+      ? `Desconto de Faltas Injustificadas no Período (${financials.unjustifiedAbsencesCount} falta(s))`
+      : `Desconto de Faltas Injustificadas no Período (${financials.unjustifiedAbsencesCount} dia(s) × carga 8,8h)`;
     tableData.push([
-      `Desconto de Faltas Injustificadas no Período (${financials.unjustifiedAbsencesCount} falta(s))`,
+      faltasLabel,
       `${financials.unjustifiedAbsencesCount} dia(s)`,
       '-',
       formatCurrencyBR(financials.unjustifiedAbsencesDiscount),
     ]);
   }
 
+  if (financials.missingHoursDiscount && financials.missingHoursDiscount > 0) {
+    tableData.push([
+      `Desconto de Atrasos / Horas Faltantes (${financials.missingHoursFormatted || '0h00min'})`,
+      financials.missingHoursFormatted || '0h00min',
+      '-',
+      formatCurrencyBR(financials.missingHoursDiscount),
+    ]);
+  }
+
   if (financials.totalExtraMinutes > 0) {
     tableData.push([
-      `Horas Extras / Reposições Apuradas (${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)})`,
-      formatMinutesToHoursAndMinutes(financials.totalExtraMinutes),
+      `Horas Extras Apuradas com Adicional de 50% (${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)})`,
+      'Hora × 1,5',
       formatCurrencyBR(financials.extraHoursAmount),
       '-',
     ]);
@@ -2157,12 +2215,19 @@ export function generateReciboBolsaPDF({
     ]);
   }
 
+  const safeAjuda = financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0;
+  const baseEarnings = isProfessor
+    ? (financials.salarioAulas || 0) + (financials.horaAtividade || 0) + (financials.dsr || 0)
+    : financials.baseSalary;
   const totalGross =
-    financials.baseSalary +
+    baseEarnings +
     financials.extraHoursAmount +
-    (financials.manualAddition || 0);
+    (financials.manualAddition || 0) +
+    safeAjuda;
   const totalDiscounts =
-    financials.unjustifiedAbsencesDiscount + (financials.manualDiscount || 0);
+    financials.unjustifiedAbsencesDiscount +
+    (financials.missingHoursDiscount || 0) +
+    (financials.manualDiscount || 0);
 
   tableData.push([
     'TOTAL GERAL DE PROVENTOS E DESCONTOS',
@@ -2520,6 +2585,7 @@ export interface GenerateNumericAttendancePDFOptions {
   records: AttendanceRecord[];
   holidays?: HolidayItem[];
   saveImmediately?: boolean;
+  convertPastPendingToAbsence?: boolean;
 }
 
 export function generateNumericAttendanceConsolidatedPDFReport({
@@ -2531,6 +2597,7 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   records,
   holidays = [],
   saveImmediately = false,
+  convertPastPendingToAbsence = true,
 }: GenerateNumericAttendancePDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -2548,7 +2615,8 @@ export function generateNumericAttendanceConsolidatedPDFReport({
     students,
     records,
     holidays,
-    targetTurmaParam
+    targetTurmaParam,
+    { convertPastPendingToAbsence }
   );
 
   // Header
@@ -2585,7 +2653,11 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   doc.text(
     `Dias Úteis Letivos: ${consolidated.schoolDaysCount} dias ${
       consolidated.holidaysCount > 0 ? `(${consolidated.holidaysCount} feriados/recessos descontados)` : ''
-    } • Matrículas Ativas no Escopo: ${consolidated.totalMatriculasAtivas} alunos`,
+    } • Matrículas Ativas no Escopo: ${consolidated.totalMatriculasAtivas} alunos • ${
+      convertPastPendingToAbsence
+        ? 'Regra: Pendências de chamadas passadas computadas como falta'
+        : 'Regra: Exibição explícita de pendências'
+    }`,
     18,
     startY + 19
   );
@@ -2594,7 +2666,7 @@ export function generateNumericAttendanceConsolidatedPDFReport({
 
   const tableData = consolidated.dailyMetrics.map((day) => {
     let rateStr = '-';
-    if (day.totalAtivos > 0 && day.apurados > 0) {
+    if (day.totalEsperados > 0 && day.apurados > 0) {
       rateStr = `${day.taxaPresenca}%`;
     } else if (day.apurados > 0) {
       rateStr = `${day.taxaApurada}%`;
@@ -2602,10 +2674,11 @@ export function generateNumericAttendanceConsolidatedPDFReport({
 
     return [
       `${formatDateBR(day.dateStr)} (${day.dayName})`,
-      String(day.totalAtivos),
+      String(day.totalEsperados),
       String(day.presentes),
       String(day.faltas),
       String(day.justificados),
+      String(day.pendentes),
       rateStr,
     ];
   });
@@ -2614,28 +2687,35 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   const totalPresencasAcumuladas = consolidated.totalPresentesAcumulados;
   const totalFaltasAcumuladas = consolidated.totalFaltasAcumuladas;
   const totalSaudeAcumuladas = consolidated.totalJustificadosAcumulados;
+  const totalPendentesAcumulados = consolidated.totalPendentesAcumulados;
   const taxaGeral = consolidated.taxaPresencaGeral;
 
-  // Metric Cards
+  // Metric Cards (6 cards proportionally distributed: 14 margin + 6 * 28 + 5 * 2.5 = 194.5mm)
   const metrics = [
     { label: 'Dias Letivos', value: `${consolidated.schoolDaysCount} d`, color: [15, 23, 42] as [number, number, number] },
-    { label: 'Alunos Esperados', value: totalEsperadosAcumulados, color: [79, 70, 229] as [number, number, number] },
+    { label: 'Total Esperados', value: totalEsperadosAcumulados, color: [79, 70, 229] as [number, number, number] },
     { label: 'Presenças', value: totalPresencasAcumuladas, color: [22, 163, 74] as [number, number, number] },
     { label: 'Faltas', value: totalFaltasAcumuladas, color: [220, 38, 38] as [number, number, number] },
     { label: 'Atestados/Saúde', value: totalSaudeAcumuladas, color: [217, 119, 6] as [number, number, number] },
+    {
+      label: 'Pendentes',
+      value: totalPendentesAcumulados,
+      color: totalPendentesAcumulados > 0 ? ([194, 65, 12] as [number, number, number]) : ([100, 116, 139] as [number, number, number]),
+    },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 28, 14, 2.5, metrics);
 
   startY += 18;
 
-  // Main Numerical Table with Foot Row
+  // Main Numerical Table with Foot Row - Rigorous Mathematical Balance:
+  // Presenças + Faltas + Atestados + Pendentes === Total Esperados
   autoTable(doc, {
     startY,
-    head: [['Data / Dia da Semana', 'Alunos Esperados', 'Presenças', 'Faltas', 'Atestados / Saúde', '% Assiduidade']],
+    head: [['Data / Dia da Semana', 'Total Esperados', 'Presenças', 'Faltas', 'Atestados / Saúde', 'Pendentes', '% Assiduidade']],
     body:
       tableData.length > 0
         ? tableData
-        : [['Nenhum dia letivo encontrado para o período selecionado', '-', '-', '-', '-', '-']],
+        : [['Nenhum dia letivo encontrado para o período selecionado', '-', '-', '-', '-', '-', '-']],
     foot: [
       [
         'TOTAIS DO PERÍODO',
@@ -2643,6 +2723,7 @@ export function generateNumericAttendanceConsolidatedPDFReport({
         String(totalPresencasAcumuladas),
         String(totalFaltasAcumuladas),
         String(totalSaudeAcumuladas),
+        String(totalPendentesAcumulados),
         `${taxaGeral}%`,
       ],
     ],
@@ -2671,11 +2752,12 @@ export function generateNumericAttendanceConsolidatedPDFReport({
     },
     columnStyles: {
       0: { cellWidth: 'auto', fontStyle: 'bold' },
-      1: { cellWidth: 32, halign: 'center' },
-      2: { cellWidth: 26, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
-      3: { cellWidth: 24, halign: 'center', textColor: [220, 38, 38] },
-      4: { cellWidth: 32, halign: 'center', textColor: [217, 119, 6] },
-      5: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 26, halign: 'center', fontStyle: 'bold' },
+      2: { cellWidth: 22, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
+      3: { cellWidth: 20, halign: 'center', textColor: [220, 38, 38] },
+      4: { cellWidth: 26, halign: 'center', textColor: [217, 119, 6] },
+      5: { cellWidth: 20, halign: 'center', textColor: [100, 116, 139] },
+      6: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
     },
     didParseCell: (data) => {
       if (data.section === 'foot' && data.column.index === 0) {

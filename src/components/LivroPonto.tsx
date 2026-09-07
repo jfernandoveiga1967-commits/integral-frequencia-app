@@ -32,6 +32,7 @@ import {
   Save,
   PenTool,
   Download,
+  GraduationCap,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -39,6 +40,7 @@ import {
   PontoRecord,
   PontoMonthClosing,
   PontoStatus,
+  RegimeTrabalho,
 } from '../types';
 import {
   isCoordenador,
@@ -66,6 +68,15 @@ import {
   applyTolerance,
   calculateDayWorkedMinutes,
   calculateMonthlyPontoFinancials,
+  DIVISOR_MENSAL_PADRAO,
+  CARGA_DIARIA_PADRAO_HORAS,
+  CARGA_DIARIA_PADRAO_MINUTOS,
+  CARGA_DIARIA_PADRAO_FORMATADA,
+  VALOR_AJUDA_DE_CUSTO_PADRAO,
+  DURACAO_AULA_PADRAO_MINUTOS,
+  FATOR_HORA_EXTRA_50,
+  calcularValorHora,
+  calcularSalarioBase,
   formatCurrencyBR,
   generateDigitalSignatureHash,
   getMonthNameBR,
@@ -296,6 +307,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     ? Number(closingRecord.baseSalary)
     : (targetUser?.baseSalary !== undefined && targetUser?.baseSalary !== null ? Number(targetUser.baseSalary) : 1200);
 
+  const divisorHours = isMonthClosed && closingRecord?.divisorHours !== undefined
+    ? Number(closingRecord.divisorHours)
+    : (targetUser?.contractDivisorHours !== undefined ? Number(targetUser.contractDivisorHours) : DIVISOR_MENSAL_PADRAO);
+
+  const ajudaDeCusto = isMonthClosed && closingRecord?.ajudaDeCusto !== undefined
+    ? Number(closingRecord.ajudaDeCusto)
+    : (targetUser?.ajudaDeCusto !== undefined ? Number(targetUser.ajudaDeCusto) : VALOR_AJUDA_DE_CUSTO_PADRAO);
+
+  const regimeTrabalho: RegimeTrabalho = isMonthClosed && closingRecord?.regimeTrabalho
+    ? closingRecord.regimeTrabalho
+    : (targetUser?.regimeTrabalho || 'mensalista');
+
+  const valorHoraAula = isMonthClosed && closingRecord?.valorHoraAula !== undefined
+    ? Number(closingRecord.valorHoraAula)
+    : (targetUser?.valorHoraAula !== undefined ? Number(targetUser.valorHoraAula) : undefined);
+
+  const duracaoAulaMinutos = isMonthClosed && closingRecord?.duracaoAulaMinutos !== undefined
+    ? Number(closingRecord.duracaoAulaMinutos)
+    : (targetUser?.duracaoAulaMinutos !== undefined ? Number(targetUser.duracaoAulaMinutos) : DURACAO_AULA_PADRAO_MINUTOS);
+
   const companyName = isMonthClosed && closingRecord?.companyName
     ? closingRecord.companyName
     : (targetUser?.company || 'GADAL - Gestão e Apoio');
@@ -327,8 +358,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [userEditPixKey, setUserEditPixKey] = useState('');
   const [userEditWorkShiftType, setUserEditWorkShiftType] = useState<'continua_6h' | 'padrao_8h' | 'personalizada'>('continua_6h');
   const [userEditContractSchedule, setUserEditContractSchedule] = useState('');
-  const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('6h00min');
+  const [userEditContractDailyHoursFormatted, setUserEditContractDailyHoursFormatted] = useState('8h48min');
   const [userEditBaseSalary, setUserEditBaseSalary] = useState<number | string>(1200);
+  const [userEditRegimeTrabalho, setUserEditRegimeTrabalho] = useState<RegimeTrabalho>('mensalista');
+  const [userEditValorHoraAula, setUserEditValorHoraAula] = useState<number | string>('');
+  const [userEditDuracaoAulaMinutos, setUserEditDuracaoAulaMinutos] = useState<number | string>(DURACAO_AULA_PADRAO_MINUTOS);
+  const [userEditDivisorHours, setUserEditDivisorHours] = useState<number | string>(DIVISOR_MENSAL_PADRAO);
+  const [userEditAjudaDeCusto, setUserEditAjudaDeCusto] = useState<number | string>(VALOR_AJUDA_DE_CUSTO_PADRAO);
   const [userEditCompany, setUserEditCompany] = useState('');
 
   // Dynamic calculation for schedule input in user edit modal
@@ -366,21 +402,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       setUserEditPixKey(targetUser.pixKey || targetUser.phone || '');
       const shift = targetUser.workShiftType || (isContinuousShift(targetUser, targetUser.contractSchedule) ? 'continua_6h' : 'padrao_8h');
       setUserEditWorkShiftType(shift);
-      setUserEditContractSchedule(targetUser.contractSchedule || (shift === 'continua_6h' ? '11:40 - 17:40' : '07:30 - 11:30 / 13:00 - 17:42'));
+      setUserEditContractSchedule(targetUser.contractSchedule || (shift === 'continua_6h' ? '11:40 - 17:40' : '07:30 - 11:30 / 13:00 - 17:48'));
       setUserEditContractDailyHoursFormatted(
         targetUser.contractDailyHoursFormatted ||
-        formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || (shift === 'continua_6h' ? 360 : 522))
+        formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || (shift === 'continua_6h' ? 360 : 528))
       );
       setUserEditBaseSalary(targetUser.baseSalary !== undefined && targetUser.baseSalary !== null ? targetUser.baseSalary : 1200);
+      setUserEditRegimeTrabalho(targetUser.regimeTrabalho || 'mensalista');
+      setUserEditValorHoraAula(targetUser.valorHoraAula !== undefined && targetUser.valorHoraAula !== null ? targetUser.valorHoraAula : '');
+      setUserEditDuracaoAulaMinutos(targetUser.duracaoAulaMinutos !== undefined ? targetUser.duracaoAulaMinutos : DURACAO_AULA_PADRAO_MINUTOS);
+      setUserEditDivisorHours(targetUser.contractDivisorHours || DIVISOR_MENSAL_PADRAO);
+      setUserEditAjudaDeCusto(targetUser.ajudaDeCusto !== undefined ? targetUser.ajudaDeCusto : VALOR_AJUDA_DE_CUSTO_PADRAO);
       setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
     }
   }, [targetUser, showEditUserModal]);
 
-  const handleSaveUserContractSubmit = (e: React.FormEvent) => {
+  const handleSaveUserContractSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetUser) return;
 
-    let resolvedMinutes = userEditWorkShiftType === 'continua_6h' ? 360 : 522;
+    let resolvedMinutes = userEditWorkShiftType === 'continua_6h' ? 360 : 528;
     if (userEditContractDailyHoursFormatted && userEditContractDailyHoursFormatted.trim()) {
       resolvedMinutes = parseHoursAndMinutesStringToMinutes(userEditContractDailyHoursFormatted);
     } else if (userEditContractSchedule && userEditContractSchedule.includes('-')) {
@@ -389,6 +430,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
     const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
     const parsedSalary = userEditBaseSalary !== '' && !isNaN(Number(userEditBaseSalary)) ? Math.max(0, Number(userEditBaseSalary)) : 1200;
+    const parsedDivisor = userEditDivisorHours !== '' && !isNaN(Number(userEditDivisorHours)) ? Math.max(1, Number(userEditDivisorHours)) : DIVISOR_MENSAL_PADRAO;
+    const parsedAjuda = userEditAjudaDeCusto !== '' && !isNaN(Number(userEditAjudaDeCusto)) ? Math.max(0, Number(userEditAjudaDeCusto)) : VALOR_AJUDA_DE_CUSTO_PADRAO;
+    const computedHourlyRate = Number((parsedSalary / parsedDivisor).toFixed(4));
+
+    if (userEditRegimeTrabalho === 'professor_horista') {
+      const parsedHoraAula = Number(userEditValorHoraAula);
+      if (!userEditValorHoraAula || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
+        setPunchFeedback({
+          text: 'Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero.',
+          type: 'error',
+        });
+        setTimeout(() => setPunchFeedback(null), 4000);
+        return;
+      }
+    }
 
     const updatedUser: UserProfile = {
       ...targetUser,
@@ -396,18 +452,24 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       cargoLabel: userEditCargo.trim() || targetUser.cargoLabel,
       phone: userEditPhone.trim() || undefined,
       pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
+      regimeTrabalho: userEditRegimeTrabalho,
+      valorHoraAula: userEditRegimeTrabalho === 'professor_horista' ? Number(userEditValorHoraAula) : undefined,
+      duracaoAulaMinutos: Number(userEditDuracaoAulaMinutos) || DURACAO_AULA_PADRAO_MINUTOS,
       workShiftType: userEditWorkShiftType,
       contractSchedule: userEditContractSchedule.trim() || undefined,
       contractDailyHours: decimalHours,
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
+      contractDivisorHours: parsedDivisor,
+      hourlyRate: userEditRegimeTrabalho === 'professor_horista' ? (Number(userEditValorHoraAula) || 0) : computedHourlyRate,
+      ajudaDeCusto: parsedAjuda,
       baseSalary: parsedSalary,
       company: userEditCompany.trim() || 'GADAL - Gestão e Apoio',
       updatedAt: new Date().toISOString(),
     };
 
     if (onSaveUser) {
-      onSaveUser(updatedUser);
+      await onSaveUser(updatedUser);
     }
     setShowEditUserModal(false);
     setPunchFeedback({
@@ -489,7 +551,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       year: selectedYear,
       month: selectedMonth,
       baseSalary,
+      regimeTrabalho,
+      valorHoraAula,
+      duracaoAulaMinutos,
+      divisorHours,
       divisorDays: 30,
+      ajudaDeCusto,
       contractDailyHours,
       contractDailyMinutes,
       contractDailyHoursFormatted,
@@ -503,6 +570,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     selectedYear,
     selectedMonth,
     baseSalary,
+    regimeTrabalho,
+    valorHoraAula,
+    duracaoAulaMinutos,
+    divisorHours,
+    ajudaDeCusto,
     contractDailyHours,
     contractDailyMinutes,
     contractDailyHoursFormatted,
@@ -670,7 +742,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       year: selectedYear,
       month: selectedMonth,
       baseSalary,
+      regimeTrabalho: financials.regimeTrabalho,
+      valorHoraAula: financials.valorHoraAula,
+      duracaoAulaMinutos: financials.duracaoAulaMinutos,
+      totalAulas: financials.totalAulas,
+      salarioAulas: financials.salarioAulas,
+      horaAtividade: financials.horaAtividade,
+      dsr: financials.dsr,
+      divisorHours: financials.divisorHours,
       divisorDays: 30,
+      hourlyRate: financials.hourlyRate,
+      ajudaDeCusto: financials.ajudaDeCusto,
+      extraHoursRateMultiplier: financials.extraHoursRateMultiplier,
       contractDailyHours,
       contractDailyMinutes,
       contractDailyHoursFormatted,
@@ -731,7 +814,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       year: selectedYear,
       month: selectedMonth,
       baseSalary,
+      regimeTrabalho: financials.regimeTrabalho,
+      valorHoraAula: financials.valorHoraAula,
+      duracaoAulaMinutos: financials.duracaoAulaMinutos,
+      totalAulas: financials.totalAulas,
+      salarioAulas: financials.salarioAulas,
+      horaAtividade: financials.horaAtividade,
+      dsr: financials.dsr,
+      divisorHours: financials.divisorHours,
       divisorDays: 30,
+      hourlyRate: financials.hourlyRate,
+      ajudaDeCusto: financials.ajudaDeCusto,
+      extraHoursRateMultiplier: financials.extraHoursRateMultiplier,
       contractDailyHours,
       contractDailyMinutes,
       contractDailyHoursFormatted,
@@ -785,7 +879,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       year: selectedYear,
       month: selectedMonth,
       baseSalary,
+      regimeTrabalho: financials.regimeTrabalho,
+      valorHoraAula: financials.valorHoraAula,
+      duracaoAulaMinutos: financials.duracaoAulaMinutos,
+      totalAulas: financials.totalAulas,
+      salarioAulas: financials.salarioAulas,
+      horaAtividade: financials.horaAtividade,
+      dsr: financials.dsr,
+      divisorHours: financials.divisorHours,
       divisorDays: 30,
+      hourlyRate: financials.hourlyRate,
+      ajudaDeCusto: financials.ajudaDeCusto,
+      extraHoursRateMultiplier: financials.extraHoursRateMultiplier,
       contractDailyHours,
       contractDailyMinutes,
       contractDailyHoursFormatted,
@@ -1192,6 +1297,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <span className="text-xs px-2.5 py-0.5 font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
                   {targetUser?.cargoLabel || 'Estagiária'}
                 </span>
+                {regimeTrabalho === 'professor_horista' ? (
+                  <span className="text-xs px-2.5 py-0.5 font-extrabold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-300 flex items-center gap-1">
+                    <GraduationCap className="w-3 h-3 text-indigo-600" />
+                    Professor Horista
+                  </span>
+                ) : (
+                  <span className="text-xs px-2.5 py-0.5 font-semibold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                    Mensalista (220h)
+                  </span>
+                )}
                 {(() => {
                   const badge = getUserStatusBadge(targetUser);
                   return (
@@ -1215,9 +1330,20 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <span className="text-slate-400 block font-medium">Horário Contratual:</span>
               <strong className="text-slate-800 font-bold">{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
             </div>
-            <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              <span className="text-slate-400 block font-medium">Bolsa Auxílio Base:</span>
-              <strong className="text-slate-800 font-bold">{formatCurrencyBR(baseSalary)} / mês</strong>
+            {regimeTrabalho === 'professor_horista' ? (
+              <div className="bg-indigo-50/70 px-3 py-1.5 rounded-lg border border-indigo-200">
+                <span className="text-indigo-700 block font-medium">Hora-Aula:</span>
+                <strong className="text-indigo-900 font-bold">{formatCurrencyBR(valorHoraAula || 0)} / aula</strong>
+              </div>
+            ) : (
+              <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                <span className="text-slate-400 block font-medium">Bolsa Auxílio Base:</span>
+                <strong className="text-slate-800 font-bold">{formatCurrencyBR(baseSalary)} / mês</strong>
+              </div>
+            )}
+            <div className="bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
+              <span className="text-emerald-700 block font-medium">Ajuda de Custo:</span>
+              <strong className="text-emerald-900 font-bold">{formatCurrencyBR(ajudaDeCusto)}</strong>
             </div>
             <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
               <span className="text-slate-400 block font-medium">Chave PIX:</span>
@@ -1638,10 +1764,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <h3 className="text-sm font-black text-slate-900">
                   Apuração Financeira & Fechamento da Folha
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Divisor Contratual: <strong>30 dias</strong> • Diária: <strong>{formatCurrencyBR(financials.diariaRate)}</strong> • Hora:{' '}
-                  <strong>{formatCurrencyBR(financials.hourlyRate)}/h</strong>
-                </p>
+                {financials.regimeTrabalho === 'professor_horista' ? (
+                  <p className="text-xs text-slate-500">
+                    Regime: <strong className="text-indigo-700">Professor Horista</strong> • Hora-Aula: <strong>{formatCurrencyBR(financials.valorHoraAula || 0)}</strong> ({financials.duracaoAulaMinutos}min) • Aulas no Mês: <strong>{financials.totalAulas}</strong> • Hora-Atividade: <strong>5%</strong> • DSR: <strong>1/6</strong>
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Regime: <strong className="text-slate-700">Mensalista (220h)</strong> • Divisor Contratual: <strong>{financials.divisorHours}h</strong> • Carga Diária: <strong>{contractDailyHoursFormatted}</strong> • Valor da Hora: <strong>{formatCurrencyBR(financials.hourlyRate)}/h</strong> • Diária (8,8h): <strong>{formatCurrencyBR(financials.diariaRate)}</strong>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1651,49 +1782,162 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           {/* Grid of calculations */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-slate-500 font-medium block truncate text-[11px]">Bolsa Auxílio Base:</span>
-              <span className="text-sm sm:text-base font-black text-slate-800 truncate mt-1">
-                {formatCurrencyBR(financials.baseSalary)}
-              </span>
-            </div>
+          {financials.regimeTrabalho === 'professor_horista' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-indigo-800 font-bold block truncate text-[11px]">Aulas Ministradas:</span>
+                  <span className="text-[10px] text-indigo-600 block truncate">Aulas Reais do Mês</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-indigo-900 truncate block">
+                    {financials.totalAulas} aulas
+                  </span>
+                  <span className="text-[9px] text-indigo-500 block">{financials.duracaoAulaMinutos} min / aula</span>
+                </div>
+              </div>
 
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-blue-700 font-medium block truncate text-[11px]">Total Horas Trabalhadas:</span>
-              <span className="text-sm sm:text-base font-black text-blue-900 truncate mt-1 font-mono">
-                {financials.totalWorkedFormatted}
-              </span>
-            </div>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-slate-600 font-bold block truncate text-[11px]">Salário de Aulas:</span>
+                  <span className="text-[10px] text-slate-400 block truncate">Aulas × {formatCurrencyBR(financials.valorHoraAula || 0)}</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-slate-900 truncate mt-1">
+                  {formatCurrencyBR(financials.salarioAulas)}
+                </span>
+              </div>
 
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-emerald-700 font-medium block truncate text-[11px]">Dias Pagos / Feriados:</span>
-              <span className="text-xs sm:text-sm font-black text-emerald-900 break-words mt-1 leading-snug">
-                {financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Pagos)
-              </span>
-            </div>
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-blue-700 font-bold block truncate text-[11px]">(+) Hora-Atividade (5%):</span>
+                  <span className="text-[9px] text-blue-500 block">5% s/ Salário de Aulas</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-blue-900 truncate mt-1">
+                  {formatCurrencyBR(financials.horaAtividade || 0)}
+                </span>
+              </div>
 
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas Injustificadas:</span>
-              <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
-                {financials.unjustifiedAbsencesCount} dias ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})
-              </span>
-            </div>
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-purple-700 font-bold block truncate text-[11px]">(+) DSR (1/6):</span>
+                  <span className="text-[9px] text-purple-500 block">Descanso Semanal (1/6)</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-purple-900 truncate mt-1">
+                  {formatCurrencyBR(financials.dsr || 0)}
+                </span>
+              </div>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-amber-800 font-medium block truncate text-[11px]">Atrasos / Horas Faltantes:</span>
-              <span className="text-xs sm:text-sm font-black text-amber-950 break-words mt-1 leading-snug font-mono">
-                {financials.missingHoursFormatted} ({financials.missingHoursDiscount > 0 ? formatCurrencyBR(-financials.missingHoursDiscount) : 'R$ 0,00'})
-              </span>
-            </div>
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
+                <div>
+                  <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
+                  <span className="text-[9px] font-semibold text-emerald-600 uppercase tracking-tight block">Fixo • Não Salarial</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
+                    {formatCurrencyBR(financials.ajudaDeCusto)}
+                  </span>
+                  <span className="text-[9px] text-emerald-600 block">Sem descontos</span>
+                </div>
+              </div>
 
-            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-              <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras / Adicionais:</span>
-              <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis font-mono">
-                {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
-              </span>
+              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras (50%):</span>
+                  <span className="text-[9px] text-indigo-500 block">(Hora × 1,5) × Excedentes</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug font-mono">
+                  {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
+                </span>
+              </div>
+
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas / Atrasos:</span>
+                  <span className="text-[9px] text-rose-500 block">Descontos proporcionais</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
+                  {financials.unjustifiedAbsencesCount > 0 || (financials.totalMissingMinutes && financials.totalMissingMinutes > 0)
+                    ? formatCurrencyBR(-(financials.unjustifiedAbsencesDiscount + financials.missingHoursDiscount))
+                    : 'R$ 0,00'}
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-slate-500 font-medium block truncate text-[11px]">Salário Base (220h):</span>
+                  <span className="text-xs text-slate-400 block truncate text-[10px]">{formatCurrencyBR(financials.hourlyRate)}/hora</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-slate-800 truncate mt-1">
+                  {formatCurrencyBR(financials.baseSalary)}
+                </span>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
+                <div>
+                  <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
+                  <span className="text-[9px] font-semibold text-emerald-600 uppercase tracking-tight block">Fixo • Não Salarial</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
+                    {formatCurrencyBR(financials.ajudaDeCusto)}
+                  </span>
+                  <span className="text-[9px] text-emerald-600 block">Sem descontos legais</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-blue-700 font-medium block truncate text-[11px]">Horas Trabalhadas:</span>
+                  <span className="text-[9px] text-blue-500 block">Total apurado no mês</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-blue-900 truncate mt-1 font-mono">
+                  {financials.totalWorkedFormatted}
+                </span>
+              </div>
+
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-emerald-700 font-medium block truncate text-[11px]">Feriados / Recessos:</span>
+                  <span className="text-[9px] text-emerald-600 block">100% Pagos e abonados</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-emerald-900 break-words mt-1 leading-snug">
+                  {financials.paidHolidaysCount + financials.paidRecessDaysCount} dias
+                </span>
+              </div>
+
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas Injustificadas:</span>
+                  <span className="text-[9px] text-rose-500 block">Base 8,8h por dia ({formatCurrencyBR(financials.diariaRate)})</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
+                  {financials.unjustifiedAbsencesCount} dias ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})
+                </span>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-amber-800 font-medium block truncate text-[11px]">Atrasos / Faltantes:</span>
+                  <span className="text-[9px] text-amber-600 block">Horas a compensar/descontar</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-amber-950 break-words mt-1 leading-snug font-mono">
+                  {financials.missingHoursFormatted} ({financials.missingHoursDiscount > 0 ? formatCurrencyBR(-financials.missingHoursDiscount) : 'R$ 0,00'})
+                </span>
+              </div>
+
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras (50%):</span>
+                  <span className="text-[9px] text-indigo-500 block">(Hora × 1,5) × Horas Excedentes</span>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis font-mono">
+                  {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Admin Adjustments Inputs */}
           {isAdmin ? (
@@ -1803,6 +2047,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <p className="text-xs text-slate-300 mt-1 italic capitalize">
                 ({numberToWordsBRL(financials.netTotal)})
               </p>
+              <div className="mt-2.5 px-2.5 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-[11px] text-emerald-300 flex items-center justify-between">
+                <span>Ajuda de Custo (100% Líquida):</span>
+                <strong className="font-mono">{formatCurrencyBR(financials.ajudaDeCusto)}</strong>
+              </div>
             </div>
 
             <div className="mt-5 space-y-1.5 text-xs text-slate-300 border-t border-slate-800 pt-4">
@@ -1953,7 +2201,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               {/* Identification Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Beneficiária / Estagiária:</span>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Beneficiária / Colaborador(a):</span>
                   <strong className="text-xs text-slate-900">{targetUser?.name}</strong>
                 </div>
                 <div>
@@ -1965,16 +2213,27 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <strong className="text-xs text-slate-900">{getMonthNameBR(selectedMonth)} / {selectedYear}</strong>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Horário Contratual:</span>
-                  <strong className="text-xs text-slate-900">{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Regime de Trabalho:</span>
+                  <strong className="text-xs text-indigo-700">
+                    {financials.regimeTrabalho === 'professor_horista' ? 'Professor Horista (Por Aulas)' : 'Mensalista (Jornada Padrão 220h)'}
+                  </strong>
                 </div>
+                {financials.regimeTrabalho === 'professor_horista' ? (
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold block">Hora-Aula / Aulas do Mês:</span>
+                    <strong className="text-xs text-slate-900">
+                      {formatCurrencyBR(financials.valorHoraAula || 0)}/aula • {financials.totalAulas} aulas ({financials.duracaoAulaMinutos}min)
+                    </strong>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold block">Divisor / Valor da Hora:</span>
+                    <strong className="text-xs text-slate-900">{financials.divisorHours}h • {formatCurrencyBR(financials.hourlyRate)}/h</strong>
+                  </div>
+                )}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Forma de Pagamento / PIX:</span>
-                  <strong className="text-xs text-slate-900 font-mono">{pixKey}</strong>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Base de Cálculo (30 Dias):</span>
-                  <strong className="text-xs text-slate-900">{formatCurrencyBR(baseSalary)}</strong>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Ajuda de Custo Fixa:</span>
+                  <strong className="text-xs text-emerald-700">{formatCurrencyBR(financials.ajudaDeCusto)} (100% líquida)</strong>
                 </div>
               </div>
 
@@ -1990,13 +2249,55 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    <tr>
-                      <td className="p-2.5 font-semibold">Bolsa Auxílio Estágio / Monitoria Integral</td>
-                      <td className="p-2.5 text-center">30 dias</td>
-                      <td className="p-2.5 text-right font-bold text-slate-900">{formatCurrencyBR(financials.baseSalary)}</td>
-                      <td className="p-2.5 text-right text-slate-400">—</td>
-                    </tr>
-                    {financials.paidHolidaysCount + financials.paidRecessDaysCount > 0 && (
+                    {financials.regimeTrabalho === 'professor_horista' ? (
+                      <>
+                        <tr>
+                          <td className="p-2.5 font-semibold">
+                            Salário Base de Aulas ({financials.totalAulas} aulas ministradas no mês)
+                          </td>
+                          <td className="p-2.5 text-center">{financials.totalAulas} aulas</td>
+                          <td className="p-2.5 text-right font-bold text-slate-900">{formatCurrencyBR(financials.salarioAulas)}</td>
+                          <td className="p-2.5 text-right text-slate-400">—</td>
+                        </tr>
+                        <tr className="bg-blue-50/40 text-blue-950">
+                          <td className="p-2.5">
+                            <span className="font-semibold block">Adicional de Hora-Atividade (5%)</span>
+                            <span className="text-[10px] text-blue-700 block">5% calculado sobre o Salário Base de Aulas</span>
+                          </td>
+                          <td className="p-2.5 text-center font-semibold text-blue-800">5%</td>
+                          <td className="p-2.5 text-right font-bold text-blue-800">{formatCurrencyBR(financials.horaAtividade || 0)}</td>
+                          <td className="p-2.5 text-right text-slate-400">—</td>
+                        </tr>
+                        <tr className="bg-purple-50/40 text-purple-950">
+                          <td className="p-2.5">
+                            <span className="font-semibold block">D.S.R. - Descanso Semanal Remunerado (1/6)</span>
+                            <span className="text-[10px] text-purple-700 block">1/6 s/ (Salário de Aulas + Hora-Atividade) - Lei 605/49 e Súmula 351 TST</span>
+                          </td>
+                          <td className="p-2.5 text-center font-semibold text-purple-800">1/6</td>
+                          <td className="p-2.5 text-right font-bold text-purple-800">{formatCurrencyBR(financials.dsr || 0)}</td>
+                          <td className="p-2.5 text-right text-slate-400">—</td>
+                        </tr>
+                      </>
+                    ) : (
+                      <tr>
+                        <td className="p-2.5 font-semibold">Salário / Bolsa Auxílio Integral ({financials.divisorHours}h)</td>
+                        <td className="p-2.5 text-center">{financials.divisorHours}h</td>
+                        <td className="p-2.5 text-right font-bold text-slate-900">{formatCurrencyBR(financials.baseSalary)}</td>
+                        <td className="p-2.5 text-right text-slate-400">—</td>
+                      </tr>
+                    )}
+                    {financials.ajudaDeCusto > 0 && (
+                      <tr className="text-emerald-950 bg-emerald-50/70">
+                        <td className="p-2.5">
+                          <span className="font-bold text-emerald-900 block">Ajuda de Custo Fixa Mensal</span>
+                          <span className="text-[10px] text-emerald-700 block">Verba indenizatória / não salarial (sem incidência de descontos legais)</span>
+                        </td>
+                        <td className="p-2.5 text-center font-semibold text-emerald-800">Fixo</td>
+                        <td className="p-2.5 text-right font-bold text-emerald-800">{formatCurrencyBR(financials.ajudaDeCusto)}</td>
+                        <td className="p-2.5 text-right text-slate-400">—</td>
+                      </tr>
+                    )}
+                    {financials.regimeTrabalho === 'mensalista' && financials.paidHolidaysCount + financials.paidRecessDaysCount > 0 && (
                       <tr className="text-emerald-800 bg-emerald-50/40">
                         <td className="p-2.5 font-medium">Feriados e Recessos Escolares Garantidos e Abonados</td>
                         <td className="p-2.5 text-center">{financials.paidHolidaysCount + financials.paidRecessDaysCount} dias</td>
@@ -2006,15 +2307,25 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     )}
                     {financials.unjustifiedAbsencesCount > 0 && (
                       <tr className="text-rose-900 bg-rose-50/40">
-                        <td className="p-2.5 font-medium">Desconto de Faltas Injustificadas ({formatCurrencyBR(financials.diariaRate)}/dia)</td>
+                        <td className="p-2.5 font-medium">
+                          Desconto de Faltas Injustificadas ({financials.regimeTrabalho === 'professor_horista' ? 'Aulas não ministradas' : `${formatCurrencyBR(financials.diariaRate)}/dia`})
+                        </td>
                         <td className="p-2.5 text-center">{financials.unjustifiedAbsencesCount} dias</td>
                         <td className="p-2.5 text-right text-slate-400">—</td>
                         <td className="p-2.5 text-right font-bold text-rose-700">{formatCurrencyBR(financials.unjustifiedAbsencesDiscount)}</td>
                       </tr>
                     )}
+                    {financials.missingHoursDiscount > 0 && (
+                      <tr className="text-amber-900 bg-amber-50/40">
+                        <td className="p-2.5 font-medium">Desconto de Atrasos / Horas Faltantes</td>
+                        <td className="p-2.5 text-center">{financials.missingHoursFormatted}</td>
+                        <td className="p-2.5 text-right text-slate-400">—</td>
+                        <td className="p-2.5 text-right font-bold text-amber-700">{formatCurrencyBR(financials.missingHoursDiscount)}</td>
+                      </tr>
+                    )}
                     {financials.extraHoursAmount > 0 && (
                       <tr className="text-indigo-900 bg-indigo-50/40">
-                        <td className="p-2.5 font-medium">Horas / Minutos Extras Apurados</td>
+                        <td className="p-2.5 font-medium">Horas Extras Apuradas (+50%)</td>
                         <td className="p-2.5 text-center">{formatMinutesToTime(financials.totalExtraMinutes)}</td>
                         <td className="p-2.5 text-right font-bold text-indigo-700">{formatCurrencyBR(financials.extraHoursAmount)}</td>
                         <td className="p-2.5 text-right text-slate-400">—</td>
@@ -2836,25 +3147,29 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
 
             {/* Financial Summary Box */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-2 sm:grid-cols-6 gap-2 text-[11px]">
               <div>
-                <span className="text-slate-500 block text-[10px]">Bolsa Base:</span>
+                <span className="text-slate-500 block text-[10px]">Salário Base ({financials.divisorHours}h):</span>
                 <strong className="text-slate-900">{formatCurrencyBR(financials.baseSalary)}</strong>
               </div>
               <div>
-                <span className="text-blue-700 block text-[10px]">Total Horas Trabalhadas:</span>
+                <span className="text-emerald-700 block text-[10px]">(+) Ajuda de Custo:</span>
+                <strong className="text-emerald-800">{formatCurrencyBR(financials.ajudaDeCusto)}</strong>
+              </div>
+              <div>
+                <span className="text-blue-700 block text-[10px]">Total Trabalhado:</span>
                 <strong className="text-blue-900 font-mono">{financials.totalWorkedFormatted}</strong>
               </div>
               <div>
                 <span className="text-emerald-700 block text-[10px]">Feriados / Recessos:</span>
-                <strong className="text-emerald-800">{financials.paidHolidaysCount + financials.paidRecessDaysCount} dias (100% Pagos)</strong>
+                <strong className="text-emerald-800">{financials.paidHolidaysCount + financials.paidRecessDaysCount} dias</strong>
               </div>
               <div>
                 <span className="text-rose-700 block text-[10px]">Faltas Injustificadas:</span>
                 <strong className="text-rose-800">{financials.unjustifiedAbsencesCount} ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})</strong>
               </div>
               <div>
-                <span className="text-indigo-700 block text-[10px]">Horas Extras:</span>
+                <span className="text-indigo-700 block text-[10px]">Horas Extras (50%):</span>
                 <strong className="text-indigo-900 font-mono">{financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})</strong>
               </div>
             </div>
@@ -2921,14 +3236,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       setUserEditContractSchedule('11:40 - 17:40');
                       setUserEditContractDailyHoursFormatted('6h00min');
                     } else if (st === 'padrao_8h') {
-                      setUserEditContractSchedule('07:30 - 11:30 / 13:00 - 17:42');
-                      setUserEditContractDailyHoursFormatted('8h40min');
+                      setUserEditContractDailyHoursFormatted('8h48min');
                     }
                   }}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-semibold focus:border-indigo-500 focus:outline-none"
                 >
                   <option value="continua_6h">Jornada Contínua (6 horas - Entrada e Saída Direta)</option>
-                  <option value="padrao_8h">Jornada Padrão com Almoço (8h40min - 4 Batidas)</option>
+                  <option value="padrao_8h">Jornada Padrão (4 Batidas • 8h48min)</option>
                   <option value="personalizada">Jornada Personalizada</option>
                 </select>
               </div>
@@ -3004,7 +3318,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">Bolsa Auxílio Mensal (R$)</label>
+                  <label className="text-slate-300 font-semibold block mb-1">Salário / Bolsa Mensal (R$)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -3024,6 +3338,68 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     placeholder="CPF, Celular, E-mail ou Aleatória"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* Parametros Financeiros da Jornada Padrão: Divisor 220h e Ajuda de Custo R$ 150,00 */}
+              <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    Parâmetros Financeiros & Jornada Padrão
+                  </span>
+                  <span className="text-[10px] text-slate-400">Jornada 220h / 8,8h dia</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-slate-300 font-semibold block mb-1">
+                      Divisor Mensal (Horas)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={userEditDivisorHours}
+                      onChange={(e) => setUserEditDivisorHours(e.target.value)}
+                      placeholder="220"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Padrão contratual: 220 horas</span>
+                  </div>
+
+                  <div>
+                    <label className="text-slate-300 font-semibold block mb-1">
+                      Ajuda de Custo Fixa (R$)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={userEditAjudaDeCusto}
+                      onChange={(e) => setUserEditAjudaDeCusto(e.target.value)}
+                      placeholder="150.00"
+                      className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg p-2 text-emerald-400 font-mono font-bold focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-emerald-400 mt-0.5 block">Padrão: R$ 150,00 fixo mensal</span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[11px] space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Valor da Hora Base Calculado:</span>
+                    <strong className="text-white font-mono">
+                      {formatCurrencyBR(calcularValorHora(Number(userEditBaseSalary) || 0, Number(userEditDivisorHours) || 220))}/h
+                    </strong>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Hora Extra 50% Calculada:</span>
+                    <strong className="text-indigo-300 font-mono">
+                      {formatCurrencyBR(calcularValorHora(Number(userEditBaseSalary) || 0, Number(userEditDivisorHours) || 220) * 1.5)}/h
+                    </strong>
+                  </div>
+                  <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                    ℹ️ A <strong>Ajuda de Custo</strong> é verba não indenizatória/não salarial: entra diretamente no <strong>Líquido a Receber</strong> sem sofrer descontos de INSS/FGTS e sem alterar a base de cálculo de horas extras ou faltas.
+                  </p>
                 </div>
               </div>
 
