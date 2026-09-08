@@ -41,6 +41,8 @@ import {
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
 import { generateSemanarioPDFReport } from '../../utils/pdfGenerator';
+import { triggerPrint, safeWindowPrint } from '../../utils/printUtils';
+import { PdfViewerModal } from '../PdfViewerModal';
 
 /**
  * Extrai o horário de início (horaInicio) de um timeSlot como '11:20 - 11:30' ou '07:30'
@@ -161,6 +163,17 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // AI Batch Generation Modal / Loading State
   const [isGeneratingBatchAI, setIsGeneratingBatchAI] = useState<boolean>(false);
+
+  // PDF Preview & Print Modal State
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    isOpen: boolean;
+    doc?: any;
+    blobUrl?: string | null;
+    dataUrl?: string | null;
+    filename?: string;
+    title?: string;
+    onDownload?: () => void;
+  }>({ isOpen: false });
 
   // Add Turma Handler
   const handleAddTurmaSubmit = (e: React.FormEvent) => {
@@ -504,27 +517,58 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     onBatchSavePlans(generated);
   };
 
-  // PDF Export
+  // PDF Export & Preview Modal
   const handleExportPDF = (turmaFilter?: string) => {
+    const targetTurma = turmaFilter || activeTurma || 'all';
     const plansToExport = turmaFilter
       ? weekPlans.filter((p) => p.turma === turmaFilter)
       : activeTurma
       ? filteredActiveTurmaPlans
       : weekPlans;
 
-    generateSemanarioPDFReport(
+    const result = generateSemanarioPDFReport(
       plansToExport,
       currentWeek,
-      turmaFilter || activeTurma || 'all',
+      targetTurma,
       selectedDay,
       currentUser,
-      true
+      false
     );
+
+    const isAll = targetTurma === 'all';
+    setPdfPreviewState({
+      isOpen: true,
+      doc: result.doc,
+      blobUrl: result.blobUrl,
+      dataUrl: result.dataUrl || result.dataUri,
+      filename: result.filename,
+      title: `Semanário Pedagógico — Semana ${currentWeek.weekNumber} (${isAll ? 'Todas as Turmas' : targetTurma})`,
+      onDownload: result.download,
+    });
   };
 
-  // Print
+  // Direct Print via hidden iframe (pop-up blocker proof) or safeWindowPrint
   const handlePrint = () => {
-    window.print();
+    try {
+      const targetTurma = activeTurma || 'all';
+      const plansToExport = activeTurma
+        ? filteredActiveTurmaPlans
+        : weekPlans;
+
+      const result = generateSemanarioPDFReport(
+        plansToExport,
+        currentWeek,
+        targetTurma,
+        selectedDay,
+        currentUser,
+        false
+      );
+
+      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
+    } catch (err) {
+      console.warn('Fallback para impressão direta no Semanário:', err);
+      safeWindowPrint();
+    }
   };
 
   // All active categories list for filter dropdown (sorted alphabetically)
@@ -566,7 +610,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           </div>
 
           {/* Quick Actions in Banner */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0 print:hidden no-print">
             {activeTurma ? (
               <>
                 <button
@@ -680,7 +724,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         </div>
 
         {/* Week Navigator Bar */}
-        <div className="mt-6 pt-5 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="mt-6 pt-5 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 print:hidden no-print">
           <div className="flex items-center space-x-2">
             <button
               type="button"
@@ -738,7 +782,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       {!activeTurma && (
         <div className="space-y-6">
           {/* Subheader & Search for Classes */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 print:hidden no-print">
             <div className="flex items-center space-x-3 w-full sm:w-auto">
               <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl border border-indigo-100">
                 <GraduationCap className="w-5 h-5" />
@@ -958,7 +1002,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
             </div>
 
             {/* Turma Switcher */}
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5 print:hidden no-print">
               {/* Quick Select another turma */}
               <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
                 <span className="text-xs font-bold text-slate-500">Turma:</span>
@@ -978,7 +1022,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           </div>
 
           {/* Filter and Search Bar for the active Turma */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3 print:hidden no-print">
             <div className="flex flex-col lg:flex-row items-center gap-3">
               {/* Search Box */}
               <div className="relative flex-1 w-full">
@@ -1250,6 +1294,20 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Official PDF Viewer Modal with direct print via hidden iframe and download */}
+      {pdfPreviewState.isOpen && (
+        <PdfViewerModal
+          isOpen={pdfPreviewState.isOpen}
+          onClose={() => setPdfPreviewState({ isOpen: false })}
+          doc={pdfPreviewState.doc}
+          blobUrl={pdfPreviewState.blobUrl}
+          dataUrl={pdfPreviewState.dataUrl}
+          filename={pdfPreviewState.filename}
+          title={pdfPreviewState.title}
+          onDownload={pdfPreviewState.onDownload}
+        />
       )}
     </div>
   );

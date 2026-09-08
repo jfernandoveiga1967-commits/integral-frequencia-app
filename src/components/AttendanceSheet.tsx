@@ -8,7 +8,7 @@ import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
-import { safeWindowPrint } from '../utils/printUtils';
+import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -450,6 +450,25 @@ function getCurrentHHMM(): string {
     }
   };
 
+  const handlePrintAttendanceDaily = () => {
+    try {
+      const result = generateAttendanceDailyPDFReport({
+        date: selectedDate,
+        activityName: selectedActivity,
+        turma: selectedTurma,
+        students: filteredStudents,
+        records,
+        teacherName: currentUser?.name,
+        saveImmediately: false,
+      });
+
+      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
+    } catch (e) {
+      console.warn('Fallback para impressão direta no espelho de chamada:', e);
+      safeWindowPrint();
+    }
+  };
+
   return (
     <div className="space-y-6">
       {!userCanMarkAttendance && (
@@ -460,18 +479,20 @@ function getCurrentHHMM(): string {
       )}
 
       {/* Routine & Monitor Guidance Banner (Atividade do Momento, Atalho de Chamada, Orientações e Cronograma) */}
-      <RoutineMonitorBanner
-        schedules={schedules}
-        activitiesList={activitiesList}
-        selectedTurma={selectedTurma}
-        selectedDate={selectedDate}
-        turmasList={turmasList}
-        holidays={holidays}
-        onSelectActivityAndTurma={(act, turma) => {
-          if (act) setSelectedActivity(act);
-          if (turma) setSelectedTurma(turma);
-        }}
-      />
+      <div className="print:hidden no-print">
+        <RoutineMonitorBanner
+          schedules={schedules}
+          activitiesList={activitiesList}
+          selectedTurma={selectedTurma}
+          selectedDate={selectedDate}
+          turmasList={turmasList}
+          holidays={holidays}
+          onSelectActivityAndTurma={(act, turma) => {
+            if (act) setSelectedActivity(act);
+            if (turma) setSelectedTurma(turma);
+          }}
+        />
+      </div>
 
       {/* Equipment Modal */}
       <EquipmentModal
@@ -484,7 +505,7 @@ function getCurrentHHMM(): string {
       />
 
       {/* Control Panel / Filters */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 print:hidden no-print">
         {/* Activity Chips Selector */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -702,11 +723,11 @@ function getCurrentHHMM(): string {
           </div>
 
           {/* Quick Buttons */}
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end print:hidden no-print">
             {/* Print Timesheet / Call List */}
             <button
               type="button"
-              onClick={() => safeWindowPrint()}
+              onClick={handlePrintAttendanceDaily}
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs active:scale-95"
               title="Imprimir lista de chamada / espelho de frequência em folha A4"
             >
@@ -808,10 +829,10 @@ function getCurrentHHMM(): string {
                 {filteredStudents.length} aluno(s) listado(s) • Clique nos botões para registrar a presença ou justificativa de ausência.
               </p>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 print:hidden no-print">
               <button
                 type="button"
-                onClick={() => safeWindowPrint()}
+                onClick={handlePrintAttendanceDaily}
                 className="px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all cursor-pointer flex items-center space-x-1 active:scale-95"
                 title="Imprimir lista de chamada em formato A4"
               >
@@ -954,7 +975,7 @@ function getCurrentHHMM(): string {
                             </div>
 
                             {/* Attendance Status Action Buttons */}
-                            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 w-full lg:w-auto">
+                            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 w-full lg:w-auto print:hidden no-print">
                               {/* 1. PRESENTE */}
                               <button
                                 type="button"
@@ -1059,7 +1080,7 @@ function getCurrentHHMM(): string {
                           )}
 
                           {/* Optional Observation input */}
-                          <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center space-x-2">
+                          <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center space-x-2 print:hidden no-print">
                             <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <input
                               type="text"

@@ -203,7 +203,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         }`}
       >
         {/* Fixed Header Toolbar (Hidden in Print) */}
-        <div className="bg-slate-900 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 shrink-0 border-b border-slate-800 sticky top-0 z-30 shadow-md print-hidden">
+        <div className="bg-slate-900 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 shrink-0 border-b border-slate-800 sticky top-0 z-30 shadow-md print:hidden no-print print-hidden">
           <div className="flex items-center space-x-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 shrink-0">
               <FileText className="w-5 h-5" />
@@ -314,7 +314,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         </div>
 
         {/* Sub-bar filename info (Hidden in Print) */}
-        <div className="bg-slate-950/70 px-4 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 print-hidden shrink-0">
+        <div className="bg-slate-950/70 px-4 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 print:hidden no-print print-hidden shrink-0">
           <span className="truncate font-mono text-[11px]">
             Arquivo: <strong className="text-indigo-300">{filename || 'relatorio.pdf'}</strong>
           </span>
@@ -373,7 +373,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
                     loading="eager"
                   />
                   {renderedPages.length > 1 && (
-                    <div className="bg-slate-100 text-slate-600 text-[10px] font-bold px-3 py-1 text-right border-t border-slate-200 print-hidden">
+                    <div className="bg-slate-100 text-slate-600 text-[10px] font-bold px-3 py-1 text-right border-t border-slate-200 print:hidden no-print print-hidden">
                       Página {page.pageNumber} de {renderedPages.length}
                     </div>
                   )}

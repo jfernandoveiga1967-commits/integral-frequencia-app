@@ -22,7 +22,7 @@ import {
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
-import { safeWindowPrint } from '../utils/printUtils';
+import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -544,7 +544,22 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // Printing & CSV
   const handlePrint = () => {
-    safeWindowPrint();
+    try {
+      const result = generateNumericAttendanceConsolidatedPDFReport({
+        turma: 'all',
+        startDate: effectiveStartDate,
+        endDate: effectiveEndDate,
+        periodLabel: `De ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`,
+        students,
+        records: activeRecords,
+        holidays,
+        saveImmediately: false,
+      });
+      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
+    } catch (err) {
+      console.warn('Fallback para impressão direta no Relatório:', err);
+      safeWindowPrint();
+    }
   };
 
   const handleExportCSV = () => {
@@ -589,7 +604,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   return (
     <div className="space-y-6 print:space-y-4">
       {/* Top Header & Period Filter Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 print:hidden">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 print:hidden no-print">
         {/* Header line + Title */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
