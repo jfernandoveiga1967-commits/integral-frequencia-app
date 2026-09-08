@@ -8,7 +8,7 @@ import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
-import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
+import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
 import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -451,7 +451,26 @@ function getCurrentHHMM(): string {
   };
 
   const handlePrintAttendanceDaily = () => {
-    safeWindowPrint('daily-attendance-sheet');
+    try {
+      const pdf = generateAttendanceDailyPDFReport({
+        date: selectedDate,
+        activityName: selectedActivity,
+        turma: selectedTurma,
+        students: filteredStudents,
+        records,
+        teacherName: currentUser?.name,
+        saveImmediately: false,
+      });
+
+      directPrint({
+        elementId: 'daily-attendance-sheet',
+        title: `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`,
+        blobUrl: pdf.blobUrl,
+        doc: pdf.doc,
+      });
+    } catch (e) {
+      safeWindowPrint('daily-attendance-sheet', `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`);
+    }
   };
 
   return (

@@ -549,7 +549,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Direct Print immediately via CSS @media print and same window
   const handlePrint = () => {
-    safeWindowPrint('semanario-printable-area');
+    safeWindowPrint('semanario-printable-area', `Semanário Pedagógico — ${currentWeek.label} (${activeTurma || 'Geral'})`);
   };
 
   // All active categories list for filter dropdown (sorted alphabetically)

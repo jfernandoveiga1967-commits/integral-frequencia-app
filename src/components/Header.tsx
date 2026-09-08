@@ -11,11 +11,13 @@ import {
   X,
   Clock,
   BookOpen,
+  ExternalLink,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ConnectionState } from '../services/syncService';
 import { LOGO_CRESCER_BASE64 } from '../utils/appLogoData';
 import { isCoordenador } from '../utils/authUtils';
+import { isRunningInIframe } from '../utils/printUtils';
 import {
   isAudioNotificationsEnabled,
   unlockAudioContextAndPlayTest,
@@ -143,10 +145,22 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </div>
 
-            <div className="shrink-0">
+            <div className="shrink-0 flex items-center space-x-2.5">
               <h1 className="text-base sm:text-lg font-bold tracking-tight text-white leading-tight whitespace-nowrap">
                 Programa do Integral
               </h1>
+              {isRunningInIframe() && (
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:inline-flex items-center space-x-1 px-2 py-0.5 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 hover:text-white border border-indigo-500/30 rounded-lg text-[10px] font-bold tracking-tight transition cursor-pointer no-underline"
+                  title="Abrir em Nova Aba fora do iFrame para liberar impressoras diretamente no computador"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Nova Aba</span>
+                </a>
+              )}
             </div>
           </div>
 
