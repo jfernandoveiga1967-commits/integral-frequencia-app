@@ -3,7 +3,9 @@
 /* ========================================================================= */
 /* ELEMENTOS EXCLUSIVOS DE IMPRESSÃO (Ocultos na tela normal)               */
 /* ========================================================================= */
-.print-only {
+#app-print-container,
+.print-only,
+.print-container {
   display: none !important;
 }
 
@@ -34,16 +36,14 @@
     print-color-adjust: exact !important;
   }
 
-  /* Elementos exclusivos para a folha impressa (cabeçalho oficial institucional, assinaturas) */
-  .print-only {
-    display: block !important;
-    visibility: visible !important;
-  }
-
-  /* Ocultar elementos de navegação, cabeçalhos do app, rodapés e botões de ação */
+  /* ------------------------------------------------------------------------- */
+  /* TRATAMENTO DE ESTILOS: OCULTAÇÃO DA ESTRUTURA DO APP                     */
+  /* Oculta toda a estrutura do app: menus, barras laterais, painéis, cabeçalhos*/
+  /* ------------------------------------------------------------------------- */
   header,
   nav,
   footer,
+  aside,
   #app-header,
   #app-footer,
   .print\:hidden,
@@ -67,7 +67,38 @@
     text-shadow: none !important;
   }
 
-  /* Desbloquear e expandir contêineres principais */
+  /* ------------------------------------------------------------------------- */
+  /* MÉTODO DIRETO COM CONTÊINER DEDICADO DE IMPRESSÃO                         */
+  /* Quando um documento é copiado para #app-print-container, ocultamos #root */
+  /* completamente e exibimos unicamente o contêiner do documento selecionado! */
+  /* ------------------------------------------------------------------------- */
+  body.has-print-container #root {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.has-print-container #app-print-container {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* Elementos exclusivos para a folha impressa (cabeçalho oficial institucional, assinaturas) */
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Desbloquear e expandir contêineres principais caso não esteja em modo has-print-container */
   main,
   #root,
   .app-container {

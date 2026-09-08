@@ -542,24 +542,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     setShowNumericModal(false);
   };
 
-  // Printing & CSV
+  // Printing & CSV - Direct same-window print via CSS @media print
   const handlePrint = () => {
-    try {
-      const result = generateNumericAttendanceConsolidatedPDFReport({
-        turma: 'all',
-        startDate: effectiveStartDate,
-        endDate: effectiveEndDate,
-        periodLabel: `De ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`,
-        students,
-        records: activeRecords,
-        holidays,
-        saveImmediately: false,
-      });
-      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
-    } catch (err) {
-      console.warn('Fallback para impressão direta no Relatório:', err);
-      safeWindowPrint();
-    }
+    safeWindowPrint('weekly-report-content');
   };
 
   const handleExportCSV = () => {
@@ -602,7 +587,22 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   };
 
   return (
-    <div className="space-y-6 print:space-y-4">
+    <div id="weekly-report-content" className="space-y-6 print:space-y-4">
+      {/* Institutional Print Header */}
+      <div className="print-only p-4 border-b-2 border-slate-900 text-center space-y-1">
+        <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
+          INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
+        </h1>
+        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+          PAINEL CONSOLIDADO DE FREQUÊNCIA E DESEMPENHO
+        </h2>
+        <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300">
+          <span>Período: {formatDateBR(effectiveStartDate)} a {formatDateBR(effectiveEndDate)}</span>
+          <span>Filtro: {filterMode === 'week' ? `Semana ${currentWeek.weekNumber}` : 'Período Personalizado'}</span>
+          {currentUser?.name && <span>Emitido por: {currentUser.name}</span>}
+        </div>
+      </div>
+
       {/* Top Header & Period Filter Toolbar */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 print:hidden no-print">
         {/* Header line + Title */}

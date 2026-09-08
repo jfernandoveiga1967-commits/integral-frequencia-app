@@ -547,28 +547,9 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     });
   };
 
-  // Direct Print via hidden iframe (pop-up blocker proof) or safeWindowPrint
+  // Direct Print immediately via CSS @media print and same window
   const handlePrint = () => {
-    try {
-      const targetTurma = activeTurma || 'all';
-      const plansToExport = activeTurma
-        ? filteredActiveTurmaPlans
-        : weekPlans;
-
-      const result = generateSemanarioPDFReport(
-        plansToExport,
-        currentWeek,
-        targetTurma,
-        selectedDay,
-        currentUser,
-        false
-      );
-
-      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
-    } catch (err) {
-      console.warn('Fallback para impressão direta no Semanário:', err);
-      safeWindowPrint();
-    }
+    safeWindowPrint('semanario-printable-area');
   };
 
   // All active categories list for filter dropdown (sorted alphabetically)
@@ -777,9 +758,28 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       </div>
 
       {/* =========================================================================
-          NÍVEL 1: VISÃO INICIAL (PAINEL GERAL DE TURMAS)
+          CONTÊINER DE IMPRESSÃO DIRETA DO SEMANÁRIO
           ========================================================================= */}
-      {!activeTurma && (
+      <div id="semanario-printable-area" className="space-y-6">
+        {/* Institutional Print Header */}
+        <div className="print-only p-4 border-b-2 border-slate-900 text-center space-y-1">
+          <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
+            INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
+          </h1>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+            SEMANÁRIO PEDAGÓGICO — {currentWeek.label}
+          </h2>
+          <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300">
+            <span>Período: {currentWeek.startDate} até {currentWeek.endDate}</span>
+            <span>Turma: {activeTurma || 'Visão Geral das Turmas'}</span>
+            {currentUser?.name && <span>Docente / Responsável: {currentUser.name}</span>}
+          </div>
+        </div>
+
+        {/* =========================================================================
+            NÍVEL 1: VISÃO INICIAL (PAINEL GERAL DE TURMAS)
+            ========================================================================= */}
+        {!activeTurma && (
         <div className="space-y-6">
           {/* Subheader & Search for Classes */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 print:hidden no-print">
@@ -1191,6 +1191,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           )}
         </div>
       )}
+      </div>
 
       {/* Modal for Planning Creation / Edit */}
       <SemanarioModal

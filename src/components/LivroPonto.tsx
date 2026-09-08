@@ -2143,24 +2143,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   type="button"
                   id="btn-receipt-modal-print"
                   onClick={() => {
-                    try {
-                      const result = generateReciboBolsaPDF({
-                        user: targetUser,
-                        month: selectedMonth,
-                        year: selectedYear,
-                        financials,
-                        closingRecord,
-                        companyName,
-                        institutionName,
-                        pixKey,
-                        contractSchedule,
-                        contractDailyHoursFormatted,
-                        saveImmediately: false,
-                      });
-                      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
-                    } catch (e) {
-                      triggerPrint();
-                    }
+                    safeWindowPrint('recibo-bolsa-printable');
                   }}
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
                   title="Direcionar para a impressora do computador"
@@ -2181,7 +2164,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
 
             {/* Printable Document Area */}
-            <div className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs font-sans overflow-y-auto">
+            <div id="recibo-bolsa-printable" className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs font-sans overflow-y-auto">
               {/* Institutional Header */}
               <div className="border-b-2 border-slate-900 pb-4 text-center space-y-1">
                 <h2 className="text-base font-black tracking-wide uppercase text-slate-900">
@@ -2438,25 +2421,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   type="button"
                   id="btn-timesheet-modal-print"
                   onClick={() => {
-                    try {
-                      const result = generateLivroPontoPDFReport({
-                        user: targetUser,
-                        month: selectedMonth,
-                        year: selectedYear,
-                        monthDaysGrid,
-                        financials,
-                        closingRecord,
-                        companyName,
-                        institutionName,
-                        pixKey,
-                        contractSchedule,
-                        contractDailyHoursFormatted,
-                        saveImmediately: false,
-                      });
-                      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
-                    } catch (e) {
-                      triggerPrint();
-                    }
+                    safeWindowPrint('timesheet-modal-printable');
                   }}
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer active:scale-95"
                   title="Direcionar para a caixa de impressão do computador"
@@ -2476,7 +2441,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </div>
             </div>
 
-            <div className="p-8 space-y-4 text-slate-800 text-xs overflow-y-auto">
+            <div id="timesheet-modal-printable" className="p-8 space-y-4 text-slate-800 text-xs overflow-y-auto">
               {/* Timesheet Printable Header */}
               <div className="border-b-2 border-slate-900 pb-3 text-center space-y-0.5">
                 <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">

@@ -451,22 +451,7 @@ function getCurrentHHMM(): string {
   };
 
   const handlePrintAttendanceDaily = () => {
-    try {
-      const result = generateAttendanceDailyPDFReport({
-        date: selectedDate,
-        activityName: selectedActivity,
-        turma: selectedTurma,
-        students: filteredStudents,
-        records,
-        teacherName: currentUser?.name,
-        saveImmediately: false,
-      });
-
-      triggerPrint({ doc: result.doc, blobUrl: result.blobUrl });
-    } catch (e) {
-      console.warn('Fallback para impressão direta no espelho de chamada:', e);
-      safeWindowPrint();
-    }
+    safeWindowPrint('daily-attendance-sheet');
   };
 
   return (
@@ -818,7 +803,23 @@ function getCurrentHHMM(): string {
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div id="daily-attendance-sheet" className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          {/* Institutional Print Header */}
+          <div className="print-only p-4 border-b-2 border-slate-900 text-center space-y-1">
+            <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
+              INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
+            </h1>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              LISTA DE CHAMADA DIÁRIA DE FREQUÊNCIA
+            </h2>
+            <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300">
+              <span>Data: {formatDateBR(selectedDate)}</span>
+              <span>Modalidade: {selectedActivity}</span>
+              <span>Turma: {selectedTurma === 'all' ? 'Todas as Turmas' : selectedTurma}</span>
+              {currentUser?.name && <span>Responsável: {currentUser.name}</span>}
+            </div>
+          </div>
+
           <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold flex items-center space-x-2">
@@ -1104,6 +1105,22 @@ function getCurrentHHMM(): string {
                 </div>
               );
             })}
+          </div>
+
+          {/* Institutional Print Signatures Footer */}
+          <div className="print-only p-6 pt-12 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs print-signatures">
+            <div>
+              <div className="border-t border-slate-800 pt-1 font-bold text-slate-900">
+                {currentUser?.name || 'Responsável pelo Registro'}
+              </div>
+              <div className="text-[10px] text-slate-600">Assinatura do(a) Professor(a) / Monitor(a)</div>
+            </div>
+            <div>
+              <div className="border-t border-slate-800 pt-1 font-bold text-slate-900">
+                Coordenação Pedagógica
+              </div>
+              <div className="text-[10px] text-slate-600">Colégio Crescer</div>
+            </div>
           </div>
         </div>
       )}

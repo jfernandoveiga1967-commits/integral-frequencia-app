@@ -1,239 +1,135 @@
 import type { jsPDF } from 'jspdf';
 
 export interface PrintOptions {
+  elementId?: string | null;
+  htmlContent?: string;
+  pageImages?: string[];
+  title?: string;
   doc?: jsPDF | null;
   blobUrl?: string | null;
   dataUrl?: string | null;
-  elementId?: string | null;
-  pageImages?: string[];
-  htmlContent?: string;
-  title?: string;
 }
 
 /**
- * Imprime um conteúdo HTML completo utilizando um <iframe> oculto no próprio DOM.
- * Essa estratégia NÃO abre novas janelas ou abas, evitando 100% dos bloqueadores de pop-up
- * dos navegadores modernos e em ambientes encapsulados como iframes/WebViews.
+ * Utilitário de Impressão Direta na Mesma Janela com CSS @media print
  * 
- * Aguarda o disparo automático do evento onload e a carga completa de imagens/logotipos
- * antes de invocar o comando print().
+ * Abordagem direta e compatível com Web/iFrames:
+ * 1. Adiciona a classe global 'is-printing' no <body> no momento do clique.
+ * 2. Se especificado um elemento ou conteúdo, popula o container exclusivo '#app-print-container'.
+ * 3. Dispara window.print() IMEDIATAMENTE e de forma SÍNCRONA, preservando o gesto
+ *    de clique do usuário (sem nenhum setTimeout, async/await ou requisição assíncrona prévia).
+ * 4. Remove a classe e limpa o container após o encerramento do diálogo de impressão.
  */
-export function printHtmlViaHiddenIframe(htmlContent: string, title: string = 'Relatório'): Promise<void> {
-  return new Promise((resolve) => {
-    // Remove qualquer iframe de impressão residual anterior
-    const existingIframe = document.getElementById('app-print-hidden-iframe');
-    if (existingIframe) {
-      existingIframe.remove();
-    }
 
-    const iframe = document.createElement('iframe');
-    iframe.id = 'app-print-hidden-iframe';
-    iframe.title = title;
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (!doc) {
-      safeWindowPrint();
-      resolve();
-      return;
-    }
-
-    let isPrinted = false;
-    const executePrint = () => {
-      if (isPrinted) return;
-      isPrinted = true;
-
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch (err) {
-        console.warn('Falha na impressão via iframe, usando fallback direto de janela:', err);
-        safeWindowPrint();
-      } finally {
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            iframe.remove();
-          }
-          resolve();
-        }, 1500);
-      }
-    };
-
-    // Escreve o documento HTML completo
-    doc.open();
-    doc.write(htmlContent);
-    doc.close();
-
-    // Aguarda o carregamento de imagens (como logotipo do Colégio)
-    const images = Array.from(doc.images || []);
-    if (images.length === 0) {
-      setTimeout(executePrint, 250);
-    } else {
-      let loadedCount = 0;
-      const totalImages = images.length;
-
-      const checkImagesDone = () => {
-        loadedCount++;
-        if (loadedCount >= totalImages) {
-          setTimeout(executePrint, 200);
-        }
-      };
-
-      images.forEach((img) => {
-        if (img.complete) {
-          checkImagesDone();
-        } else {
-          img.onload = checkImagesDone;
-          img.onerror = checkImagesDone;
-        }
-      });
-
-      // Timeout de segurança caso alguma imagem externa demore
-      setTimeout(executePrint, 2000);
-    }
-  });
+/**
+ * Obtém ou cria o contêiner dedicado para impressão direta no body da página
+ */
+function getOrCreatePrintContainer(): HTMLElement {
+  let container = document.getElementById('app-print-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'app-print-container';
+    container.className = 'print-container print-only';
+    document.body.appendChild(container);
+  }
+  return container;
 }
 
 /**
- * Imprime um arquivo PDF gerado (Blob URL) utilizando um <iframe> oculto no próprio DOM.
- * Não aciona pop-ups externos e aguarda o evento onload para o disparo.
+ * Limpa o estado global de impressão do documento
  */
-export function printBlobViaHiddenIframe(blobUrl: string): Promise<void> {
-  return new Promise((resolve) => {
-    const existingIframe = document.getElementById('app-print-hidden-iframe');
-    if (existingIframe) {
-      existingIframe.remove();
-    }
+export function cleanupPrintState(): void {
+  document.body.classList.remove('is-printing', 'has-print-container');
+  document.documentElement.classList.remove('is-printing');
+  document.body.removeAttribute('data-print-target');
 
-    const iframe = document.createElement('iframe');
-    iframe.id = 'app-print-hidden-iframe';
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-    iframe.src = blobUrl;
-
-    document.body.appendChild(iframe);
-
-    let isPrinted = false;
-    const executePrint = () => {
-      if (isPrinted) return;
-      isPrinted = true;
-
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch (err) {
-        console.warn('Falha na impressão do blob via iframe, acionando fallback:', err);
-        safeWindowPrint();
-      } finally {
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            iframe.remove();
-          }
-          resolve();
-        }, 1500);
-      }
-    };
-
-    iframe.onload = () => {
-      setTimeout(executePrint, 350);
-    };
-
-    // Timeout de segurança
-    setTimeout(executePrint, 2500);
-  });
+  const container = document.getElementById('app-print-container');
+  if (container) {
+    container.innerHTML = '';
+  }
 }
 
 /**
- * Dispara o diálogo nativo de impressão (window.print()) diretamente na tela atual,
- * desbloqueando overflows para evitar cortes de página e ativando os estilos @media print.
- * Não utiliza window.open() e portanto é 100% imune a bloqueadores de pop-up.
+ * Dispara a impressão imediatamente de forma síncrona na mesma janela.
+ * Preserva o evento de clique do usuário sem atrasos, sem timeouts e sem requisições.
+ */
+export function directPrint(options: PrintOptions = {}): void {
+  const { elementId, htmlContent, pageImages } = options;
+
+  const container = getOrCreatePrintContainer();
+  let hasSpecificContent = false;
+
+  // 1. Se imagens de páginas foram passadas (ex: PdfViewerModal com Canvas de alta resolução)
+  if (pageImages && pageImages.length > 0) {
+    container.innerHTML = pageImages
+      .map(
+        (imgSrc, index) =>
+          `<div class="pdf-printable-page" style="page-break-after: ${
+            index === pageImages.length - 1 ? 'avoid' : 'always'
+          }; break-after: ${index === pageImages.length - 1 ? 'avoid' : 'page'}; width: 100%; margin: 0 0 10mm 0;">
+            <img src="${imgSrc}" alt="Página ${index + 1}" style="width: 100%; height: auto; display: block; image-rendering: -webkit-optimize-contrast;" />
+          </div>`
+      )
+      .join('');
+    hasSpecificContent = true;
+  }
+  // 2. Se foi passado um ID de elemento do DOM (ex: 'timesheet-official-sheet', 'daily-attendance-sheet')
+  else if (elementId) {
+    const targetElement = document.getElementById(elementId);
+    if (targetElement) {
+      container.innerHTML = targetElement.outerHTML;
+      hasSpecificContent = true;
+      document.body.setAttribute('data-print-target', elementId);
+    }
+  }
+  // 3. Se foi passado conteúdo HTML customizado
+  else if (htmlContent) {
+    container.innerHTML = htmlContent;
+    hasSpecificContent = true;
+  }
+
+  // Adiciona as classes CSS globais no body e html de forma síncrona
+  document.body.classList.add('is-printing');
+  document.documentElement.classList.add('is-printing');
+  if (hasSpecificContent) {
+    document.body.classList.add('has-print-container');
+  }
+
+  // Prepara limpeza posterior
+  let cleaned = false;
+  const doCleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    cleanupPrintState();
+    window.removeEventListener('afterprint', doCleanup);
+  };
+
+  window.addEventListener('afterprint', doCleanup, { once: true });
+
+  // Dispara window.print() IMEDIATAMENTE dentro da mesma chamada síncrona do clique do usuário!
+  try {
+    window.focus();
+    window.print();
+  } catch (err) {
+    console.error('Erro ao invocar window.print():', err);
+  } finally {
+    // Para navegadores onde window.print() é síncrono ou se afterprint demorar,
+    // garantimos a limpeza posterior via pequeno timer sem NUNCA afetar o print prévio.
+    setTimeout(doCleanup, 500);
+  }
+}
+
+/**
+ * Atalho para impressão direta na mesma janela focando em um elemento ou na tela
  */
 export function safeWindowPrint(elementId?: string | null): void {
-  const originalOverflow = document.body.style.overflow;
-  const originalHeight = document.body.style.height;
-  const originalPosition = document.body.style.position;
-
-  // Desbloqueia temporariamente o body para cálculo de altura do layout de impressão
-  document.body.style.overflow = 'visible';
-  document.body.style.height = 'auto';
-  document.body.style.position = 'static';
-
-  if (elementId) {
-    const el = document.getElementById(elementId);
-    if (el) {
-      el.focus();
-    }
-  }
-
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
-        window.focus();
-        window.print();
-      } catch (err) {
-        console.error('Erro ao invocar window.print():', err);
-      } finally {
-        setTimeout(() => {
-          document.body.style.overflow = originalOverflow;
-          document.body.style.height = originalHeight;
-          document.body.style.position = originalPosition;
-        }, 1000);
-      }
-    }, 150);
-  });
+  directPrint({ elementId });
 }
 
 /**
- * Orquestrador inteligente de impressão que roteia a ação para a melhor estratégia:
- * 1. Se fornecido Blob URL de PDF -> imprime via iframe oculto com onload.
- * 2. Se fornecido documento jsPDF -> extrai blob e imprime via iframe oculto com onload.
- * 3. Se fornecido htmlContent -> injeta no iframe oculto, aguarda imagens e dispara print.
- * 4. Caso contrário -> executa safeWindowPrint() direto na janela com estilos @media print ativos.
+ * Orquestrador principal de impressão direta na mesma janela
  */
 export function triggerPrint(options: PrintOptions = {}): void {
-  const { doc, blobUrl, htmlContent, title, elementId } = options;
-
-  if (blobUrl) {
-    printBlobViaHiddenIframe(blobUrl).catch(() => {
-      safeWindowPrint(elementId);
-    });
-    return;
-  }
-
-  if (doc) {
-    try {
-      const blob = doc.output('blob');
-      const url = URL.createObjectURL(blob);
-      printBlobViaHiddenIframe(url).finally(() => {
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      });
-      return;
-    } catch (e) {
-      console.warn('Falha ao converter jsPDF para blob de impressão, fallback para window.print:', e);
-    }
-  }
-
-  if (htmlContent) {
-    printHtmlViaHiddenIframe(htmlContent, title).catch(() => {
-      safeWindowPrint(elementId);
-    });
-    return;
-  }
-
-  safeWindowPrint(elementId);
+  directPrint(options);
 }
+
