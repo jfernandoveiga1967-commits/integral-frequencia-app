@@ -243,9 +243,21 @@ export interface MealDailyEntry {
   holidayName?: string;
   systemCount: number; // Alunos presentes calculados automaticamente pela chamada
   manualCount: number; // Quantidade de alunos (editável pelo financeiro)
-  unitPrice: number; // Valor unitário da refeição (editável, ex: 15.00)
+  unitPrice: number; // Valor unitário da refeição (editável, ex: 9.00)
   total: number; // manualCount * unitPrice
   notes?: string;
+}
+
+export interface MealReportGlobalSettings {
+  id?: string;
+  unitPrice: number;
+  providerName: string;
+  responsibleCoordinator?: string;
+  coordinatorRole?: string;
+  responsibleFinancial?: string;
+  financialRole?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface MealReportConfig {
@@ -255,9 +267,10 @@ export interface MealReportConfig {
   month: number;
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
-  defaultUnitPrice: number; // ex: 15.00
+  defaultUnitPrice: number; // ex: 9.00
   entries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }>;
-  contractCompany?: string; // ex: "Cantina & Refeições Integrais"
+  contractCompany?: string; // ex: "Cantina & Nutrição Escolar"
+  providerName?: string; // ex: "Cantina & Nutrição Escolar"
   responsibleCoordinator?: string;
   coordinatorRole?: string;
   responsibleFinancial?: string;

@@ -19,7 +19,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
+import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings } from './types';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
@@ -1952,6 +1952,163 @@ export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[])
     handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
   }
 }
+
+/**
+ * Salva as configurações globais do Relatório de Refeições no Firestore (settings/mealReport)
+ */
+export async function saveMealReportGlobalSettings(settings: {
+  unitPrice: number;
+  providerName: string;
+  responsibleCoordinator?: string;
+  coordinatorRole?: string;
+  responsibleFinancial?: string;
+  financialRole?: string;
+  updatedBy?: string;
+}): Promise<void> {
+  const docRef = doc(db, 'settings', 'mealReport');
+  const payload = {
+    id: 'mealReport',
+    unitPrice: Number(settings.unitPrice) || 9.0,
+    providerName: (settings.providerName || 'Cantina & Nutrição Escolar').trim(),
+    responsibleCoordinator: settings.responsibleCoordinator || 'Fernando Veiga',
+    coordinatorRole: settings.coordinatorRole || 'Coordenação do Integral / DP GAVAR',
+    responsibleFinancial: settings.responsibleFinancial || 'Departamento Financeiro',
+    financialRole: settings.financialRole || 'Conferência & Prestação de Contas',
+    updatedAt: new Date().toISOString(),
+    updatedBy: settings.updatedBy || '',
+  };
+
+  try {
+    await setDoc(docRef, payload, { merge: true });
+    // Local backup for zero-latency startup and offline resilience
+    localStorage.setItem('crescer_meal_global_settings', JSON.stringify(payload));
+  } catch (error) {
+    console.warn('Erro ao salvar settings/mealReport no Firestore, usando fallback local:', error);
+    localStorage.setItem('crescer_meal_global_settings', JSON.stringify(payload));
+    handleFirestoreError(error, OperationType.WRITE, 'settings/mealReport');
+  }
+}
+
+/**
+ * Recupera as configurações globais do Relatório de Refeições do Firestore (settings/mealReport)
+ */
+export async function getMealReportGlobalSettings(): Promise<MealReportGlobalSettings | null> {
+  try {
+    const docRef = doc(db, 'settings', 'mealReport');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const result: MealReportGlobalSettings = {
+        id: 'mealReport',
+        unitPrice: data.unitPrice !== undefined ? Number(data.unitPrice) : 9.0,
+        providerName: data.providerName || (data as Record<string, unknown>).contractCompany as string || 'Cantina & Nutrição Escolar',
+        responsibleCoordinator: data.responsibleCoordinator,
+        coordinatorRole: data.coordinatorRole,
+        responsibleFinancial: data.responsibleFinancial,
+        financialRole: data.financialRole,
+        updatedAt: data.updatedAt,
+        updatedBy: data.updatedBy,
+      };
+      // Keep local backup in sync
+      localStorage.setItem('crescer_meal_global_settings', JSON.stringify(result));
+      return result;
+    }
+  } catch (error) {
+    console.warn('Erro ao ler settings/mealReport do Firestore, tentando local:', error);
+  }
+
+  // Fallback to local storage
+  try {
+    const local = localStorage.getItem('crescer_meal_global_settings');
+    if (local) {
+      return JSON.parse(local);
+    }
+  } catch (e) {
+    console.warn('Erro ao ler crescer_meal_global_settings do localStorage:', e);
+  }
+
+  return null;
+}
+
+/**
+ * Salva o relatório consolidado de refeições do mês no Firestore (mealReports/{monthKey})
+ */
+export async function saveMealReportToFirestore(config: MealReportConfig): Promise<void> {
+  const docRef = doc(db, 'mealReports', config.monthKey);
+  const payload = {
+    id: config.monthKey,
+    monthKey: config.monthKey,
+    year: Number(config.year),
+    month: Number(config.month),
+    startDate: config.startDate || '',
+    endDate: config.endDate || '',
+    defaultUnitPrice: Number(config.defaultUnitPrice) || 9.0,
+    unitPrice: Number(config.defaultUnitPrice) || 9.0,
+    contractCompany: config.contractCompany || config.providerName || 'Cantina & Nutrição Escolar',
+    providerName: config.providerName || config.contractCompany || 'Cantina & Nutrição Escolar',
+    responsibleCoordinator: config.responsibleCoordinator || 'Fernando Veiga',
+    coordinatorRole: config.coordinatorRole || 'Coordenação do Integral / DP GAVAR',
+    responsibleFinancial: config.responsibleFinancial || 'Departamento Financeiro',
+    financialRole: config.financialRole || 'Conferência & Prestação de Contas',
+    generalNotes: config.generalNotes || '',
+    entries: config.entries || {},
+    updatedAt: new Date().toISOString(),
+    updatedBy: config.updatedBy || '',
+  };
+
+  try {
+    await setDoc(docRef, payload, { merge: true });
+    // Also save global settings to keep settings/mealReport automatically synchronized
+    await saveMealReportGlobalSettings({
+      unitPrice: payload.unitPrice,
+      providerName: payload.providerName,
+      responsibleCoordinator: payload.responsibleCoordinator,
+      coordinatorRole: payload.coordinatorRole,
+      responsibleFinancial: payload.responsibleFinancial,
+      financialRole: payload.financialRole,
+      updatedBy: payload.updatedBy,
+    });
+  } catch (error) {
+    console.warn('Erro ao salvar mealReports no Firestore, mantendo cópia local:', error);
+    handleFirestoreError(error, OperationType.WRITE, `mealReports/${config.monthKey}`);
+  }
+}
+
+/**
+ * Recupera o relatório do mês do Firestore (mealReports/{monthKey})
+ */
+export async function getMealReportFromFirestore(monthKey: string): Promise<MealReportConfig | null> {
+  try {
+    const docRef = doc(db, 'mealReports', monthKey);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        id: data.id || monthKey,
+        monthKey: data.monthKey || monthKey,
+        year: data.year,
+        month: data.month,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        defaultUnitPrice: data.defaultUnitPrice !== undefined ? Number(data.defaultUnitPrice) : (data.unitPrice !== undefined ? Number(data.unitPrice) : 9.0),
+        entries: data.entries || {},
+        contractCompany: data.contractCompany || data.providerName || 'Cantina & Nutrição Escolar',
+        providerName: data.providerName || data.contractCompany || 'Cantina & Nutrição Escolar',
+        responsibleCoordinator: data.responsibleCoordinator,
+        coordinatorRole: data.coordinatorRole,
+        responsibleFinancial: data.responsibleFinancial,
+        financialRole: data.financialRole,
+        generalNotes: data.generalNotes || '',
+        updatedAt: data.updatedAt,
+        updatedBy: data.updatedBy,
+      };
+    }
+  } catch (error) {
+    console.warn(`Erro ao ler mealReports/${monthKey} do Firestore:`, error);
+  }
+  return null;
+}
+
 
 
 

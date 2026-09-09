@@ -19,6 +19,12 @@ import { generateMealFinancialPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { formatDateBR } from '../utils/dateUtils';
 import {
+  saveMealReportGlobalSettings,
+  getMealReportGlobalSettings,
+  saveMealReportToFirestore,
+  getMealReportFromFirestore,
+} from '../firebase';
+import {
   Utensils,
   X,
   FileSpreadsheet,
@@ -36,6 +42,8 @@ import {
   UserCheck,
   CalendarRange,
   Clock,
+  Loader2,
+  Cloud,
 } from 'lucide-react';
 
 interface MealReportModalProps {
@@ -86,8 +94,10 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   );
 
   // Configuração e valores customizados por dia
-  const [defaultUnitPrice, setDefaultUnitPrice] = useState<number>(15.0);
+  const [defaultUnitPrice, setDefaultUnitPrice] = useState<number>(9.0);
   const [contractCompany, setContractCompany] = useState<string>('Cantina & Nutrição Escolar');
+  const [isLoadingFromFirestore, setIsLoadingFromFirestore] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [responsibleCoordinator, setResponsibleCoordinator] = useState<string>(
     currentUser?.role === 'coordenador' ? (currentUser.name || 'Fernando Veiga') : 'Fernando Veiga'
   );
@@ -128,23 +138,88 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     setEndDate(`${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`);
   }, [selectedYear, selectedMonth]);
 
-  // Carregar dados salvos ao trocar de mês
+  // Carregar dados salvos ao trocar de mês (Lê do Firestore e fallback do storage local)
   useEffect(() => {
     if (!isOpen) return;
 
-    const saved = loadMealConfig(monthKey);
-    if (saved) {
-      setDefaultUnitPrice(saved.defaultUnitPrice ?? 15.0);
-      setContractCompany(saved.contractCompany || 'Cantina & Nutrição Escolar');
-      setResponsibleCoordinator(saved.responsibleCoordinator || (currentUser?.name || 'Fernando Veiga'));
-      setCoordinatorRole(saved.coordinatorRole || 'Coordenação do Integral / DP GAVAR');
-      setResponsibleFinancial(saved.responsibleFinancial || 'Departamento Financeiro');
-      setFinancialRole(saved.financialRole || 'Conferência & Prestação de Contas');
-      setGeneralNotes(saved.generalNotes || '');
-      setCustomEntries(saved.entries || {});
-    } else {
-      setCustomEntries({});
+    let isMounted = true;
+
+    async function loadSettingsAndReport() {
+      setIsLoadingFromFirestore(true);
+
+      // 1. Leitura rápida do cache local para resposta imediata
+      const localGlobal = localStorage.getItem('crescer_meal_global_settings');
+      let cachedGlobal: { unitPrice?: number; providerName?: string; responsibleCoordinator?: string; coordinatorRole?: string; responsibleFinancial?: string; financialRole?: string } | null = null;
+      if (localGlobal) {
+        try {
+          cachedGlobal = JSON.parse(localGlobal);
+        } catch (e) {
+          // ignore
+        }
+      }
+      const localMonth = loadMealConfig(monthKey);
+
+      // Aplica valores iniciais do cache
+      const initialPrice = localMonth?.defaultUnitPrice ?? cachedGlobal?.unitPrice ?? 9.0;
+      const initialProvider = localMonth?.providerName || localMonth?.contractCompany || cachedGlobal?.providerName || 'Cantina & Nutrição Escolar';
+
+      setDefaultUnitPrice(initialPrice);
+      setContractCompany(initialProvider);
+      if (localMonth?.responsibleCoordinator) setResponsibleCoordinator(localMonth.responsibleCoordinator);
+      if (localMonth?.coordinatorRole) setCoordinatorRole(localMonth.coordinatorRole);
+      if (localMonth?.responsibleFinancial) setResponsibleFinancial(localMonth.responsibleFinancial);
+      if (localMonth?.financialRole) setFinancialRole(localMonth.financialRole);
+      if (localMonth?.generalNotes) setGeneralNotes(localMonth.generalNotes);
+      if (localMonth?.entries) setCustomEntries(localMonth.entries);
+
+      // 2. Leitura definitiva no Firestore (settings/mealReport e mealReports/{monthKey})
+      try {
+        const [firestoreGlobal, firestoreMonth] = await Promise.all([
+          getMealReportGlobalSettings(),
+          getMealReportFromFirestore(monthKey),
+        ]);
+
+        if (!isMounted) return;
+
+        // Configurações globais persistidas no Firestore
+        const globalPrice = firestoreGlobal?.unitPrice ?? cachedGlobal?.unitPrice ?? 9.0;
+        const globalProvider = firestoreGlobal?.providerName ?? cachedGlobal?.providerName ?? 'Cantina & Nutrição Escolar';
+
+        if (firestoreMonth) {
+          setDefaultUnitPrice(firestoreMonth.defaultUnitPrice !== undefined ? Number(firestoreMonth.defaultUnitPrice) : globalPrice);
+          setContractCompany(firestoreMonth.providerName || firestoreMonth.contractCompany || globalProvider);
+          if (firestoreMonth.responsibleCoordinator) setResponsibleCoordinator(firestoreMonth.responsibleCoordinator);
+          if (firestoreMonth.coordinatorRole) setCoordinatorRole(firestoreMonth.coordinatorRole);
+          if (firestoreMonth.responsibleFinancial) setResponsibleFinancial(firestoreMonth.responsibleFinancial);
+          if (firestoreMonth.financialRole) setFinancialRole(firestoreMonth.financialRole);
+          if (firestoreMonth.generalNotes) setGeneralNotes(firestoreMonth.generalNotes);
+          if (firestoreMonth.entries) setCustomEntries(firestoreMonth.entries);
+        } else {
+          // Sem relatório específico para o mês ainda: utiliza os padrões globais do Firestore
+          setDefaultUnitPrice(globalPrice);
+          setContractCompany(globalProvider);
+          if (firestoreGlobal?.responsibleCoordinator) setResponsibleCoordinator(firestoreGlobal.responsibleCoordinator);
+          if (firestoreGlobal?.coordinatorRole) setCoordinatorRole(firestoreGlobal.coordinatorRole);
+          if (firestoreGlobal?.responsibleFinancial) setResponsibleFinancial(firestoreGlobal.responsibleFinancial);
+          if (firestoreGlobal?.financialRole) setFinancialRole(firestoreGlobal.financialRole);
+          if (!localMonth) {
+            setCustomEntries({});
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao sincronizar relatório de refeições com Firestore:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingFromFirestore(false);
+        }
+      }
     }
+
+    loadSettingsAndReport();
+
+    return () => {
+      isMounted = false;
+    };
   }, [monthKey, isOpen, currentUser]);
 
   // Identificação do período ativo (ex: 1ª Quinzena, 2ª Quinzena, Mês Completo ou Personalizado)
@@ -289,17 +364,44 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     }));
   };
 
-  // Aplicar preço padrão a todos os dias do período
-  const handleApplyPriceToAll = () => {
+  // Manipulador para alteração do valor unitário padrão com recálculo dinâmico
+  const handleDefaultUnitPriceChange = (valStr: string) => {
+    const clean = valStr.replace(',', '.');
+    const num = clean === '' ? 0 : Math.max(0, parseFloat(clean) || 0);
+    const oldPrice = defaultUnitPrice;
+    setDefaultUnitPrice(num);
+
+    // Recálculo automático: atualiza todos os dias que usavam o valor padrão anterior
+    setCustomEntries((prev) => {
+      const updated = { ...prev };
+      let changed = false;
+      Object.keys(updated).forEach((d) => {
+        if (updated[d]?.unitPrice === undefined || updated[d]?.unitPrice === oldPrice) {
+          updated[d] = {
+            ...updated[d],
+            unitPrice: num,
+          };
+          changed = true;
+        }
+      });
+      return changed ? updated : prev;
+    });
+  };
+
+  // Aplicar preço padrão a todos os dias do período (Recálculo instantâneo geral)
+  const handleApplyPriceToAll = (priceOverride?: number) => {
+    const priceToApply = priceOverride !== undefined ? priceOverride : defaultUnitPrice;
     const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }> = { ...customEntries };
     activeEntries.forEach((e) => {
       updated[e.date] = {
         ...updated[e.date],
-        unitPrice: defaultUnitPrice,
+        manualCount: e.manualCount,
+        unitPrice: priceToApply,
+        notes: e.notes || '',
       };
     });
     setCustomEntries(updated);
-    showNotice(`Preço unitário R$ ${defaultUnitPrice.toFixed(2)} aplicado ao período.`);
+    showNotice(`Preço unitário R$ ${priceToApply.toFixed(2).replace('.', ',')} aplicado a todas as linhas do período.`);
   };
 
   // Restaurar valores calculados pela chamada do sistema
@@ -332,8 +434,12 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     setTimeout(() => setSaveSuccessNotice(null), 3500);
   };
 
-  // Salvar no storage
-  const handleSave = () => {
+  // Salvar no storage local e persistir definitivamente no Firestore
+  const handleSave = async () => {
+    setIsSaving(true);
+    const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
+    const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
+
     const configToSave: MealReportConfig = {
       id: monthKey,
       monthKey,
@@ -341,9 +447,10 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       month: selectedMonth,
       startDate,
       endDate,
-      defaultUnitPrice,
+      defaultUnitPrice: cleanUnitPrice,
       entries: customEntries,
-      contractCompany,
+      contractCompany: cleanCompany,
+      providerName: cleanCompany,
       responsibleCoordinator,
       coordinatorRole,
       responsibleFinancial,
@@ -353,8 +460,31 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       updatedBy: currentUser?.name || 'Coordenação',
     };
 
-    saveMealConfig(configToSave);
-    showNotice('Relatório de refeições salvo com sucesso!');
+    try {
+      // 1. Salvar no localStorage (backup e cache local instantâneo)
+      saveMealConfig(configToSave);
+
+      // 2. Persistir no Firestore: documento mensal (mealReports/{monthKey}) E configurações globais (settings/mealReport)
+      await Promise.all([
+        saveMealReportToFirestore(configToSave),
+        saveMealReportGlobalSettings({
+          unitPrice: cleanUnitPrice,
+          providerName: cleanCompany,
+          responsibleCoordinator,
+          coordinatorRole,
+          responsibleFinancial,
+          financialRole,
+          updatedBy: currentUser?.name || 'Coordenação',
+        }),
+      ]);
+
+      showNotice('Configurações e fechamento de refeições salvos no banco de dados (Firestore) com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar relatório de refeições no Firestore:', error);
+      showNotice('Salvo localmente com segurança.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Navegação de Mês
@@ -467,6 +597,17 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wide">
                   {periodInfo.shortTag}
                 </span>
+                {isLoadingFromFirestore ? (
+                  <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/30 text-amber-300 border border-amber-400/30">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Sincronizando Nuvem...</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30" title="Conectado ao Firestore">
+                    <Cloud className="w-3 h-3" />
+                    <span>Sync Nuvem Ativo</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-indigo-200/80">
                 Filtro por período quinzenal, conferência diária, valores unitários e fechamento financeiro
@@ -603,15 +744,15 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                     step="0.50"
                     min="0"
                     value={defaultUnitPrice}
-                    onChange={(e) => setDefaultUnitPrice(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => handleDefaultUnitPriceChange(e.target.value)}
                     className="text-xs font-black text-slate-800 bg-transparent border-b border-slate-300 focus:border-emerald-600 focus:outline-none w-14 text-right"
                   />
                 </div>
                 <button
                   type="button"
-                  onClick={handleApplyPriceToAll}
+                  onClick={() => handleApplyPriceToAll(defaultUnitPrice)}
                   className="ml-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors cursor-pointer"
-                  title="Aplica este valor unitário a todos os dias do período"
+                  title="Aplica este valor unitário a todos os dias do período e recalcula os totais"
                 >
                   Aplicar
                 </button>
@@ -941,16 +1082,28 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           <div className="flex items-center space-x-2">
             <button
               type="button"
+              disabled={isSaving}
               onClick={handleSave}
-              className="px-4 py-2.5 rounded-2xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
-              title="Salvar alterações manuais feitas para este mês"
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5 ${
+                isSaving ? 'opacity-75 cursor-not-allowed' : ''
+              }`}
+              title="Salvar alterações manuais e configurações no Firestore"
             >
-              <Save className="w-4 h-4" />
-              <span>Salvar Alterações</span>
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Salvando na Nuvem...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Salvar Alterações</span>
+                </>
+              )}
             </button>
 
             <span className="text-[11px] text-slate-500 hidden sm:inline">
-              Edições manuais salvas para prestação de contas
+              Edições e valores padrão persistidos na nuvem (Firestore)
             </span>
           </div>
 

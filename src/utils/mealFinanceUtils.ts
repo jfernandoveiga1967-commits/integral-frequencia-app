@@ -75,7 +75,7 @@ export function buildMealEntriesForDateRange(
   records: AttendanceRecord[],
   holidays: HolidayItem[],
   configOverrides?: MealReportConfig | null,
-  defaultUnitPrice: number = 15.0
+  defaultUnitPrice: number = 9.0
 ): MealDailyEntry[] {
   const entries: MealDailyEntry[] = [];
   const savedEntries = configOverrides?.entries || {};
@@ -189,7 +189,7 @@ export function buildMonthMealEntries(
   records: AttendanceRecord[],
   holidays: HolidayItem[],
   configOverrides?: MealReportConfig | null,
-  defaultUnitPrice: number = 15.0
+  defaultUnitPrice: number = 9.0
 ): MealDailyEntry[] {
   const daysInMonth = new Date(year, month, 0).getDate();
   const startDateStr = `${year}-${String(month).padStart(2, '0')}-01`;

@@ -184,6 +184,44 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "userId", "monthKey", "year", "month", "netTotal", "isClosed"]
+    },
+    "MealReportSettings": {
+      "title": "MealReportSettings",
+      "description": "Global settings for the meal financial reports such as unit price and provider",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "unitPrice": { "type": "number" },
+        "providerName": { "type": "string", "maxLength": 128 },
+        "responsibleCoordinator": { "type": "string", "maxLength": 128 },
+        "coordinatorRole": { "type": "string", "maxLength": 128 },
+        "responsibleFinancial": { "type": "string", "maxLength": 128 },
+        "financialRole": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "unitPrice", "providerName"]
+    },
+    "MealReportConfig": {
+      "title": "MealReportConfig",
+      "description": "Monthly meal report and closing configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "monthKey": { "type": "string", "maxLength": 10 },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
+        "startDate": { "type": "string", "maxLength": 10 },
+        "endDate": { "type": "string", "maxLength": 10 },
+        "defaultUnitPrice": { "type": "number" },
+        "providerName": { "type": "string", "maxLength": 128 },
+        "contractCompany": { "type": "string", "maxLength": 128 },
+        "entries": { "type": "object" },
+        "generalNotes": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "monthKey", "defaultUnitPrice"]
     }
   },
   "firestore": {
@@ -226,6 +264,14 @@
     "/pontoClosings/{closingId}": {
       "schema": "PontoClosing",
       "description": "Collection of monthly collaborator closing summaries and signatures"
+    },
+    "/settings/{settingId}": {
+      "schema": "MealReportSettings",
+      "description": "Global application module settings such as mealReport"
+    },
+    "/mealReports/{reportId}": {
+      "schema": "MealReportConfig",
+      "description": "Monthly meal financial closing records"
     }
   }
 }
