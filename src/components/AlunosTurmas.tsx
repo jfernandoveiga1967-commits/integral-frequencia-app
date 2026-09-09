@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StudentManager } from './StudentManager';
 import { Student, AttendanceRecord, TurmaType, ActivityType, WeekInfo, UserProfile, ActivityItem, DayOfWeek } from '../types';
-import { subscribeAlunos, saveStudentToFirestore, deleteStudentFromFirestore } from '../firebase';
+import { saveStudentToFirestore, deleteStudentFromFirestore } from '../firebase';
 import { removeStudentFromLocalStorage, markStudentAsDeleted } from '../utils/storageUtils';
 
 export interface AlunosTurmasProps {
@@ -30,30 +30,9 @@ export interface AlunosTurmasProps {
 export const AlunosTurmas: React.FC<AlunosTurmasProps> = (props) => {
   const [realtimeStudents, setRealtimeStudents] = useState<Student[]>(props.students || []);
 
+  // Sincroniza diretamente a partir das props gerenciadas centralmente pelo ouvinte de App.tsx
   useEffect(() => {
-    let isSubscribed = true;
-
-    // Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos
-    const unsubscribe = subscribeAlunos(
-      (liveList) => {
-        if (!isSubscribed) return;
-        setRealtimeStudents(liveList);
-      },
-      (error) => {
-        console.error('Erro na sincronização reativa onSnapshot de alunos (AlunosTurmas):', error);
-      }
-    );
-
-    // Gestão do Evento (Unsubscribe): Limpa o escutador ao desmontar o componente
-    return () => {
-      isSubscribed = false;
-      unsubscribe();
-    };
-  }, []);
-
-  // Sincroniza se a lista de alunos for passada via props
-  useEffect(() => {
-    if (props.students && props.students.length > 0) {
+    if (props.students) {
       setRealtimeStudents(props.students);
     }
   }, [props.students]);

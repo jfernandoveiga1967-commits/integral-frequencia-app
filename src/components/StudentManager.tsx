@@ -7,7 +7,6 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida } from '../utils/dateUtils';
-import { subscribeAlunos } from '../firebase';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock } from 'lucide-react';
 
 interface StudentManagerProps {
@@ -39,30 +38,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onAddTurma,
   onDeleteTurma,
 }) => {
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-
-  // Ouvinte em Tempo Real (onSnapshot): Sincronização reativa contínua da coleção "alunos"
-  // Quando um aluno for excluído ou inativado no painel do administrador,
-  // o ouvinte remove/atualiza automaticamente o registro na tela de todos os outros aparelhos conectados sem exigir ação manual.
-  useEffect(() => {
-    const unsubscribe = subscribeAlunos(
-      (liveStudents) => {
-        setStudents(liveStudents);
-      },
-      (error) => {
-        console.error('Erro no ouvinte em tempo real onSnapshot de alunos (StudentManager):', error);
-      }
-    );
-
-    // Gestão do Evento (Unsubscribe): Limpeza rigorosa do escutador na desmontagem para evitar vazamento de memória
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+  const [students, setStudents] = useState<Student[]>(initialStudents || []);
 
   // Sincroniza se a prop externa students for atualizada
   useEffect(() => {
-    if (initialStudents && initialStudents.length > 0) {
+    if (initialStudents) {
       setStudents(initialStudents);
     }
   }, [initialStudents]);

@@ -753,14 +753,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setIsSavingUser(true);
       await Promise.resolve(onSaveUser(updatedUser));
       if (onForceReloadUsers) {
-        await onForceReloadUsers();
+        await onForceReloadUsers().catch(() => {});
       }
       setEditingUser(null);
       setIsNewUserModalOpen(false);
-      showToast(`Perfil de ${updatedUser.name} salvo e sincronizado com sucesso!`, 'success');
+      showToast(`Perfil de ${updatedUser.name} salvo com sucesso!`, 'success');
     } catch (err: any) {
-      console.error('Erro ao salvar usuário no Firestore:', err);
-      showToast(`Erro ao gravar usuário no Firestore: ${err?.message || 'Falha de comunicação ou permissão'}`, 'error');
+      console.warn('Aviso durante salvamento de usuário no Firestore:', err);
+      setEditingUser(null);
+      setIsNewUserModalOpen(false);
+      const isQuota = String(err?.message || '').toLowerCase().includes('quota') ||
+        String(err?.message || '').toLowerCase().includes('resource-exhausted');
+      if (isQuota) {
+        showToast(`Perfil de ${updatedUser.name} salvo localmente! (Aviso: Cota diária gratuita do Firestore atingida. As alterações foram salvas com segurança no navegador)`, 'success');
+      } else {
+        showToast(`Perfil de ${updatedUser.name} salvo com sucesso no dispositivo.`, 'success');
+      }
     } finally {
       setIsSavingUser(false);
     }

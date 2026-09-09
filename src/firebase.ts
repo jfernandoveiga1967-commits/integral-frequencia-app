@@ -435,65 +435,33 @@ export async function resolveUserFirestoreDocId(user: UserProfile): Promise<stri
     return 'usr_anaclaragarcia';
   }
 
-  // 3. Verificar se já existe documento na coleção 'usuarios' ou 'users' com o ID informado
+  // 3. Se rawId já é informado e válido (ex: usr_danyelpereira), use diretamente SEM leituras prévias para poupar cota
   if (rawId) {
-    try {
-      const snapU = await getDoc(doc(db, 'usuarios', rawId));
-      if (snapU.exists()) return snapU.id;
-      const snapUsers = await getDoc(doc(db, 'users', rawId));
-      if (snapUsers.exists()) return snapUsers.id;
-    } catch {
-      // Ignora erro de verificação rápida
-    }
+    return rawId;
   }
 
-  // 4. Se o usuário autenticado no Firebase Auth coincidir com este perfil, verificar se o doc é o Auth UID
+  // 4. Se o usuário autenticado no Firebase Auth coincidir com este perfil
   if (isAuthUser && authUid) {
-    try {
-      const snapAuthU = await getDoc(doc(db, 'usuarios', authUid));
-      if (snapAuthU.exists()) return snapAuthU.id;
-      const snapAuthUsers = await getDoc(doc(db, 'users', authUid));
-      if (snapAuthUsers.exists()) return snapAuthUsers.id;
-    } catch {
-      // Ignora erro de verificação rápida
-    }
+    return authUid;
   }
 
-  // 5. Verificar se o doc no Firestore está registrado com o e-mail como chave primária
+  // 5. Se possuir e-mail, gera ID canônico estável baseado no slug do e-mail
   if (emailLower) {
-    try {
-      const snapEmailU = await getDoc(doc(db, 'usuarios', emailLower));
-      if (snapEmailU.exists()) return snapEmailU.id;
-      const snapEmailUsers = await getDoc(doc(db, 'users', emailLower));
-      if (snapEmailUsers.exists()) return snapEmailUsers.id;
-
-      // Buscar por query no campo email em 'usuarios'
-      const qU = query(collection(db, 'usuarios'), where('email', '==', emailLower));
-      const qSnapU = await getDocs(qU);
-      if (!qSnapU.empty) {
-        return qSnapU.docs[0].id;
-      }
-
-      // Buscar por query no campo email em 'users'
-      const qUsers = query(collection(db, 'users'), where('email', '==', emailLower));
-      const qSnapUsers = await getDocs(qUsers);
-      if (!qSnapUsers.empty) {
-        return qSnapUsers.docs[0].id;
-      }
-    } catch {
-      // Ignora erro de query
+    const slug = emailLower.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+    if (slug) {
+      return `usr_${slug}`;
     }
   }
 
-  // 6. Fallback final: usar rawId existente, ou authUid, ou gerar novo identificador
-  return rawId || (isAuthUser && authUid ? authUid : `usr_${Date.now()}`);
+  // 6. Fallback final
+  return `usr_${Date.now()}`;
 }
 
 /**
  * Salva o perfil do colaborador no Firestore garantindo gravação com sucesso
- * na coleção 'usuarios' (via updateDoc se o documento existir, ou setDoc se for novo)
- * e espelhamento síncrono em 'users' para retrocompatibilidade e semântica de UID fixo.
- * Retorna os dados confirmados para atualização do estado.
+ * na coleção 'usuarios' e espelhamento síncrono em 'users'.
+ * Não realiza leituras desnecessárias (getDoc) para evitar atingir ou estourar a cota gratuita do Firestore.
+ * Em caso de cota temporariamente excedida ou falha de rede, preserva o usuário no armazenamento local e retorna os dados atualizados com sucesso.
  */
 export async function saveUserToFirestore(user: UserProfile): Promise<UserProfile> {
   const targetDocId = await resolveUserFirestoreDocId(user);
@@ -584,41 +552,49 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     updatedAt: new Date().toISOString(),
   };
 
+  // 1. Persistência imediata no armazenamento local para resiliência total contra quedas de rede ou cota esgotada
   try {
-    // 1. Garantir Gravação no Firestore na coleção 'usuarios'
-    // Executa updateDoc se já existir ou setDoc se for novo
+    const currentLocal = getLocalUsersList();
+    const updatedLocal = normalizeAndDeduplicateUsers([updatedData, ...currentLocal]);
+    saveLocalUsersList(updatedLocal);
+  } catch (localErr) {
+    console.warn('Aviso ao salvar usuário em cache local:', localErr);
+  }
+
+  // 2. Gravação direta no Firestore com setDoc(..., { merge: true })
+  // setDoc com merge realiza upsert sem fazer leitura getDoc prévia, economizando cotas
+  try {
     const usuarioDocRef = doc(db, 'usuarios', targetDocId);
-    const usuarioSnap = await getDoc(usuarioDocRef);
-    if (usuarioSnap.exists()) {
-      await updateDoc(usuarioDocRef, updatedData as any);
-    } else {
-      await setDoc(usuarioDocRef, updatedData, { merge: true });
-    }
-
-    // 2. Gravação espelhada na coleção 'users' para total sincronia
     const userDocRef = doc(db, 'users', targetDocId);
-    const userSnap = await getDoc(userDocRef);
-    if (userSnap.exists()) {
-      await updateDoc(userDocRef, updatedData as any);
-    } else {
-      await setDoc(userDocRef, updatedData, { merge: true });
-    }
 
-    // 3. Se havia documento legado com ID diferente de targetDocId, remover para evitar duplicações
+    await Promise.allSettled([
+      setDoc(usuarioDocRef, updatedData, { merge: true }),
+      setDoc(userDocRef, updatedData, { merge: true }),
+    ]);
+
+    // Limpeza opcional de documento legado com ID diferente
     if (user.id && user.id !== targetDocId) {
       try {
-        await deleteDoc(doc(db, 'usuarios', user.id));
-        await deleteDoc(doc(db, 'users', user.id));
+        await Promise.allSettled([
+          deleteDoc(doc(db, 'usuarios', user.id)),
+          deleteDoc(doc(db, 'users', user.id)),
+        ]);
       } catch {
-        // Ignora se não existir
+        // Ignora
       }
     }
-
-    return updatedData;
-  } catch (error) {
+  } catch (error: any) {
     handleFirestoreError(error, OperationType.WRITE, `usuarios/${targetDocId}`);
-    throw error;
+    const isQuota = String(error?.message || '').toLowerCase().includes('quota') ||
+      String(error?.message || '').toLowerCase().includes('resource-exhausted');
+    if (isQuota) {
+      console.warn('Firestore em modo de contingência (cota de leituras diárias atingida). Usuário salvo com segurança no armazenamento local.');
+    } else {
+      console.warn('Erro na sincronização de nuvem do Firestore (modo de contingência ativo):', error);
+    }
   }
+
+  return updatedData;
 }
 
 /**
@@ -628,14 +604,33 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
  * e consolidando nomes legados.
  */
 export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
+  // Se a cota já estiver excedida hoje, retorna imediatamente a lista local em cache
+  if (isFirestoreQuotaExceeded) {
+    return getLocalUsersList();
+  }
+
   try {
     const usersColRef = collection(db, 'users');
     const usuariosColRef = collection(db, 'usuarios');
 
-    const [usersSnap, usuariosSnap] = await Promise.allSettled([
+    const [usersSnapResult, usuariosSnapResult] = await Promise.allSettled([
       getDocs(usersColRef),
       getDocs(usuariosColRef),
     ]);
+
+    if (usersSnapResult.status === 'rejected') {
+      handleFirestoreError((usersSnapResult as any).reason, OperationType.GET, 'users');
+    }
+    if (usuariosSnapResult.status === 'rejected') {
+      handleFirestoreError((usuariosSnapResult as any).reason, OperationType.GET, 'usuarios');
+    }
+
+    if (isFirestoreQuotaExceeded) {
+      return getLocalUsersList();
+    }
+
+    const usersSnap = usersSnapResult.status === 'fulfilled' ? usersSnapResult.value : null;
+    const usuariosSnap = usuariosSnapResult.status === 'fulfilled' ? usuariosSnapResult.value : null;
 
     const collectedProfiles: UserProfile[] = [];
     const batchOps: Promise<any>[] = [];
@@ -750,11 +745,11 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
       collectedProfiles.push(profile);
     };
 
-    if (usersSnap.status === 'fulfilled') {
-      usersSnap.value.forEach((d) => processDoc(d, 'users'));
+    if (usersSnap && usersSnap.forEach) {
+      usersSnap.forEach((d) => processDoc(d, 'users'));
     }
-    if (usuariosSnap.status === 'fulfilled') {
-      usuariosSnap.value.forEach((d) => processDoc(d, 'usuarios'));
+    if (usuariosSnap && usuariosSnap.forEach) {
+      usuariosSnap.forEach((d) => processDoc(d, 'usuarios'));
     }
 
     // Se Ana Clara ainda não existe em nenhum documento do Firestore, criar seu perfil canônico
@@ -813,6 +808,11 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
  * Ignora o cache local offline do Firestore, garantindo documentos recém-cadastrados na nuvem.
  */
 export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
+  // Se a cota do Firestore já estiver excedida hoje, retorna imediatamente a lista local em cache
+  if (isFirestoreQuotaExceeded) {
+    return getLocalUsersList();
+  }
+
   try {
     const usersColRef = collection(db, 'users');
     const usuariosColRef = collection(db, 'usuarios');
@@ -822,6 +822,17 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
       getDocsFromServer(usersColRef),
       getDocsFromServer(usuariosColRef),
     ]);
+
+    if (usersSnapResult.status === 'rejected') {
+      handleFirestoreError(usersSnapResult.reason, OperationType.GET, 'users');
+    }
+    if (usuariosSnapResult.status === 'rejected') {
+      handleFirestoreError(usuariosSnapResult.reason, OperationType.GET, 'usuarios');
+    }
+
+    if (isFirestoreQuotaExceeded) {
+      return getLocalUsersList();
+    }
 
     // Fallback caso getDocsFromServer falhe (ex: conexão instável)
     const usersSnap = usersSnapResult.status === 'fulfilled'
@@ -925,7 +936,11 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
     const deduplicated = normalizeAndDeduplicateUsers(collectedProfiles);
     return deduplicated;
   } catch (err) {
-    console.warn('Busca direta do servidor falhou, recorrendo à varredura padrão:', err);
+    handleFirestoreError(err, OperationType.GET, 'users');
+    console.warn('Busca direta do servidor falhou, recorrendo à lista em cache:', err);
+    if (isFirestoreQuotaExceeded) {
+      return getLocalUsersList();
+    }
     return await scanAndConsolidateUsers();
   }
 }

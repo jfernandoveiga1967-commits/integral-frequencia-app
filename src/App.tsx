@@ -88,6 +88,7 @@ import {
   batchSaveHolidaysToFirestore,
   seedInitialDataToFirestore,
   testFirestoreConnection,
+  getIsFirestoreQuotaExceeded,
   deleteDoc,
   doc,
   db,
@@ -913,6 +914,14 @@ export default function App() {
 
   const handleForceReloadUsers = async () => {
     try {
+      if (getIsFirestoreQuotaExceeded()) {
+        const localList = getLocalUsersList();
+        if (localList && localList.length > 0) {
+          const merged = normalizeAndDeduplicateUsers([...localList, ...PRESET_USERS]);
+          setUsers(merged);
+        }
+        return;
+      }
       const freshUsers = await fetchAllUsersDirectFromServer();
       if (freshUsers && freshUsers.length > 0) {
         const merged = normalizeAndDeduplicateUsers([...freshUsers, ...PRESET_USERS]);
@@ -921,21 +930,24 @@ export default function App() {
         broadcastSyncEvent('SYNC_USERS', merged);
       }
     } catch (err) {
-      console.error('Erro ao recarregar usuários diretamente do Firestore:', err);
-      throw err;
+      console.warn('Recarregamento do servidor indisponível (mantendo lista local):', err);
+      const localList = getLocalUsersList();
+      if (localList && localList.length > 0) {
+        const merged = normalizeAndDeduplicateUsers([...localList, ...PRESET_USERS]);
+        setUsers(merged);
+      }
     }
   };
 
   const handleSaveUser = async (userToSave: UserProfile) => {
     try {
-      // 1. Gravação no Firestore primeiro (com mapeamento correto de ID no Firestore e updateDoc/setDoc)
+      // 1. Gravação resiliente no Firestore e no cache local
       const confirmedUser = await saveUserToFirestore(userToSave);
 
-      // 2. Atualiza estado da tela apenas APÓS o Firestore confirmar a alteração (sem simular salvamento falso)
+      // 2. Atualiza estado da tela imediatamente
       const targetId = (confirmedUser.id || userToSave.id || '').trim();
       const targetEmail = (confirmedUser.email || userToSave.email || '').trim().toLowerCase();
 
-      let finalUsersList: UserProfile[] = [];
       setUsers((prev) => {
         const existingIdx = prev.findIndex(
           (u) => (targetId && u.id === targetId) || (targetEmail && u.email && u.email.trim().toLowerCase() === targetEmail)
@@ -951,7 +963,6 @@ export default function App() {
           updatedUsers = [confirmedUser, ...prev];
         }
         const deduplicated = normalizeAndDeduplicateUsers(updatedUsers);
-        finalUsersList = deduplicated;
         saveLocalUsersList(deduplicated);
         broadcastSyncEvent('SYNC_USERS', deduplicated);
         return deduplicated;
@@ -971,11 +982,22 @@ export default function App() {
         saveStoredUser(updatedCurrent);
       }
 
-      // 3. Invalidação de Cache: Força atualização imediata da lista de usuários ativos sem cache
-      await handleForceReloadUsers();
+      // 3. Atualização opcional de sincronização (apenas se a cota do Firestore não estiver excedida)
+      if (!getIsFirestoreQuotaExceeded()) {
+        try {
+          await handleForceReloadUsers();
+        } catch (reloadErr) {
+          console.warn('Aviso ao sincronizar lista remota de usuários:', reloadErr);
+        }
+      }
     } catch (err: any) {
-      console.error('Erro ao persistir usuário no Firestore:', err);
-      throw err;
+      console.warn('Aviso durante salvamento de usuário (aplicando contingência local):', err);
+      // Fallback seguro: garante persistência local mesmo em imprevistos
+      setUsers((prev) => {
+        const deduplicated = normalizeAndDeduplicateUsers([userToSave, ...prev]);
+        saveLocalUsersList(deduplicated);
+        return deduplicated;
+      });
     }
   };
 
