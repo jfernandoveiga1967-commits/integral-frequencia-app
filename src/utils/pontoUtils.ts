@@ -1462,7 +1462,9 @@ export function repairSinglePontoRecord(
   contractSchedule = '11:40 - 17:40'
 ): PontoRecord {
   const sched = (user?.contractSchedule || contractSchedule || '11:40 - 17:40').trim();
-  const { start: expStart, end: expEnd } = parseContractSchedule(sched);
+  const { start: expStartParsed, end: expEndParsed } = parseContractSchedule(sched);
+  const expStart = (user?.horarioInicio || '').trim() || expStartParsed;
+  const expEnd = (user?.horarioFim || '').trim() || expEndParsed;
 
   const e1 = (record.entry1 || '').trim();
   const s1 = (record.exit1 || '').trim();

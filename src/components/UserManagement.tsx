@@ -23,6 +23,7 @@ import {
   formatMinutesToHoursAndMinutes,
   parseHoursAndMinutesStringToMinutes,
   isContinuousShift,
+  parseContractSchedule,
 } from '../utils/pontoUtils';
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
@@ -696,6 +697,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         ? formMotivoDesligamento.trim()
         : undefined;
 
+    const finalSchedule = formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined);
+    let userHorarioInicio = (editingUser?.horarioInicio || '').trim();
+    let userHorarioFim = (editingUser?.horarioFim || '').trim();
+    if (finalSchedule) {
+      const parsedSched = parseContractSchedule(finalSchedule);
+      if (parsedSched.start && parsedSched.end) {
+        userHorarioInicio = parsedSched.start;
+        userHorarioFim = parsedSched.end;
+      }
+    }
+
     const updatedUser: UserProfile = {
       id: targetId,
       name: isMasterAdmin ? (cleanName || 'Fernando Veiga') : cleanName,
@@ -715,7 +727,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
-      contractSchedule: formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined),
+      contractSchedule: finalSchedule,
+      horarioInicio: userHorarioInicio || undefined,
+      horarioFim: userHorarioFim || undefined,
       contractDailyHours: decimalHours,
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,

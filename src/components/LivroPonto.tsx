@@ -446,6 +446,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       }
     }
 
+    const finalSchedule = userEditContractSchedule.trim() || undefined;
+    let userHorarioInicio = (targetUser?.horarioInicio || '').trim();
+    let userHorarioFim = (targetUser?.horarioFim || '').trim();
+    if (finalSchedule) {
+      const parsedSched = parseContractSchedule(finalSchedule);
+      if (parsedSched.start && parsedSched.end) {
+        userHorarioInicio = parsedSched.start;
+        userHorarioFim = parsedSched.end;
+      }
+    }
+
     const updatedUser: UserProfile = {
       ...targetUser,
       name: userEditName.trim() || targetUser.name,
@@ -456,7 +467,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       valorHoraAula: userEditRegimeTrabalho === 'professor_horista' ? Number(userEditValorHoraAula) : undefined,
       duracaoAulaMinutos: Number(userEditDuracaoAulaMinutos) || DURACAO_AULA_PADRAO_MINUTOS,
       workShiftType: userEditWorkShiftType,
-      contractSchedule: userEditContractSchedule.trim() || undefined,
+      contractSchedule: finalSchedule,
+      horarioInicio: userHorarioInicio || undefined,
+      horarioFim: userHorarioFim || undefined,
       contractDailyHours: decimalHours,
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
@@ -924,6 +937,83 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 4000);
+  };
+
+  /**
+   * Abre a modal de ajuste de batida para o dia selecionado.
+   * Se o dia ainda não tiver batidas salvas (dia sem registro prévio):
+   * 1. Consulta os campos horarioInicio e horarioFim do contrato do colaborador selecionado (ex: 13:00 e 17:30 no caso do Danyel Pereira);
+   * 2. Se não estiverem explícitos em horarioInicio/horarioFim, extrai do contractSchedule cadastrado na ficha do colaborador ou no fechamento mensal;
+   * 3. Fallback inteligente: caso o colaborador não tenha horários contratuais definidos em sua ficha,
+   *    utiliza como fallback o horário estipulado para a jornada dele (ex: padrão 8h -> 07:30 e 17:18; contínua 6h -> 11:40 e 17:40);
+   * 4. Para dias de fim de semana (sábado/domingo), os campos iniciam vazios;
+   * 5. Para jornada contínua (como a do Danyel), preenche entrada em entry1 e saída em exit2 (com exit1 e entry2 vazios).
+   */
+  const handleOpenEditModal = (item: (typeof monthDaysGrid)[0], existingRec?: PontoRecord) => {
+    if (existingRec) {
+      setShowEditDayModal(existingRec);
+      return;
+    }
+
+    // 1. Obter horários contratuais individuais da ficha do colaborador
+    let defaultStart = (targetUser?.horarioInicio || '').trim();
+    let defaultEnd = (targetUser?.horarioFim || '').trim();
+
+    // 2. Se não houver horário explícito direto, analisar o horário contratual (contractSchedule)
+    const effectiveSchedule = (contractSchedule || targetUser?.contractSchedule || '').trim();
+    if ((!defaultStart || !defaultEnd) && effectiveSchedule) {
+      const parsed = parseContractSchedule(effectiveSchedule);
+      if (parsed.start && parsed.end) {
+        if (!defaultStart) defaultStart = parsed.start;
+        if (!defaultEnd) defaultEnd = parsed.end;
+      }
+    }
+
+    // 3. Fallback Inteligente: baseado na jornada estipulada do colaborador
+    if (!defaultStart || !defaultEnd) {
+      const shiftType = targetUser?.workShiftType || (isUserContinuous ? 'continua_6h' : 'padrao_8h');
+      if (shiftType === 'padrao_8h') {
+        if (!defaultStart) defaultStart = '07:30';
+        if (!defaultEnd) defaultEnd = '17:18';
+      } else {
+        // Padrão jornada contínua (6 horas)
+        if (!defaultStart) defaultStart = '11:40';
+        if (!defaultEnd) defaultEnd = '17:40';
+      }
+    }
+
+    let initialEntry1 = item.isWk ? '' : defaultStart;
+    let initialExit1 = '';
+    let initialEntry2 = '';
+    let initialExit2 = item.isWk ? '' : defaultEnd;
+
+    // Se não for jornada contínua e a jornada contratual tiver intervalo de almoço definido (ex: 07:30 - 11:30 / 13:00 - 17:42)
+    if (!item.isWk && !isUserContinuous && effectiveSchedule.includes('/')) {
+      const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
+      const matches = Array.from(effectiveSchedule.matchAll(timeRegex));
+      if (matches.length >= 4) {
+        initialEntry1 = matches[0][0];
+        initialExit1 = matches[1][0];
+        initialEntry2 = matches[2][0];
+        initialExit2 = matches[3][0];
+      }
+    }
+
+    const initialRec: PontoRecord = {
+      id: `${selectedUserId}_${item.dateStr}`,
+      userId: selectedUserId,
+      userName: targetUser?.name || '',
+      date: item.dateStr,
+      monthKey,
+      dayNumber: item.dayNumber,
+      entry1: initialEntry1,
+      exit1: initialExit1,
+      entry2: initialEntry2,
+      exit2: initialExit2,
+      status: item.defaultStatus,
+    };
+
+    setShowEditDayModal(initialRec);
   };
 
   // Save Day Edit Modal
@@ -1717,22 +1807,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {isAdmin && !isMonthClosed && (
                       <td className="py-2 px-3 text-center">
                         <button
-                          onClick={() => {
-                            const initialRec: PontoRecord = rec || {
-                              id: `${selectedUserId}_${item.dateStr}`,
-                              userId: selectedUserId,
-                              userName: targetUser?.name || '',
-                              date: item.dateStr,
-                              monthKey,
-                              dayNumber: item.dayNumber,
-                              entry1: item.isWk ? '' : '11:40',
-                              exit1: '',
-                              entry2: '',
-                              exit2: item.isWk ? '' : '17:40',
-                              status: item.defaultStatus,
-                            };
-                            setShowEditDayModal(initialRec);
-                          }}
+                          onClick={() => handleOpenEditModal(item, rec)}
                           className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded transition"
                           title="Ajustar horários ou status deste dia"
                         >
@@ -2622,7 +2697,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
             {/* Quick Actions Bar for 1-Click Correction */}
             {(() => {
-              const { start: schedStart, end: schedEnd } = parseContractSchedule(contractSchedule);
+              const { start: parsedSchedStart, end: parsedSchedEnd } = parseContractSchedule(contractSchedule);
+              const schedStart = (targetUser?.horarioInicio || '').trim() || parsedSchedStart;
+              const schedEnd = (targetUser?.horarioFim || '').trim() || parsedSchedEnd;
               const curE1 = (showEditDayModal.entry1 || '').trim();
               const curExit = (showEditDayModal.exit2 || showEditDayModal.exit1 || '').trim();
 

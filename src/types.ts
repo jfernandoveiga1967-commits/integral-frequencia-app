@@ -213,6 +213,8 @@ export interface UserProfile {
   canMarkAttendance?: boolean;
   pixKey?: string; // Chave PIX (CPF, Telefone, E-mail ou Aleatória)
   contractSchedule?: string; // Horário contratual (ex: "11:40 - 17:40" ou "07:30 - 11:30 / 13:00 - 17:42")
+  horarioInicio?: string; // Horário de início do contrato (ex: "13:00" ou "11:40")
+  horarioFim?: string; // Horário de fim do contrato (ex: "17:30" ou "17:40")
   contractDailyHours?: number; // Horas diárias contratuais em decimal (ex: 8.7 ou 6)
   contractDailyMinutes?: number; // Horas diárias em minutos totais exatos (ex: 522)
   contractDailyHoursFormatted?: string; // Formato amigável (ex: "8h 42min" ou "6h 00min")

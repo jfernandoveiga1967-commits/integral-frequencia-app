@@ -20,7 +20,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing } from './types';
-import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords } from './utils/pontoUtils';
+import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
   addToAttendanceOutbox,
@@ -360,6 +360,8 @@ export function subscribeUsers(
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             pixKey: data.pixKey || data.phone || undefined,
             contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
+            horarioInicio: data.horarioInicio || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).start : undefined),
+            horarioFim: data.horarioFim || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).end : undefined),
             contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
             contractDailyMinutes: rawMinutes,
             contractDailyHoursFormatted: formattedHours,
@@ -560,6 +562,8 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     motivoDesligamento: user.motivoDesligamento || '',
     workShiftType: user.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
     contractSchedule: user.contractSchedule !== undefined ? user.contractSchedule.trim() : (isMasterAdmin ? '07:30 - 17:30' : ''),
+    horarioInicio: user.horarioInicio || (user.contractSchedule ? parseContractSchedule(user.contractSchedule).start : null),
+    horarioFim: user.horarioFim || (user.contractSchedule ? parseContractSchedule(user.contractSchedule).end : null),
     contractDailyHours: decimalHours,
     contractDailyMinutes: resolvedMinutes,
     contractDailyHoursFormatted: formattedHours,
@@ -731,6 +735,8 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
         pixKey: data.pixKey || data.phone || undefined,
         contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
+        horarioInicio: data.horarioInicio || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).start : undefined),
+        horarioFim: data.horarioFim || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).end : undefined),
         contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
         contractDailyMinutes: rawMinutes,
         contractDailyHoursFormatted: formattedHours,
@@ -886,6 +892,8 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
         canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
         pixKey: data.pixKey || data.phone || undefined,
         contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
+        horarioInicio: data.horarioInicio || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).start : undefined),
+        horarioFim: data.horarioFim || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).end : undefined),
         contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
         contractDailyMinutes: rawMinutes,
         contractDailyHoursFormatted: formattedHours,

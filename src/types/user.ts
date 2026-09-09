@@ -24,6 +24,8 @@ export interface User {
   canMarkAttendance?: boolean;
   pixKey?: string;
   contractSchedule?: string;
+  horarioInicio?: string;
+  horarioFim?: string;
   contractDailyHours?: number;
   contractDailyMinutes?: number;
   contractDailyHoursFormatted?: string;
