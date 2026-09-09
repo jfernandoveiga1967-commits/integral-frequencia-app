@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho } from '../types';
+import { UserProfile, User, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho } from '../types';
 import { TURMAS_LIST } from '../data/initialData';
 import {
   getRoleBadgeStyle,
@@ -27,6 +27,7 @@ import {
 import { ActivityBadge, renderActivityIcon, renderActivityIconOrImage, BASE_AVAILABLE_ICONS, detectIconFromActivityName } from './ActivityBadge';
 import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
+import { fetchAllUsersDirectFromServer } from '../firebase';
 import {
   ShieldCheck,
   GraduationCap,
@@ -157,7 +158,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
-  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('ATIVOS');
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
   const [isReloadingUsers, setIsReloadingUsers] = useState(false);
 
   // User Editing state
@@ -480,12 +481,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
-    setFormRegimeTrabalho(user.regimeTrabalho || 'mensalista');
+    const initialRegime: RegimeTrabalho =
+      user.regimeTrabalho === 'professor_horista' ||
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
+        ? 'professor_horista'
+        : 'mensalista';
+    setFormRegimeTrabalho(initialRegime);
     setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
     setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
-    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150);
-    setFormCompany(user.company || 'GADAL - Gestão e Apoio');
+    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 150);
+    setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
   };
 
   const handleReloadUsers = async () => {
@@ -493,11 +499,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setIsReloadingUsers(true);
       if (onForceReloadUsers) {
         await onForceReloadUsers();
+      } else {
+        await fetchAllUsersDirectFromServer();
       }
-      showToast('Lista de colaboradores atualizada diretamente do Firestore (sem cache)!', 'success');
+      showToast('Lista de colaboradores sincronizada diretamente da nuvem (servidor Firestore)!', 'success');
     } catch (err: any) {
-      console.error('Erro ao recarregar usuários:', err);
-      showToast('Erro ao sincronizar lista: ' + (err?.message || 'Falha de comunicação'), 'error');
+      console.error('Erro ao recarregar usuários do servidor:', err);
+      showToast('Erro ao sincronizar com o servidor: ' + (err?.message || 'Falha de comunicação'), 'error');
     } finally {
       setIsReloadingUsers(false);
     }
@@ -593,11 +601,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail && (!editingUser || u.id !== editingUser.id)
     );
 
+    // Parse e validação do Valor da Hora-Aula para Professor Horista
+    let parsedHoraAula: number | undefined = undefined;
     if (formRegimeTrabalho === 'professor_horista') {
-      const parsedHoraAula = Number(formValorHoraAula);
-      if (!formValorHoraAula || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
-        showToast('Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero.', 'error');
+      if (typeof formValorHoraAula === 'number') {
+        parsedHoraAula = isNaN(formValorHoraAula) ? undefined : formValorHoraAula;
+      } else if (typeof formValorHoraAula === 'string' && formValorHoraAula.trim() !== '') {
+        const cleaned = formValorHoraAula.replace(/[^\d.,]/g, '');
+        if (cleaned.includes(',') && cleaned.includes('.')) {
+          parsedHoraAula = parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || undefined;
+        } else if (cleaned.includes(',')) {
+          parsedHoraAula = parseFloat(cleaned.replace(',', '.')) || undefined;
+        } else {
+          parsedHoraAula = parseFloat(cleaned) || undefined;
+        }
+      }
+
+      if (parsedHoraAula === undefined || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
+        showToast('Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero (ex: 31.49).', 'error');
         return;
+      }
+    }
+
+    // Parse de Ajuda de Custo (suporta valores decimais como '150', '150,00', etc.)
+    let parsedAjudaDeCusto = 150;
+    if (typeof formAjudaDeCusto === 'number') {
+      parsedAjudaDeCusto = isNaN(formAjudaDeCusto) ? 150 : formAjudaDeCusto;
+    } else if (typeof formAjudaDeCusto === 'string' && formAjudaDeCusto.trim() !== '') {
+      const cleaned = formAjudaDeCusto.replace(/[^\d.,]/g, '');
+      if (cleaned.includes(',') && cleaned.includes('.')) {
+        parsedAjudaDeCusto = parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
+      } else if (cleaned.includes(',')) {
+        parsedAjudaDeCusto = parseFloat(cleaned.replace(',', '.')) || 0;
+      } else {
+        parsedAjudaDeCusto = parseFloat(cleaned) || 0;
       }
     }
 
@@ -684,14 +721,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
       regimeTrabalho: formRegimeTrabalho,
-      valorHoraAula: formRegimeTrabalho === 'professor_horista' ? Number(formValorHoraAula) : undefined,
+      regimeContratual: formRegimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT',
+      valorHoraAula: formRegimeTrabalho === 'professor_horista' ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
       hourlyRate: formRegimeTrabalho === 'professor_horista'
-        ? (Number(formValorHoraAula) || 0)
+        ? (parsedHoraAula || 0)
         : Number((parsedSalary / (Number(formContractDivisorHours) || 220)).toFixed(4)),
-      ajudaDeCusto: Number(formAjudaDeCusto) >= 0 ? Number(formAjudaDeCusto) : 150,
+      ajudaDeCusto: parsedAjudaDeCusto,
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
+      empresa: formCompany.trim() || 'GADAL - Gestão e Apoio',
       workShiftType: formWorkShiftType,
       updatedAt: new Date().toISOString(),
     };
@@ -1299,6 +1338,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
+                  onClick={handleReloadUsers}
+                  disabled={isReloadingUsers}
+                  className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 font-bold text-xs transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-60 shadow-2xs"
+                  title="Executar busca direta do servidor Firestore ignorando o cache offline"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-amber-700 ${isReloadingUsers ? 'animate-spin' : ''}`} />
+                  <span>{isReloadingUsers ? 'Sincronizando...' : 'Sincronizar Lista'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={expandAllUsers}
                   className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
                   title="Expandir todos os cartões de usuário"
@@ -1535,7 +1585,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           <div className="flex flex-wrap items-center gap-3">
                             <div className="flex items-center space-x-1.5 font-bold">
                               <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                              <span>Empresa: <strong className="text-slate-900">{user.company || 'GADAL - Gestão e Apoio'}</strong></span>
+                              <span>Empresa: <strong className="text-slate-900">{user.empresa || user.company || 'GADAL - Gestão e Apoio'}</strong></span>
                             </div>
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
@@ -1547,13 +1597,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
-                              {user.regimeTrabalho === 'professor_horista' ? (
+                              {(user.regimeTrabalho === 'professor_horista' || (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))) ? (
                                 <span>
-                                  Regime: <strong className="text-indigo-900">Prof. Horista</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                  Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               ) : (
                                 <span>
-                                  Regime: <strong className="text-slate-900">Mensalista (220h)</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                  Regime: <strong className="text-slate-900">{user.regimeContratual || 'Mensalista (220h)'}</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               )}
                             </div>
@@ -2490,13 +2540,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-[9px] text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded">Obrigatório</span>
                           </label>
                           <input
-                            type="number"
-                            step="0.01"
-                            min="1"
+                            type="text"
+                            inputMode="decimal"
                             required
                             value={formValorHoraAula}
-                            onChange={(e) => setFormValorHoraAula(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
-                            placeholder="Ex: 45.00"
+                            onChange={(e) => setFormValorHoraAula(e.target.value)}
+                            placeholder="Ex: 31.49"
                             className="w-full px-3 py-2 bg-indigo-50/40 border border-indigo-300 rounded-xl text-indigo-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                           <span className="text-[9px] text-slate-500 block mt-0.5">
@@ -2598,11 +2647,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </div>
                     <div className="w-full sm:w-36">
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         value={formAjudaDeCusto}
-                        onChange={(e) => setFormAjudaDeCusto(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                        onChange={(e) => setFormAjudaDeCusto(e.target.value)}
                         placeholder="150.00"
                         className="w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />

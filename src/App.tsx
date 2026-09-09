@@ -393,14 +393,27 @@ export default function App() {
 
     const unsubUsers = subscribeUsers((fsUsers) => {
       // Deduplicate strictly in memory and merge with presets
-      const merged = normalizeAndDeduplicateUsers([...fsUsers, ...PRESET_USERS]);
-      setUsers(merged);
-      saveLocalUsersList(merged);
+      let effectiveUsers: UserProfile[];
+      if (fsUsers && fsUsers.length > 0) {
+        effectiveUsers = normalizeAndDeduplicateUsers([...fsUsers, ...PRESET_USERS]);
+        setUsers(effectiveUsers);
+        saveLocalUsersList(effectiveUsers);
+      } else {
+        // Se a resposta da nuvem estiver vazia (modo offline / cota esgotada), preservar os colaboradores salvos no localStorage
+        const localList = getLocalUsersList();
+        if (localList && localList.length > 1) {
+          effectiveUsers = localList;
+          setUsers(effectiveUsers);
+        } else {
+          effectiveUsers = normalizeAndDeduplicateUsers([...(fsUsers || []), ...PRESET_USERS]);
+          setUsers(effectiveUsers);
+        }
+      }
 
       // Real-time permission sync for current active session
       const activeSelf = currentUserRef.current;
       if (activeSelf) {
-        const updatedSelf = merged.find(
+        const updatedSelf = effectiveUsers.find(
           (u) => u.id === activeSelf.id || (u.email && activeSelf.email && u.email.toLowerCase() === activeSelf.email.toLowerCase())
         );
         if (updatedSelf) {

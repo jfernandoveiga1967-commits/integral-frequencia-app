@@ -117,21 +117,27 @@ export const Footer: React.FC<FooterProps> = ({
             type="button"
             onClick={onForceSync}
             title={
-              connectionState?.status === 'offline'
+              connectionState?.quotaExceeded
+                ? 'Cota diária gratuita do Firestore atingida (50.000 leituras/dia no projeto Google Cloud). O app continua operando em modo offline com o cache local até o reset diário pelo Google ou upgrade do plano.'
+                : connectionState?.status === 'offline'
                 ? 'Rede offline. Dados gravados em contingência local e serão enviados ao reconectar. Clique para tentar reconectar agora.'
                 : connectionState?.status === 'syncing' || connectionState?.status === 'reconnecting'
                 ? 'Sincronizando com o servidor e outros dispositivos...'
                 : 'Sincronização em tempo real ativa (100%). Clique para forçar verificação agora.'
             }
             className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer shadow-sm ${
-              connectionState?.status === 'offline'
+              connectionState?.quotaExceeded
+                ? 'bg-rose-950/70 border-rose-500/40 text-rose-300 hover:bg-rose-900/80'
+                : connectionState?.status === 'offline'
                 ? 'bg-amber-950/70 border-amber-500/40 text-amber-300 hover:bg-amber-900/80'
                 : connectionState?.status === 'syncing' || connectionState?.status === 'reconnecting'
                 ? 'bg-blue-950/70 border-blue-500/40 text-blue-300 hover:bg-blue-900/80'
                 : 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80'
             }`}
           >
-            {connectionState?.status === 'offline' ? (
+            {connectionState?.quotaExceeded ? (
+              <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            ) : connectionState?.status === 'offline' ? (
               <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             ) : connectionState?.status === 'syncing' || connectionState?.status === 'reconnecting' ? (
               <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
@@ -143,7 +149,9 @@ export const Footer: React.FC<FooterProps> = ({
             )}
             <span className="hidden sm:inline">Sync:</span>
             <span>
-              {connectionState?.status === 'offline'
+              {connectionState?.quotaExceeded
+                ? 'Cota Firebase Excedida'
+                : connectionState?.status === 'offline'
                 ? 'Offline (Salvo)'
                 : connectionState?.status === 'syncing' || connectionState?.status === 'reconnecting'
                 ? 'Sincronizando...'

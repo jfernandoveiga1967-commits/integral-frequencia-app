@@ -8,7 +8,7 @@ import {
   SemanarioPlan,
   UserProfile,
 } from '../types';
-import { reconnectFirestore, disconnectFirestore, testFirestoreConnection, processAttendanceOutbox } from '../firebase';
+import { reconnectFirestore, disconnectFirestore, testFirestoreConnection, processAttendanceOutbox, getIsFirestoreQuotaExceeded } from '../firebase';
 
 export type SyncEventType =
   | 'SYNC_ATTENDANCE_RECORDS'
@@ -40,6 +40,7 @@ export interface ConnectionState {
   isOnline: boolean;
   lastSyncTime: number;
   pendingOutboxCount: number;
+  quotaExceeded?: boolean;
 }
 
 // Generate unique tab/window identifier
@@ -80,6 +81,7 @@ let currentConnectionState: ConnectionState = {
   isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
   lastSyncTime: Date.now(),
   pendingOutboxCount: 0,
+  quotaExceeded: false,
 };
 
 type ConnectionStatusListener = (state: ConnectionState) => void;
@@ -88,6 +90,7 @@ const statusListeners = new Set<ConnectionStatusListener>();
 function updateConnectionState(partial: Partial<ConnectionState>) {
   currentConnectionState = {
     ...currentConnectionState,
+    quotaExceeded: getIsFirestoreQuotaExceeded(),
     ...partial,
   };
   statusListeners.forEach((listener) => {
@@ -219,7 +222,7 @@ let isConnectivityInitialized = false;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let isReconnecting = false;
 
-export async function runAutoReconnect(): Promise<boolean> {
+export async function runAutoReconnect(force = false): Promise<boolean> {
   if (isReconnecting) return false;
   isReconnecting = true;
   updateConnectionState({ status: 'reconnecting' });
@@ -232,11 +235,11 @@ export async function runAutoReconnect(): Promise<boolean> {
       return false;
     }
 
-    // Force Firestore network reconnection
+    // Force Firestore network reconnection if offline
     await reconnectFirestore();
 
-    // Check actual Firestore server ping
-    const isConnected = await testFirestoreConnection();
+    // Check actual Firestore server ping (with caching/throttling)
+    const isConnected = await testFirestoreConnection(force);
     if (isConnected) {
       // Process pending outbox
       const processed = await processAttendanceOutbox();
@@ -248,7 +251,9 @@ export async function runAutoReconnect(): Promise<boolean> {
       });
 
       // Broadcast force resync to make sure all instances refresh any missed writes
-      broadcastSyncEvent('FORCE_RESYNC', { timestamp: Date.now(), processedOutbox: processed });
+      if (force) {
+        broadcastSyncEvent('FORCE_RESYNC', { timestamp: Date.now(), processedOutbox: processed });
+      }
       isReconnecting = false;
       return true;
     } else {
@@ -294,20 +299,20 @@ export function initConnectivityMonitor(): () => void {
   window.addEventListener('focus', handleVisibilityOrFocus);
   document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
-  // Periodic heartbeat every 15 seconds to monitor connection health
+  // Periodic heartbeat every 30 seconds to monitor connection health
   heartbeatInterval = setInterval(async () => {
     if (navigator.onLine) {
       // If was offline or reconnecting, run reconnect
       if (currentConnectionState.status === 'offline' || currentConnectionState.status === 'reconnecting') {
         await runAutoReconnect();
-      } else {
-        // Quick silent check and outbox flush
+      } else if (currentConnectionState.pendingOutboxCount > 0) {
+        // Quick silent check and outbox flush only if items exist
         processAttendanceOutbox().catch(() => {});
       }
     } else {
       updateConnectionState({ isOnline: false, status: 'offline' });
     }
-  }, 15000);
+  }, 30000);
 
   // Initial check
   if (navigator.onLine) {

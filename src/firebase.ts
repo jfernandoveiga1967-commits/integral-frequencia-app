@@ -7,6 +7,7 @@ import {
   getDocFromServer,
   collection,
   getDocs,
+  getDocsFromServer,
   onSnapshot,
   setDoc,
   updateDoc,
@@ -29,7 +30,7 @@ import {
   getDeletedStudentIds,
   deduplicateStudentsList,
 } from './utils/storageUtils';
-import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS } from './utils/authUtils';
+import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS, getLocalUsersList, saveLocalUsersList } from './utils/authUtils';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -58,9 +59,22 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export let isFirestoreQuotaExceeded = false;
+let lastQuotaCheckTime = 0;
+
+export function getIsFirestoreQuotaExceeded(): boolean {
+  return isFirestoreQuotaExceeded;
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource-exhausted')) {
+    isFirestoreQuotaExceeded = true;
+    lastQuotaCheckTime = Date.now();
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -76,13 +90,33 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 }
 
-export async function testFirestoreConnection(): Promise<boolean> {
+let lastSuccessfulPingTime = 0;
+
+export async function testFirestoreConnection(force = false): Promise<boolean> {
+  // Se a cota já foi confirmada como excedida, evitar spammar o servidor a cada poucos segundos
+  if (isFirestoreQuotaExceeded && Date.now() - lastQuotaCheckTime < 180000) {
+    return false;
+  }
+
+  // Se já foi testado com sucesso nos últimos 45 segundos e não é uma ação forçada pelo usuário, poupar leituras
+  if (!force && lastSuccessfulPingTime > 0 && Date.now() - lastSuccessfulPingTime < 45000) {
+    return true;
+  }
+
   try {
     const pingPromise = getDocFromServer(doc(db, 'test', 'connection'))
-      .then(() => true)
+      .then(() => {
+        isFirestoreQuotaExceeded = false;
+        lastSuccessfulPingTime = Date.now();
+        return true;
+      })
       .catch((err) => {
-        // Offline or connection in progress - Firestore will continue working in offline cache mode
-        if (err instanceof Error && (err.message.includes('the client is offline') || err.message.includes('unavailable'))) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
+          isFirestoreQuotaExceeded = true;
+          lastQuotaCheckTime = Date.now();
+          console.warn('Cota diária de leitura do Firestore excedida (Free daily read units per project). Operando em modo offline.');
+        } else if (msg.includes('the client is offline') || msg.includes('unavailable')) {
           console.info('Firestore is operating in offline mode.');
         }
         return false;
@@ -92,7 +126,11 @@ export async function testFirestoreConnection(): Promise<boolean> {
       setTimeout(() => resolve(false), 2500);
     });
 
-    return await Promise.race([pingPromise, timeoutPromise]);
+    const success = await Promise.race([pingPromise, timeoutPromise]);
+    if (success) {
+      lastSuccessfulPingTime = Date.now();
+    }
+    return success;
   } catch {
     return false;
   }
@@ -240,20 +278,25 @@ export function subscribeTurmas(
   );
 }
 
+let hasScannedUsersSession = false;
+
 export function subscribeUsers(
   onData: (users: UserProfile[]) => void,
   onError?: (err: Error) => void
 ) {
-  // Executar varredura e consolidação de migração em segundo plano imediatamente
-  scanAndConsolidateUsers()
-    .then((consolidated) => {
-      if (consolidated && consolidated.length > 0) {
-        onData(consolidated);
-      }
-    })
-    .catch((e) => {
-      console.warn('Aviso durante varredura inicial de usuários:', e);
-    });
+  // Executar varredura e consolidação de migração em segundo plano apenas 1x por sessão para evitar consumo excessivo de leituras
+  if (!hasScannedUsersSession) {
+    hasScannedUsersSession = true;
+    scanAndConsolidateUsers()
+      .then((consolidated) => {
+        if (consolidated && consolidated.length > 0) {
+          onData(consolidated);
+        }
+      })
+      .catch((e) => {
+        console.warn('Aviso durante varredura inicial de usuários:', e);
+      });
+  }
 
   const colRef = collection(db, 'users');
   return onSnapshot(
@@ -323,13 +366,15 @@ export function subscribeUsers(
             baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
               ? Number(data.baseSalary)
               : (isMasterAdmin ? 0 : 1200),
-            regimeTrabalho: data.regimeTrabalho || 'mensalista',
-            valorHoraAula: data.valorHoraAula !== undefined ? Number(data.valorHoraAula) : undefined,
+            regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
+            regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+            valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
             duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
             contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
             hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
-            ajudaDeCusto: data.ajudaDeCusto !== undefined ? Number(data.ajudaDeCusto) : 150,
-            company: data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+            ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 150,
+            company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+            empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
 
@@ -521,13 +566,17 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary))
       ? Number(user.baseSalary)
       : (isMasterAdmin ? 0 : 1200),
-    regimeTrabalho: user.regimeTrabalho || 'mensalista',
-    valorHoraAula: user.valorHoraAula !== undefined ? Number(user.valorHoraAula) : null,
+    regimeTrabalho: user.regimeTrabalho || (user.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
+    regimeContratual: user.regimeContratual || (user.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+    valorHoraAula: user.valorHoraAula !== undefined && user.valorHoraAula !== null && !isNaN(Number(user.valorHoraAula))
+      ? Number(user.valorHoraAula)
+      : null,
     duracaoAulaMinutos: user.duracaoAulaMinutos !== undefined ? Number(user.duracaoAulaMinutos) : 50,
     contractDivisorHours: user.contractDivisorHours !== undefined ? Number(user.contractDivisorHours) : 220,
     hourlyRate: user.hourlyRate !== undefined ? Number(user.hourlyRate) : (user.baseSalary ? Number((user.baseSalary / 220).toFixed(4)) : 0),
-    ajudaDeCusto: user.ajudaDeCusto !== undefined ? Number(user.ajudaDeCusto) : 150,
-    company: user.company ? user.company.trim() : 'GADAL - Gestão e Apoio',
+    ajudaDeCusto: user.ajudaDeCusto !== undefined && !isNaN(Number(user.ajudaDeCusto)) ? Number(user.ajudaDeCusto) : 150,
+    company: user.company ? user.company.trim() : (user.empresa ? user.empresa.trim() : 'GADAL - Gestão e Apoio'),
+    empresa: user.empresa ? user.empresa.trim() : (user.company ? user.company.trim() : 'GADAL - Gestão e Apoio'),
     updatedAt: new Date().toISOString(),
   };
 
@@ -739,18 +788,138 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
     }
 
     const deduplicated = normalizeAndDeduplicateUsers(collectedProfiles);
+    if (deduplicated.length > 0) {
+      saveLocalUsersList(deduplicated);
+    }
     return deduplicated;
   } catch (err) {
-    console.error('Erro na varredura e consolidação de usuários:', err);
+    console.warn('Varredura e consolidação de usuários em modo de contingência:', err);
+    const localList = getLocalUsersList();
+    if (localList && localList.length > 0) {
+      return localList;
+    }
     return normalizeAndDeduplicateUsers([]);
   }
 }
 
 /**
- * Busca a lista fresca de usuários diretamente do Firestore sem depender de cache local.
+ * Busca a lista fresca de colaboradores diretamente do Firestore via getDocsFromServer (Bypass Cache).
+ * Ignora o cache local offline do Firestore, garantindo documentos recém-cadastrados na nuvem.
  */
 export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
-  return await scanAndConsolidateUsers();
+  try {
+    const usersColRef = collection(db, 'users');
+    const usuariosColRef = collection(db, 'usuarios');
+
+    // Executa busca direta do servidor ignorando o cache local offline do Firestore
+    const [usersSnapResult, usuariosSnapResult] = await Promise.allSettled([
+      getDocsFromServer(usersColRef),
+      getDocsFromServer(usuariosColRef),
+    ]);
+
+    // Fallback caso getDocsFromServer falhe (ex: conexão instável)
+    const usersSnap = usersSnapResult.status === 'fulfilled'
+      ? usersSnapResult.value
+      : await getDocs(usersColRef).catch(() => null);
+
+    const usuariosSnap = usuariosSnapResult.status === 'fulfilled'
+      ? usuariosSnapResult.value
+      : await getDocs(usuariosColRef).catch(() => null);
+
+    const collectedProfiles: UserProfile[] = [];
+
+    const processDoc = (docSnap: any) => {
+      const data = docSnap.data();
+      if (!data) return;
+
+      const docId = docSnap.id;
+      const rawName = (data.name || '').trim();
+      const rawEmail = (data.email || '').trim().toLowerCase();
+      const rawId = (data.id || docId || '').trim();
+
+      const isMasterAdmin =
+        rawEmail === ADMIN_EMAIL.toLowerCase() ||
+        rawId === 'usr_coord_1' ||
+        rawName.toLowerCase().includes('fernando veiga') ||
+        rawEmail === 'coordenacao@crescer.edu.br';
+
+      const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
+      const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
+      const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
+
+      let assignedActivities = Array.isArray(data.assignedActivities)
+        ? data.assignedActivities
+        : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
+
+      let assignedTurmas = Array.isArray(data.allowedClassIds)
+        ? data.allowedClassIds
+        : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
+
+      const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
+        ? Number(data.contractDailyMinutes)
+        : (data.contractDailyHoursFormatted
+            ? parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted)
+            : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours))
+                ? Math.round(Number(data.contractDailyHours) * 60)
+                : (isMasterAdmin ? 480 : (data.workShiftType === 'padrao_8h' ? 528 : 360))));
+      const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
+
+      const profile: UserProfile = {
+        id: isMasterAdmin ? 'usr_coord_1' : rawId,
+        name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
+        email: isMasterAdmin ? ADMIN_EMAIL : rawEmail,
+        phone: data.phone !== undefined ? data.phone : undefined,
+        role,
+        cargoLabel,
+        avatarColor,
+        birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : '1995-01-01'),
+        pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+        // Trazendo todos os documentos da coleção users mesmo que não tenham a chave status
+        status: data.status || 'ATIVO',
+        dataDesligamento: data.dataDesligamento || undefined,
+        motivoDesligamento: data.motivoDesligamento || undefined,
+        workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
+        assignedActivities,
+        assignedTurmas,
+        allowedClassIds: assignedTurmas,
+        canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
+        canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
+        pixKey: data.pixKey || data.phone || undefined,
+        contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
+        contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
+        contractDailyMinutes: rawMinutes,
+        contractDailyHoursFormatted: formattedHours,
+        baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
+          ? Number(data.baseSalary)
+          : (isMasterAdmin ? 0 : 1200),
+        regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
+        regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+        valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
+        duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
+        contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
+        hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
+        ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 150,
+        company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+        empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      };
+
+      collectedProfiles.push(profile);
+    };
+
+    if (usersSnap && usersSnap.forEach) {
+      usersSnap.forEach((d: any) => processDoc(d));
+    }
+    if (usuariosSnap && usuariosSnap.forEach) {
+      usuariosSnap.forEach((d: any) => processDoc(d));
+    }
+
+    const deduplicated = normalizeAndDeduplicateUsers(collectedProfiles);
+    return deduplicated;
+  } catch (err) {
+    console.warn('Busca direta do servidor falhou, recorrendo à varredura padrão:', err);
+    return await scanAndConsolidateUsers();
+  }
 }
 
 /**

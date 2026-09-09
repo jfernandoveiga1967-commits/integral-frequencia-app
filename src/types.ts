@@ -218,15 +218,19 @@ export interface UserProfile {
   contractDailyHoursFormatted?: string; // Formato amigável (ex: "8h 42min" ou "6h 00min")
   baseSalary?: number; // Bolsa Auxílio Base (ex: 1200)
   regimeTrabalho?: RegimeTrabalho; // 'mensalista' (220h) | 'professor_horista' (Aulas Dadas)
+  regimeContratual?: string; // Regime contratual (ex: 'Prof. Horista', 'CLT', 'mensalista')
   valorHoraAula?: number; // Valor da Hora-Aula (R$) obrigatório para Professor Horista
   duracaoAulaMinutos?: number; // Duração padrão de cada aula em minutos (padrão: 50min)
   hourlyRate?: number; // Valor da hora contratual (ex: baseSalary / 220)
   contractDivisorHours?: number; // Divisor contratual em horas (padrão: 220h)
   ajudaDeCusto?: number; // Valor fixo mensal da Ajuda de Custo (padrão R$ 150,00)
-  company?: string; // Empresa conveniada (ex: "GADAL")
+  company?: string; // Empresa conveniada (ex: "GADAL - Gestão e Apoio")
+  empresa?: string; // Alias para company / Empresa conveniada
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
   updatedAt?: string;
 }
+
+export type User = UserProfile;
 
 export interface MealDailyEntry {
   date: string; // YYYY-MM-DD

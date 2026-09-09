@@ -11,13 +11,11 @@ import {
   X,
   Clock,
   BookOpen,
-  ExternalLink,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ConnectionState } from '../services/syncService';
 import { LOGO_CRESCER_BASE64 } from '../utils/appLogoData';
 import { isCoordenador } from '../utils/authUtils';
-import { isRunningInIframe } from '../utils/printUtils';
 import {
   isAudioNotificationsEnabled,
   unlockAudioContextAndPlayTest,
@@ -37,8 +35,8 @@ interface HeaderProps {
   justificadosHoje?: number;
   pendentesHoje?: number;
   onNavigateToPending?: () => void;
-  currentUser: UserProfile | null;
-  onLogout: () => void;
+  currentUser?: UserProfile | null;
+  onLogout?: () => void;
   connectionState?: ConnectionState;
   onForceSync?: () => void;
 }
@@ -54,10 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
   justificadosHoje = 0,
   pendentesHoje = 0,
   onNavigateToPending,
-  currentUser,
-  onLogout,
-  connectionState,
-  onForceSync,
+  currentUser = null,
 }) => {
   // Sound Notifications state
   const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(() => isAudioNotificationsEnabled());
@@ -145,22 +140,10 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </div>
 
-            <div className="shrink-0 flex items-center space-x-2.5">
+            <div className="shrink-0">
               <h1 className="text-base sm:text-lg font-bold tracking-tight text-white leading-tight whitespace-nowrap">
                 Programa do Integral
               </h1>
-              {isRunningInIframe() && (
-                <a
-                  href={window.location.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hidden sm:inline-flex items-center space-x-1 px-2 py-0.5 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 hover:text-white border border-indigo-500/30 rounded-lg text-[10px] font-bold tracking-tight transition cursor-pointer no-underline"
-                  title="Abrir em Nova Aba fora do iFrame para liberar impressoras diretamente no computador"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>Nova Aba</span>
-                </a>
-              )}
             </div>
           </div>
 
@@ -174,64 +157,64 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
 
-              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
 
-              {/* 2. Total Geral Matriculados */}
-              <div className="flex items-center space-x-1.5" title="Total geral de alunos matriculados na escola">
-                <span className="text-slate-400 font-medium">Total Matriculados:</span>
-                <span className="font-bold text-slate-300">
-                  {totalMatriculados !== undefined ? totalMatriculados : totalStudents}
-                </span>
-              </div>
-
-              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-
-              {/* 3. Presentes */}
-              <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (Presença normal + Saída antecipada + Sem uniforme)">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <span className="text-slate-400 font-medium">Presentes:</span>
-                <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
-              </div>
-
-              <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-
-              {/* 4. Faltas */}
-              <div className="flex items-center space-x-1.5" title="Faltas não justificadas hoje no Integral">
-                <span className="text-slate-400 font-medium">Faltas:</span>
-                <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
-                  {faltasHoje}
-                </span>
-              </div>
-
-              {/* 5. Atestados / Justificados */}
-              {justificadosHoje > 0 && (
-                <>
-                  <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-                  <div className="flex items-center space-x-1.5" title="Ausências justificadas / Atestados de saúde hoje">
-                    <span className="text-slate-400 font-medium">Atestados:</span>
-                    <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
-                  </div>
-                </>
-              )}
-
-              {/* 6. Pendentes (Apenas alunos esperados hoje sem chamada de rotina) */}
-              {pendentesHoje > 0 && (
-                <>
-                  <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-                  <button
-                    type="button"
-                    onClick={onNavigateToPending}
-                    title="Alunos esperados hoje que ainda não receberam marcação de presença/falta na chamada de rotina. Clique para conferir."
-                    className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
-                  >
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
-                    <span className="font-medium text-[11px]">Pendentes:</span>
-                    <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
-                  </button>
-                </>
-              )}
+            {/* 2. Total Geral Matriculados */}
+            <div className="flex items-center space-x-1.5" title="Total geral de alunos matriculados na escola">
+              <span className="text-slate-400 font-medium">Total Matriculados:</span>
+              <span className="font-bold text-slate-300">
+                {totalMatriculados !== undefined ? totalMatriculados : totalStudents}
+              </span>
             </div>
+
+            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+
+            {/* 3. Presentes */}
+            <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (Presença normal + Saída antecipada + Sem uniforme)">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-slate-400 font-medium">Presentes:</span>
+              <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
+            </div>
+
+            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+
+            {/* 4. Faltas */}
+            <div className="flex items-center space-x-1.5" title="Faltas não justificadas hoje no Integral">
+              <span className="text-slate-400 font-medium">Faltas:</span>
+              <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                {faltasHoje}
+              </span>
+            </div>
+
+            {/* 5. Atestados / Justificados */}
+            {justificadosHoje > 0 && (
+              <>
+                <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+                <div className="flex items-center space-x-1.5" title="Ausências justificadas / Atestados de saúde hoje">
+                  <span className="text-slate-400 font-medium">Atestados:</span>
+                  <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
+                </div>
+              </>
+            )}
+
+            {/* 6. Pendentes (Apenas alunos esperados hoje sem chamada de rotina) */}
+            {pendentesHoje > 0 && (
+              <>
+                <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
+                <button
+                  type="button"
+                  onClick={onNavigateToPending}
+                  title="Alunos esperados hoje que ainda não receberam marcação de presença/falta na chamada de rotina. Clique para conferir."
+                  className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                >
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                  <span className="font-medium text-[11px]">Pendentes:</span>
+                  <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
+                </button>
+              </>
+            )}
           </div>
+        </div>
 
         {/* Navigation Tabs */}
         <div className="flex space-x-1 border-t border-slate-800 overflow-x-auto pt-1 no-scrollbar">
