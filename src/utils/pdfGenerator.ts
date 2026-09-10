@@ -2145,7 +2145,7 @@ export function generateReciboBolsaPDF({
         [
           'Ajuda de Custo (Verba Indenizatória / Não Salarial - 100% Líquida)',
           'Fixo Mensal',
-          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0),
+          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? Number(financials.ajudaDeCusto) : 0.0),
           '-',
         ],
       ]
@@ -2159,7 +2159,7 @@ export function generateReciboBolsaPDF({
         [
           'Ajuda de Custo (Verba Não Salarial / Não Indenizatória - 100% Líquida)',
           'Fixo Mensal',
-          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0),
+          formatCurrencyBR(financials.ajudaDeCusto !== undefined ? Number(financials.ajudaDeCusto) : 0.0),
           '-',
         ],
         [
@@ -2235,7 +2235,7 @@ export function generateReciboBolsaPDF({
     ]);
   }
 
-  const safeAjuda = financials.ajudaDeCusto !== undefined ? financials.ajudaDeCusto : 150.0;
+  const safeAjuda = financials.ajudaDeCusto !== undefined ? Number(financials.ajudaDeCusto) : 0.0;
   const baseEarnings = isProfessor
     ? (financials.salarioAulas || 0) + (financials.horaAtividade || 0) + (financials.dsr || 0)
     : financials.baseSalary;

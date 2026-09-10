@@ -72,7 +72,6 @@ import {
   CARGA_DIARIA_PADRAO_HORAS,
   CARGA_DIARIA_PADRAO_MINUTOS,
   CARGA_DIARIA_PADRAO_FORMATADA,
-  VALOR_AJUDA_DE_CUSTO_PADRAO,
   DURACAO_AULA_PADRAO_MINUTOS,
   FATOR_HORA_EXTRA_50,
   calcularValorHora,
@@ -312,9 +311,31 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     ? Number(closingRecord.divisorHours)
     : (targetUser?.contractDivisorHours !== undefined ? Number(targetUser.contractDivisorHours) : DIVISOR_MENSAL_PADRAO);
 
-  const ajudaDeCusto = isMonthClosed && closingRecord?.ajudaDeCusto !== undefined
-    ? Number(closingRecord.ajudaDeCusto)
-    : (targetUser?.ajudaDeCusto !== undefined ? Number(targetUser.ajudaDeCusto) : VALOR_AJUDA_DE_CUSTO_PADRAO);
+  // Monthly Ajuda de Custo state (editable on the panel in real-time)
+  const [monthAjudaDeCusto, setMonthAjudaDeCusto] = useState<number | string>(() => {
+    if (closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
+      return Number(closingRecord.ajudaDeCusto);
+    }
+    if (targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null) {
+      return Number(targetUser.ajudaDeCusto);
+    }
+    return 0;
+  });
+
+  const effectiveAjudaDeCusto = useMemo(() => {
+    if (isMonthClosed && closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
+      return Number(closingRecord.ajudaDeCusto);
+    }
+    if (monthAjudaDeCusto !== '' && !isNaN(Number(monthAjudaDeCusto))) {
+      return Math.max(0, Number(monthAjudaDeCusto));
+    }
+    if (targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null) {
+      return Math.max(0, Number(targetUser.ajudaDeCusto));
+    }
+    return 0;
+  }, [isMonthClosed, closingRecord?.ajudaDeCusto, monthAjudaDeCusto, targetUser?.ajudaDeCusto]);
+
+  const ajudaDeCusto = effectiveAjudaDeCusto;
 
   const regimeTrabalho: RegimeTrabalho = isMonthClosed && closingRecord?.regimeTrabalho
     ? closingRecord.regimeTrabalho
@@ -365,7 +386,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [userEditValorHoraAula, setUserEditValorHoraAula] = useState<number | string>('');
   const [userEditDuracaoAulaMinutos, setUserEditDuracaoAulaMinutos] = useState<number | string>(DURACAO_AULA_PADRAO_MINUTOS);
   const [userEditDivisorHours, setUserEditDivisorHours] = useState<number | string>(DIVISOR_MENSAL_PADRAO);
-  const [userEditAjudaDeCusto, setUserEditAjudaDeCusto] = useState<number | string>(VALOR_AJUDA_DE_CUSTO_PADRAO);
+  const [userEditAjudaDeCusto, setUserEditAjudaDeCusto] = useState<number | string>(0);
   const [userEditCompany, setUserEditCompany] = useState('');
 
   // Dynamic calculation for schedule input in user edit modal
@@ -413,7 +434,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       setUserEditValorHoraAula(targetUser.valorHoraAula !== undefined && targetUser.valorHoraAula !== null ? targetUser.valorHoraAula : '');
       setUserEditDuracaoAulaMinutos(targetUser.duracaoAulaMinutos !== undefined ? targetUser.duracaoAulaMinutos : DURACAO_AULA_PADRAO_MINUTOS);
       setUserEditDivisorHours(targetUser.contractDivisorHours || DIVISOR_MENSAL_PADRAO);
-      setUserEditAjudaDeCusto(targetUser.ajudaDeCusto !== undefined ? targetUser.ajudaDeCusto : VALOR_AJUDA_DE_CUSTO_PADRAO);
+      setUserEditAjudaDeCusto(targetUser.ajudaDeCusto !== undefined && targetUser.ajudaDeCusto !== null ? targetUser.ajudaDeCusto : 0);
       setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
     }
   }, [targetUser, showEditUserModal]);
@@ -432,7 +453,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
     const parsedSalary = userEditBaseSalary !== '' && !isNaN(Number(userEditBaseSalary)) ? Math.max(0, Number(userEditBaseSalary)) : 1200;
     const parsedDivisor = userEditDivisorHours !== '' && !isNaN(Number(userEditDivisorHours)) ? Math.max(1, Number(userEditDivisorHours)) : DIVISOR_MENSAL_PADRAO;
-    const parsedAjuda = userEditAjudaDeCusto !== '' && !isNaN(Number(userEditAjudaDeCusto)) ? Math.max(0, Number(userEditAjudaDeCusto)) : VALOR_AJUDA_DE_CUSTO_PADRAO;
+    const parsedAjuda = userEditAjudaDeCusto !== '' && !isNaN(Number(userEditAjudaDeCusto)) ? Math.max(0, Number(userEditAjudaDeCusto)) : 0;
     const computedHourlyRate = Number((parsedSalary / parsedDivisor).toFixed(4));
 
     if (userEditRegimeTrabalho === 'professor_horista') {
@@ -499,7 +520,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     setManualAdditionNote(closingRecord?.manualAdditionNote || '');
     setManualDiscount(closingRecord?.manualDiscount || 0);
     setManualDiscountNote(closingRecord?.manualDiscountNote || '');
-  }, [closingRecord, selectedUserId, monthKey]);
+    if (closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
+      setMonthAjudaDeCusto(Number(closingRecord.ajudaDeCusto));
+    } else if (targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null) {
+      setMonthAjudaDeCusto(Number(targetUser.ajudaDeCusto));
+    } else {
+      setMonthAjudaDeCusto(0);
+    }
+  }, [closingRecord, targetUser?.ajudaDeCusto, selectedUserId, monthKey]);
 
   // Get user's records for this month
   const monthUserRecords = useMemo(() => {
@@ -2069,7 +2097,31 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-2.5 bg-emerald-50/90 border border-emerald-300 rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-emerald-950 block">
+                      (+) Ajuda de Custo do Mês (R$)
+                    </label>
+                    <span className="text-[9px] text-emerald-800 font-semibold bg-emerald-200/70 px-1.5 py-0.5 rounded">
+                      100% Líquida
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={isMonthClosed}
+                    value={monthAjudaDeCusto}
+                    onChange={(e) => setMonthAjudaDeCusto(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-400 rounded-lg focus:outline-none focus:border-emerald-600 font-mono font-bold text-emerald-950 shadow-xs"
+                    placeholder="0.00"
+                  />
+                  <span className="text-[10px] text-emerald-700 mt-1 block">
+                    Base contratual: {formatCurrencyBR(targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null ? Number(targetUser.ajudaDeCusto) : 0)}
+                  </span>
+                </div>
+
                 <div>
                   <label className="text-[11px] font-semibold text-slate-600 block mb-1">
                     (+) Adicional / Gratificação (R$)
@@ -3492,10 +3544,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       min="0"
                       value={userEditAjudaDeCusto}
                       onChange={(e) => setUserEditAjudaDeCusto(e.target.value)}
-                      placeholder="150.00"
+                      placeholder="0.00"
                       className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg p-2 text-emerald-400 font-mono font-bold focus:border-indigo-500 focus:outline-none"
                     />
-                    <span className="text-[10px] text-emerald-400 mt-0.5 block">Padrão: R$ 150,00 fixo mensal</span>
+                    <span className="text-[10px] text-emerald-400 mt-0.5 block">Valor contratual mensal (aceita R$ 0,00 ou qualquer valor digitado)</span>
                   </div>
                 </div>
 

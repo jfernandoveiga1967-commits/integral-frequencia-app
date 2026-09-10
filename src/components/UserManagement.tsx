@@ -192,7 +192,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formValorHoraAula, setFormValorHoraAula] = useState<number | string>('');
   const [formDuracaoAulaMinutos, setFormDuracaoAulaMinutos] = useState<number | string>(50);
   const [formContractDivisorHours, setFormContractDivisorHours] = useState<number | string>(220);
-  const [formAjudaDeCusto, setFormAjudaDeCusto] = useState<number | string>(150);
+  const [formAjudaDeCusto, setFormAjudaDeCusto] = useState<number | string>(0);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
 
   // Dynamic calculation for schedule and lunch interval
@@ -491,7 +491,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
     setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
-    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 150);
+    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
     setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
   };
 
@@ -538,7 +538,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormValorHoraAula('');
     setFormDuracaoAulaMinutos(50);
     setFormContractDivisorHours(220);
-    setFormAjudaDeCusto(150);
+    setFormAjudaDeCusto(0);
     setFormCompany('GADAL - Gestão e Apoio');
     setIsNewUserModalOpen(true);
   };
@@ -625,9 +625,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     // Parse de Ajuda de Custo (suporta valores decimais como '150', '150,00', etc.)
-    let parsedAjudaDeCusto = 150;
+    let parsedAjudaDeCusto = 0;
     if (typeof formAjudaDeCusto === 'number') {
-      parsedAjudaDeCusto = isNaN(formAjudaDeCusto) ? 150 : formAjudaDeCusto;
+      parsedAjudaDeCusto = isNaN(formAjudaDeCusto) ? 0 : Math.max(0, formAjudaDeCusto);
     } else if (typeof formAjudaDeCusto === 'string' && formAjudaDeCusto.trim() !== '') {
       const cleaned = formAjudaDeCusto.replace(/[^\d.,]/g, '');
       if (cleaned.includes(',') && cleaned.includes('.')) {
@@ -637,6 +637,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       } else {
         parsedAjudaDeCusto = parseFloat(cleaned) || 0;
       }
+    } else {
+      parsedAjudaDeCusto = 0;
     }
 
     const targetId = isMasterAdmin
@@ -1621,11 +1623,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
                               {(user.regimeTrabalho === 'professor_horista' || (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))) ? (
                                 <span>
-                                  Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                  Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               ) : (
                                 <span>
-                                  Regime: <strong className="text-slate-900">{user.regimeContratual || 'Mensalista (220h)'}</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 150).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                  Regime: <strong className="text-slate-900">{user.regimeContratual || 'Mensalista (220h)'}</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               )}
                             </div>
@@ -2669,14 +2671,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </div>
                     <div className="w-full sm:w-36">
                       <input
-                        type="text"
-                        inputMode="decimal"
+                        type="number"
+                        step="0.01"
+                        min="0"
                         value={formAjudaDeCusto}
                         onChange={(e) => setFormAjudaDeCusto(e.target.value)}
-                        placeholder="150.00"
+                        placeholder="0.00"
                         className="w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
-                      <span className="text-[9px] text-emerald-700 block text-right mt-0.5">Padrão: R$ 150,00</span>
+                      <span className="text-[9px] text-emerald-700 block text-right mt-0.5">Valor contratual livre</span>
                     </div>
                   </div>
                 </div>

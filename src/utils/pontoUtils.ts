@@ -1194,7 +1194,7 @@ export function calculateMonthlyPontoFinancials({
   contractDailyMinutes,
   contractDailyHoursFormatted,
   contractSchedule = '11:40 - 17:40',
-  ajudaDeCusto = VALOR_AJUDA_DE_CUSTO_PADRAO,
+  ajudaDeCusto = 0,
   extraHoursRateMultiplier = FATOR_HORA_EXTRA_50,
   manualAddition = 0,
   manualDiscount = 0,
@@ -1298,10 +1298,10 @@ export function calculateMonthlyPontoFinancials({
   // Diária: computada com base na carga diária (ex: 8,8h = 528min)
   const diariaRate = safeHours * hourlyRate;
 
-  // Ajuda de Custo: R$ 150,00 fixo mensal (não salarial / não indenizatória)
+  // Ajuda de Custo: (não salarial / não indenizatória)
   const safeAjudaDeCusto = (ajudaDeCusto !== undefined && ajudaDeCusto !== null)
     ? Math.max(0, Number(ajudaDeCusto))
-    : VALOR_AJUDA_DE_CUSTO_PADRAO;
+    : 0;
 
   const safeExtraMultiplier = (extraHoursRateMultiplier !== undefined && Number(extraHoursRateMultiplier) > 0)
     ? Number(extraHoursRateMultiplier)

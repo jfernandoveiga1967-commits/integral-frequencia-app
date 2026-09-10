@@ -30,8 +30,8 @@ export const CARGA_DIARIA_PADRAO_MINUTOS = 528;
 /** Representação amigável da carga diária padrão */
 export const CARGA_DIARIA_PADRAO_FORMATADA = '8h48min';
 
-/** Valor fixo mensal da Ajuda de Custo (verba não salarial / não indenizatória) */
-export const VALOR_AJUDA_DE_CUSTO_PADRAO = 150.0;
+/** Valor fixo mensal da Ajuda de Custo (verba não salarial / não indenizatória - padrão aberto) */
+export const VALOR_AJUDA_DE_CUSTO_PADRAO = 0.0;
 
 /** Fator multiplicador de hora extra com 50% de adicional (1 + 0.50 = 1.5) */
 export const FATOR_HORA_EXTRA_50 = 1.5;
@@ -225,7 +225,7 @@ export interface ApuracaoHoleriteJornadaPadrao {
   valorDiaria: number;
 
   // Ajuda de Custo (Não Salarial / Não Indenizatória)
-  ajudaDeCusto: number; // R$ 150,00
+  ajudaDeCusto: number;
   ajudaDeCustoDescricao: string;
 
   // Faltas e Atrasos (Base Carga 8,8h)
@@ -314,8 +314,8 @@ export function calcularHoleriteJornadaPadrao({
   const vMinuto = vHora / 60;
   const vDiaria = vHora * safeCargaHoras; // Valor de 1 dia de 8,8h
 
-  // Ajuda de Custo Fixa de R$ 150,00
-  const safeAjuda = ajudaDeCusto !== undefined && ajudaDeCusto !== null ? Math.max(0, Number(ajudaDeCusto)) : VALOR_AJUDA_DE_CUSTO_PADRAO;
+  // Ajuda de Custo (Não Salarial / Não Indenizatória)
+  const safeAjuda = ajudaDeCusto !== undefined && ajudaDeCusto !== null ? Math.max(0, Number(ajudaDeCusto)) : 0;
 
   // Faltas integrais (dias completos) com base na carga diária de 8,8h:
   const absCount = Math.max(0, Number(unjustifiedAbsencesCount) || 0);
@@ -474,7 +474,7 @@ export interface ApuracaoHoleriteProfessorHorista {
   fracaoDsr: number; // 1/6
 
   // Ajuda de Custo (Não Salarial / Não Indenizatória)
-  ajudaDeCusto: number; // R$ 150,00 padrão
+  ajudaDeCusto: number;
   ajudaDeCustoDescricao: string;
 
   // Ajustes Avulsos
@@ -529,7 +529,7 @@ export function calcularHoleriteProfessorHorista({
 
   const safeAjuda = ajudaDeCusto !== undefined && ajudaDeCusto !== null
     ? Math.max(0, Number(ajudaDeCusto))
-    : VALOR_AJUDA_DE_CUSTO_PADRAO;
+    : 0;
 
   const safeManualAdd = Math.max(0, Number(manualAddition) || 0);
   const safeManualDesc = Math.max(0, Number(manualDiscount) || 0);
