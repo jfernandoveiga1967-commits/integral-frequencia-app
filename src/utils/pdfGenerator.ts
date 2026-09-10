@@ -1836,6 +1836,9 @@ export function generateLivroPontoPDFReport({
     const rec = item.record;
     const status = rec?.status || item.defaultStatus || 'normal';
     const holidayName = item.holidayItem?.name || item.holidayRecessName || '';
+    const hasPunches = Boolean(rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2);
+    const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
+    const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, undefined, isDiaDescanso);
 
     const statusResult = getDayPontoStatus({
       record: rec,
@@ -1844,15 +1847,15 @@ export function generateLivroPontoPDFReport({
       dateStr: item.dateStr,
       isWeekend: item.isWk,
       holidayName,
+      isDiaDescanso,
     });
     const statusText = statusResult.label;
 
     let workedHoursStr = '-';
-    if (status === 'normal' && (rec?.entry1 || rec?.entry2)) {
-      const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5);
+    if (hasPunches) {
       workedHoursStr = formatMinutesToHoursAndMinutes(dayCalc.workedMinutes);
-    } else if (status === 'feriado' || status === 'recesso') {
-      workedHoursStr = contractDailyHoursFormatted;
+    } else if (isDiaDescanso) {
+      workedHoursStr = (status === 'feriado' || status === 'recesso') ? contractDailyHoursFormatted : '-';
     } else if (status === 'falta_injustificada') {
       workedHoursStr = '0h00min';
     }
@@ -2188,9 +2191,26 @@ export function generateReciboBolsaPDF({
     ]);
   }
 
-  if (financials.totalExtraMinutes > 0) {
+  if (financials.totalExtraMinutes50 > 0 || financials.totalExtraMinutes100 > 0) {
+    if (financials.totalExtraMinutes50 > 0) {
+      tableData.push([
+        `Horas Extras Apuradas (50% - Dias Úteis: ${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes50)})`,
+        'Hora × 1,5',
+        formatCurrencyBR(financials.extraHours50Amount),
+        '-',
+      ]);
+    }
+    if (financials.totalExtraMinutes100 > 0) {
+      tableData.push([
+        `Horas Extras Apuradas (100% - Descanso/Feriado: ${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes100)})`,
+        'Hora × 2,0 (CLT Art. 70)',
+        formatCurrencyBR(financials.extraHours100Amount),
+        '-',
+      ]);
+    }
+  } else if (financials.totalExtraMinutes > 0) {
     tableData.push([
-      `Horas Extras Apuradas com Adicional de 50% (${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)})`,
+      `Horas Extras Apuradas (${formatMinutesToHoursAndMinutes(financials.totalExtraMinutes)})`,
       'Hora × 1,5',
       formatCurrencyBR(financials.extraHoursAmount),
       '-',

@@ -165,6 +165,11 @@ export interface PontoMonthClosing {
   missingHoursDiscount?: number;
   extraMinutesTotal: number;
   extraHoursAmount: number;
+  extraMinutes50Total?: number;
+  extraHours50Amount?: number;
+  extraMinutes100Total?: number;
+  extraHours100Amount?: number;
+  restDaysWorkedCount?: number;
   manualAddition: number;
   manualAdditionNote?: string;
   manualDiscount: number;

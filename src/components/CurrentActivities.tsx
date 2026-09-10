@@ -54,8 +54,11 @@ import {
   formatDateBR,
   toISODateString,
   isStudentScheduledForDay,
+  isStudentScheduledForDate,
+  isStudentActiveOnDate,
 } from '../utils/dateUtils';
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
+import { isRoutineActivity } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { findResponsibleCollaborator } from '../utils/whatsappUtils';
 
@@ -75,6 +78,46 @@ interface CurrentActivitiesProps {
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
   onNavigateToAttendance: (activity?: ActivityType, turma?: TurmaType, date?: string) => void;
   onUpdateUserPhone?: (userId: string, newPhone: string) => void;
+}
+
+/**
+ * Retorna os alunos da turma que participam da atividade informada no dia.
+ * - Grade Geral / Rotina Coletiva (Acolhimento, Almoço, Parquinho, etc.) ou 'Rotina':
+ *   todos os alunos ativos da turma agendados para a data.
+ * - Atividades Extracurriculares que exigem chamada (Balé, Judô, etc.):
+ *   alunos com a modalidade no cadastro (ou todos da turma se a turma não tiver filtros individuais).
+ */
+function getEnrolledStudentsForActivity(
+  students: Student[],
+  turmaName: string,
+  activityId: string,
+  effectiveDayOfWeek: DayOfWeek,
+  selectedDate?: string,
+  activityMap?: Map<string, ActivityItem>
+): Student[] {
+  const turmaActiveStudents = students.filter((s) => {
+    if (s.turma !== turmaName) return false;
+    const st = s.status || s.statusMatricula || 'ativo';
+    if (st !== 'ativo') return false;
+    if (selectedDate && !isStudentActiveOnDate(s, selectedDate)) return false;
+    return isStudentScheduledForDay(s, effectiveDayOfWeek);
+  });
+
+  const actMeta = activityMap?.get(activityId);
+  const requiresRollCall = actMeta ? actMeta.requiresRollCall !== false : true;
+
+  if (!requiresRollCall || isRoutineActivity(activityId) || activityId === 'Rotina') {
+    return turmaActiveStudents;
+  }
+
+  const specificEnrolled = turmaActiveStudents.filter((s) =>
+    (s.activities || []).includes(activityId)
+  );
+
+  if (specificEnrolled.length > 0) {
+    return specificEnrolled;
+  }
+  return turmaActiveStudents;
 }
 
 export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
@@ -215,11 +258,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         const requiresRollCall = actObj ? actObj.requiresRollCall !== false : true;
 
         // Enrolled students in this turma for this activity who are scheduled to attend on this day
-        const enrolledStudents = students.filter(
-          (s) =>
-            s.turma === turmaName &&
-            (s.activities || []).includes(activeBlock.activityId) &&
-            isStudentScheduledForDay(s, effectiveDayOfWeek)
+        const enrolledStudents = getEnrolledStudentsForActivity(
+          students,
+          turmaName,
+          activeBlock.activityId,
+          effectiveDayOfWeek,
+          selectedDate,
+          activityMap
         );
 
         // Attendance records today for this turma & activity
@@ -227,7 +272,8 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           (r) =>
             r.date === selectedDate &&
             r.turma === turmaName &&
-            r.activity === activeBlock.activityId
+            (r.activity === activeBlock.activityId ||
+              (isRoutineActivity(activeBlock.activityId) && isRoutineActivity(r.activity)))
         );
 
         const recordStudentIds = new Set(recordsToday.map((r) => r.studentId));
@@ -289,18 +335,107 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const stats = useMemo(() => {
     const totalTurmas = turmaStatuses.length;
     const inActivity = turmaStatuses.filter((ts) => ts.activeBlock !== null).length;
-    const pendingRollCalls = turmaStatuses.filter(
-      (ts) => ts.rollCallInfo && ts.rollCallInfo.requiresRollCall && ts.rollCallInfo.statusType === 'pendente' && ts.rollCallInfo.totalEnrolled > 0
-    ).length;
+
+    // Card "Chamadas Pendentes":
+    // Contagem por Turma/Atividade: Deve somar +1 pendência para cada turma cuja atividade atual
+    // exija chamada (ou seja marcada para acompanhamento) e ainda não tenha a lista de presença/frequência
+    // salva pelo monitor para o bloco de horário atual.
+    // A pendência deve sumir do card assim que a chamada do horário for confirmada.
+    const pendingRollCalls = turmaStatuses.filter((ts) => {
+      if (!ts.activeBlock || !ts.rollCallInfo) return false;
+      if (!ts.rollCallInfo.requiresRollCall) return false;
+      if (ts.rollCallInfo.totalEnrolled === 0) return false;
+      return ts.rollCallInfo.statusType !== 'concluida';
+    }).length;
+
     const completedRollCalls = turmaStatuses.filter(
-      (ts) => ts.rollCallInfo && ts.rollCallInfo.requiresRollCall && ts.rollCallInfo.statusType === 'concluida' && ts.rollCallInfo.totalEnrolled > 0
+      (ts) =>
+        ts.activeBlock !== null &&
+        ts.rollCallInfo &&
+        ts.rollCallInfo.requiresRollCall &&
+        ts.rollCallInfo.statusType === 'concluida' &&
+        ts.rollCallInfo.totalEnrolled > 0
     ).length;
-    const totalStudentsInActivePeriods = turmaStatuses.reduce((acc, ts) => {
-      if (ts.rollCallInfo && ts.rollCallInfo.requiresRollCall) {
-        return acc + ts.rollCallInfo.totalEnrolled;
+
+    // Card "Alunos Ativos":
+    // Regra Geral: O card deve somar o total de alunos presentes de todas as turmas que possuem qualquer
+    // atividade em andamento no minuto atual, independentemente de a atividade ser de Grade Geral / Rotina Coletiva
+    // (ex: Acolhimento, Almoço, Parquinho) ou de Atividade Extracurricular.
+    // Desconto de Saídas: Desconsidere alunos que registraram saída antecipada no dia.
+    const saidaAntecipadaStudentIds = new Set<string>();
+    records.forEach((r) => {
+      if (r.date === selectedDate && (r.status === 'saida_antecipada' || !!r.exitTime)) {
+        saidaAntecipadaStudentIds.add(r.studentId);
       }
-      return acc;
-    }, 0);
+    });
+
+    const absentRoutineStudentIds = new Set<string>();
+    records.forEach((r) => {
+      if (
+        r.date === selectedDate &&
+        (r.status === 'falta' || r.status === 'saude') &&
+        isRoutineActivity(r.activity)
+      ) {
+        absentRoutineStudentIds.add(r.studentId);
+      }
+    });
+
+    const activePresentStudentIds = new Set<string>();
+
+    turmaStatuses.forEach((ts) => {
+      if (!ts.activeBlock) return;
+
+      const enrolled = ts.rollCallInfo?.enrolledStudents || [];
+
+      enrolled.forEach((student) => {
+        // Desconto de Saídas: desconsidera quem registrou saída antecipada no dia
+        if (saidaAntecipadaStudentIds.has(student.id)) {
+          return;
+        }
+
+        // Desconsidera faltas / atestados do dia na rotina geral
+        if (absentRoutineStudentIds.has(student.id)) {
+          return;
+        }
+
+        // Verifica se há registro desta atividade específica
+        const actRec = records.find(
+          (r) =>
+            r.date === selectedDate &&
+            r.turma === ts.turmaName &&
+            (r.activity === ts.activeBlock!.activityId ||
+              (isRoutineActivity(ts.activeBlock!.activityId) && isRoutineActivity(r.activity))) &&
+            r.studentId === student.id
+        );
+
+        if (actRec) {
+          if (actRec.status === 'presente' || actRec.status === 'sem_equipamento') {
+            activePresentStudentIds.add(student.id);
+          }
+          // Se for falta, saude ou saida_antecipada, não inclui
+        } else {
+          // Sem registro para a atividade específica ainda:
+          // Checa se tem registro na rotina geral
+          const routineRec = records.find(
+            (r) =>
+              r.date === selectedDate &&
+              r.studentId === student.id &&
+              isRoutineActivity(r.activity)
+          );
+
+          if (routineRec) {
+            if (routineRec.status === 'presente' || routineRec.status === 'sem_equipamento') {
+              activePresentStudentIds.add(student.id);
+            }
+          } else {
+            // Sem nenhum registro hoje ainda: aluno ativo e agendado sem falta ou saída é considerado presente
+            activePresentStudentIds.add(student.id);
+          }
+        }
+      });
+    });
+
+    const totalStudentsInActivePeriods = activePresentStudentIds.size;
 
     return {
       totalTurmas,
@@ -309,7 +444,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       completedRollCalls,
       totalStudentsInActivePeriods,
     };
-  }, [turmaStatuses]);
+  }, [turmaStatuses, records, selectedDate]);
 
   // Filtered list of turmas
   const filteredTurmas = useMemo(() => {
@@ -342,10 +477,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       }
       if (statusFilter === 'CHAMADA_PENDENTE') {
         return (
+          item.activeBlock !== null &&
           item.rollCallInfo &&
           item.rollCallInfo.requiresRollCall &&
-          item.rollCallInfo.statusType === 'pendente' &&
-          item.rollCallInfo.totalEnrolled > 0
+          item.rollCallInfo.totalEnrolled > 0 &&
+          item.rollCallInfo.statusType !== 'concluida'
         );
       }
       if (statusFilter === 'SEM_ATIVIDADE') {
@@ -359,13 +495,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Quick Roll Call Student helpers
   const quickModalStudents = useMemo(() => {
     if (!quickRollCallModal) return [];
-    return students.filter(
-      (s) =>
-        s.turma === quickRollCallModal.turma &&
-        (s.activities || []).includes(quickRollCallModal.activityId) &&
-        isStudentScheduledForDay(s, effectiveDayOfWeek)
+    return getEnrolledStudentsForActivity(
+      students,
+      quickRollCallModal.turma,
+      quickRollCallModal.activityId,
+      effectiveDayOfWeek,
+      selectedDate,
+      activityMap
     );
-  }, [quickRollCallModal, students, effectiveDayOfWeek]);
+  }, [quickRollCallModal, students, effectiveDayOfWeek, selectedDate, activityMap]);
 
   const quickModalRecordsMap = useMemo(() => {
     if (!quickRollCallModal) return new Map<string, AttendanceRecord>();
@@ -375,7 +513,8 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         (r) =>
           r.date === selectedDate &&
           r.turma === quickRollCallModal.turma &&
-          r.activity === quickRollCallModal.activityId
+          (r.activity === quickRollCallModal.activityId ||
+            (isRoutineActivity(quickRollCallModal.activityId) && isRoutineActivity(r.activity)))
       )
       .forEach((r) => map.set(r.studentId, r));
     return map;
@@ -556,7 +695,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             <div className="text-lg sm:text-xl font-black text-emerald-300 mt-0.5">
               {stats.totalStudentsInActivePeriods}
             </div>
-            <div className="text-[9px] text-emerald-400/80 mt-0.5">Em aulas extracurriculares</div>
+            <div className="text-[9px] text-emerald-400/80 mt-0.5">Presentes em atividades agora</div>
           </div>
         </div>
       </div>

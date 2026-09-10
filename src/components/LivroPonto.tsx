@@ -88,6 +88,7 @@ import {
   repairOverlappedPontoRecords,
   getDayPontoStatus,
   isDayShiftComplete,
+  checkIsDiaDescanso,
 } from '../utils/pontoUtils';
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
@@ -781,6 +782,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       missingHoursDiscount: financials.missingHoursDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
       extraHoursAmount: financials.extraHoursAmount,
+      extraMinutes50Total: financials.totalExtraMinutes50,
+      extraHours50Amount: financials.extraHours50Amount,
+      extraMinutes100Total: financials.totalExtraMinutes100,
+      extraHours100Amount: financials.extraHours100Amount,
+      restDaysWorkedCount: financials.restDaysWorkedCount,
       manualAddition,
       manualAdditionNote,
       manualDiscount,
@@ -853,6 +859,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       missingHoursDiscount: financials.missingHoursDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
       extraHoursAmount: financials.extraHoursAmount,
+      extraMinutes50Total: financials.totalExtraMinutes50,
+      extraHours50Amount: financials.extraHours50Amount,
+      extraMinutes100Total: financials.totalExtraMinutes100,
+      extraHours100Amount: financials.extraHours100Amount,
+      restDaysWorkedCount: financials.restDaysWorkedCount,
       manualAddition,
       manualAdditionNote,
       manualDiscount,
@@ -916,6 +927,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
       extraHoursAmount: financials.extraHoursAmount,
+      extraMinutes50Total: financials.totalExtraMinutes50,
+      extraHours50Amount: financials.extraHours50Amount,
+      extraMinutes100Total: financials.totalExtraMinutes100,
+      extraHours100Amount: financials.extraHours100Amount,
+      restDaysWorkedCount: financials.restDaysWorkedCount,
       manualAddition,
       manualAdditionNote,
       manualDiscount,
@@ -1726,9 +1742,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                             if (!rec?.entry1 && !rec?.entry2 && !rec?.exit1 && !rec?.exit2) {
                               return <span className="text-slate-400 font-normal">{item.isWk ? '—' : '0h00min'}</span>;
                             }
-                            const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
+                            const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || rec?.status === 'sabado' || rec?.status === 'domingo' || rec?.status === 'feriado' || rec?.status === 'recesso';
+                            const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes, isDiaDescanso, holidays);
                             const shiftComplete = isDayShiftComplete(rec, isUserContinuous);
-                            const showNegativeDebt = dayCalc.missingMinutes > 0 && (
+                            const showNegativeDebt = !isDiaDescanso && dayCalc.missingMinutes > 0 && (
                               shiftComplete || (!isToday && (rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2))
                             );
 
@@ -1736,7 +1753,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                               <div className="flex flex-col items-center">
                                 <span
                                   className={`font-black ${
-                                    dayCalc.overtimeMinutes > 0
+                                    dayCalc.overtime100Minutes > 0
+                                      ? 'text-purple-700'
+                                      : dayCalc.overtimeMinutes > 0
                                       ? 'text-indigo-600'
                                       : showNegativeDebt
                                       ? 'text-rose-600'
@@ -1745,14 +1764,22 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                                 >
                                   {formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
                                 </span>
-                                {dayCalc.overtimeMinutes > 0 && (
-                                  <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">
-                                    +{formatMinutesToHoursAndMinutes(dayCalc.overtimeMinutes)}
+                                {dayCalc.overtime100Minutes > 0 && (
+                                  <span
+                                    className="text-[9px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1 rounded mt-0.5"
+                                    title="Horas Extras a 100% (Trabalho em Descanso / Feriado - CLT Art. 70)"
+                                  >
+                                    HE 100%: +{formatMinutesToHoursAndMinutes(dayCalc.overtime100Minutes)}
+                                  </span>
+                                )}
+                                {dayCalc.overtime50Minutes > 0 && (
+                                  <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded mt-0.5" title="Horas Extras a 50%">
+                                    +{formatMinutesToHoursAndMinutes(dayCalc.overtime50Minutes)}
                                   </span>
                                 )}
                                 {showNegativeDebt && (
                                   <span
-                                    className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1 rounded"
+                                    className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1 rounded mt-0.5"
                                     title={`Atraso/Saldo negativo de -${formatMinutesToHoursAndMinutes(dayCalc.missingMinutes)}`}
                                   >
                                     -{formatMinutesToHoursAndMinutes(dayCalc.missingMinutes)}
@@ -1768,6 +1795,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {/* Status Badge */}
                     <td className="py-2 px-3 text-center">
                       {(() => {
+                        const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
                         const statusResult = getDayPontoStatus({
                           record: rec,
                           defaultStatus: status,
@@ -1775,10 +1803,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           dateStr: item.dateStr,
                           isWeekend: item.isWk,
                           holidayName: item.holidayItem?.name,
+                          isDiaDescanso,
                         });
 
                         let icon = null;
-                        if (statusResult.statusKey === 'em_andamento') {
+                        if (statusResult.statusKey === 'trabalho_descanso_he100') {
+                          icon = <Sparkles className="w-3 h-3 mr-0.5 text-purple-700" />;
+                        } else if (statusResult.statusKey === 'em_andamento') {
                           icon = <Clock className="w-3 h-3 mr-0.5 text-amber-600 animate-pulse" />;
                         } else if (statusResult.statusKey === 'presenca_normal') {
                           icon = <Check className="w-3 h-3 mr-0.5 text-emerald-600" />;
@@ -1914,8 +1945,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
               <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
                 <div>
-                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras (50%):</span>
-                  <span className="text-[9px] text-indigo-500 block">(Hora × 1,5) × Excedentes</span>
+                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras:</span>
+                  <span className="text-[9px] text-indigo-500 block truncate">
+                    {financials.totalExtraMinutes100 > 0
+                      ? `50%: ${financials.extraHours50Formatted} | 100%: ${financials.extraHours100Formatted}`
+                      : '(Hora × 1,5) × Excedentes'}
+                  </span>
                 </div>
                 <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug font-mono">
                   {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
@@ -2001,8 +2036,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
               <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
                 <div>
-                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras (50%):</span>
-                  <span className="text-[9px] text-indigo-500 block">(Hora × 1,5) × Horas Excedentes</span>
+                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras:</span>
+                  <span className="text-[9px] text-indigo-500 block truncate">
+                    {financials.totalExtraMinutes100 > 0
+                      ? `50%: ${financials.extraHours50Formatted} | 100%: ${financials.extraHours100Formatted}`
+                      : '(Hora × 1,5) × Excedentes'}
+                  </span>
                 </div>
                 <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug overflow-hidden text-ellipsis font-mono">
                   {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
@@ -2378,9 +2417,25 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                         <td className="p-2.5 text-right font-bold text-amber-700">{formatCurrencyBR(financials.missingHoursDiscount)}</td>
                       </tr>
                     )}
-                    {financials.extraHoursAmount > 0 && (
+                    {financials.totalExtraMinutes50 > 0 && (
                       <tr className="text-indigo-900 bg-indigo-50/40">
-                        <td className="p-2.5 font-medium">Horas Extras Apuradas (+50%)</td>
+                        <td className="p-2.5 font-medium">Horas Extras Apuradas (+50% - Dias Úteis)</td>
+                        <td className="p-2.5 text-center">{formatMinutesToTime(financials.totalExtraMinutes50)}</td>
+                        <td className="p-2.5 text-right font-bold text-indigo-700">{formatCurrencyBR(financials.extraHours50Amount)}</td>
+                        <td className="p-2.5 text-right text-slate-400">—</td>
+                      </tr>
+                    )}
+                    {financials.totalExtraMinutes100 > 0 && (
+                      <tr className="text-purple-900 bg-purple-50/40">
+                        <td className="p-2.5 font-medium">Horas Extras em Descanso / Feriado (+100% - CLT Art. 70)</td>
+                        <td className="p-2.5 text-center">{formatMinutesToTime(financials.totalExtraMinutes100)}</td>
+                        <td className="p-2.5 text-right font-bold text-purple-700">{formatCurrencyBR(financials.extraHours100Amount)}</td>
+                        <td className="p-2.5 text-right text-slate-400">—</td>
+                      </tr>
+                    )}
+                    {financials.extraHoursAmount > 0 && financials.totalExtraMinutes50 === 0 && financials.totalExtraMinutes100 === 0 && (
+                      <tr className="text-indigo-900 bg-indigo-50/40">
+                        <td className="p-2.5 font-medium">Horas Extras Apuradas</td>
                         <td className="p-2.5 text-center">{formatMinutesToTime(financials.totalExtraMinutes)}</td>
                         <td className="p-2.5 text-right font-bold text-indigo-700">{formatCurrencyBR(financials.extraHoursAmount)}</td>
                         <td className="p-2.5 text-right text-slate-400">—</td>
@@ -2580,15 +2635,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {monthDaysGrid.map((item) => {
                       const rec = item.record;
                       const status = rec?.status || item.defaultStatus;
+                      const hasPunches = Boolean(rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2);
+                      const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
                       return (
                         <tr key={item.dateStr} className={item.isWk ? 'bg-slate-50 text-slate-400' : ''}>
                           <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
                           <td className="p-1 text-center">{item.dayOfWeekShort}</td>
-                          {item.isWk ? (
+                          {!hasPunches && item.isWk ? (
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center italic font-semibold">
                               {item.isSat ? 'SÁBADO' : 'DOMINGO'}
                             </td>
-                          ) : status === 'feriado' || status === 'recesso' ? (
+                          ) : !hasPunches && (status === 'feriado' || status === 'recesso') ? (
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
                               {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
                             </td>
@@ -2614,6 +2671,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                                 dateStr: item.dateStr,
                                 isWeekend: item.isWk,
                                 holidayName: item.holidayItem?.name,
+                                isDiaDescanso,
                               });
                               return res.label;
                             })()}
@@ -2893,11 +2951,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               {/* Real-time Calculation Box */}
               {(() => {
                 if (!showEditDayModal) return null;
+                const isDiaDescansoModal = checkIsDiaDescanso(showEditDayModal.date, showEditDayModal.status, holidays);
                 const previewDayCalc = calculateDayWorkedMinutes(
                   showEditDayModal,
                   contractSchedule,
                   5,
-                  contractDailyMinutes
+                  contractDailyMinutes,
+                  isDiaDescansoModal,
+                  holidays
                 );
                 const hasPunches = Boolean(showEditDayModal.entry1 || showEditDayModal.entry2 || showEditDayModal.exit1 || showEditDayModal.exit2);
                 const hasCompletePair = isDayShiftComplete(showEditDayModal, isUserContinuous);
@@ -2929,14 +2990,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </div>
                     )}
 
-                    {previewDayCalc.overtimeMinutes > 0 && (
-                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold pt-1 border-t border-slate-700/60">
-                        <span>Horas Extras Apuradas:</span>
-                        <span className="font-mono font-bold">+{formatMinutesToHoursAndMinutes(previewDayCalc.overtimeMinutes)}</span>
+                    {previewDayCalc.overtime100Minutes > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-purple-300 font-semibold pt-1 border-t border-slate-700/60">
+                        <span>Horas Extras 100% (Descanso / Feriado):</span>
+                        <span className="font-mono font-bold text-purple-200">+{formatMinutesToHoursAndMinutes(previewDayCalc.overtime100Minutes)}</span>
                       </div>
                     )}
 
-                    {previewDayCalc.missingMinutes > 0 && showEditDayModal?.status === 'normal' && hasCompletePair && (
+                    {previewDayCalc.overtime50Minutes > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold pt-1 border-t border-slate-700/60">
+                        <span>Horas Extras Apuradas (50%):</span>
+                        <span className="font-mono font-bold">+{formatMinutesToHoursAndMinutes(previewDayCalc.overtime50Minutes)}</span>
+                      </div>
+                    )}
+
+                    {!isDiaDescansoModal && previewDayCalc.missingMinutes > 0 && showEditDayModal?.status === 'normal' && hasCompletePair && (
                       <div className="flex items-center justify-between text-[11px] text-rose-400 font-semibold pt-1 border-t border-slate-700/60">
                         <span>Débito / Atraso Apurado:</span>
                         <span className="font-mono font-bold">-{formatMinutesToHoursAndMinutes(previewDayCalc.missingMinutes)}</span>
@@ -3113,19 +3181,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   {monthDaysGrid.map((item) => {
                     const rec = item.record;
                     const status = rec?.status || item.defaultStatus;
-                    const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes);
+                    const hasPunches = Boolean(rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2);
+                    const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
+                    const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes, isDiaDescanso, holidays);
                     return (
                       <tr key={item.dateStr} className={item.isWk ? 'bg-slate-50 text-slate-400' : ''}>
                         <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
                         <td className="p-1 text-center">{item.dayOfWeekShort}</td>
-                        {item.isWk ? (
+                        {!hasPunches && item.isWk ? (
                           <>
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center italic font-semibold">
                               {item.isSat ? 'SÁBADO' : 'DOMINGO'}
                             </td>
                             <td className="p-1 text-center text-slate-400 font-mono">—</td>
                           </>
-                        ) : status === 'feriado' || status === 'recesso' ? (
+                        ) : !hasPunches && (status === 'feriado' || status === 'recesso') ? (
                           <>
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
                               {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
@@ -3148,7 +3218,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                             <td className="p-1 text-center font-mono">{rec?.entry1 || '—'}</td>
                             <td className="p-1 text-center font-mono">{rec?.exit2 || rec?.exit1 || '—'}</td>
                             <td className="p-1 text-center font-mono font-bold text-slate-900">
-                              {!rec?.entry1 && !rec?.exit2 && !rec?.exit1 ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
+                              {!hasPunches ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
                             </td>
                           </>
                         ) : (
@@ -3158,7 +3228,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                             <td className="p-1 text-center font-mono">{rec?.entry2 || '—'}</td>
                             <td className="p-1 text-center font-mono">{rec?.exit2 || '—'}</td>
                             <td className="p-1 text-center font-mono font-bold text-slate-900">
-                              {!rec?.entry1 && !rec?.entry2 ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
+                              {!hasPunches ? '0h00min' : formatMinutesToHoursAndMinutes(dayCalc.workedMinutes)}
                             </td>
                           </>
                         )}
@@ -3171,6 +3241,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                               dateStr: item.dateStr,
                               isWeekend: item.isWk,
                               holidayName: item.holidayItem?.name,
+                              isDiaDescanso,
                             });
                             return res.label;
                           })()}
@@ -3208,8 +3279,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <strong className="text-rose-800">{financials.unjustifiedAbsencesCount} ({formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)})</strong>
               </div>
               <div>
-                <span className="text-indigo-700 block text-[10px]">Horas Extras (50%):</span>
+                <span className="text-indigo-700 block text-[10px]">Horas Extras Total:</span>
                 <strong className="text-indigo-900 font-mono">{financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})</strong>
+                {financials.totalExtraMinutes100 > 0 && (
+                  <span className="text-[9px] text-purple-700 font-bold block">
+                    (100%: {financials.extraHours100Formatted})
+                  </span>
+                )}
               </div>
             </div>
 

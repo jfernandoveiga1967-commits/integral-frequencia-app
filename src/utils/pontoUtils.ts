@@ -333,6 +333,33 @@ export function isDayShiftComplete(
     : Boolean(e1 && s1 && e2 && s2);
 }
 
+/**
+ * Identifica se uma data é Dia de Descanso / Não Útil (Sábado, Domingo ou Feriado/Recesso)
+ * Conforme CLT e Súmula 146 do TST.
+ */
+export function checkIsDiaDescanso(
+  dateStr?: string,
+  recordStatus?: string,
+  holidays?: HolidayItem[]
+): boolean {
+  if (
+    recordStatus === 'sabado' ||
+    recordStatus === 'domingo' ||
+    recordStatus === 'feriado' ||
+    recordStatus === 'recesso'
+  ) {
+    return true;
+  }
+  if (!dateStr) return false;
+  if (isSaturday(dateStr) || isSunday(dateStr) || isWeekend(dateStr)) {
+    return true;
+  }
+  if (holidays && holidays.length > 0 && Boolean(isHolidayOrRecess(dateStr, holidays))) {
+    return true;
+  }
+  return false;
+}
+
 export interface DayPontoStatusResult {
   statusKey: string;
   label: string;
@@ -356,6 +383,9 @@ export interface DayPontoStatusResult {
  * 2. Consolidação do Status Final:
  *    O status PRESENÇA NORMAL só deve ser concedido após o encerramento completo de todos os turnos
  *    previstos no contrato do dia (ou após o horário final da jornada com as devidas batidas registradas).
+ * 
+ * 3. Trabalho em Dias de Descanso / Feriados (CLT):
+ *    Se houver batidas registradas em dia de descanso/feriado, atualiza para "TRABALHO EM DIA DE DESCANSO (HE 100%)".
  */
 export function getDayPontoStatus({
   record,
@@ -365,6 +395,7 @@ export function getDayPontoStatus({
   isWeekend = false,
   holidayName,
   referenceDateStr,
+  isDiaDescanso: explicitIsDiaDescanso,
 }: {
   record?: Partial<PontoRecord> | null;
   defaultStatus?: string;
@@ -373,12 +404,101 @@ export function getDayPontoStatus({
   isWeekend?: boolean;
   holidayName?: string;
   referenceDateStr?: string;
+  isDiaDescanso?: boolean;
 }): DayPontoStatusResult {
   const todayStr = referenceDateStr || toISODateString(new Date());
   const isToday = dateStr === todayStr;
   const isPast = dateStr < todayStr;
   const status = record?.status || defaultStatus;
 
+  const e1 = (record?.entry1 || '').trim();
+  const s1 = (record?.exit1 || '').trim();
+  const e2 = (record?.entry2 || '').trim();
+  const s2 = (record?.exit2 || '').trim();
+  const hasPunches = Boolean(e1 || s1 || e2 || s2);
+
+  const isSat = isSaturday(dateStr);
+  const isSun = isSunday(dateStr);
+  const isDiaDescanso = explicitIsDiaDescanso !== undefined
+    ? explicitIsDiaDescanso
+    : (isWeekend || isSat || isSun || Boolean(holidayName) || defaultStatus === 'sabado' || defaultStatus === 'domingo' || defaultStatus === 'feriado' || defaultStatus === 'recesso' || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso');
+
+  // =========================================================================
+  // REGRAS CLT PARA DIAS NÃO ÚTEIS / DESCANSO (SÁBADO, DOMINGO, FERIADO, RECESSO)
+  // =========================================================================
+  if (isDiaDescanso) {
+    // 3. Com Registro (> 0h trabalhadas):
+    if (hasPunches) {
+      return {
+        statusKey: 'trabalho_descanso_he100',
+        label: 'TRABALHO EM DIA DE DESCANSO (HE 100%)',
+        badgeBg: 'bg-purple-100 border border-purple-300',
+        badgeText: 'text-purple-900',
+        isShiftComplete: true,
+        hasPunches: true,
+        isToday,
+        isPast,
+        tooltip: 'Trabalho em dia de descanso / feriado remunerado com 100% de adicional extraordinário (Art. 70 CLT / Súmula 146 TST)',
+      };
+    }
+
+    // Sem Registro (0h trabalhadas): Mantenha o status informativo de descanso
+    if (status === 'feriado' || (!status || status === 'normal') && holidayName) {
+      return {
+        statusKey: 'feriado',
+        label: holidayName ? `FERIADO — ${holidayName.toUpperCase()}` : 'FERIADO NACIONAL',
+        badgeBg: 'bg-emerald-100',
+        badgeText: 'text-emerald-800',
+        isShiftComplete: true,
+        hasPunches: false,
+        isToday,
+        isPast,
+        tooltip: holidayName ? `Feriado: ${holidayName} (Abonado)` : 'Feriado Nacional Pago (Abonado)',
+      };
+    }
+
+    if (status === 'recesso') {
+      return {
+        statusKey: 'recesso',
+        label: holidayName ? `RECESSO — ${holidayName.toUpperCase()}` : 'RECESSO ESCOLAR',
+        badgeBg: 'bg-teal-100',
+        badgeText: 'text-teal-800',
+        isShiftComplete: true,
+        hasPunches: false,
+        isToday,
+        isPast,
+        tooltip: holidayName ? `Recesso: ${holidayName} (Abonado)` : 'Recesso Escolar Pago (Abonado)',
+      };
+    }
+
+    if (isSun || status === 'domingo') {
+      return {
+        statusKey: 'domingo',
+        label: 'DOMINGO (DSR)',
+        badgeBg: 'bg-slate-100',
+        badgeText: 'text-slate-600',
+        isShiftComplete: true,
+        hasPunches: false,
+        isToday,
+        isPast,
+        tooltip: 'Descanso Semanal Remunerado (DSR - CLT Art. 67)',
+      };
+    }
+
+    return {
+      statusKey: 'sabado',
+      label: 'SÁBADO',
+      badgeBg: 'bg-slate-100',
+      badgeText: 'text-slate-600',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: 'Sábado — Descanso Semanal',
+    };
+  }
+
+  // DIAS ÚTEIS NORMAIS
   if (status === 'feriado') {
     return {
       statusKey: 'feriado',
@@ -464,12 +584,6 @@ export function getDayPontoStatus({
   }
 
   // Working day (status === 'normal')
-  const e1 = (record?.entry1 || '').trim();
-  const s1 = (record?.exit1 || '').trim();
-  const e2 = (record?.entry2 || '').trim();
-  const s2 = (record?.exit2 || '').trim();
-
-  const hasPunches = Boolean(e1 || s1 || e2 || s2);
   const isShiftComplete = isContinuous
     ? Boolean(e1 && (s2 || s1))
     : Boolean(e1 && s1 && e2 && s2);
@@ -519,7 +633,6 @@ export function getDayPontoStatus({
 
   // Incomplete punches:
   if (isToday) {
-    // Current day in progress:
     return {
       statusKey: 'em_andamento',
       label: 'EM ANDAMENTO',
@@ -556,38 +669,153 @@ export function getDayPontoStatus({
   };
 }
 
+export interface DayWorkedMinutesResult {
+  workedMinutes: number;
+  overtimeMinutes: number; // total de minutos extras (50% + 100%)
+  overtime50Minutes: number; // minutos extras a 50% (dias úteis normais)
+  overtime100Minutes: number; // minutos extras a 100% (dias de descanso / feriados)
+  missingMinutes: number;
+  effectiveSummary: string;
+  isDiaDescanso: boolean;
+  isDiaDescansoTrabalhado: boolean;
+  expectedDailyMinutes: number;
+}
+
 /**
- * Calculates total worked minutes for a single day record and identifies overtime/missing minutes
+ * Calculates total worked minutes for a single day record and identifies overtime/missing minutes.
+ * 
+ * Regra CLT para Dias de Descanso (Sábado, Domingo, Feriado/Recesso):
+ * 1. isDiaDescanso === true: carga esperada é 0h00min.
+ * 2. Garantia Anti-Saldo Negativo: missingMinutes é SEMPRE 0 (zero débito/atraso/falta).
+ * 3. Se houver trabalho (> 0h): 100% do tempo trabalhado vai para HE 100%.
  */
 export function calculateDayWorkedMinutes(
   record?: Partial<PontoRecord> | null,
   contractSchedule = '11:40 - 17:40',
   toleranceMinutes = 5,
-  explicitDailyMinutes?: number
-): {
-  workedMinutes: number;
-  overtimeMinutes: number;
-  missingMinutes: number;
-  effectiveSummary: string;
-} {
+  explicitDailyMinutes?: number,
+  isDiaDescansoParam?: boolean,
+  holidays?: HolidayItem[]
+): DayWorkedMinutesResult {
   if (!record) {
-    return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
+    return {
+      workedMinutes: 0,
+      overtimeMinutes: 0,
+      overtime50Minutes: 0,
+      overtime100Minutes: 0,
+      missingMinutes: 0,
+      effectiveSummary: '',
+      isDiaDescanso: false,
+      isDiaDescansoTrabalhado: false,
+      expectedDailyMinutes: 0,
+    };
   }
 
   const recStatus = record.status || 'normal';
+  const dateStr = record.date;
+  const isDiaDescanso = isDiaDescansoParam !== undefined
+    ? isDiaDescansoParam
+    : checkIsDiaDescanso(dateStr, recStatus, holidays);
 
+  // 1. Dias com afastamento / atestado / justificada / compensação sem batidas
   if (
-    recStatus === 'feriado' ||
-    recStatus === 'recesso' ||
-    recStatus === 'sabado' ||
-    recStatus === 'domingo' ||
     recStatus === 'falta_justificada' ||
     recStatus === 'atestado' ||
     recStatus === 'compensado'
   ) {
-    return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
+    return {
+      workedMinutes: 0,
+      overtimeMinutes: 0,
+      overtime50Minutes: 0,
+      overtime100Minutes: 0,
+      missingMinutes: 0,
+      effectiveSummary: recStatus === 'atestado' ? 'Atestado Médico Abonado' : 'Falta Justificada Abonada',
+      isDiaDescanso,
+      isDiaDescansoTrabalhado: false,
+      expectedDailyMinutes: 0,
+    };
   }
 
+  const e1 = parseTimeToMinutes(record.entry1);
+  const s1 = parseTimeToMinutes(record.exit1);
+  const e2 = parseTimeToMinutes(record.entry2);
+  const s2 = parseTimeToMinutes(record.exit2);
+
+  const hasAnyPunch = e1 !== null || s1 !== null || e2 !== null || s2 !== null;
+
+  // =========================================================================
+  // REGRA CLT PARA DIAS NÃO ÚTEIS / DESCANSO (SÁBADOS, DOMINGOS E FERIADOS/RECESSOS)
+  // =========================================================================
+  if (isDiaDescanso) {
+    // 2. Carga Horária Esperada Zero (0h00min)
+    const expectedDailyMinutes = 0;
+
+    // Se NÃO houver registros de batida (0h trabalhadas):
+    if (!hasAnyPunch) {
+      return {
+        workedMinutes: 0,
+        overtimeMinutes: 0,
+        overtime50Minutes: 0,
+        overtime100Minutes: 0,
+        missingMinutes: 0, // Garantia Anti-Saldo Negativo: zero débito, zero atraso
+        effectiveSummary: 'Dia de Descanso (0h00min contratual)',
+        isDiaDescanso: true,
+        isDiaDescansoTrabalhado: false,
+        expectedDailyMinutes: 0,
+      };
+    }
+
+    // Se HOUVER registros de batida (> 0h trabalhadas):
+    // Apura o tempo efetivamente trabalhado
+    let period1 = 0;
+    let period2 = 0;
+
+    // Período 1:
+    if (e1 !== null && s1 !== null) {
+      period1 = Math.max(0, s1 - e1);
+    } else if (e1 !== null && s2 !== null && s1 === null && e2 === null) {
+      period1 = Math.max(0, s2 - e1);
+    }
+
+    // Período 2:
+    if (e2 !== null && s2 !== null) {
+      period2 = Math.max(0, s2 - e2);
+    }
+
+    const totalWorked = period1 + period2;
+
+    if (totalWorked <= 0) {
+      return {
+        workedMinutes: 0,
+        overtimeMinutes: 0,
+        overtime50Minutes: 0,
+        overtime100Minutes: 0,
+        missingMinutes: 0, // Garantia Anti-Saldo Negativo
+        effectiveSummary: 'Dia de Descanso (0h00min contratual)',
+        isDiaDescanso: true,
+        isDiaDescansoTrabalhado: false,
+        expectedDailyMinutes: 0,
+      };
+    }
+
+    // 3. Cálculo e Alocação de Hora Extra 100%:
+    // 100% do tempo efetivamente trabalhado é direcionado para a coluna de Horas Extras a 100%
+    return {
+      workedMinutes: totalWorked,
+      overtimeMinutes: totalWorked,
+      overtime50Minutes: 0,
+      overtime100Minutes: totalWorked, // 100% do tempo trabalhado vai para HE 100%
+      missingMinutes: 0, // Garantia Anti-Saldo Negativo: NUNCA gera saldo negativo
+      effectiveSummary: `${formatMinutesToHoursAndMinutes(totalWorked)} (HE 100% - Trabalho em Descanso)`,
+      isDiaDescanso: true,
+      isDiaDescansoTrabalhado: true,
+      expectedDailyMinutes: 0,
+    };
+  }
+
+  // =========================================================================
+  // DIA ÚTIL REGULAR (SEGUNDA A SEXTA NÃO FERIADO)
+  // =========================================================================
   const { startMinutes: expStart, endMinutes: expEnd, dailyHours, dailyHoursFormatted, workedMinutes: parsedSchedMinutes } = parseContractSchedule(contractSchedule);
   const expectedDailyMinutes = (explicitDailyMinutes !== undefined && explicitDailyMinutes > 0)
     ? explicitDailyMinutes
@@ -597,15 +825,15 @@ export function calculateDayWorkedMinutes(
     return {
       workedMinutes: 0,
       overtimeMinutes: 0,
+      overtime50Minutes: 0,
+      overtime100Minutes: 0,
       missingMinutes: expectedDailyMinutes,
       effectiveSummary: 'Falta Injustificada',
+      isDiaDescanso: false,
+      isDiaDescansoTrabalhado: false,
+      expectedDailyMinutes,
     };
   }
-
-  const e1 = parseTimeToMinutes(record.entry1);
-  const s1 = parseTimeToMinutes(record.exit1);
-  const e2 = parseTimeToMinutes(record.entry2);
-  const s2 = parseTimeToMinutes(record.exit2);
 
   let period1 = 0;
   let period2 = 0;
@@ -613,11 +841,8 @@ export function calculateDayWorkedMinutes(
   const continuous = isContinuousShift(null, contractSchedule);
 
   if (continuous) {
-    // Case 1: Continuous / 2-Punch Shift (Direct Entrada 1 and Saída (exit2 or exit1), no second entrance e2)
     if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
       const punchOut = s2 !== null ? s2 : s1!;
-      
-      // Apply tolerance to entrance and exit against contractual schedule
       const startDiff = e1 - expStart;
       const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
 
@@ -627,7 +852,6 @@ export function calculateDayWorkedMinutes(
       period1 = Math.max(0, effectiveEnd - effectiveStart);
     }
   } else {
-    // Case 2: Split Shift with Lunch Interval (2 turns: 4 punches)
     const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
     const matches = Array.from(contractSchedule.matchAll(timeRegex));
     let t1Start = expStart;
@@ -658,7 +882,6 @@ export function calculateDayWorkedMinutes(
       period2 = Math.max(0, effS2 - effE2);
     }
 
-    // Direct continuous fallback if someone with split contract punched e1 and s2 directly
     if (period1 === 0 && period2 === 0 && e1 !== null && s2 !== null && s1 === null && e2 === null) {
       const startDiff = e1 - expStart;
       const effStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
@@ -670,22 +893,36 @@ export function calculateDayWorkedMinutes(
 
   let totalWorked = period1 + period2;
   if (totalWorked === 0) {
-    return { workedMinutes: 0, overtimeMinutes: 0, missingMinutes: 0, effectiveSummary: '' };
+    return {
+      workedMinutes: 0,
+      overtimeMinutes: 0,
+      overtime50Minutes: 0,
+      overtime100Minutes: 0,
+      missingMinutes: 0,
+      effectiveSummary: '',
+      isDiaDescanso: false,
+      isDiaDescansoTrabalhado: false,
+      expectedDailyMinutes,
+    };
   }
 
-  // Tolerance check on total daily hours (e.g. within tolerance of expectedDailyMinutes)
   if (Math.abs(totalWorked - expectedDailyMinutes) <= toleranceMinutes) {
     totalWorked = expectedDailyMinutes;
   }
 
-  const overtimeMinutes = totalWorked > expectedDailyMinutes ? totalWorked - expectedDailyMinutes : 0;
+  const overtime50Minutes = totalWorked > expectedDailyMinutes ? totalWorked - expectedDailyMinutes : 0;
   const missingMinutes = totalWorked < expectedDailyMinutes ? expectedDailyMinutes - totalWorked : 0;
 
   return {
     workedMinutes: totalWorked,
-    overtimeMinutes,
+    overtimeMinutes: overtime50Minutes,
+    overtime50Minutes,
+    overtime100Minutes: 0,
     missingMinutes,
     effectiveSummary: `${formatMinutesToHoursAndMinutes(totalWorked)} (${dailyHoursFormatted || formatMinutesToHoursAndMinutes(expectedDailyMinutes)} contratual)`,
+    isDiaDescanso: false,
+    isDiaDescansoTrabalhado: false,
+    expectedDailyMinutes,
   };
 }
 
@@ -696,9 +933,11 @@ export function calcularHorasDia(
   record?: Partial<PontoRecord> | null,
   contractSchedule = '11:40 - 17:40',
   toleranceMinutes = 5,
-  explicitDailyMinutes?: number
-) {
-  return calculateDayWorkedMinutes(record, contractSchedule, toleranceMinutes, explicitDailyMinutes);
+  explicitDailyMinutes?: number,
+  isDiaDescansoParam?: boolean,
+  holidays?: HolidayItem[]
+): DayWorkedMinutesResult {
+  return calculateDayWorkedMinutes(record, contractSchedule, toleranceMinutes, explicitDailyMinutes, isDiaDescansoParam, holidays);
 }
 
 /**
@@ -1006,6 +1245,15 @@ export function calculateMonthlyPontoFinancials({
   extraHoursDecimal: number;
   extraHoursFormatted: string;
   extraHoursAmount: number;
+  totalExtraMinutes50: number;
+  extraHours50Decimal: number;
+  extraHours50Formatted: string;
+  extraHours50Amount: number;
+  totalExtraMinutes100: number;
+  extraHours100Decimal: number;
+  extraHours100Formatted: string;
+  extraHours100Amount: number;
+  restDaysWorkedCount: number;
   totalMissingMinutes: number;
   missingHoursFormatted: string;
   missingHoursDiscount: number;
@@ -1062,10 +1310,13 @@ export function calculateMonthlyPontoFinancials({
   let unjustifiedAbsencesCount = 0;
   let totalWorkedMinutes = 0;
   let totalExtraMinutes = 0;
+  let totalExtraMinutes50 = 0;
+  let totalExtraMinutes100 = 0;
   let totalMissingMinutes = 0;
   let paidHolidaysCount = 0;
   let paidRecessDaysCount = 0;
   let workedDaysCount = 0;
+  let restDaysWorkedCount = 0;
 
   const monthStr = String(month).padStart(2, '0');
   const monthKey = `${year}-${monthStr}`;
@@ -1074,35 +1325,75 @@ export function calculateMonthlyPontoFinancials({
     if (!rec || !rec.date || !rec.date.startsWith(monthKey)) return;
 
     const recStatus = rec.status || 'normal';
-    if (recStatus === 'falta_injustificada') {
-      unjustifiedAbsencesCount++;
-    } else if (recStatus === 'feriado') {
-      paidHolidaysCount++;
-    } else if (recStatus === 'recesso') {
-      paidRecessDaysCount++;
-    } else if (recStatus === 'normal') {
-      if (rec.entry1 || rec.entry2) {
-        workedDaysCount++;
-      }
-      const { workedMinutes, overtimeMinutes, missingMinutes } = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes);
-      totalWorkedMinutes += workedMinutes;
-      totalExtraMinutes += overtimeMinutes;
-      // Only deduct missing minutes on days where the employee worked partially or has unpunched hours
-      // (Full day unjustified absences are already counted in unjustifiedAbsencesCount)
-      const isShiftCompleted = isContinuousShift(null, contractSchedule)
-        ? Boolean(rec.entry1 && (rec.exit2 || rec.exit1))
-        : Boolean(rec.entry1 && rec.exit1 && rec.entry2 && rec.exit2);
-      const isTodayRec = toISODateString(new Date()) === rec.date;
+    const isDiaDescanso = checkIsDiaDescanso(rec.date, recStatus, holidays);
+    const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes, isDiaDescanso, holidays);
 
-      if (missingMinutes > 0 && (rec.entry1 || rec.entry2 || rec.exit1 || rec.exit2)) {
-        if (!(isTodayRec && !isShiftCompleted)) {
-          totalMissingMinutes += missingMinutes;
+    if (isDiaDescanso) {
+      // REGRA CLT PARA DIAS NÃO ÚTEIS / DESCANSO (SÁBADO, DOMINGO, FERIADO, RECESSO)
+      const hasAnyPunch = Boolean(rec.entry1 || rec.entry2 || rec.exit1 || rec.exit2);
+      if (hasAnyPunch && dayCalc.workedMinutes > 0) {
+        workedDaysCount++;
+        restDaysWorkedCount++;
+        totalWorkedMinutes += dayCalc.workedMinutes;
+        totalExtraMinutes100 += dayCalc.overtime100Minutes; // 100% do tempo trabalhado vai para HE 100%
+        totalExtraMinutes += dayCalc.overtime100Minutes;
+        // missingMinutes é 0 (Garantia Anti-Saldo Negativo)
+      } else {
+        const holItem = isHolidayOrRecess(rec.date, holidays);
+        if (recStatus === 'recesso' || holItem?.type === 'recesso') {
+          paidRecessDaysCount++;
+        } else if (recStatus === 'feriado' || holItem) {
+          paidHolidaysCount++;
+        }
+      }
+    } else {
+      // DIAS ÚTEIS REGULARES
+      if (recStatus === 'falta_injustificada') {
+        unjustifiedAbsencesCount++;
+      } else if (recStatus === 'feriado') {
+        paidHolidaysCount++;
+      } else if (recStatus === 'recesso') {
+        paidRecessDaysCount++;
+      } else if (recStatus === 'normal') {
+        if (rec.entry1 || rec.entry2) {
+          workedDaysCount++;
+        }
+        totalWorkedMinutes += dayCalc.workedMinutes;
+        totalExtraMinutes50 += dayCalc.overtime50Minutes;
+        totalExtraMinutes += dayCalc.overtime50Minutes;
+
+        // Only deduct missing minutes on days where the employee worked partially or has unpunched hours
+        // (Full day unjustified absences are already counted in unjustifiedAbsencesCount)
+        const isShiftCompleted = isContinuousShift(null, contractSchedule)
+          ? Boolean(rec.entry1 && (rec.exit2 || rec.exit1))
+          : Boolean(rec.entry1 && rec.exit1 && rec.entry2 && rec.exit2);
+        const isTodayRec = toISODateString(new Date()) === rec.date;
+
+        if (dayCalc.missingMinutes > 0 && (rec.entry1 || rec.entry2 || rec.exit1 || rec.exit2)) {
+          if (!(isTodayRec && !isShiftCompleted)) {
+            totalMissingMinutes += dayCalc.missingMinutes;
+          }
         }
       }
     }
   });
 
   const totalWorkedFormatted = formatMinutesToHoursAndMinutes(totalWorkedMinutes);
+
+  // Horas Extras 50% (Dias úteis além da jornada contratual)
+  const extraHours50Decimal = totalExtraMinutes50 / 60;
+  const extraHours50Formatted = formatMinutesToHoursAndMinutes(totalExtraMinutes50);
+  const extraHours50Amount = (totalExtraMinutes50 / 60) * (hourlyRate * safeExtraMultiplier);
+
+  // Horas Extras 100% (Trabalho em Descanso / Feriados - CLT Art. 70 e Súmula 146 TST)
+  const extraHours100Decimal = totalExtraMinutes100 / 60;
+  const extraHours100Formatted = formatMinutesToHoursAndMinutes(totalExtraMinutes100);
+  const extraHours100Amount = (totalExtraMinutes100 / 60) * (hourlyRate * 2.0);
+
+  // Total Geral de Horas Extras (50% + 100%)
+  const extraHoursDecimal = totalExtraMinutes / 60;
+  const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
+  const extraHoursAmount = extraHours50Amount + extraHours100Amount;
 
   if (isProfessor) {
     // =========================================================================
@@ -1128,10 +1419,10 @@ export function calculateMonthlyPontoFinancials({
     // Descontos do Professor: descontos manuais (não se aplicam faltas de 8,8h por ser horista de aulas)
     const totalDescontos = safeManualDesc;
 
-    // Subtotal Salarial: Salário Aulas + Hora-Atividade + DSR + Adicionais - Descontos
+    // Subtotal Salarial: Salário Aulas + Hora-Atividade + DSR + Horas Extras + Adicionais - Descontos
     const subtotalSalarial = Math.max(
       0,
-      salarioAulas + horaAtividade + dsr + safeManualAdd - totalDescontos
+      salarioAulas + horaAtividade + dsr + extraHoursAmount + safeManualAdd - totalDescontos
     );
 
     // Total Líquido Estimado: Subtotal Salarial + Ajuda de Custo (R$ 150,00 fixo não salarial)
@@ -1160,10 +1451,19 @@ export function calculateMonthlyPontoFinancials({
       unjustifiedAbsencesDiscount: 0,
       totalWorkedMinutes,
       totalWorkedFormatted,
-      totalExtraMinutes: 0,
-      extraHoursDecimal: 0,
-      extraHoursFormatted: '0h00min',
-      extraHoursAmount: 0,
+      totalExtraMinutes,
+      extraHoursDecimal,
+      extraHoursFormatted,
+      extraHoursAmount,
+      totalExtraMinutes50,
+      extraHours50Decimal,
+      extraHours50Formatted,
+      extraHours50Amount,
+      totalExtraMinutes100,
+      extraHours100Decimal,
+      extraHours100Formatted,
+      extraHours100Amount,
+      restDaysWorkedCount,
       totalMissingMinutes: 0,
       missingHoursFormatted: '0h00min',
       missingHoursDiscount: 0,
@@ -1187,11 +1487,6 @@ export function calculateMonthlyPontoFinancials({
   // Atrasos e minutos faltantes computados sobre a taxa do minuto contratual
   const missingHoursDiscount = totalMissingMinutes * minuteRate;
   const missingHoursFormatted = formatMinutesToHoursAndMinutes(totalMissingMinutes);
-
-  // Horas Extras (50%): (Valor da Hora * 1,5) * Horas Excedentes
-  const extraHoursDecimal = totalExtraMinutes / 60;
-  const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
-  const extraHoursAmount = (totalExtraMinutes / 60) * (hourlyRate * safeExtraMultiplier);
 
   const totalDescontos = unjustifiedAbsencesDiscount + missingHoursDiscount + (Number(manualDiscount) || 0);
 
@@ -1226,6 +1521,15 @@ export function calculateMonthlyPontoFinancials({
     extraHoursDecimal,
     extraHoursFormatted,
     extraHoursAmount,
+    totalExtraMinutes50,
+    extraHours50Decimal,
+    extraHours50Formatted,
+    extraHours50Amount,
+    totalExtraMinutes100,
+    extraHours100Decimal,
+    extraHours100Formatted,
+    extraHours100Amount,
+    restDaysWorkedCount,
     totalMissingMinutes,
     missingHoursFormatted,
     missingHoursDiscount,
