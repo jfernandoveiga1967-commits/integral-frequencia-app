@@ -32,6 +32,32 @@ export const PRESET_USERS: UserProfile[] = [
     contractDivisorHours: 220,
     ajudaDeCusto: 0,
   },
+  {
+    id: 'usr_nutri_1',
+    name: 'Thaís Grisoni Baroni',
+    email: 'thaisgriisoni@gmail.com',
+    role: 'professor',
+    cargoLabel: 'Nutricionista (CRN: 84367)',
+    avatarColor: 'bg-emerald-600',
+    birthDate: '1992-04-20',
+    pin: '20/04/1992',
+    status: 'ATIVO',
+    assignedActivities: ['Culinária', 'Rotina'],
+    assignedTurmas: MASTER_ADMIN_TURMAS,
+    allowedClassIds: MASTER_ADMIN_TURMAS,
+    canManageStudents: false,
+    canMarkAttendance: true,
+    company: 'Acesso Nutri / Colégio Crescer',
+    contractSchedule: '08:00 - 17:00',
+    contractDailyHours: 8,
+    contractDailyMinutes: 480,
+    contractDailyHoursFormatted: '8h 00min',
+    baseSalary: 0,
+    regimeTrabalho: 'mensalista',
+    regimeContratual: 'Prestador de Serviço',
+    contractDivisorHours: 220,
+    ajudaDeCusto: 0,
+  },
 ];
 
 /**
@@ -490,6 +516,25 @@ export function isProfessor(user: UserProfile | null): boolean {
 
 export function isAuxiliar(_user: UserProfile | null): boolean {
   return false;
+}
+
+export function isNutricionista(user: UserProfile | null): boolean {
+  if (!user) return false;
+  const cargo = (user.cargoLabel || '').toLowerCase();
+  const name = (user.name || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  return (
+    cargo.includes('nutri') ||
+    name.includes('thaís grisoni') ||
+    name.includes('thais grisoni') ||
+    email.includes('thaisgriisoni') ||
+    email.includes('acessonutri')
+  );
+}
+
+export function canManageCardapio(user: UserProfile | null): boolean {
+  if (!user) return false;
+  return isCoordenador(user) || isNutricionista(user);
 }
 
 export function canManageStudents(user: UserProfile | null): boolean {

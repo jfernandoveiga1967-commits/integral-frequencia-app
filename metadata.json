@@ -1,6 +1,6 @@
 {
   "name": "Programa do Integral - Colégio Crescer",
-  "description": "Assistente para gestão de chamada de frequência semanal, grade horária ao vivo das atividades do Integral, Semanário Pedagógico com BNCC e IA (Gemini), e Livro Ponto digital com tolerância, fechamento de folha e quitação institucional.",
+  "description": "Assistente para gestão de chamada de frequência semanal, grade horária ao vivo das atividades do Integral, Semanário Pedagógico com BNCC e IA (Gemini), Livro Ponto digital com tolerância, fechamento de folha e quitação, e módulo de Cardápio e Culinária com cardápio escolar mensal e receitas pedagógicas.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

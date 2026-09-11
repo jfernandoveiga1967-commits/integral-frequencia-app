@@ -15,6 +15,7 @@ import {
   HolidayItem,
   SemanarioPlan,
 } from '../types';
+import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -3276,6 +3277,368 @@ export function generateSemanarioPDFReport(
   const cleanTurma = selectedTurma === 'all' ? 'Todas_Turmas' : selectedTurma.replace(/[\/\s:]+/g, '_');
   const filename = `Semanario_Integral_Semana_${weekInfo.weekNumber}_${cleanTurma}.pdf`;
 
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o Cardápio Mensal em PDF formato A4 Paisagem (Horizontal), exatamente
+ * como o modelo impresso da Nutricionista (5 semanas, Segunda a Sexta).
+ */
+export function generateCardapioMensalPDF(
+  menu: MonthlyMenu,
+  saveImmediately = false
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 297;
+  const pageHeight = 210;
+
+  // Header Background bar
+  doc.setFillColor(248, 250, 252);
+  doc.rect(0, 0, pageWidth, 28, 'F');
+
+  // Logo Crescer
+  const logoData = getLogoDataUrl();
+  if (logoData) {
+    try {
+      doc.addImage(logoData, 'PNG', 12, 4, 38, 18);
+    } catch (e) {
+      console.warn('Erro ao inserir logo no PDF do cardápio:', e);
+    }
+  } else {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(22, 101, 52);
+    doc.text('COLÉGIO CRESCER', 12, 14);
+  }
+
+  // Título Centralizado
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(22, 101, 52); // Dark Green
+  doc.text('CARDÁPIO MENSAL', pageWidth / 2, 9, { align: 'center' });
+
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${menu.monthName} ${menu.year}`, pageWidth / 2, 15, { align: 'center' });
+
+  // Nome da Nutricionista e CRN na mesma linha
+  const cleanCrn = menu.crn ? menu.crn.replace(/^CRN:?\s*/i, '') : '84367';
+  const nutriName = menu.nutritionistName || 'Thaís Grisoni Baroni';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`${nutriName} - CRN: ${cleanCrn}`, pageWidth / 2, 22, { align: 'center' });
+
+  // Tabela de Cardápio (5 colunas + 1 lateral de semana)
+  // Monta as linhas para 1ª à 5ª semana
+  const daysByWeek: Record<number, MenuItemDay[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+  const sortedDays = Object.values(menu.days).sort((a, b) => a.date.localeCompare(b.date));
+
+  sortedDays.forEach((d) => {
+    if (d.weekIndex >= 1 && d.weekIndex <= 5) {
+      daysByWeek[d.weekIndex].push(d);
+    }
+  });
+
+  const weekHeaders = ['SEMANA', 'SEGUNDA-FEIRA', 'TERÇA-FEIRA', 'QUARTA-FEIRA', 'QUINTA-FEIRA', 'SEXTA-FEIRA'];
+
+  const tableBody: string[][] = [];
+
+  for (let w = 1; w <= 5; w++) {
+    const daysInWeek = daysByWeek[w] || [];
+    const order = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+    const row: string[] = [`${w}ª SEMANA`];
+
+    order.forEach((dayName) => {
+      const item = daysInWeek.find((d) => d.dayOfWeek === dayName);
+      if (!item) {
+        row.push('-');
+      } else if (item.isHoliday) {
+        row.push(`DIA ${item.dayNumber} -\n\n${item.holidayDescription || 'FERIADO'}`);
+      } else {
+        const parts: string[] = [];
+        parts.push(`DIA ${item.dayNumber} - *${item.base?.[0] || 'Arroz Branco'}`);
+        if (item.base?.[1]) parts.push(`*${item.base[1]}`);
+        if (item.protein) parts.push(item.protein);
+        if (item.garnish) parts.push(item.garnish);
+        if (item.salad) parts.push(item.salad);
+        if (item.dessert) parts.push(item.dessert);
+        row.push(parts.join('\n'));
+      }
+    });
+
+    tableBody.push(row);
+  }
+
+  autoTable(doc, {
+    startY: 28,
+    head: [weekHeaders],
+    body: tableBody,
+    theme: 'grid',
+    margin: { left: 10, right: 10 },
+    styles: {
+      fontSize: 8.5,
+      cellPadding: 2.2,
+      lineColor: [30, 41, 59],
+      lineWidth: 0.25,
+      textColor: [15, 23, 42],
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: [22, 101, 52], // Deep Green
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'center',
+      fontSize: 9,
+    },
+    columnStyles: {
+      0: {
+        cellWidth: 16,
+        fillColor: [22, 101, 52],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        halign: 'center',
+        valign: 'middle',
+      },
+      1: { cellWidth: 52.2 },
+      2: { cellWidth: 52.2 },
+      3: { cellWidth: 52.2 },
+      4: { cellWidth: 52.2 },
+      5: { cellWidth: 52.2 },
+    },
+    didParseCell: (data) => {
+      // Destaque em amarelo para dias de feriado
+      if (typeof data.cell.raw === 'string' && data.cell.raw.includes('FERIADO')) {
+        data.cell.styles.fillColor = [254, 240, 138];
+        data.cell.styles.textColor = [161, 98, 7];
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.halign = 'center';
+      }
+    },
+  });
+
+  // Footer bar
+  const footerY = pageHeight - 8;
+  doc.setDrawColor(22, 101, 52);
+  doc.setLineWidth(0.8);
+  doc.line(10, footerY - 3, pageWidth - 10, footerY - 3);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(22, 101, 52);
+  doc.text(`Nutricionista: ${nutriName} - CRN: ${cleanCrn}`, 12, footerY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Instituto Educacional Crescer`, pageWidth - 12, footerY, { align: 'right' });
+
+  const filename = `Cardapio_Mensal_${menu.monthName}_${menu.year}.pdf`;
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o Caderno de Receitas da Oficina de Culinária em PDF formato A4
+ */
+export function generateReceitasCulinariaPDF(
+  monthKey: string,
+  monthName: string,
+  year: number,
+  recipes: CookingRecipe[],
+  saveImmediately = false
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+
+  // Header Banner
+  doc.setFillColor(240, 253, 244);
+  doc.rect(0, 0, pageWidth, 32, 'F');
+  doc.setDrawColor(34, 197, 94);
+  doc.setLineWidth(1);
+  doc.line(0, 32, pageWidth, 32);
+
+  // Logo Crescer
+  const logoData = getLogoDataUrl();
+  if (logoData) {
+    try {
+      doc.addImage(logoData, 'PNG', 12, 5, 32, 15);
+    } catch (e) {
+      console.warn('Erro ao inserir logo no PDF de culinária:', e);
+    }
+  }
+
+  // Header Titles
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(22, 101, 52);
+  doc.text(`OFICINA DE CULINÁRIA / Receitas - ${monthName} de ${year}`, 50, 15);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Instituto Educacional Crescer • Modalidade Culinária', 50, 23);
+
+  let currentY = 38;
+
+  recipes.forEach((recipe) => {
+    // 1. Pre-calculate text wrapping and height
+    let totalIngLines = 0;
+    recipe.ingredients.forEach((ing) => {
+      const lines = doc.splitTextToSize(`• ${ing}`, 64);
+      totalIngLines += lines.length;
+    });
+    const ingBlockHeight = 5 + totalIngLines * 4.0;
+
+    let totalPrepLines = 0;
+    recipe.instructions.forEach((step, sIdx) => {
+      const stepText = `${sIdx + 1}. ${step}`;
+      const lines = doc.splitTextToSize(stepText, 96);
+      totalPrepLines += lines.length;
+    });
+    const prepBlockHeight = 5 + totalPrepLines * 4.0 + (recipe.instructions.length * 1.2);
+
+    const columnsHeight = Math.max(ingBlockHeight, prepBlockHeight);
+
+    const metaParts: string[] = [];
+    if (recipe.prepTime) metaParts.push(`Preparo: ${recipe.prepTime}`);
+    if (recipe.servings) metaParts.push(`Rendimento: ${recipe.servings}`);
+    if (recipe.allergens && recipe.allergens.length > 0) {
+      metaParts.push(`Alérgenos: ${recipe.allergens.join(', ')}`);
+    }
+    const hasMeta = metaParts.length > 0;
+    const footerMetaHeight = hasMeta ? 9 : 2;
+
+    const topBarHeight = 9;
+    const titleHeight = 8;
+    const totalCardHeight = topBarHeight + titleHeight + columnsHeight + footerMetaHeight + 4;
+
+    // Page overflow check
+    if (currentY + totalCardHeight > pageHeight - 16) {
+      doc.addPage();
+      currentY = 16;
+    }
+
+    // Card Outer Box
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(12, currentY, pageWidth - 24, totalCardHeight, 3, 3, 'FD');
+
+    // Card Top Header Bar (Semana & Datas)
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(12, currentY, pageWidth - 24, topBarHeight, 3, 3, 'F');
+    doc.rect(12, currentY + 5, pageWidth - 24, 4, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`${recipe.weekLabel} • ${recipe.datesLabel}`, 16, currentY + 6.2);
+
+    // Recipe Title (sem rendimento abaixo)
+    doc.setFontSize(11.5);
+    doc.setTextColor(22, 101, 52);
+    doc.text(recipe.title, 16, currentY + 15);
+
+    // Column headers & content
+    const contentStartY = currentY + topBarHeight + titleHeight + 1;
+
+    // Left column: Ingredientes
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Ingredientes:', 16, contentStartY + 3);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(51, 65, 85);
+    let ingY = contentStartY + 7.5;
+    recipe.ingredients.forEach((ing) => {
+      const splitIng = doc.splitTextToSize(`• ${ing}`, 64);
+      splitIng.forEach((line: string) => {
+        doc.text(line, 16, ingY);
+        ingY += 4.0;
+      });
+    });
+
+    // Right column: Modo de Preparo
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Modo de Preparo:', 88, contentStartY + 3);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(51, 65, 85);
+    let prepY = contentStartY + 7.5;
+    recipe.instructions.forEach((step, sIdx) => {
+      const stepText = `${sIdx + 1}. ${step}`;
+      const splitStep = doc.splitTextToSize(stepText, 102);
+      splitStep.forEach((line: string) => {
+        doc.text(line, 88, prepY);
+        prepY += 4.0;
+      });
+      prepY += 1.2;
+    });
+
+    // Informações / Rendimento reposicionados APÓS o modo de preparo
+    if (hasMeta) {
+      const metaY = contentStartY + columnsHeight + 2;
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.line(16, metaY, pageWidth - 16, metaY);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(metaParts.join('   •   '), 16, metaY + 4.5);
+    }
+
+    currentY += totalCardHeight + 5;
+  });
+
+  const footerY = pageHeight - 10;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.5);
+  doc.line(12, footerY - 3, pageWidth - 12, footerY - 3);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Nutricionista Responsável: Thaís Grisoni Baroni - CRN: 84367', 14, footerY);
+  doc.text('Instituto Educacional Crescer', pageWidth - 14, footerY, { align: 'right' });
+
+  const filename = `Oficina_Culinaria_Receitas_${monthName}_${year}.pdf`;
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');

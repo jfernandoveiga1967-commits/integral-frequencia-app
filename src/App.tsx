@@ -45,6 +45,7 @@ import { WeeklyLibrary } from './components/WeeklyLibrary';
 import { UserManagement } from './components/UserManagement';
 import { LivroPonto } from './components/LivroPonto';
 import { SemanarioMain } from './components/Semanario/SemanarioMain';
+import { CardapioCulinaria } from './components/CardapioCulinaria';
 import { LoginScreen } from './components/LoginScreen';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
@@ -1485,6 +1486,11 @@ export default function App() {
             onBatchSaveHolidays={handleBatchSaveHolidays}
             onSaveUser={handleSaveUser}
           />
+        )}
+
+        {/* Tab 7: Cardápio e Culinária (Cardápio de Almoço e Oficina de Receitas) */}
+        {activeTab === 'cardapio' && (
+          <CardapioCulinaria currentUser={currentUser} />
         )}
       </main>
 

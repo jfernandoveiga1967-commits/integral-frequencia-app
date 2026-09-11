@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings } from './types';
+import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
@@ -2124,6 +2125,73 @@ export async function getMealReportFromFirestore(monthKey: string): Promise<Meal
   return null;
 }
 
+/**
+ * Salva o Cardápio Mensal no Firestore (monthlyMenus/{monthKey})
+ */
+export async function saveMonthlyMenuToFirestore(menu: MonthlyMenu): Promise<void> {
+  try {
+    const docRef = doc(db, 'monthlyMenus', menu.monthKey);
+    const payload = {
+      ...menu,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn('Erro ao salvar monthlyMenus no Firestore, mantendo cópia local:', error);
+    handleFirestoreError(error, OperationType.WRITE, `monthlyMenus/${menu.monthKey}`);
+  }
+}
 
+/**
+ * Recupera o Cardápio Mensal do Firestore (monthlyMenus/{monthKey})
+ */
+export async function getMonthlyMenuFromFirestore(monthKey: string): Promise<MonthlyMenu | null> {
+  try {
+    const docRef = doc(db, 'monthlyMenus', monthKey);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as MonthlyMenu;
+    }
+  } catch (error) {
+    console.warn(`Erro ao ler monthlyMenus/${monthKey} do Firestore:`, error);
+  }
+  return null;
+}
 
+/**
+ * Salva as receitas da Oficina de Culinária no Firestore (cookingRecipes/{monthKey})
+ */
+export async function saveCookingRecipesToFirestore(monthKey: string, recipes: CookingRecipe[]): Promise<void> {
+  try {
+    const docRef = doc(db, 'cookingRecipes', monthKey);
+    const payload = {
+      id: monthKey,
+      monthKey,
+      recipes,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn('Erro ao salvar cookingRecipes no Firestore, mantendo cópia local:', error);
+    handleFirestoreError(error, OperationType.WRITE, `cookingRecipes/${monthKey}`);
+  }
+}
 
+/**
+ * Recupera as receitas da Oficina de Culinária do Firestore (cookingRecipes/{monthKey})
+ */
+export async function getCookingRecipesFromFirestore(monthKey: string): Promise<CookingRecipe[] | null> {
+  try {
+    const docRef = doc(db, 'cookingRecipes', monthKey);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.recipes)) {
+        return data.recipes as CookingRecipe[];
+      }
+    }
+  } catch (error) {
+    console.warn(`Erro ao ler cookingRecipes/${monthKey} do Firestore:`, error);
+  }
+  return null;
+}

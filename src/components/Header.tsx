@@ -11,6 +11,7 @@ import {
   X,
   Clock,
   BookOpen,
+  Utensils,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ConnectionState } from '../services/syncService';
@@ -22,7 +23,7 @@ import {
   isAudioContextReady,
 } from '../utils/notificationUtils';
 
-export type TabType = 'momento' | 'frequencia' | 'semanario' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios' | 'ponto';
+export type TabType = 'momento' | 'frequencia' | 'semanario' | 'ponto' | 'cardapio' | 'alunos' | 'relatorio' | 'biblioteca' | 'usuarios';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -271,6 +272,19 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Clock className="w-4 h-4 text-emerald-400" />
             <span>Livro Ponto</span>
+          </button>
+
+          {/* 5. Cardápio e Culinária (Disponível para Todos) */}
+          <button
+            onClick={() => setActiveTab('cardapio')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+              activeTab === 'cardapio'
+                ? 'bg-slate-800 text-teal-400 border-teal-500'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+            }`}
+          >
+            <Utensils className="w-4 h-4 text-teal-400" />
+            <span>Cardápio e Culinária</span>
           </button>
 
           {/* Abas exclusivas de Gestão / Administração (Apenas Coordenador / Admin) */}
