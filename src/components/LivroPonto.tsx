@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Calendar,
   Clock,
@@ -33,6 +33,7 @@ import {
   PenTool,
   Download,
   GraduationCap,
+  Loader2,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -92,6 +93,7 @@ import {
 import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
 import { loadPontoRecords } from '../utils/storageUtils';
+import { playPontoSuccessSound } from '../utils/notificationUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
@@ -222,6 +224,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     type: 'success' | 'info' | 'error';
   } | null>(null);
 
+  // Quick punch button loading/lock state (instant UI block to prevent double clicks)
+  const [isRegisteringPunch, setIsRegisteringPunch] = useState<boolean>(false);
+  const isRegisteringPunchRef = useRef<boolean>(false);
+
   // Live time ticker for clock
   const [liveClock, setLiveClock] = useState<string>(() => {
     const d = new Date();
@@ -313,7 +319,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
   // Monthly Ajuda de Custo state (editable on the panel in real-time)
   const [monthAjudaDeCusto, setMonthAjudaDeCusto] = useState<number | string>(() => {
-    if (closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
+    if (isMonthClosed && closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
       return Number(closingRecord.ajudaDeCusto);
     }
     if (targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null) {
@@ -520,14 +526,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     setManualAdditionNote(closingRecord?.manualAdditionNote || '');
     setManualDiscount(closingRecord?.manualDiscount || 0);
     setManualDiscountNote(closingRecord?.manualDiscountNote || '');
-    if (closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
+    if (isMonthClosed && closingRecord?.ajudaDeCusto !== undefined && closingRecord?.ajudaDeCusto !== null) {
       setMonthAjudaDeCusto(Number(closingRecord.ajudaDeCusto));
     } else if (targetUser?.ajudaDeCusto !== undefined && targetUser?.ajudaDeCusto !== null) {
       setMonthAjudaDeCusto(Number(targetUser.ajudaDeCusto));
     } else {
       setMonthAjudaDeCusto(0);
     }
-  }, [closingRecord, targetUser?.ajudaDeCusto, selectedUserId, monthKey]);
+  }, [isMonthClosed, closingRecord, targetUser?.ajudaDeCusto, selectedUserId, monthKey]);
 
   // Get user's records for this month
   const monthUserRecords = useMemo(() => {
@@ -627,7 +633,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
   // Handle Quick Punch (Registrar Batida Agora)
   const handleQuickPunch = () => {
+    // 1. Bloqueio Instantâneo no primeiro milissegundo do clique
+    if (isRegisteringPunchRef.current) return;
+    isRegisteringPunchRef.current = true;
+    setIsRegisteringPunch(true);
+
     if (isMonthClosed) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
       setPunchFeedback({
         text: 'O mês está Fechado/Travado. Não é possível registrar novas batidas.',
         type: 'error',
@@ -637,6 +650,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     if (isUserInactiveOrDismissed(targetUser)) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
       setPunchFeedback({
         text: `Não é possível registrar batida de ponto para colaboradores com status Inativo ou Desligado (${targetUser?.name || 'Colaborador'}).`,
         type: 'error',
@@ -648,6 +663,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const currentNow = new Date();
     const todayStr = toISODateString(currentNow);
     if (!todayStr.startsWith(monthKey)) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
       setPunchFeedback({
         text: `Atenção: A data de hoje (${formatDateBR(todayStr)}) não pertence ao mês visualizado (${getMonthNameBR(selectedMonth)}/${selectedYear}). Navegue para o mês atual para bater ponto.`,
         type: 'info',
@@ -656,14 +673,48 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
-    
     // Always find latest day record from pontoRecords, monthUserRecords or fresh LocalStorage cache
     const freshLocal = loadPontoRecords();
     const dayRecord =
       pontoRecords.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
       freshLocal.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
       monthUserRecords.find((r) => r.date === todayStr);
+
+    // 3. Trava Temporal Anti-Duplo Registro (Debounce no Código - 120 segundos / 2 minutos)
+    const lastPunchStorageKey = `ponto_last_punch_${selectedUserId}`;
+    let lastPunchTimestamp = 0;
+    try {
+      const stored = localStorage.getItem(lastPunchStorageKey);
+      if (stored) {
+        lastPunchTimestamp = Number(stored) || 0;
+      }
+    } catch (e) {
+      console.warn('Erro ao verificar trava temporal de batida:', e);
+    }
+
+    // Também avalia updatedAt do registro do dia de hoje caso o ponto tenha sido registrado há pouco
+    if (dayRecord && dayRecord.date === todayStr && dayRecord.updatedAt) {
+      const recordUpdatedMs = new Date(dayRecord.updatedAt).getTime();
+      if (!isNaN(recordUpdatedMs) && recordUpdatedMs > lastPunchTimestamp) {
+        lastPunchTimestamp = recordUpdatedMs;
+      }
+    }
+
+    const nowEpoch = Date.now();
+    const elapsedSeconds = Math.floor((nowEpoch - lastPunchTimestamp) / 1000);
+
+    if (lastPunchTimestamp > 0 && elapsedSeconds < 120) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
+      setPunchFeedback({
+        text: 'Atenção: Seu ponto já foi registrado há poucos segundos. Aguarde 2 minutos para um novo registro.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 5000);
+      return;
+    }
+
+    const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
 
     const result = processSequentialPunch({
       existingRecord: dayRecord,
@@ -680,6 +731,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     });
 
     if (!result.success || !result.updatedRecord) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
       setPunchFeedback({
         text: result.error || 'Não foi possível registrar a batida.',
         type: 'info',
@@ -688,17 +741,48 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
+    // Atualiza timestamp para a trava temporal anti-duplo registro
+    try {
+      localStorage.setItem(lastPunchStorageKey, String(nowEpoch));
+    } catch (e) {
+      console.warn('Erro ao salvar timestamp da batida:', e);
+    }
+
     // Immediately trigger state update and save
     onSavePontoRecord(result.updatedRecord);
 
-    const hoursSummary = result.calculatedHours?.effectiveSummary
-      ? ` • Total apurado: ${result.calculatedHours.effectiveSummary}`
-      : '';
+    // 2. Feedback Visual e Sonoro de Confirmação
+    playPontoSuccessSound();
+
+    let slotDisplayName = 'Batida';
+    if (result.slotKey === 'entry1') {
+      slotDisplayName = isUserContinuous ? 'Entrada' : 'Entrada 1';
+    } else if (result.slotKey === 'exit1') {
+      slotDisplayName = 'Saída 1';
+    } else if (result.slotKey === 'entry2') {
+      slotDisplayName = 'Entrada 2';
+    } else if (result.slotKey === 'exit2') {
+      slotDisplayName = isUserContinuous ? 'Saída' : 'Saída 2';
+    } else if (result.slotName) {
+      if (result.slotName.includes('Entrada 1')) slotDisplayName = 'Entrada 1';
+      else if (result.slotName.includes('Saída 1') || result.slotName.includes('Saida 1')) slotDisplayName = 'Saída 1';
+      else if (result.slotName.includes('Entrada 2')) slotDisplayName = 'Entrada 2';
+      else if (result.slotName.includes('Saída 2') || result.slotName.includes('Saida 2')) slotDisplayName = 'Saída 2';
+      else if (result.slotName.toLowerCase().includes('entrada')) slotDisplayName = 'Entrada';
+      else if (result.slotName.toLowerCase().includes('saída') || result.slotName.toLowerCase().includes('saida')) slotDisplayName = 'Saída';
+    }
+
     setPunchFeedback({
-      text: `Batida de ${result.slotName} registrada com sucesso às ${currentHoursMinutes}!${hoursSummary}`,
+      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso!`,
       type: 'success',
     });
-    setTimeout(() => setPunchFeedback(null), 4500);
+    setTimeout(() => setPunchFeedback(null), 5000);
+
+    // Libera a trava de interface do botão após intervalo seguro
+    setTimeout(() => {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
+    }, 800);
   };
 
   // Check how many overlapped records exist in the current month for the selected user
@@ -1222,22 +1306,35 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             <button
               type="button"
               onClick={handleQuickPunch}
-              disabled={isMonthClosed || isUserInactiveOrDismissed(targetUser)}
+              disabled={isRegisteringPunch || isMonthClosed || isUserInactiveOrDismissed(targetUser)}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all ${
-                isMonthClosed || isUserInactiveOrDismissed(targetUser)
+                isRegisteringPunch
+                  ? 'bg-emerald-900/90 text-emerald-200 cursor-not-allowed border border-emerald-500/50 opacity-90'
+                  : isMonthClosed || isUserInactiveOrDismissed(targetUser)
                   ? 'bg-slate-800/80 text-slate-500 cursor-not-allowed border border-slate-700 opacity-60'
                   : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white border border-emerald-400/40 shadow-emerald-900/30 cursor-pointer'
               }`}
               title={
-                isMonthClosed
+                isRegisteringPunch
+                  ? 'Registrando batida de ponto...'
+                  : isMonthClosed
                   ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
                   : isUserInactiveOrDismissed(targetUser)
                   ? 'Colaborador com status Inativo ou Desligado (Batidas bloqueadas)'
                   : 'Registrar batida de ponto com o horário exato de agora'
               }
             >
-              <Clock className="w-4 h-4" />
-              <span>Registrar Batida Agora</span>
+              {isRegisteringPunch ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
+                  <span>[ ⏳ Registrando ponto... ]</span>
+                </>
+              ) : (
+                <>
+                  <Clock className="w-4 h-4" />
+                  <span>Registrar Batida Agora</span>
+                </>
+              )}
             </button>
 
             {/* Print/View Receipt */}
@@ -1961,7 +2058,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
                 <div>
                   <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
-                  <span className="text-[9px] font-semibold text-emerald-600 uppercase tracking-tight block">Fixo • Não Salarial</span>
                 </div>
                 <div className="mt-1">
                   <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
@@ -2012,7 +2108,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
                 <div>
                   <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
-                  <span className="text-[9px] font-semibold text-emerald-600 uppercase tracking-tight block">Fixo • Não Salarial</span>
                 </div>
                 <div className="mt-1">
                   <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
@@ -2142,7 +2237,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       value={manualAdditionNote}
                       onChange={(e) => setManualAdditionNote(e.target.value)}
                       className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                      placeholder="Motivo (ex: Ajuda de custo, plantão de sábado)"
+                      placeholder="Motivo (ex: Gratificação, plantão de sábado)"
                     />
                   </div>
                 </div>
@@ -2378,7 +2473,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   </div>
                 )}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Ajuda de Custo Fixa:</span>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">Ajuda de Custo:</span>
                   <strong className="text-xs text-emerald-700">{formatCurrencyBR(financials.ajudaDeCusto)} (100% líquida)</strong>
                 </div>
               </div>
@@ -2435,10 +2530,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     {financials.ajudaDeCusto > 0 && (
                       <tr className="text-emerald-950 bg-emerald-50/70">
                         <td className="p-2.5">
-                          <span className="font-bold text-emerald-900 block">Ajuda de Custo Fixa Mensal</span>
+                          <span className="font-bold text-emerald-900 block">Ajuda de Custo</span>
                           <span className="text-[10px] text-emerald-700 block">Verba indenizatória / não salarial (sem incidência de descontos legais)</span>
                         </td>
-                        <td className="p-2.5 text-center font-semibold text-emerald-800">Fixo</td>
+                        <td className="p-2.5 text-center font-semibold text-emerald-800">Mensal</td>
                         <td className="p-2.5 text-right font-bold text-emerald-800">{formatCurrencyBR(financials.ajudaDeCusto)}</td>
                         <td className="p-2.5 text-right text-slate-400">—</td>
                       </tr>
@@ -3508,12 +3603,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </div>
               </div>
 
-              {/* Parametros Financeiros da Jornada Padrão: Divisor 220h e Ajuda de Custo R$ 150,00 */}
+              {/* Parâmetros Financeiros da Jornada Contratual */}
               <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
                     <DollarSign className="w-3.5 h-3.5" />
-                    Parâmetros Financeiros & Jornada Padrão
+                    Parâmetros Financeiros da Jornada Contratual
                   </span>
                   <span className="text-[10px] text-slate-400">Jornada 220h / 8,8h dia</span>
                 </div>
@@ -3536,7 +3631,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
                   <div>
                     <label className="text-slate-300 font-semibold block mb-1">
-                      Ajuda de Custo Fixa (R$)
+                      Ajuda de Custo (R$)
                     </label>
                     <input
                       type="number"

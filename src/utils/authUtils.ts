@@ -26,6 +26,11 @@ export const PRESET_USERS: UserProfile[] = [
     contractDailyHours: 8,
     contractDailyMinutes: 480,
     contractDailyHoursFormatted: '8h 00min',
+    baseSalary: 0,
+    regimeTrabalho: 'mensalista',
+    regimeContratual: 'CLT',
+    contractDivisorHours: 220,
+    ajudaDeCusto: 0,
   },
 ];
 
@@ -127,6 +132,17 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         baseSalary: primary.baseSalary !== undefined && primary.baseSalary !== null && !isNaN(Number(primary.baseSalary))
           ? Number(primary.baseSalary)
           : (secondary?.baseSalary !== undefined && secondary.baseSalary !== null && !isNaN(Number(secondary.baseSalary)) ? Number(secondary.baseSalary) : 0),
+        regimeTrabalho: primary.regimeTrabalho || secondary?.regimeTrabalho || 'mensalista',
+        regimeContratual: primary.regimeContratual || secondary?.regimeContratual || 'CLT',
+        valorHoraAula: primary.valorHoraAula !== undefined && primary.valorHoraAula !== null ? Number(primary.valorHoraAula) : (secondary?.valorHoraAula !== undefined ? Number(secondary.valorHoraAula) : undefined),
+        duracaoAulaMinutos: primary.duracaoAulaMinutos !== undefined ? Number(primary.duracaoAulaMinutos) : (secondary?.duracaoAulaMinutos || 50),
+        contractDivisorHours: primary.contractDivisorHours !== undefined ? Number(primary.contractDivisorHours) : (secondary?.contractDivisorHours || 220),
+        hourlyRate: primary.hourlyRate !== undefined ? Number(primary.hourlyRate) : secondary?.hourlyRate,
+        ajudaDeCusto: primary.ajudaDeCusto !== undefined && primary.ajudaDeCusto !== null && !isNaN(Number(primary.ajudaDeCusto))
+          ? Number(primary.ajudaDeCusto)
+          : (secondary?.ajudaDeCusto !== undefined && secondary.ajudaDeCusto !== null && !isNaN(Number(secondary.ajudaDeCusto))
+              ? Number(secondary.ajudaDeCusto)
+              : 0),
         assignedActivities: Array.isArray(primary.assignedActivities)
           ? primary.assignedActivities
           : (Array.isArray(secondary?.assignedActivities) ? secondary!.assignedActivities : MASTER_ADMIN_ACTIVITIES),
@@ -209,6 +225,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         contractSchedule: raw.contractSchedule !== undefined ? raw.contractSchedule.trim() : undefined,
         company: raw.company !== undefined ? raw.company.trim() : 'Colégio Crescer',
         baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null && !isNaN(Number(raw.baseSalary)) ? Number(raw.baseSalary) : 1200,
+        ajudaDeCusto: raw.ajudaDeCusto !== undefined && raw.ajudaDeCusto !== null && !isNaN(Number(raw.ajudaDeCusto)) ? Number(raw.ajudaDeCusto) : 0,
         updatedAt: raw.updatedAt || new Date().toISOString(),
       };
 
@@ -269,6 +286,9 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         baseSalary: winner.baseSalary !== undefined && winner.baseSalary !== null && !isNaN(Number(winner.baseSalary))
           ? Number(winner.baseSalary)
           : (fallback.baseSalary !== undefined ? fallback.baseSalary : 1200),
+        ajudaDeCusto: winner.ajudaDeCusto !== undefined && winner.ajudaDeCusto !== null && !isNaN(Number(winner.ajudaDeCusto))
+          ? Number(winner.ajudaDeCusto)
+          : (fallback.ajudaDeCusto !== undefined && fallback.ajudaDeCusto !== null && !isNaN(Number(fallback.ajudaDeCusto)) ? Number(fallback.ajudaDeCusto) : 0),
         assignedActivities: mergedActs,
         assignedTurmas: mergedTurmas,
         allowedClassIds: mergedTurmas,

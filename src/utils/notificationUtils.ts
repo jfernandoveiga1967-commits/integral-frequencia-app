@@ -213,6 +213,27 @@ export function playChimeSound(): void {
 }
 
 /**
+ * Play a distinctive and pleasant confirmation sound when a ponto punch is registered
+ */
+export function playPontoSuccessSound(): void {
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    // Ascending harmonic chime triad (C5 -> E5 -> G5)
+    playBellHarmonic(ctx, 523.25, now, 0.32, 0.22); // C5
+    playBellHarmonic(ctx, 659.25, now + 0.11, 0.42, 0.25); // E5
+    playBellHarmonic(ctx, 783.99, now + 0.23, 0.58, 0.32); // G5
+  } catch (err) {
+    console.warn('Ponto success audio playback failed:', err);
+  }
+}
+
+/**
  * Check if Web Notifications are supported in current browser
  */
 export function isNotificationSupported(): boolean {

@@ -106,9 +106,9 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   const [financialRole, setFinancialRole] = useState<string>('Conferência & Prestação de Contas');
   const [generalNotes, setGeneralNotes] = useState<string>('');
 
-  // Overrides em memória: { "2026-08-01": { manualCount: 20, unitPrice: 15, notes: "" } }
+  // Overrides em memória: { "2026-08-01": { manualCount: 20, unitPrice: 15, notes: "", isManualOverride: true } }
   const [customEntries, setCustomEntries] = useState<
-    Record<string, { manualCount?: number; unitPrice?: number; notes?: string }>
+    Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>
   >({});
 
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null);
@@ -159,6 +159,38 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       }
       const localMonth = loadMealConfig(monthKey);
 
+      const activeEnrolledCount =
+        students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length ||
+        students.length ||
+        212;
+
+      const sanitizeLoadedEntries = (
+        rawEntries?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>
+      ) => {
+        if (!rawEntries) return {};
+        const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {};
+        Object.entries(rawEntries).forEach(([dateKey, val]) => {
+          if (!val) return;
+          const isLegacy =
+            val.manualCount !== undefined &&
+            (val.manualCount >= 180 ||
+              val.manualCount === activeEnrolledCount ||
+              val.manualCount === 211 ||
+              val.manualCount === 212 ||
+              val.manualCount === 213 ||
+              val.manualCount === 214 ||
+              val.manualCount === 215 ||
+              val.manualCount === 231);
+
+          sanitized[dateKey] = {
+            ...val,
+            manualCount: isLegacy ? undefined : val.manualCount,
+            isManualOverride: isLegacy ? false : Boolean(val.isManualOverride),
+          };
+        });
+        return sanitized;
+      };
+
       // Aplica valores iniciais do cache
       const initialPrice = localMonth?.defaultUnitPrice ?? cachedGlobal?.unitPrice ?? 9.0;
       const initialProvider = localMonth?.providerName || localMonth?.contractCompany || cachedGlobal?.providerName || 'Cantina & Nutrição Escolar';
@@ -170,7 +202,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       if (localMonth?.responsibleFinancial) setResponsibleFinancial(localMonth.responsibleFinancial);
       if (localMonth?.financialRole) setFinancialRole(localMonth.financialRole);
       if (localMonth?.generalNotes) setGeneralNotes(localMonth.generalNotes);
-      if (localMonth?.entries) setCustomEntries(localMonth.entries);
+      if (localMonth?.entries) setCustomEntries(sanitizeLoadedEntries(localMonth.entries));
 
       // 2. Leitura definitiva no Firestore (settings/mealReport e mealReports/{monthKey})
       try {
@@ -193,7 +225,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           if (firestoreMonth.responsibleFinancial) setResponsibleFinancial(firestoreMonth.responsibleFinancial);
           if (firestoreMonth.financialRole) setFinancialRole(firestoreMonth.financialRole);
           if (firestoreMonth.generalNotes) setGeneralNotes(firestoreMonth.generalNotes);
-          if (firestoreMonth.entries) setCustomEntries(firestoreMonth.entries);
+          if (firestoreMonth.entries) setCustomEntries(sanitizeLoadedEntries(firestoreMonth.entries));
         } else {
           // Sem relatório específico para o mês ainda: utiliza os padrões globais do Firestore
           setDefaultUnitPrice(globalPrice);
@@ -338,6 +370,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       [dateStr]: {
         ...prev[dateStr],
         manualCount: num,
+        isManualOverride: true,
       },
     }));
   };
@@ -391,13 +424,14 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   // Aplicar preço padrão a todos os dias do período (Recálculo instantâneo geral)
   const handleApplyPriceToAll = (priceOverride?: number) => {
     const priceToApply = priceOverride !== undefined ? priceOverride : defaultUnitPrice;
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }> = { ...customEntries };
+    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = { ...customEntries };
     activeEntries.forEach((e) => {
       updated[e.date] = {
         ...updated[e.date],
         manualCount: e.manualCount,
         unitPrice: priceToApply,
         notes: e.notes || '',
+        isManualOverride: e.isManualOverride,
       };
     });
     setCustomEntries(updated);
@@ -409,19 +443,21 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     if (!window.confirm('Deseja restaurar as quantidades de alunos conforme os registros originais da chamada do sistema?')) {
       return;
     }
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }> = {};
+    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {};
     activeEntries.forEach((e) => {
       if (e.isSchoolDay) {
         updated[e.date] = {
           manualCount: e.systemCount,
           unitPrice: defaultUnitPrice,
           notes: e.holidayName || '',
+          isManualOverride: false,
         };
       } else {
         updated[e.date] = {
           manualCount: 0,
           unitPrice: defaultUnitPrice,
           notes: e.holidayName || (e.dayOfWeek === 'sabado' || e.dayOfWeek === 'domingo' ? 'Final de Semana' : ''),
+          isManualOverride: false,
         };
       }
     });
@@ -802,7 +838,17 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           </div>
 
           {/* Quick Metrics Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-0.5">
+                Total Esperados (Ativos)
+              </span>
+              <div className="flex items-baseline space-x-1.5">
+                <span className="text-xl font-black text-slate-800">{totals.totalEsperados}</span>
+                <span className="text-xs font-medium text-slate-500">esperados</span>
+              </div>
+            </div>
+
             <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-0.5">
                 Total de Refeições
@@ -833,7 +879,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
               </div>
             </div>
 
-            <div className="bg-gradient-to-br from-emerald-500 to-teal-700 p-3 rounded-2xl text-white shadow-xs">
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-700 p-3 rounded-2xl text-white shadow-xs col-span-2 sm:col-span-1">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-100 block mb-0.5">
                 Total do Período (R$)
               </span>
@@ -858,6 +904,9 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                 <tr className="bg-slate-900 text-white font-bold text-[11px] uppercase tracking-wider">
                   <th className="py-3 px-3 w-28 text-center">Data</th>
                   <th className="py-3 px-3 w-32">Dia da Semana</th>
+                  <th className="py-3 px-3 w-36 text-center" title="Total Esperados = Presenças + Faltas + Atestados + Pendentes">
+                    Total Esperados (Ativos)
+                  </th>
                   <th className="py-3 px-3 w-28 text-center" title="Presentes apurados automaticamente na chamada de rotina do dia">
                     Chamada (Auto)
                   </th>
@@ -875,7 +924,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {activeEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
+                    <td colSpan={8} className="py-8 text-center text-slate-400 font-medium">
                       Nenhum dia encontrado para o intervalo de datas selecionado.
                     </td>
                   </tr>
@@ -908,11 +957,32 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                           {e.dayLabel}
                         </td>
 
+                        {/* Total Esperados (Ativos) */}
+                        <td className="py-2 px-3 text-center">
+                          {e.isSchoolDay ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-800 border border-slate-200"
+                                title={`Total de Alunos Matriculados Ativos: ${e.totalEsperados && e.totalEsperados > 0 ? e.totalEsperados : (students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || 212)}`}
+                              >
+                                {e.totalEsperados && e.totalEsperados > 0 ? e.totalEsperados : (students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || 212)}
+                              </span>
+                              {(e.faltas || e.atestados) ? (
+                                <span className="text-[9px] text-slate-400 mt-0.5 font-medium">
+                                  {e.presentes ?? e.systemCount}P + {e.faltas ?? 0}F{e.atestados ? ` + ${e.atestados}A` : ''}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300 font-bold">-</span>
+                          )}
+                        </td>
+
                         {/* Chamada Sistema */}
                         <td className="py-2 px-3 text-center">
                           {e.isSchoolDay ? (
                             <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700"
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
                               title="Presenças registradas na chamada oficial de Rotina"
                             >
                               {e.systemCount} al
@@ -995,10 +1065,16 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
               {/* Totalizador de Rodapé */}
               <tfoot>
                 <tr className="bg-slate-900 text-white font-black text-xs">
-                  <td colSpan={3} className="py-3 px-4 text-left">
+                  <td colSpan={2} className="py-3 px-4 text-left">
                     TOTAL DO PERÍODO ({totals.attendedDaysCount} dias faturados)
                   </td>
-                  <td className="py-3 px-3 text-center text-amber-300 text-sm font-black">
+                  <td className="py-3 px-3 text-center text-slate-200 text-sm font-black whitespace-nowrap">
+                    {totals.totalEsperados} al
+                  </td>
+                  <td className="py-3 px-3 text-center text-emerald-300 text-sm font-black whitespace-nowrap">
+                    {totals.totalSystemMeals} al
+                  </td>
+                  <td className="py-3 px-3 text-center text-amber-300 text-sm font-black whitespace-nowrap">
                     {totals.totalMeals} un
                   </td>
                   <td className="py-3 px-3 text-right text-slate-300">-</td>
@@ -1010,7 +1086,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                     })}
                   </td>
                   <td className="py-3 px-3 text-slate-400 text-[11px] font-normal">
-                    Exportação em Excel inclui fórmulas ativas =D*E e =SOMA
+                    Fórmula Oficial: Total Esperados = Presenças + Faltas + Atestados
                   </td>
                 </tr>
               </tfoot>

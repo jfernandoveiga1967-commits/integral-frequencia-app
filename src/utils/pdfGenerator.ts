@@ -2827,6 +2827,8 @@ export function generateMealFinancialPDFReport(
     date: string;
     dayLabel: string;
     isSchoolDay: boolean;
+    totalEsperados?: number;
+    systemCount?: number;
     manualCount: number;
     unitPrice: number;
     total: number;
@@ -2861,7 +2863,7 @@ export function generateMealFinancialPDFReport(
 
   const avgMeals = totals.attendedDays > 0 ? (totals.totalMeals / totals.attendedDays).toFixed(1) : '0';
 
-  // 1. Header Oficial de 4 Níveis
+  // 1. Header Oficial de 4 Níveis (Compacto)
   drawOfficialHeader(
     doc,
     'Relatório Financeiro de Refeições',
@@ -2870,9 +2872,9 @@ export function generateMealFinancialPDFReport(
     'portrait'
   );
 
-  let startY = 38;
+  let startY = 31;
 
-  // 2. Summary Metric Boxes
+  // 2. Summary Metric Boxes (5 caixas compactas - sem coluna de esperados)
   const metrics = [
     { label: 'Dias com Almoço', value: `${totals.attendedDays} dias`, color: [15, 23, 42] as [number, number, number] },
     { label: 'Total Refeições', value: `${totals.totalMeals} un`, color: [79, 70, 229] as [number, number, number] },
@@ -2884,11 +2886,11 @@ export function generateMealFinancialPDFReport(
       color: [22, 163, 74] as [number, number, number],
     },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 34, 9.5, 3, metrics);
 
-  startY += 18;
+  startY += 12;
 
-  // 3. Prepare Table Data
+  // 3. Prepare Table Data (Sem coluna de esperados, exibindo refeições faturadas)
   const tableData = entries.map((e) => {
     const formattedTotal = `R$ ${e.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const formattedUnit = `R$ ${e.unitPrice.toFixed(2)}`;
@@ -2907,13 +2909,13 @@ export function generateMealFinancialPDFReport(
 
   autoTable(doc, {
     startY,
-    head: [['Data / Dia', 'Situação / Observação', 'Alunos Presentes', 'Valor Unitário', 'Total Diário']],
+    head: [['Data / Dia', 'Situação / Observação', 'Alunos / Refeições', 'Valor Unitário', 'Total Diário']],
     body: tableData,
     foot: [
       [
         'TOTAL GERAL DO PERÍODO',
         `Consolidado (${totals.attendedDays} dias faturados)`,
-        String(totals.totalMeals),
+        `${totals.totalMeals} un`,
         '-',
         totalGeralStr,
       ],
@@ -2923,19 +2925,21 @@ export function generateMealFinancialPDFReport(
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8,
+      fontSize: 7.0,
+      cellPadding: [1.0, 1.6],
       halign: 'center',
     },
     bodyStyles: {
-      fontSize: 7.2,
+      fontSize: 6.3,
       textColor: [51, 65, 85],
-      cellPadding: 2,
+      cellPadding: [0.8, 1.4],
     },
     footStyles: {
       fillColor: [30, 41, 59],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8,
+      fontSize: 7.0,
+      cellPadding: [1.0, 1.6],
       halign: 'center',
     },
     alternateRowStyles: {
@@ -2944,10 +2948,11 @@ export function generateMealFinancialPDFReport(
     columnStyles: {
       0: { cellWidth: 38, fontStyle: 'bold' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
+      2: { cellWidth: 26, halign: 'center', fontStyle: 'bold' },
       3: { cellWidth: 26, halign: 'right' },
-      4: { cellWidth: 32, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] },
+      4: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] },
     },
+    margin: { top: 43, bottom: 25, left: 14, right: 14 },
     didParseCell: (data) => {
       if (data.section === 'foot' && data.column.index === 0) {
         data.cell.styles.halign = 'left';
@@ -2958,22 +2963,18 @@ export function generateMealFinancialPDFReport(
     },
   });
 
-  // Signatures on the last page
-  const finalY = (doc as any).lastAutoTable?.finalY || 210;
-  const pageHeight = 297;
-  let sigY = finalY + 22;
+  // Signatures estritamente na mesma folha (Single-page A4)
+  const finalY = (doc as any).lastAutoTable?.finalY || 190;
 
-  if (sigY + 28 > pageHeight - 15) {
-    doc.addPage('a4', 'portrait');
-    drawOfficialHeader(
-      doc,
-      'Relatório Financeiro de Refeições (Validação)',
-      `Fechamento Oficial • Período: ${periodLabel}`,
-      [`Período: ${periodLabel}`],
-      'portrait'
-    );
-    sigY = 55;
+  if (config.generalNotes && config.generalNotes.trim()) {
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Observações: ${config.generalNotes.trim()}`, 14, Math.min(finalY + 3.5, 246));
   }
+
+  // Posiciona as assinaturas de forma fixa no rodapé da folha sem estourar
+  const sigY = Math.min(Math.max(finalY + 12, 250), 266);
 
   // Linhas de Assinatura (Apenas 2: Coordenação e Financeiro)
   doc.setDrawColor(148, 163, 184); // slate-400
@@ -2981,47 +2982,52 @@ export function generateMealFinancialPDFReport(
   doc.line(20, sigY, 90, sigY);
   doc.line(120, sigY, 190, sigY);
 
-  // Assinatura 1 - Coordenação do Integral (Padrão Vertical: Linha 1 = Nome, Linha 2 = Cargo)
-  doc.setFontSize(8.5);
+  // Assinatura 1 - Coordenação do Integral
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 41, 59);
   doc.text(
     config.responsibleCoordinator || 'Fernando Veiga',
     55,
-    sigY + 4.5,
+    sigY + 4,
     { align: 'center' }
   );
 
-  doc.setFontSize(7.2);
+  doc.setFontSize(6.8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
   doc.text(
     config.coordinatorRole || 'Coordenação do Integral / DP GAVAR',
     55,
-    sigY + 8.5,
+    sigY + 7.5,
     { align: 'center' }
   );
 
-  // Assinatura 2 - Departamento Financeiro (Padrão Vertical: Linha 1 = Nome/Depto, Linha 2 = Cargo/Função)
-  doc.setFontSize(8.5);
+  // Assinatura 2 - Departamento Financeiro
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 41, 59);
   doc.text(
     config.responsibleFinancial || 'Departamento Financeiro',
     155,
-    sigY + 4.5,
+    sigY + 4,
     { align: 'center' }
   );
 
-  doc.setFontSize(7.2);
+  doc.setFontSize(6.8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
   doc.text(
     config.financialRole || 'Conferência & Prestação de Contas',
     155,
-    sigY + 8.5,
+    sigY + 7.5,
     { align: 'center' }
   );
+
+  // Garante estritamente 1 única folha A4 eliminando qualquer quebra de página involuntária
+  while (doc.getNumberOfPages() > 1) {
+    doc.deletePage(doc.getNumberOfPages());
+  }
 
   applyPageNumbersAndFooters(doc, 'portrait');
 

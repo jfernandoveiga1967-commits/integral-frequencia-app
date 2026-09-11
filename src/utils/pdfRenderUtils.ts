@@ -1,12 +1,18 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Configure worker locally via Vite asset bundling - no external CDN or network dependency
-try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-} catch (e) {
-  console.warn('Error setting pdfjs worker:', e);
-}
+// Configuração do Worker do PDF.js com mesma origem e caminhos estáticos
+const configurePdfWorker = () => {
+  try {
+    if (typeof window !== 'undefined') {
+      // Prioriza worker da mesma origem servido pela pasta public
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.mjs`;
+    }
+  } catch (e) {
+    console.warn('Erro ao configurar worker do pdfjs:', e);
+  }
+};
+
+configurePdfWorker();
 
 export interface RenderedPdfPage {
   pageNumber: number;

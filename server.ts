@@ -15,6 +15,16 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(process.cwd(), 'public')));
 app.use('/assets', express.static(path.join(process.cwd(), 'src/assets')));
 app.use('/src/assets', express.static(path.join(process.cwd(), 'src/assets')));
+app.use(
+  '/node_modules/pdfjs-dist/build',
+  express.static(path.join(process.cwd(), 'node_modules/pdfjs-dist/build'), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.mjs') || filePath.endsWith('.js')) {
+        res.setHeader('Content-Type', 'application/javascript');
+      }
+    },
+  })
+);
 
 let aiClient: GoogleGenAI | null = null;
 

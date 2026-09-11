@@ -36,7 +36,7 @@ export interface User {
   duracaoAulaMinutos?: number;
   hourlyRate?: number;
   contractDivisorHours?: number;
-  ajudaDeCusto?: number; // Ajuda de Custo (ex: 150)
+  ajudaDeCusto?: number; // Ajuda de Custo mensal (R$)
   company?: string;
   empresa?: string; // Alias para Empresa conveniada / Vinculada
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada';

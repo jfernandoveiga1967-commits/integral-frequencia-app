@@ -246,8 +246,14 @@ export interface MealDailyEntry {
   dayLabel: string; // "Segunda-feira"
   isSchoolDay: boolean;
   holidayName?: string;
+  totalEsperados?: number; // Total dinâmico de alunos esperados (Presenças + Faltas + Atestados + Pendentes)
+  presentes?: number; // Presenças da chamada oficial
+  faltas?: number; // Faltas registradas na rotina
+  atestados?: number; // Atestados médicos / saúde
+  pendentes?: number; // Alunos pendentes de registro
   systemCount: number; // Alunos presentes calculados automaticamente pela chamada
   manualCount: number; // Quantidade de alunos (editável pelo financeiro)
+  isManualOverride?: boolean; // Se o valor foi alterado manualmente pelo usuário
   unitPrice: number; // Valor unitário da refeição (editável, ex: 9.00)
   total: number; // manualCount * unitPrice
   notes?: string;
@@ -273,7 +279,7 @@ export interface MealReportConfig {
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   defaultUnitPrice: number; // ex: 9.00
-  entries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string }>;
+  entries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>;
   contractCompany?: string; // ex: "Cantina & Nutrição Escolar"
   providerName?: string; // ex: "Cantina & Nutrição Escolar"
   responsibleCoordinator?: string;
