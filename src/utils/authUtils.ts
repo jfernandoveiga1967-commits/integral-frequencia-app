@@ -1,4 +1,5 @@
 import { UserProfile, UserRole, ActivityType } from '../types';
+import { REMOVED_CATEGORY_NAMES } from '../data/initialData';
 
 export const ADMIN_EMAIL = 'jfernandoveiga1967@gmail.com';
 
@@ -42,19 +43,20 @@ export const PRESET_USERS: UserProfile[] = [
     birthDate: '1992-04-20',
     pin: '20/04/1992',
     status: 'ATIVO',
-    assignedActivities: ['Culinária', 'Rotina'],
+    assignedActivities: ['Culinária'],
     assignedTurmas: MASTER_ADMIN_TURMAS,
     allowedClassIds: MASTER_ADMIN_TURMAS,
     canManageStudents: false,
     canMarkAttendance: true,
-    company: 'Acesso Nutri / Colégio Crescer',
-    contractSchedule: '08:00 - 17:00',
-    contractDailyHours: 8,
-    contractDailyMinutes: 480,
-    contractDailyHoursFormatted: '8h 00min',
+    company: 'Nutri / Colégio Crescer',
+    workShiftType: 'continua_6h',
+    contractSchedule: '08:00 - 14:00',
+    contractDailyHours: 6,
+    contractDailyMinutes: 360,
+    contractDailyHoursFormatted: '6h 00min',
     baseSalary: 0,
     regimeTrabalho: 'mensalista',
-    regimeContratual: 'Prestador de Serviço',
+    regimeContratual: 'Jornada Contínua / Mensalista (6h)',
     contractDivisorHours: 220,
     ajudaDeCusto: 0,
   },
@@ -115,6 +117,37 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       if (!rawId) {
         rawId = 'usr_anaclaragarcia';
       }
+    }
+
+    // 2b. Consolidação e integridade do perfil: Thaís Grisoni Baroni (Nutricionista)
+    const isThais =
+      rawId === 'usr_nutri_1' ||
+      rawNameLower.includes('thaís grisoni') ||
+      rawNameLower.includes('thais grisoni') ||
+      rawEmailLower.includes('thaisgriisoni') ||
+      rawEmailLower.includes('acessonutri');
+
+    if (isThais) {
+      rawId = 'usr_nutri_1';
+      rawName = 'Thaís Grisoni Baroni';
+      if (!rawEmail || rawEmail.includes('acessonutri')) {
+        rawEmail = 'thaisgriisoni@gmail.com';
+      }
+      const existingActs = Array.isArray(raw.assignedActivities) ? raw.assignedActivities : [];
+      const cleanedActs = existingActs.filter((a) => a && !REMOVED_CATEGORY_NAMES.has(a));
+      if (!cleanedActs.includes('Culinária')) {
+        cleanedActs.push('Culinária');
+      }
+      raw.assignedActivities = cleanedActs;
+      raw.cargoLabel = raw.cargoLabel || 'Nutricionista (CRN: 84367)';
+      raw.regimeTrabalho = 'mensalista';
+      raw.regimeContratual = 'Jornada Contínua / Mensalista (6h)';
+      raw.company = 'Nutri / Colégio Crescer';
+      raw.empresa = 'Nutri / Colégio Crescer';
+      raw.workShiftType = 'continua_6h';
+      raw.contractDailyHours = 6;
+      raw.contractDailyMinutes = 360;
+      raw.contractDailyHoursFormatted = '6h 00min';
     }
 
     // 3. Identificar se é o Coordenador Geral (Fernando Veiga)
@@ -227,6 +260,10 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const rawStatus = (raw.status || 'ATIVO').toUpperCase() as any;
       const status = rawStatus || 'ATIVO';
 
+      const cleanAssignedActivities = (Array.isArray(raw.assignedActivities) ? raw.assignedActivities : []).filter(
+        (a) => a && !REMOVED_CATEGORY_NAMES.has(a)
+      );
+
       const singleProfile: UserProfile = {
         ...raw,
         id: canonicalId,
@@ -238,18 +275,26 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         status,
         dataDesligamento: raw.dataDesligamento || undefined,
         motivoDesligamento: raw.motivoDesligamento || undefined,
-        workShiftType: raw.workShiftType || undefined,
+        workShiftType: (isThais || canonicalId === 'usr_nutri_1') ? 'continua_6h' : (raw.workShiftType || undefined),
         birthDate: raw.birthDate || '1995-01-01',
         pin: raw.pin || '1234',
-        assignedActivities: Array.isArray(raw.assignedActivities) ? raw.assignedActivities : [],
+        assignedActivities: (isThais || canonicalId === 'usr_nutri_1')
+          ? (cleanAssignedActivities.includes('Culinária') ? cleanAssignedActivities : [...cleanAssignedActivities, 'Culinária'])
+          : cleanAssignedActivities,
         assignedTurmas: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : (Array.isArray(raw.assignedTurmas) ? raw.assignedTurmas : []),
         allowedClassIds: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : (Array.isArray(raw.assignedTurmas) ? raw.assignedTurmas : []),
         canManageStudents: raw.canManageStudents !== undefined ? raw.canManageStudents : true,
         canMarkAttendance: raw.canMarkAttendance !== undefined ? raw.canMarkAttendance : true,
         phone: raw.phone !== undefined ? raw.phone.trim() : undefined,
         pixKey: raw.pixKey !== undefined ? raw.pixKey.trim() : undefined,
-        contractSchedule: raw.contractSchedule !== undefined ? raw.contractSchedule.trim() : undefined,
-        company: raw.company !== undefined ? raw.company.trim() : 'Colégio Crescer',
+        contractSchedule: (isThais || canonicalId === 'usr_nutri_1') ? '08:00 - 14:00' : (raw.contractSchedule !== undefined ? raw.contractSchedule.trim() : undefined),
+        company: (isThais || canonicalId === 'usr_nutri_1') ? 'Nutri / Colégio Crescer' : (raw.company !== undefined ? raw.company.trim() : 'Colégio Crescer'),
+        empresa: (isThais || canonicalId === 'usr_nutri_1') ? 'Nutri / Colégio Crescer' : (raw.empresa !== undefined ? raw.empresa.trim() : undefined),
+        regimeTrabalho: (isThais || canonicalId === 'usr_nutri_1') ? 'mensalista' : (raw.regimeTrabalho || 'mensalista'),
+        regimeContratual: (isThais || canonicalId === 'usr_nutri_1') ? 'Jornada Contínua / Mensalista (6h)' : raw.regimeContratual,
+        contractDailyHours: (isThais || canonicalId === 'usr_nutri_1') ? 6 : raw.contractDailyHours,
+        contractDailyMinutes: (isThais || canonicalId === 'usr_nutri_1') ? 360 : raw.contractDailyMinutes,
+        contractDailyHoursFormatted: (isThais || canonicalId === 'usr_nutri_1') ? '6h 00min' : raw.contractDailyHoursFormatted,
         baseSalary: raw.baseSalary !== undefined && raw.baseSalary !== null && !isNaN(Number(raw.baseSalary)) ? Number(raw.baseSalary) : 1200,
         ajudaDeCusto: raw.ajudaDeCusto !== undefined && raw.ajudaDeCusto !== null && !isNaN(Number(raw.ajudaDeCusto)) ? Number(raw.ajudaDeCusto) : 0,
         updatedAt: raw.updatedAt || new Date().toISOString(),
@@ -273,9 +318,16 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const avatarColor = winner.avatarColor || fallback.avatarColor || (mergedRole === 'coordenador' ? 'bg-amber-500' : 'bg-indigo-600');
       const mergedStatus = winner.status || fallback.status || 'ATIVO';
 
-      const mergedActs = Array.isArray(winner.assignedActivities)
+      const rawMergedActs = Array.isArray(winner.assignedActivities)
         ? winner.assignedActivities
         : (Array.isArray(fallback.assignedActivities) ? fallback.assignedActivities : []);
+      let mergedActs = rawMergedActs.filter((a) => a && !REMOVED_CATEGORY_NAMES.has(a));
+
+      if (canonicalId === 'usr_nutri_1' || isThais) {
+        if (!mergedActs.includes('Culinária')) {
+          mergedActs.push('Culinária');
+        }
+      }
 
       const winnerTurmas = Array.isArray(winner.allowedClassIds)
         ? winner.allowedClassIds
@@ -286,6 +338,8 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const mergedTurmas = winnerTurmas !== undefined ? winnerTurmas : (fallbackTurmas !== undefined ? fallbackTurmas : []);
 
       const mergedName = (winner.name && winner.name.trim()) || fallback.name || 'Colaborador';
+
+      const isThaisProfile = canonicalId === 'usr_nutri_1' || isThais;
 
       const mergedProfile: UserProfile = {
         ...fallback,
@@ -299,16 +353,19 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         status: mergedStatus as any,
         dataDesligamento: winner.dataDesligamento !== undefined ? winner.dataDesligamento : fallback.dataDesligamento,
         motivoDesligamento: winner.motivoDesligamento !== undefined ? winner.motivoDesligamento : fallback.motivoDesligamento,
-        workShiftType: winner.workShiftType !== undefined ? winner.workShiftType : fallback.workShiftType,
+        workShiftType: isThaisProfile ? 'continua_6h' : (winner.workShiftType !== undefined ? winner.workShiftType : fallback.workShiftType),
         phone: winner.phone !== undefined ? winner.phone : fallback.phone,
         pixKey: winner.pixKey !== undefined ? winner.pixKey : fallback.pixKey,
         birthDate: winner.birthDate || fallback.birthDate || '1995-01-01',
         pin: winner.pin || fallback.pin || '1234',
-        contractSchedule: winner.contractSchedule !== undefined ? winner.contractSchedule : fallback.contractSchedule,
-        contractDailyHours: winner.contractDailyHours !== undefined ? winner.contractDailyHours : fallback.contractDailyHours,
-        contractDailyMinutes: winner.contractDailyMinutes !== undefined ? winner.contractDailyMinutes : fallback.contractDailyMinutes,
-        contractDailyHoursFormatted: winner.contractDailyHoursFormatted !== undefined ? winner.contractDailyHoursFormatted : fallback.contractDailyHoursFormatted,
-        company: winner.company !== undefined ? winner.company : fallback.company,
+        contractSchedule: isThaisProfile ? '08:00 - 14:00' : (winner.contractSchedule !== undefined ? winner.contractSchedule : fallback.contractSchedule),
+        contractDailyHours: isThaisProfile ? 6 : (winner.contractDailyHours !== undefined ? winner.contractDailyHours : fallback.contractDailyHours),
+        contractDailyMinutes: isThaisProfile ? 360 : (winner.contractDailyMinutes !== undefined ? winner.contractDailyMinutes : fallback.contractDailyMinutes),
+        contractDailyHoursFormatted: isThaisProfile ? '6h 00min' : (winner.contractDailyHoursFormatted !== undefined ? winner.contractDailyHoursFormatted : fallback.contractDailyHoursFormatted),
+        company: isThaisProfile ? 'Nutri / Colégio Crescer' : (winner.company !== undefined ? winner.company : fallback.company),
+        empresa: isThaisProfile ? 'Nutri / Colégio Crescer' : (winner.empresa !== undefined ? winner.empresa : fallback.empresa),
+        regimeTrabalho: isThaisProfile ? 'mensalista' : (winner.regimeTrabalho || fallback.regimeTrabalho),
+        regimeContratual: isThaisProfile ? 'Jornada Contínua / Mensalista (6h)' : (winner.regimeContratual || fallback.regimeContratual),
         baseSalary: winner.baseSalary !== undefined && winner.baseSalary !== null && !isNaN(Number(winner.baseSalary))
           ? Number(winner.baseSalary)
           : (fallback.baseSalary !== undefined ? fallback.baseSalary : 1200),
@@ -333,6 +390,11 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
   // Garantir que Fernando Veiga esteja sempre presente
   if (!userById.has('usr_coord_1')) {
     userById.set('usr_coord_1', PRESET_USERS[0]);
+  }
+
+  // Garantir que Thaís Grisoni Baroni esteja sempre presente
+  if (!userById.has('usr_nutri_1')) {
+    userById.set('usr_nutri_1', PRESET_USERS[1]);
   }
 
   const result = Array.from(userById.values());

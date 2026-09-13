@@ -1,5 +1,5 @@
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, ContractType, UserProfile } from '../types';
-import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS } from '../data/initialData';
+import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
@@ -751,16 +751,7 @@ export function saveSchedules(schedules: ScheduleBlock[]): void {
   }
 }
 
-export const REMOVED_CATEGORY_NAMES = new Set([
-  'Estimulação Psicomotora',
-  'Estimulação Motora',
-  'Estimulação Psicomotora / Motora',
-  'Jogos de Tabuleiro',
-  'Oficina Pedagógica',
-  'Recreação Dirigida',
-  'Relaxamento',
-  'Tarefas Escolares',
-]);
+export { REMOVED_CATEGORY_NAMES };
 
 export function loadActivities(): ActivityItem[] {
   try {
@@ -789,9 +780,13 @@ export function loadActivities(): ActivityItem[] {
           };
         });
 
-        // Ensure all default official activities are present
+        // Ensure all default official activities are present (excluding obsolete)
         ACTIVITIES_LIST.forEach((officialAct) => {
-          if (!enriched.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
+          if (
+            !REMOVED_CATEGORY_NAMES.has(officialAct.id) &&
+            !REMOVED_CATEGORY_NAMES.has(officialAct.name) &&
+            !enriched.some((a) => a.id === officialAct.id || a.name === officialAct.name)
+          ) {
             enriched.push({ ...officialAct });
           }
         });

@@ -1,6 +1,7 @@
+// Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
 import {
   loadStudents,
@@ -31,6 +32,7 @@ import {
   isMockStudent,
   checkAndInactivateExpiredTemporaryStudents,
 } from './utils/storageUtils';
+import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas } from './utils/atribuicoesStorage';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
@@ -65,6 +67,10 @@ import {
   saveSemanarioPlanToFirestore,
   deleteSemanarioPlanFromFirestore,
   batchSaveSemanarioPlansToFirestore,
+  subscribeQuadroAtribuicoes,
+  saveTurmaAtribuicaoToFirestore,
+  batchSaveQuadroAtribuicoesToFirestore,
+  deleteTurmaAtribuicaoFromFirestore,
   saveStudentToFirestore,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
@@ -115,6 +121,7 @@ export default function App() {
   const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
   const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
   const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
+  const [quadroAtribuicoes, setQuadroAtribuicoes] = useState<TurmaAtribuicao[]>(() => loadLocalQuadroAtribuicoes());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>({
@@ -323,6 +330,14 @@ export default function App() {
           if (Array.isArray(updatedUsers)) {
             setUsers(updatedUsers);
             saveLocalUsersList(updatedUsers);
+          }
+          break;
+        }
+        case 'SYNC_QUADRO_ATRIBUICOES': {
+          const updatedAtribuicoes = message.payload as TurmaAtribuicao[];
+          if (Array.isArray(updatedAtribuicoes)) {
+            setQuadroAtribuicoes(updatedAtribuicoes);
+            saveLocalQuadroAtribuicoes(updatedAtribuicoes);
           }
           break;
         }
@@ -583,6 +598,19 @@ export default function App() {
       }
     });
 
+    const unsubQuadro = subscribeQuadroAtribuicoes((fsAtribuicoes) => {
+      if (fsAtribuicoes && fsAtribuicoes.length > 0) {
+        setQuadroAtribuicoes(fsAtribuicoes);
+        saveLocalQuadroAtribuicoes(fsAtribuicoes);
+      } else {
+        const local = loadLocalQuadroAtribuicoes();
+        if (local && local.length > 0) {
+          setQuadroAtribuicoes(local);
+          batchSaveQuadroAtribuicoesToFirestore(local);
+        }
+      }
+    });
+
     return () => {
       cleanupConnectivity();
       unsubStatus();
@@ -597,6 +625,7 @@ export default function App() {
       unsubPontoRecords();
       unsubPontoClosings();
       unsubSemanario();
+      unsubQuadro();
     };
   }, []);
 
@@ -843,6 +872,31 @@ export default function App() {
     saveTurmas(updated);
     broadcastSyncEvent('SYNC_TURMAS', updated);
     saveTurmaToFirestore(name);
+
+    // Integração com o Quadro de Atribuições: cria automaticamente a atribuição para a nova turma
+    const safeId = `atrib_${name.replace(/\s+/g, '_').toLowerCase()}`;
+    const newAtribuicao: TurmaAtribuicao = {
+      id: safeId,
+      turma: name,
+      monitoraName: '',
+      monitoraPhone: '',
+      monitoraAssistenteName: '',
+      monitoraAssistentePhone: '',
+      adiName: '',
+      adiPhone: '',
+      horarioTurno: '11:40 às 17:40',
+      espacoBase: name,
+      observacao: 'Atribuição da turma.',
+    };
+    setQuadroAtribuicoes((prev) => {
+      const filtered = prev.filter((a) => a.turma !== name);
+      const nextList = [...filtered, newAtribuicao];
+      saveLocalQuadroAtribuicoes(nextList);
+      broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
+      return nextList;
+    });
+    saveTurmaAtribuicaoToFirestore(newAtribuicao);
+
     return true;
   };
 
@@ -852,6 +906,15 @@ export default function App() {
     saveTurmas(updatedTurmas);
     broadcastSyncEvent('SYNC_TURMAS', updatedTurmas);
     deleteTurmaFromFirestore(turmaName);
+
+    // Integração com o Quadro de Atribuições: remove imediatamente a atribuição correspondente
+    setQuadroAtribuicoes((prev) => {
+      const nextList = prev.filter((a) => a.turma !== turmaName);
+      saveLocalQuadroAtribuicoes(nextList);
+      broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
+      return nextList;
+    });
+    deleteTurmaAtribuicaoFromFirestore(turmaName);
 
     if (deleteStudents) {
       // Remove all students belonging to this turma
@@ -1213,6 +1276,35 @@ export default function App() {
     batchSaveSemanarioPlansToFirestore(plansToSave);
   }, []);
 
+  const handleSaveTurmaAtribuicao = useCallback((item: TurmaAtribuicao) => {
+    setQuadroAtribuicoes((prev) => {
+      const idx = prev.findIndex((a) => a.turma === item.turma);
+      let next: TurmaAtribuicao[];
+      if (idx >= 0) {
+        next = [...prev];
+        next[idx] = item;
+      } else {
+        next = [...prev, item];
+      }
+      saveLocalQuadroAtribuicoes(next);
+      broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', next);
+      return next;
+    });
+    saveTurmaAtribuicaoToFirestore(item);
+  }, []);
+
+  const handleBatchSaveQuadroAtribuicoes = useCallback((items: TurmaAtribuicao[]) => {
+    setQuadroAtribuicoes(items);
+    saveLocalQuadroAtribuicoes(items);
+    broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', items);
+    batchSaveQuadroAtribuicoesToFirestore(items);
+  }, []);
+
+  // Quadro de Atribuições estritamente alinhado às turmas ativas de Alunos e Turmas
+  const effectiveQuadroAtribuicoes = useMemo(() => {
+    return reconcileAtribuicoesWithTurmas(quadroAtribuicoes, turmas);
+  }, [quadroAtribuicoes, turmas]);
+
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
     if (date) {
@@ -1378,6 +1470,9 @@ export default function App() {
             selectedDate={selectedDate}
             currentUser={currentUser}
             users={users}
+            quadroAtribuicoes={effectiveQuadroAtribuicoes}
+            onSaveAtribuicao={handleSaveTurmaAtribuicao}
+            onBatchSaveAtribuicoes={handleBatchSaveQuadroAtribuicoes}
             onUpdateUserPhone={handleUpdateUserPhone}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}

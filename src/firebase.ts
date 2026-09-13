@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDoc,
   getDocFromServer,
@@ -19,7 +20,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings } from './types';
+import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
@@ -36,7 +37,15 @@ import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MAS
 export { doc, getDoc, updateDoc, deleteDoc };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Inicializa Firestore com experimentalForceLongPolling: true para garantir conexão estável e imediata
+// sem sofrer com timeouts de 10s de WebChannel em ambientes com iframes ou proxies.
+export const db = initializeFirestore(
+  app,
+  {
+    experimentalForceLongPolling: true,
+  },
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 
 export enum OperationType {
@@ -124,7 +133,7 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
       });
 
     const timeoutPromise = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), 2500);
+      setTimeout(() => resolve(false), 5000);
     });
 
     const success = await Promise.race([pingPromise, timeoutPromise]);
@@ -2195,3 +2204,81 @@ export async function getCookingRecipesFromFirestore(monthKey: string): Promise<
   }
   return null;
 }
+
+/**
+ * Inscreve-se nas atualizações em tempo real do Quadro de Atribuições (quadroAtribuicoes)
+ */
+export function subscribeQuadroAtribuicoes(
+  onData: (items: TurmaAtribuicao[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'quadroAtribuicoes');
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      const list: TurmaAtribuicao[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as TurmaAtribuicao;
+        list.push({ ...data, id: d.id });
+      });
+      onData(list);
+    },
+    (error) => {
+      console.warn('Erro ao escutar quadroAtribuicoes no Firestore:', error);
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'quadroAtribuicoes');
+    }
+  );
+}
+
+/**
+ * Salva uma atribuição de turma no Firestore (quadroAtribuicoes/{safeId})
+ */
+export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Promise<void> {
+  const safeId = item.id || `atrib_${item.turma.replace(/\s+/g, '_').toLowerCase()}`;
+  try {
+    const docRef = doc(db, 'quadroAtribuicoes', safeId);
+    const payload = {
+      ...item,
+      id: safeId,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn('Erro ao salvar atribuição no Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `quadroAtribuicoes/${safeId}`);
+  }
+}
+
+/**
+ * Salva um lote de atribuições no Firestore
+ */
+export async function batchSaveQuadroAtribuicoesToFirestore(items: TurmaAtribuicao[]): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+    items.forEach((item) => {
+      const safeId = item.id || `atrib_${item.turma.replace(/\s+/g, '_').toLowerCase()}`;
+      const docRef = doc(db, 'quadroAtribuicoes', safeId);
+      batch.set(docRef, { ...item, id: safeId, updatedAt: new Date().toISOString() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    console.warn('Erro ao salvar lote de atribuições no Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'quadroAtribuicoes/batch');
+  }
+}
+
+/**
+ * Remove uma atribuição de turma do Firestore (quadroAtribuicoes/{safeId})
+ */
+export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Promise<void> {
+  const safeId = `atrib_${turmaName.replace(/\s+/g, '_').toLowerCase()}`;
+  try {
+    const docRef = doc(db, 'quadroAtribuicoes', safeId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn('Erro ao excluir atribuição no Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `quadroAtribuicoes/${safeId}`);
+  }
+}
+

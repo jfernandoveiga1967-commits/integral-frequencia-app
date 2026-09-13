@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { UserProfile, User, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho } from '../types';
-import { TURMAS_LIST } from '../data/initialData';
+import { TURMAS_LIST, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import {
   getRoleBadgeStyle,
   isCoordenador,
@@ -345,6 +345,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const filteredActivities = useMemo(() => {
     return (activitiesList || []).filter((act) => {
       if (!act) return false;
+      // Exclui modalidades obsoletas permanentemente
+      if (REMOVED_CATEGORY_NAMES.has(act.id) || REMOVED_CATEGORY_NAMES.has(act.name)) {
+        return false;
+      }
+
       const search = activitySearchTerm.toLowerCase().trim();
       const matchesSearch =
         !search ||
@@ -368,7 +373,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     });
   }, [activitiesList, activitySearchTerm, activityTypeFilter]);
 
-  // Modalidades extracurriculares que exigem chamada individual (inclui "Rotina" e modalidades com requiresRollCall: true, excluindo blocos gerais informativos de rotina que não possuem chamada)
+  // Modalidades extracurriculares que exigem chamada individual (inclui "Rotina", "Culinária" e modalidades com requiresRollCall: true, excluindo blocos gerais informativos de rotina que não possuem chamada)
   const rollCallExtracurriculars = useMemo(() => {
     const nonRollCallRoutineKeywords = [
       'acolhimento',
@@ -394,16 +399,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     return (activitiesList || []).filter((act) => {
       if (!act) return false;
-      // Deve exigir chamada
-      if (act.requiresRollCall === false || (act as any).exigeChamada === false) {
+      // Exclui modalidades obsoletas permanentemente
+      if (REMOVED_CATEGORY_NAMES.has(act.id) || REMOVED_CATEGORY_NAMES.has(act.name)) {
         return false;
       }
+
       const norm = (act.name || act.id || '').toLowerCase().trim();
       const normNoAccent = norm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-      // Se for a atividade oficial "Rotina", sempre inclui
-      if (norm === 'rotina' || normNoAccent === 'rotina') {
+      // Modalidades oficiais que sempre devem estar disponíveis no painel de atribuição
+      if (norm === 'rotina' || normNoAccent === 'rotina' || norm === 'culinaria' || normNoAccent === 'culinaria') {
         return true;
+      }
+
+      // Deve exigir chamada
+      if (act.requiresRollCall === false || (act as any).exigeChamada === false) {
+        return false;
       }
 
       // Exclui termos de rotina secundária/informativa
@@ -437,11 +448,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
+    const isThaisUser =
+      user.id === 'usr_nutri_1' ||
+      (user.name && (user.name.toLowerCase().includes('thaís') || user.name.toLowerCase().includes('thais')));
+
     setFormStatus(getUserStatus(user));
     setFormDataDesligamento(user.dataDesligamento || '');
     setFormMotivoDesligamento(user.motivoDesligamento || '');
     setFormPin(user.pin || '1234');
-    setFormActivities(user.assignedActivities || activitiesList.map((a) => a.id));
+
+    const cleanActs = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
+      (a) => !REMOVED_CATEGORY_NAMES.has(a)
+    );
+    if (isThaisUser && !cleanActs.includes('Culinária')) {
+      cleanActs.push('Culinária');
+    }
+    setFormActivities(cleanActs);
     setFormTurmas(
       Array.isArray(user.allowedClassIds)
         ? user.allowedClassIds
@@ -451,14 +473,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
     setFormPixKey(user.pixKey || user.phone || '');
 
-    const shiftType = user.workShiftType || (isContinuousShift(user, user.contractSchedule) ? 'continua_6h' : 'padrao_8h');
+    const shiftType = isThaisUser
+      ? 'continua_6h'
+      : (user.workShiftType || (isContinuousShift(user, user.contractSchedule) ? 'continua_6h' : 'padrao_8h'));
     setFormWorkShiftType(shiftType);
 
-    const sched = user.contractSchedule || (shiftType === 'continua_6h' ? '11:40 - 17:40' : '');
+    const sched = user.contractSchedule || (shiftType === 'continua_6h' ? (isThaisUser ? '08:00 - 14:00' : '11:40 - 17:40') : '');
     setFormContractSchedule(sched);
     const calc = calculateDailyHoursFromSchedule(sched);
 
-    if (user.contractDailyHoursFormatted) {
+    if (isThaisUser) {
+      setFormContractDailyHours(6);
+      setFormContractDailyHoursFormatted('6h 00min');
+      setFormContractDailyMinutes(360);
+    } else if (user.contractDailyHoursFormatted) {
       setFormContractDailyHoursFormatted(user.contractDailyHoursFormatted);
       setFormContractDailyMinutes(user.contractDailyMinutes || parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted));
       setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : calc.dailyHours);
@@ -482,17 +510,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
-    const initialRegime: RegimeTrabalho =
-      user.regimeTrabalho === 'professor_horista' ||
-      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
-        ? 'professor_horista'
-        : 'mensalista';
+    const initialRegime: RegimeTrabalho = isThaisUser
+      ? 'mensalista'
+      : (user.regimeTrabalho === 'professor_horista' ||
+         (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
+          ? 'professor_horista'
+          : 'mensalista');
     setFormRegimeTrabalho(initialRegime);
     setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
     setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
     setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
-    setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
+    setFormCompany(isThaisUser ? 'Nutri / Colégio Crescer' : (user.empresa || user.company || 'GADAL - Gestão e Apoio'));
   };
 
   const handleReloadUsers = async () => {
@@ -641,23 +670,34 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       parsedAjudaDeCusto = 0;
     }
 
+    const isThaisUser =
+      (editingUser && editingUser.id === 'usr_nutri_1') ||
+      cleanName.toLowerCase().includes('thaís grisoni') ||
+      cleanName.toLowerCase().includes('thais grisoni') ||
+      normalizedEmail.includes('thaisgriisoni') ||
+      normalizedEmail.includes('acessonutri');
+
     const targetId = isMasterAdmin
       ? 'usr_coord_1'
-      : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
+      : (isThaisUser ? 'usr_nutri_1' : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now())));
 
-    const effectiveActivities = (formActivities && formActivities.length > 0)
-      ? formActivities
+    let effectiveActivities = (formActivities && formActivities.length > 0)
+      ? formActivities.filter((a) => !REMOVED_CATEGORY_NAMES.has(a))
       : (isMasterAdmin ? ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'] : []);
+
+    if (isThaisUser && !effectiveActivities.includes('Culinária')) {
+      effectiveActivities = [...effectiveActivities, 'Culinária'];
+    }
 
     const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : (isMasterAdmin ? 0 : 1200);
     
     // Resolve precise minutes and formatted daily hours string
-    let resolvedMinutes = formWorkShiftType === 'padrao_8h' ? 528 : (isMasterAdmin ? 480 : 360);
-    if (formContractDailyMinutes && !isNaN(Number(formContractDailyMinutes)) && Number(formContractDailyMinutes) > 0) {
+    let resolvedMinutes = isThaisUser ? 360 : (formWorkShiftType === 'padrao_8h' ? 528 : (isMasterAdmin ? 480 : 360));
+    if (!isThaisUser && formContractDailyMinutes && !isNaN(Number(formContractDailyMinutes)) && Number(formContractDailyMinutes) > 0) {
       resolvedMinutes = Math.round(Number(formContractDailyMinutes));
     }
     
-    if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
+    if (!isThaisUser && formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
       try {
         const parsed = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
         if (!isNaN(parsed) && parsed > 0) {
@@ -666,12 +706,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       } catch (err) {
         console.warn('Formato de carga horária inválido, mantendo valor calculado:', err);
       }
-    } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
+    } else if (!isThaisUser && formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
       const parsedHours = Number(formContractDailyHours);
       if (parsedHours > 0) {
         resolvedMinutes = Math.round(parsedHours * 60);
       }
-    } else if (formContractSchedule.trim()) {
+    } else if (!isThaisUser && formContractSchedule.trim()) {
       try {
         const calc = calculateDailyHoursFromSchedule(formContractSchedule);
         if (calc.workedMinutes > 0) {
@@ -686,8 +726,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       resolvedMinutes = 480;
     }
 
-    const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
-    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
+    const formattedHoursStr = isThaisUser ? '6h 00min' : formatMinutesToHoursAndMinutes(resolvedMinutes);
+    const decimalHours = isThaisUser ? 6 : Number((resolvedMinutes / 60).toFixed(2));
 
     const effectiveStatus: UserStatus = isMasterAdmin ? 'ATIVO' : formStatus;
     const effectiveDataDesligamento =
@@ -699,7 +739,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         ? formMotivoDesligamento.trim()
         : undefined;
 
-    const finalSchedule = formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined);
+    const finalSchedule = isThaisUser
+      ? (formContractSchedule.trim() || '08:00 - 14:00')
+      : (formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined));
     let userHorarioInicio = (editingUser?.horarioInicio || '').trim();
     let userHorarioFim = (editingUser?.horarioFim || '').trim();
     if (finalSchedule) {
@@ -736,8 +778,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
-      regimeTrabalho: formRegimeTrabalho,
-      regimeContratual: formRegimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT',
+      regimeTrabalho: isThaisUser ? 'mensalista' : formRegimeTrabalho,
+      regimeContratual: isThaisUser
+        ? 'Jornada Contínua / Mensalista (6h)'
+        : (formRegimeTrabalho === 'professor_horista'
+            ? 'Prof. Horista'
+            : (editingUser?.regimeContratual || (formWorkShiftType === 'continua_6h' ? 'Jornada Contínua / Mensalista (6h)' : 'CLT'))),
       valorHoraAula: formRegimeTrabalho === 'professor_horista' ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
@@ -745,9 +791,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         ? (parsedHoraAula || 0)
         : Number((parsedSalary / (Number(formContractDivisorHours) || 220)).toFixed(4)),
       ajudaDeCusto: parsedAjudaDeCusto,
-      company: formCompany.trim() || 'GADAL - Gestão e Apoio',
-      empresa: formCompany.trim() || 'GADAL - Gestão e Apoio',
-      workShiftType: formWorkShiftType,
+      company: isThaisUser ? 'Nutri / Colégio Crescer' : (formCompany.trim() || 'GADAL - Gestão e Apoio'),
+      empresa: isThaisUser ? 'Nutri / Colégio Crescer' : (formCompany.trim() || 'GADAL - Gestão e Apoio'),
+      workShiftType: isThaisUser ? 'continua_6h' : formWorkShiftType,
       updatedAt: new Date().toISOString(),
     };
 
@@ -867,14 +913,33 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleToggleUserActivity = async (user: UserProfile, activityId: ActivityType) => {
-    const currentList = user.assignedActivities || activitiesList.map((a) => a.id);
+    const isThaisUser =
+      user.id === 'usr_nutri_1' ||
+      (user.name && (user.name.toLowerCase().includes('thaís') || user.name.toLowerCase().includes('thais')));
+
+    const currentList = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
+      (a) => !REMOVED_CATEGORY_NAMES.has(a)
+    );
     const exists = currentList.includes(activityId);
-    const newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
+    let newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
+
+    if (isThaisUser && !newList.includes('Culinária')) {
+      newList.push('Culinária');
+    }
 
     const updated: UserProfile = {
       ...user,
       assignedActivities: newList,
       updatedAt: new Date().toISOString(),
+      ...(isThaisUser
+        ? {
+            company: 'Nutri / Colégio Crescer',
+            empresa: 'Nutri / Colégio Crescer',
+            regimeContratual: 'Jornada Contínua / Mensalista (6h)',
+            regimeTrabalho: 'mensalista' as const,
+            workShiftType: 'continua_6h' as const,
+          }
+        : {}),
     };
     try {
       await Promise.resolve(onSaveUser(updated));
@@ -886,7 +951,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleAssignAllActivities = async (user: UserProfile) => {
-    const allIds = activitiesList.map((a) => a.id);
+    const allIds = activitiesList
+      .filter((a) => !REMOVED_CATEGORY_NAMES.has(a.id) && !REMOVED_CATEGORY_NAMES.has(a.name))
+      .map((a) => a.id);
     const updated: UserProfile = {
       ...user,
       assignedActivities: allIds,
@@ -1403,7 +1470,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             ) : (
               filteredUsers.map((user) => {
                 const roleStyle = getRoleBadgeStyle(user.role);
-                const userActivities = user.assignedActivities || activitiesList.map((a) => a.id);
+                const userActivities = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
+                  (a) => !REMOVED_CATEGORY_NAMES.has(a)
+                );
                 const userTurmas = Array.isArray(user.allowedClassIds)
                   ? user.allowedClassIds
                   : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas);
@@ -1815,7 +1884,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             </div>
 
                             <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
-                              {activitiesList.map((act) => {
+                              {activitiesList
+                                .filter((act) => !REMOVED_CATEGORY_NAMES.has(act.id) && !REMOVED_CATEGORY_NAMES.has(act.name))
+                                .map((act) => {
                                 const isAssigned = userActivities.includes(act.id);
                                 return (
                                   <button

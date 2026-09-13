@@ -11,6 +11,17 @@ export const OFFICIAL_ROLL_CALL_MODALITIES: ActivityType[] = [
   'Natação',
 ];
 
+export const REMOVED_CATEGORY_NAMES = new Set<string>([
+  'Estimulação Psicomotora',
+  'Estimulação Motora',
+  'Estimulação Psicomotora / Motora',
+  'Jogos de Tabuleiro',
+  'Oficina Pedagógica',
+  'Recreação Dirigida',
+  'Relaxamento',
+  'Tarefas Escolares',
+]);
+
 export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Acolhimento', name: 'Acolhimento', icon: 'HeartHandshake', description: 'Acolhimento, Roda de Conversa e integração dos alunos', defaultEquipment: 'Almofadas e agenda escolar', requiresRollCall: false },
   { id: 'Almoço', name: 'Almoço', icon: 'Utensils', description: 'Momento de refeição, hábitos nutricionais e autonomia', defaultEquipment: 'Kit de higiene bucal', requiresRollCall: false },

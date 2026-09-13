@@ -29,6 +29,10 @@ import {
   CalendarOff,
   MessageSquare,
   Phone,
+  Send,
+  Edit3,
+  UserCheck,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   Student,
@@ -42,10 +46,13 @@ import {
   UserProfile,
   DayOfWeek,
   AttendanceStatus,
+  TurmaAtribuicao,
 } from '../types';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
+import { ApoioWhatsAppModal } from './ApoioWhatsAppModal';
+import { QuadroAtribuicoesModal } from './QuadroAtribuicoesModal';
 import {
   getDayOfWeekFromDate,
   getDayOfWeekLabel,
@@ -60,7 +67,15 @@ import {
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
 import { isRoutineActivity } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { findResponsibleCollaborator } from '../utils/whatsappUtils';
+import { findResponsibleCollaborator, cleanPhoneNumber } from '../utils/whatsappUtils';
+import {
+  loadLocalQuadroAtribuicoes,
+  saveLocalQuadroAtribuicoes,
+  resolveAtribuicaoForTurma,
+  reconcileAtribuicoesWithTurmas,
+  buildApoioWhatsAppUrl,
+  getFirstName,
+} from '../utils/atribuicoesStorage';
 
 interface CurrentActivitiesProps {
   students: Student[];
@@ -73,6 +88,9 @@ interface CurrentActivitiesProps {
   selectedDate: string;
   currentUser: UserProfile | null;
   users?: UserProfile[];
+  quadroAtribuicoes?: TurmaAtribuicao[];
+  onSaveAtribuicao?: (atribuicao: TurmaAtribuicao) => void;
+  onBatchSaveAtribuicoes?: (items: TurmaAtribuicao[]) => void;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
@@ -131,6 +149,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   selectedDate,
   currentUser,
   users = [],
+  quadroAtribuicoes,
+  onSaveAtribuicao,
+  onBatchSaveAtribuicoes,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
@@ -153,6 +174,79 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'TODAS' | 'EM_ANDAMENTO' | 'EXIGE_CHAMADA' | 'CHAMADA_PENDENTE' | 'SEM_ATIVIDADE'>('TODAS');
   const [selectedActivityFilter, setSelectedActivityFilter] = useState<string>('TODAS');
+
+  // Quadro de Atribuições local state & sync (sempre estritamente alinhado às turmas de Alunos e Turmas)
+  const [atribuicoesList, setAtribuicoesList] = useState<TurmaAtribuicao[]>(() => {
+    const raw = quadroAtribuicoes && quadroAtribuicoes.length > 0
+      ? quadroAtribuicoes
+      : loadLocalQuadroAtribuicoes();
+    return reconcileAtribuicoesWithTurmas(raw, turmas);
+  });
+
+  useEffect(() => {
+    const base = quadroAtribuicoes && quadroAtribuicoes.length > 0
+      ? quadroAtribuicoes
+      : loadLocalQuadroAtribuicoes();
+    setAtribuicoesList(reconcileAtribuicoesWithTurmas(base, turmas));
+  }, [quadroAtribuicoes, turmas]);
+
+  const handleSaveAtribuicaoItem = (item: TurmaAtribuicao) => {
+    setAtribuicoesList((prev) => {
+      const idx = prev.findIndex((a) => a.turma === item.turma);
+      let updated: TurmaAtribuicao[];
+      if (idx >= 0) {
+        updated = [...prev];
+        updated[idx] = item;
+      } else {
+        updated = [...prev, item];
+      }
+      saveLocalQuadroAtribuicoes(updated);
+      return updated;
+    });
+    if (onSaveAtribuicao) {
+      onSaveAtribuicao(item);
+    }
+  };
+
+  // Quadro de Atribuições modal
+  const [isQuadroModalOpen, setIsQuadroModalOpen] = useState(false);
+
+  // Apoio WhatsApp Modal state (customizable message)
+  const [apoioModalState, setApoioModalState] = useState<{
+    isOpen: boolean;
+    destinatarioRole: 'adi' | 'monitora' | 'coordenador';
+    destinatarioName: string;
+    destinatarioPhone?: string;
+    turmaName: string;
+  }>({
+    isOpen: false,
+    destinatarioRole: 'adi',
+    destinatarioName: '',
+    destinatarioPhone: '',
+    turmaName: '',
+  });
+
+  // Direct 1-Click WhatsApp Trigger
+  const triggerApoioDirectWhatsApp = (
+    destinatarioName: string,
+    destinatarioPhone: string | undefined,
+    turmaName: string,
+    role: 'adi' | 'monitora'
+  ) => {
+    const cleanNum = cleanPhoneNumber(destinatarioPhone);
+    if (!cleanNum) {
+      setApoioModalState({
+        isOpen: true,
+        destinatarioRole: role,
+        destinatarioName,
+        destinatarioPhone: destinatarioPhone || '',
+        turmaName,
+      });
+      return;
+    }
+    const url = buildApoioWhatsAppUrl(cleanNum, destinatarioName);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   // Quick Roll Call modal state
   const [quickRollCallModal, setQuickRollCallModal] = useState<{
@@ -210,6 +304,17 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const userCanMark = canMarkAttendance(currentUser);
   const isCoord = isCoordenador(currentUser);
 
+  // Monitora default view filter: 'minhas' vs 'todas'
+  const userAssignedTurmas = useMemo(() => {
+    return new Set(currentUser?.allowedClassIds || currentUser?.assignedTurmas || []);
+  }, [currentUser]);
+
+  const [turmaScopeFilter, setTurmaScopeFilter] = useState<'minhas' | 'todas'>(() => {
+    if (isCoord || !currentUser) return 'todas';
+    const assigned = currentUser.allowedClassIds || currentUser.assignedTurmas || [];
+    return assigned.length > 0 ? 'minhas' : 'todas';
+  });
+
   // Map of activity ID -> ActivityItem
   const activityMap = useMemo(() => {
     const map = new Map<string, ActivityItem>();
@@ -224,17 +329,37 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const allowedTurmas = useMemo(() => {
     const sorted = sortTurmasPedagogical(turmas);
     if (isCoord || !currentUser) return sorted;
-    const userTurmas = new Set(currentUser.allowedClassIds || currentUser.assignedTurmas || []);
-    return sorted.filter((t) => userTurmas.has(t));
-  }, [turmas, isCoord, currentUser]);
+    if (turmaScopeFilter === 'minhas' && userAssignedTurmas.size > 0) {
+      return sorted.filter((t) => userAssignedTurmas.has(t));
+    }
+    return sorted;
+  }, [turmas, isCoord, currentUser, turmaScopeFilter, userAssignedTurmas]);
 
   // Compute activity state per turma
   const turmaStatuses = useMemo(() => {
+    // Trava de Fim de Semana: se for sábado (6) ou domingo (0) e simulação não estiver ativa
+    const currentDayOfWeekNum = new Date().getDay();
+    const isWeekendNow = currentDayOfWeekNum === 0 || currentDayOfWeekNum === 6;
+    const isWeekendSelected = isWeekend(selectedDate);
+    const isWeekendLocked = (isWeekendNow || isWeekendSelected) && !isSimulatingTime;
+
     return allowedTurmas.map((turmaName) => {
       // All blocks for this turma on this day
       const turmaBlocks = schedules
         .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+      // Se for final de semana e não estiver em modo de simulação, nenhum bloco está em andamento
+      if (isWeekendLocked) {
+        return {
+          turmaName,
+          turmaBlocks,
+          activeBlock: null,
+          nextBlock: null,
+          pastBlocks: [],
+          rollCallInfo: null,
+        };
+      }
 
       // Active block
       const activeBlock = turmaBlocks.find(
@@ -329,11 +454,34 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     students,
     records,
     selectedDate,
+    isSimulatingTime,
   ]);
 
   // Overall Statistics
   const stats = useMemo(() => {
     const totalTurmas = turmaStatuses.length;
+
+    // Trava de Fim de Semana nos Cards de Métricas:
+    // Verifique o estado atual do dia da semana (new Date().getDay()). Se for sábado (6) ou domingo (0)
+    // e o modo de simulação NÃO estiver ativado pelo usuário:
+    // EM ATIVIDADE AGORA: Deve exibir 0.
+    // ALUNOS ATIVOS: Deve exibir 0.
+    // CHAMADAS PENDENTES: Deve exibir 0.
+    const currentDayOfWeekNum = new Date().getDay();
+    const isWeekendNow = currentDayOfWeekNum === 0 || currentDayOfWeekNum === 6;
+    const isWeekendSelected = isWeekend(selectedDate);
+    const isWeekendLocked = (isWeekendNow || isWeekendSelected) && !isSimulatingTime;
+
+    if (isWeekendLocked) {
+      return {
+        totalTurmas,
+        inActivity: 0,
+        pendingRollCalls: 0,
+        completedRollCalls: 0,
+        totalStudentsInActivePeriods: 0,
+      };
+    }
+
     const inActivity = turmaStatuses.filter((ts) => ts.activeBlock !== null).length;
 
     // Card "Chamadas Pendentes":
@@ -444,7 +592,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       completedRollCalls,
       totalStudentsInActivePeriods,
     };
-  }, [turmaStatuses, records, selectedDate]);
+  }, [turmaStatuses, records, selectedDate, isSimulatingTime]);
 
   // Filtered list of turmas
   const filteredTurmas = useMemo(() => {
@@ -700,7 +848,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
+      {/* Filter, Search and Quadro de Atribuições Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2.5">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
           {/* Search Box */}
@@ -724,8 +872,36 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             )}
           </div>
 
+          {/* Scope filter for Monitoras */}
+          {userAssignedTurmas.size > 0 && !isCoord && (
+            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs font-bold shrink-0 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setTurmaScopeFilter('minhas')}
+                className={`px-3 py-1.5 rounded-md transition-all ${
+                  turmaScopeFilter === 'minhas'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Minha Turma
+              </button>
+              <button
+                type="button"
+                onClick={() => setTurmaScopeFilter('todas')}
+                className={`px-3 py-1.5 rounded-md transition-all ${
+                  turmaScopeFilter === 'todas'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Todas as Turmas
+              </button>
+            </div>
+          )}
+
           {/* Activity Dropdown */}
-          <div className="w-full md:w-60">
+          <div className="w-full md:w-56">
             <select
               value={selectedActivityFilter}
               onChange={(e) => setSelectedActivityFilter(e.target.value)}
@@ -739,6 +915,20 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Button: Quadro Geral de Atribuições */}
+          <button
+            type="button"
+            onClick={() => setIsQuadroModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold flex items-center justify-center space-x-1.5 transition-all shadow-xs shrink-0 cursor-pointer"
+            title="Abrir Quadro Geral de Atribuições das Turmas e Apoio"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Quadro de Atribuições</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-100 uppercase tracking-wider font-black">
+              Sua ADI
+            </span>
+          </button>
         </div>
 
         {/* Status Filter Chips */}
@@ -806,6 +996,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             const { turmaName, activeBlock, nextBlock, rollCallInfo } = item;
             const actDetails = activeBlock ? activityMap.get(activeBlock.activityId) : null;
             const nextActDetails = nextBlock ? activityMap.get(nextBlock.activityId) : null;
+            const turmaAtribuicao = resolveAtribuicaoForTurma(turmaName, atribuicoesList, users);
 
             const isClassActive = activeBlock !== null;
 
@@ -1160,6 +1351,71 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {/* Bloco de Atribuição e Apoio Rápido: Sua ADI & Monitora */}
+                  <div className="mt-2 pt-2 border-t border-slate-200/80">
+                    <div className="bg-gradient-to-r from-amber-50/90 to-orange-50/70 border border-amber-200/90 rounded-xl p-2 space-y-1.5 shadow-2xs">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="flex items-center space-x-1.5 min-w-0">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span className="text-[10px] font-black text-amber-900 uppercase tracking-wider shrink-0">
+                            Sua ADI:
+                          </span>
+                          <span className="text-xs font-black text-amber-950 truncate" title={turmaAtribuicao.adiName}>
+                            {turmaAtribuicao.adiName}
+                          </span>
+                        </div>
+
+                        {/* WhatsApp Fast Actions */}
+                        <div className="flex items-center space-x-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => triggerApoioDirectWhatsApp(turmaAtribuicao.adiName, turmaAtribuicao.adiPhone, turmaName, 'adi')}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 shadow-xs active:scale-95 transition-all cursor-pointer"
+                            title={`WhatsApp 1-Clique para ${turmaAtribuicao.adiName}: "Olá, ${getFirstName(turmaAtribuicao.adiName)}! Preciso do seu apoio."`}
+                          >
+                            <Send className="w-2.5 h-2.5" />
+                            <span>1-Clique</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setApoioModalState({
+                                isOpen: true,
+                                destinatarioRole: 'adi',
+                                destinatarioName: turmaAtribuicao.adiName,
+                                destinatarioPhone: turmaAtribuicao.adiPhone || '',
+                                turmaName,
+                              })
+                            }
+                            className="p-1 rounded-lg text-emerald-800 hover:bg-emerald-100 border border-emerald-300 bg-white transition-colors cursor-pointer"
+                            title="Personalizar mensagem no seu estilo próprio antes de enviar"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Monitora da Turma e Vice-Versa */}
+                      <div className="flex items-center justify-between pt-1 border-t border-amber-200/60 text-[10px]">
+                        <div className="flex items-center space-x-1 text-slate-600 truncate min-w-0 pr-1">
+                          <span className="font-bold text-slate-500 shrink-0">Monitora:</span>
+                          <span className="font-semibold text-slate-800 truncate">{turmaAtribuicao.monitoraName}</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => triggerApoioDirectWhatsApp(turmaAtribuicao.monitoraName, turmaAtribuicao.monitoraPhone, turmaName, 'monitora')}
+                          className="text-slate-600 hover:text-emerald-700 font-bold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                          title={`Falar com Monitora (${turmaAtribuicao.monitoraName}) no WhatsApp`}
+                        >
+                          <Phone className="w-2.5 h-2.5 text-emerald-600" />
+                          <span>Falar c/ Monitora</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -1394,6 +1650,39 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           onUpdateUserPhone={onUpdateUserPhone}
         />
       )}
+
+      {/* Quadro Geral de Atribuições Modal */}
+      <QuadroAtribuicoesModal
+        isOpen={isQuadroModalOpen}
+        onClose={() => setIsQuadroModalOpen(false)}
+        atribuicoes={atribuicoesList}
+        users={users}
+        currentUser={currentUser}
+        onSaveAtribuicao={handleSaveAtribuicaoItem}
+        onBatchSaveAtribuicoes={onBatchSaveAtribuicoes}
+      />
+
+      {/* Apoio WhatsApp Custom Message Modal */}
+      <ApoioWhatsAppModal
+        isOpen={apoioModalState.isOpen}
+        onClose={() => setApoioModalState((prev) => ({ ...prev, isOpen: false }))}
+        destinatarioRole={apoioModalState.destinatarioRole}
+        destinatarioName={apoioModalState.destinatarioName}
+        destinatarioPhone={apoioModalState.destinatarioPhone}
+        turmaName={apoioModalState.turmaName}
+        onUpdatePhone={(newPhone) => {
+          const target = atribuicoesList.find((a) => a.turma === apoioModalState.turmaName);
+          if (target) {
+            const updated = { ...target };
+            if (apoioModalState.destinatarioRole === 'adi') {
+              updated.adiPhone = newPhone;
+            } else {
+              updated.monitoraPhone = newPhone;
+            }
+            handleSaveAtribuicaoItem(updated);
+          }
+        }}
+      />
     </div>
   );
 };

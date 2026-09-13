@@ -42,20 +42,43 @@
       });
 
       if ('serviceWorker' in navigator) {
-        const registerSW = () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => {
-              console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
-            })
-            .catch((err) => {
-              console.error('Falha ao registrar ServiceWorker:', err);
-            });
-        };
+        const isIframeOrDev =
+          window.self !== window.top ||
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1' ||
+          window.location.hostname.includes('ais-dev') ||
+          window.location.port === '3000';
 
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          registerSW();
+        if (isIframeOrDev) {
+          // Unregister any active service worker in preview/iframe/dev environment to prevent stale cache
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
+          });
+          if ('caches' in window) {
+            caches.keys().then((keys) => {
+              for (const key of keys) {
+                caches.delete(key);
+              }
+            });
+          }
         } else {
-          window.addEventListener('load', registerSW);
+          const registerSW = () => {
+            navigator.serviceWorker.register('/sw.js')
+              .then((reg) => {
+                console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
+              })
+              .catch((err) => {
+                console.warn('Falha ao registrar ServiceWorker:', err);
+              });
+          };
+
+          if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            registerSW();
+          } else {
+            window.addEventListener('load', registerSW);
+          }
         }
       }
     </script>

@@ -22,6 +22,7 @@ import {
   Apple,
   Salad,
   Carrot,
+  Save,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay, DayOfWeekMenu } from '../types/cardapio';
@@ -81,26 +82,33 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
 
   // Nutritionist profile editable state
   const [editingNutritionistName, setEditingNutritionistName] = useState<string>(monthlyMenu.nutritionistName || 'Thaís Grisoni Baroni');
+  const [editingNutritionistCrn, setEditingNutritionistCrn] = useState<string>(monthlyMenu.crn || '84367');
   const [isSavingNutri, setIsSavingNutri] = useState<boolean>(false);
 
   useEffect(() => {
     setEditingNutritionistName(monthlyMenu.nutritionistName || 'Thaís Grisoni Baroni');
-  }, [monthlyMenu.nutritionistName]);
+    setEditingNutritionistCrn(monthlyMenu.crn || '84367');
+  }, [monthlyMenu.nutritionistName, monthlyMenu.crn]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const handleSaveNutritionistName = async () => {
-    const trimmed = editingNutritionistName.trim();
-    if (!trimmed) return;
+  const handleSaveNutritionistProfile = async () => {
+    const trimmedName = editingNutritionistName.trim();
+    const trimmedCrn = editingNutritionistCrn.trim();
+    if (!trimmedName) return;
     setIsSavingNutri(true);
     try {
-      const updatedMenu = { ...monthlyMenu, nutritionistName: trimmed };
+      const updatedMenu = {
+        ...monthlyMenu,
+        nutritionistName: trimmedName,
+        crn: trimmedCrn || '84367',
+      };
       setMonthlyMenu(updatedMenu);
       await saveMonthlyMenu(updatedMenu);
-      showToast('Nome da Nutricionista atualizado com sucesso!');
+      showToast('Responsável Técnico e CRN atualizados com sucesso!');
     } catch (err) {
       console.error('Erro ao atualizar nutricionista:', err);
     } finally {
@@ -218,7 +226,9 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
         monthlyMenu.monthName,
         selectedYear,
         recipes,
-        false
+        false,
+        monthlyMenu.nutritionistName,
+        monthlyMenu.crn
       );
       setPdfPreview({
         isOpen: true,
@@ -450,7 +460,7 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                 <span>Grade Oficial do Cardápio Escolar</span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Nutricionista: {monthlyMenu.nutritionistName} (CRN: {monthlyMenu.crn}) • Refeições balanceadas com Arroz, Feijão, Proteína, Guarnição, Salada e Fruta.
+                Nutricionista: {monthlyMenu.nutritionistName} ({monthlyMenu.crn ? (/^CRN/i.test(monthlyMenu.crn.trim()) ? monthlyMenu.crn.trim() : `CRN: ${monthlyMenu.crn.trim()}`) : 'CRN: 84367'}) • Refeições balanceadas com Arroz, Feijão, Proteína, Guarnição, Salada e Fruta.
               </p>
             </div>
 
@@ -775,32 +785,51 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
               <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-emerald-900/20 flex-shrink-0">
                 <UserCheck className="w-8 h-8" />
               </div>
-              <div className="flex-1 w-full space-y-2">
+              <div className="flex-1 w-full space-y-4">
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
                     Nome da Responsável Técnica (Editável)
                   </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editingNutritionistName}
-                      onChange={(e) => setEditingNutritionistName(e.target.value)}
-                      placeholder="Nome completo da nutricionista"
-                      className="flex-1 px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-base font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                    <button
-                      onClick={handleSaveNutritionistName}
-                      disabled={isSavingNutri || !editingNutritionistName.trim() || editingNutritionistName.trim() === monthlyMenu.nutritionistName}
-                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow transition-all cursor-pointer whitespace-nowrap"
-                    >
-                      {isSavingNutri ? 'Salvando...' : 'Salvar'}
-                    </button>
-                  </div>
+                  <input
+                    type="text"
+                    value={editingNutritionistName}
+                    onChange={(e) => setEditingNutritionistName(e.target.value)}
+                    placeholder="Nome completo da nutricionista"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-base font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
                 </div>
 
-                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                  Nutricionista - CRN: 84367
-                </p>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                    Número do CRN (Editável)
+                  </label>
+                  <input
+                    type="text"
+                    value={editingNutritionistCrn}
+                    onChange={(e) => setEditingNutritionistCrn(e.target.value)}
+                    placeholder="Ex: CRN-3 84367"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Cadastrado: <strong className="text-emerald-700 dark:text-emerald-400">{monthlyMenu.nutritionistName}</strong> • <strong className="text-emerald-700 dark:text-emerald-400">{monthlyMenu.crn ? (/^CRN/i.test(monthlyMenu.crn.trim()) ? monthlyMenu.crn.trim() : `CRN: ${monthlyMenu.crn.trim()}`) : 'CRN: 84367'}</strong>
+                  </p>
+                  <button
+                    onClick={handleSaveNutritionistProfile}
+                    disabled={
+                      isSavingNutri ||
+                      !editingNutritionistName.trim() ||
+                      (editingNutritionistName.trim() === monthlyMenu.nutritionistName &&
+                        editingNutritionistCrn.trim() === (monthlyMenu.crn || '84367'))
+                    }
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow transition-all cursor-pointer whitespace-nowrap flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{isSavingNutri ? 'Salvando...' : 'Salvar Responsável e CRN'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

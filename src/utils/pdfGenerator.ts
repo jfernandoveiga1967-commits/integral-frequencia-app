@@ -14,6 +14,7 @@ import {
   PontoMonthClosing,
   HolidayItem,
   SemanarioPlan,
+  TurmaAtribuicao,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
@@ -3337,12 +3338,17 @@ export function generateCardapioMensalPDF(
   doc.text(`${menu.monthName} ${menu.year}`, pageWidth / 2, 15, { align: 'center' });
 
   // Nome da Nutricionista e CRN na mesma linha
-  const cleanCrn = menu.crn ? menu.crn.replace(/^CRN:?\s*/i, '') : '84367';
+  const formatPdfCrn = (rawCrn?: string) => {
+    if (!rawCrn || !rawCrn.trim()) return 'CRN: 84367';
+    const trimmed = rawCrn.trim();
+    return /^CRN/i.test(trimmed) ? trimmed : `CRN: ${trimmed}`;
+  };
+  const crnLabel = formatPdfCrn(menu.crn);
   const nutriName = menu.nutritionistName || 'Thaís Grisoni Baroni';
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(71, 85, 105);
-  doc.text(`${nutriName} - CRN: ${cleanCrn}`, pageWidth / 2, 22, { align: 'center' });
+  doc.text(`${nutriName} - ${crnLabel}`, pageWidth / 2, 22, { align: 'center' });
 
   // Tabela de Cardápio (5 colunas + 1 lateral de semana)
   // Monta as linhas para 1ª à 5ª semana
@@ -3441,7 +3447,7 @@ export function generateCardapioMensalPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(22, 101, 52);
-  doc.text(`Nutricionista: ${nutriName} - CRN: ${cleanCrn}`, 12, footerY);
+  doc.text(`Nutricionista: ${nutriName} - ${crnLabel}`, 12, footerY);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -3470,7 +3476,9 @@ export function generateReceitasCulinariaPDF(
   monthName: string,
   year: number,
   recipes: CookingRecipe[],
-  saveImmediately = false
+  saveImmediately = false,
+  nutritionistName?: string,
+  crn?: string
 ): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -3632,13 +3640,157 @@ export function generateReceitasCulinariaPDF(
   doc.setLineWidth(0.5);
   doc.line(12, footerY - 3, pageWidth - 12, footerY - 3);
 
+  const formatPdfCrn = (rawCrn?: string) => {
+    if (!rawCrn || !rawCrn.trim()) return 'CRN: 84367';
+    const trimmed = rawCrn.trim();
+    return /^CRN/i.test(trimmed) ? trimmed : `CRN: ${trimmed}`;
+  };
+  const nutriName = nutritionistName || 'Thaís Grisoni Baroni';
+  const crnLabel = formatPdfCrn(crn);
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Nutricionista Responsável: Thaís Grisoni Baroni - CRN: 84367', 14, footerY);
+  doc.text(`Nutricionista Responsável: ${nutriName} - ${crnLabel}`, 14, footerY);
   doc.text('Instituto Educacional Crescer', pageWidth - 14, footerY, { align: 'right' });
 
   const filename = `Oficina_Culinaria_Receitas_${monthName}_${year}.pdf`;
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o documento PDF oficial formatado para o Quadro Geral de Atribuições
+ */
+export function generateQuadroAtribuicoesPDF(
+  atribuicoes: TurmaAtribuicao[],
+  saveImmediately: boolean = true
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 297;
+  const pageHeight = 210;
+
+  // Cabeçalho oficial compacto horizontal
+  drawCompactOfficialHeader(
+    doc,
+    'QUADRO GERAL DE ATRIBUIÇÕES',
+    'Distribuição de Turmas, Monitoras, Monitoras Assistentes e ADIs',
+    [
+      `Total de Turmas: ${atribuicoes.length}`,
+      'Ano Letivo: 2026',
+      'Turno: 11:40 às 17:40',
+    ],
+    'landscape'
+  );
+
+  const tableRows = atribuicoes.map((item) => {
+    const monitoraDisplay = item.monitoraName
+      ? `${item.monitoraName}${item.monitoraPhone ? `\nTel: ${item.monitoraPhone}` : ''}`
+      : '—';
+
+    const monitoraAssistenteDisplay = item.monitoraAssistenteName
+      ? `${item.monitoraAssistenteName}${item.monitoraAssistentePhone ? `\nTel: ${item.monitoraAssistentePhone}` : ''}`
+      : '—';
+
+    const adiDisplay = item.adiName
+      ? `${item.adiName}${item.adiPhone ? `\nTel: ${item.adiPhone}` : ''}`
+      : '—';
+
+    const espacoDisplay = item.espacoBase || '—';
+    const horarioDisplay = item.horarioTurno || '11:40 às 17:40';
+    const obsDisplay = item.observacao || '—';
+
+    return [
+      item.turma,
+      monitoraDisplay,
+      monitoraAssistenteDisplay,
+      adiDisplay,
+      espacoDisplay,
+      horarioDisplay,
+      obsDisplay,
+    ];
+  });
+
+  autoTable(doc, {
+    startY: 25,
+    head: [
+      [
+        'Turma',
+        'Monitora Titular',
+        'Monitora Assistente',
+        'Sua ADI (Apoio)',
+        'Espaço Base',
+        'Turno / Horário',
+        'Observações',
+      ],
+    ],
+    body: tableRows,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [180, 83, 9], // amber-700
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8.5,
+      halign: 'left',
+      cellPadding: 2.5,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      textColor: [30, 41, 59], // slate-800
+      cellPadding: 2.5,
+      valign: 'middle',
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 38, textColor: [15, 23, 42] }, // Turma
+      1: { cellWidth: 44 }, // Monitora Titular
+      2: { cellWidth: 44 }, // Monitora Assistente
+      3: { cellWidth: 40 }, // Sua ADI
+      4: { cellWidth: 32 }, // Espaço Base
+      5: { cellWidth: 30 }, // Turno / Horário
+      6: { cellWidth: 'auto' }, // Observações
+    },
+    alternateRowStyles: {
+      fillColor: [254, 252, 232], // amber-50/40
+    },
+    didDrawPage: (data) => {
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      const currentPage = data.pageNumber;
+
+      // Rodapé
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+
+      const footerY = pageHeight - 6;
+      doc.text(
+        'Colégio Crescer • Programa Integral — Documento de Controle e Atribuição de Equipe',
+        14,
+        footerY
+      );
+      doc.text(`Página ${currentPage} de ${pageCount}`, pageWidth - 14, footerY, {
+        align: 'right',
+      });
+    },
+    margin: { left: 14, right: 14, top: 25, bottom: 12 },
+  });
+
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const filename = `Quadro_Geral_Atribuicoes_Integral_${dateStr}.pdf`;
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');

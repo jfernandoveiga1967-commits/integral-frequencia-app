@@ -1,4 +1,4 @@
-const CACHE_NAME = 'integral-frequencia-v3.0';
+const CACHE_NAME = 'integral-frequencia-v4.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -49,7 +49,18 @@ self.addEventListener('fetch', (event) => {
     !url.protocol.startsWith('http') ||
     url.origin.includes('firestore') ||
     url.origin.includes('firebase') ||
-    url.origin.includes('googleapis')
+    url.origin.includes('googleapis') ||
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname.includes('ais-dev') ||
+    url.hostname.includes('run.app') ||
+    url.port === '3000' ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.includes('hot-update') ||
+    url.search.includes('v=')
   ) {
     return;
   }

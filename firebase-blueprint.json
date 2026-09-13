@@ -222,6 +222,64 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "monthKey", "defaultUnitPrice"]
+    },
+    "MonthlyMenu": {
+      "title": "MonthlyMenu",
+      "description": "Monthly lunch menu definition and daily items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "monthKey": { "type": "string", "maxLength": 10 },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
+        "monthName": { "type": "string", "maxLength": 32 },
+        "nutritionistName": { "type": "string", "maxLength": 128 },
+        "crn": { "type": "string", "maxLength": 32 },
+        "contactEmail": { "type": "string", "maxLength": 128 },
+        "days": { "type": "object" },
+        "generalNotes": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "monthKey", "year", "month", "nutritionistName", "crn"]
+    },
+    "CookingRecipe": {
+      "title": "CookingRecipe",
+      "description": "Cooking workshop recipes for students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "monthKey": { "type": "string", "maxLength": 10 },
+        "weekNumber": { "type": "number" },
+        "weekLabel": { "type": "string", "maxLength": 64 },
+        "datesLabel": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "category": { "type": "string", "maxLength": 32 },
+        "ingredients": { "type": "array" },
+        "instructions": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "monthKey", "title", "ingredients", "instructions"]
+    },
+    "TurmaAtribuicao": {
+      "title": "TurmaAtribuicao",
+      "description": "Quadro de Atribuições de Turma com Monitora Responsável e Sua ADI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "turma": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "monitoraId": { "type": "string", "maxLength": 128 },
+        "monitoraName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "monitoraPhone": { "type": "string", "maxLength": 32 },
+        "adiId": { "type": "string", "maxLength": 128 },
+        "adiName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adiPhone": { "type": "string", "maxLength": 32 },
+        "horarioTurno": { "type": "string", "maxLength": 64 },
+        "espacoBase": { "type": "string", "maxLength": 128 },
+        "observacao": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "turma", "monitoraName", "adiName"]
     }
   },
   "firestore": {
@@ -272,6 +330,18 @@
     "/mealReports/{reportId}": {
       "schema": "MealReportConfig",
       "description": "Monthly meal financial closing records"
+    },
+    "/monthlyMenus/{menuId}": {
+      "schema": "MonthlyMenu",
+      "description": "Collection of monthly lunch menus"
+    },
+    "/cookingRecipes/{recipeId}": {
+      "schema": "CookingRecipe",
+      "description": "Collection of culinary workshop recipes"
+    },
+    "/quadroAtribuicoes/{turmaId}": {
+      "schema": "TurmaAtribuicao",
+      "description": "Collection of team assignments and Sua ADI by turma"
     }
   }
 }

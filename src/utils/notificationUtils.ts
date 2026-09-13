@@ -287,10 +287,34 @@ export async function requestNotificationAndAudioPermission(): Promise<{
 }
 
 /**
+ * Check if running inside an iframe or development sandbox
+ */
+export function isIframeOrDevEnvironment(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.self !== window.top ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname.includes('ais-dev') ||
+    window.location.port === '3000'
+  );
+}
+
+/**
  * Initialize Service Worker and listen for notification click messages
  */
 export function initWebPushAndServiceWorker(): void {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+  if (isIframeOrDevEnvironment()) {
+    // In dev server or preview iframe, unregister SW to prevent cache lock
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+      }
+    });
+    return;
+  }
 
   try {
     navigator.serviceWorker
@@ -399,9 +423,13 @@ export async function sendSystemPushNotification(
   };
 
   // Try Service Worker registration showNotification first (native background support on mobile & desktop)
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && !isIframeOrDevEnvironment()) {
     try {
-      const registration = await navigator.serviceWorker.ready;
+      const readyPromise = navigator.serviceWorker.ready;
+      const timeoutPromise = new Promise<ServiceWorkerRegistration | null>((resolve) =>
+        setTimeout(() => resolve(null), 1000)
+      );
+      const registration = await Promise.race([readyPromise, timeoutPromise]);
       if (registration && registration.showNotification) {
         await registration.showNotification(title, notificationPayload);
         return true;

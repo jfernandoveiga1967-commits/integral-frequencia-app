@@ -321,3 +321,26 @@ export interface SemanarioPlan {
   updatedBy?: string;
 }
 
+/**
+ * Interface do Quadro de Atribuições de Turma (Monitora Responsável & Sua ADI)
+ */
+export interface TurmaAtribuicao {
+  id: string; // e.g. "atrib_1ano_azul" ou turmaId
+  turma: TurmaType;
+  monitoraId?: string;
+  monitoraName: string; // Nome da Monitora titular (ex: "Ana Clara Carchano Garcia", "Sthefany")
+  monitoraPhone?: string; // Telefone / WhatsApp da Monitora
+  monitoraAssistenteId?: string;
+  monitoraAssistenteName?: string; // Nome da Monitora Assistente
+  monitoraAssistentePhone?: string; // Telefone / WhatsApp da Monitora Assistente
+  adiId?: string;
+  adiName: string; // Nome de Sua ADI (ex: "Patrícia", "Juliana", "Camila")
+  adiPhone?: string; // Telefone / WhatsApp da ADI
+  horarioTurno?: string; // Horário contratual / turno (ex: "11:40 às 17:40")
+  espacoBase?: string; // Espaço de referência (ex: "Sala 04 / Bloco Infantil")
+  observacao?: string; // Notas ou orientações pedagógicas da atribuição
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+

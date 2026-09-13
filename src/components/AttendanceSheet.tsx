@@ -5,7 +5,7 @@ import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
@@ -288,6 +288,21 @@ function getCurrentHHMM(): string {
 
   // Calculate status statistics for current filter and date
   const stats = useMemo(() => {
+    // Validação nos Diários de Classe:
+    // Garanta que chamadas só possam contar nas estatísticas se pertencerem a dias letivos já ocorridos ou ao dia atual.
+    const todayStr = toISODateString(new Date());
+    if (selectedDate > todayStr) {
+      return {
+        presente: 0,
+        saidaAntecipada: 0,
+        falta: 0,
+        saude: 0,
+        semEquipamento: 0,
+        pendente: filteredStudents.length,
+        total: filteredStudents.length,
+      };
+    }
+
     let presente = 0;
     let saidaAntecipada = 0;
     let falta = 0;

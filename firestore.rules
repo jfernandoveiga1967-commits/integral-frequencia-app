@@ -61,6 +61,18 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /monthlyMenus/{menuId} {
+      allow read, write: if true;
+    }
+
+    match /cookingRecipes/{recipeId} {
+      allow read, write: if true;
+    }
+
+    match /quadroAtribuicoes/{turmaId} {
+      allow read, write: if true;
+    }
+
     match /test/{docId} {
       allow read, write: if true;
     }

@@ -23,7 +23,7 @@ import {
 import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
-import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate } from '../utils/dateUtils';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import {
@@ -192,7 +192,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // Filter records according to active range and user roles
   const activeRecords = useMemo(() => {
+    const todayStr = toISODateString(new Date());
     return records.filter((r) => {
+      // Validação: chamadas só contam nas estatísticas se pertencerem a dias já ocorridos ou ao dia atual
+      if (r.date && r.date > todayStr) return false;
+
       // Date range filter
       if (filterMode === 'week') {
         const isThisWeek = r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year;

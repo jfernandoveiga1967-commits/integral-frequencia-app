@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Student, AttendanceRecord, WeekInfo, TurmaType } from '../types';
-import { getWeekInfo, getISOWeekNumber } from '../utils/dateUtils';
+import { getWeekInfo, getISOWeekNumber, toISODateString } from '../utils/dateUtils';
 import { TURMAS_LIST } from '../data/initialData';
 import { generateTurmaPDFReport } from '../utils/pdfGenerator';
 import {
@@ -54,8 +54,16 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
   const [filterMode, setFilterMode] = useState<'all' | 'with_records' | 'current'>('all');
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<number | 'all'>('all');
 
-  // Calculate actual ISO week of today
+  // Calculate actual ISO week and date of today
   const todayISO = getISOWeekNumber(new Date());
+  const todayStr = toISODateString(new Date());
+
+  // Helper to determine if a week is strictly in the future (starts after today)
+  const isWeekInFuture = (w: WeekInfo): boolean => {
+    if (w.year > todayISO.year) return true;
+    if (w.year < todayISO.year) return false;
+    return w.startDate > todayStr;
+  };
 
   // Generate list of 52 weeks for the selected year
   const allWeeks: WeekInfo[] = Array.from({ length: 52 }, (_, i) => getWeekInfo(selectedYear, i + 1));
@@ -83,6 +91,16 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
   // Aggregate records by week strictly for the modalidade "Rotina"
   (records || []).forEach((r) => {
     if (!r || r.year !== selectedYear) return;
+
+    // Validação nos Diários de Classe:
+    // Garanta que chamadas só possam contar nas estatísticas se pertencerem a dias letivos já ocorridos ou ao dia atual.
+    if (!r.date || r.date > todayStr) return;
+
+    // Filtro e Trava para Semanas Futuras:
+    // Para qualquer semana cujo período de início seja estritamente posterior à data de hoje (como a Semana 38 em diante),
+    // garanta que o sistema NÃO calcule nem exiba médias de presença, faltas ou dias lançados.
+    const wInfo = getWeekInfo(r.year, r.weekNumber);
+    if (isWeekInFuture(wInfo)) return;
 
     // Strict filter for Rotina activity
     const isRotina = r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina');
@@ -132,8 +150,9 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
 
   // Filter weeks based on search and selected filter
   const filteredWeeks = allWeeks.filter((w) => {
-    const stats = weekStatsMap.get(w.weekNumber);
-    const hasRecords = !!(stats && stats.total > 0);
+    const isFuture = isWeekInFuture(w);
+    const stats = !isFuture ? weekStatsMap.get(w.weekNumber) : undefined;
+    const hasRecords = !isFuture && !!(stats && stats.total > 0);
     const isCurrent = w.weekNumber === todayISO.weekNumber && w.year === todayISO.year;
 
     // Filter mode check
@@ -352,9 +371,10 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredWeeks.map((wInfo) => {
-            const stats = weekStatsMap.get(wInfo.weekNumber);
-            const hasRecords = stats && stats.total > 0;
-            const isCurrentWeek = wInfo.weekNumber === todayISO.weekNumber && wInfo.year === todayISO.year;
+            const isFuture = isWeekInFuture(wInfo);
+            const stats = !isFuture ? weekStatsMap.get(wInfo.weekNumber) : undefined;
+            const hasRecords = !isFuture && !!(stats && stats.total > 0);
+            const isCurrentWeek = !isFuture && wInfo.weekNumber === todayISO.weekNumber && wInfo.year === todayISO.year;
             const startDateObj = new Date(wInfo.startDate + 'T12:00:00');
             const monthName = MONTH_NAMES[startDateObj.getMonth()];
 
@@ -381,7 +401,7 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
                         <Sparkles className="w-3 h-3 text-indigo-600" />
                         <span>Semana Atual</span>
                       </span>
-                    ) : hasRecords ? (
+                    ) : hasRecords && stats ? (
                       <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                         {stats.distinctDaysCount} {stats.distinctDaysCount === 1 ? 'dia letivo' : 'dias letivos'}
                       </span>
