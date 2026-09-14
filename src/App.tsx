@@ -53,6 +53,7 @@ import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   subscribeStudents,
   subscribeRecords,
+  subscribeDashboardRecords,
   subscribeTurmas,
   subscribeUsers,
   subscribeActivities,
@@ -116,7 +117,7 @@ export default function App() {
   const [schedules, setSchedules] = useState<ScheduleBlock[]>(() => loadSchedules());
   const [holidays, setHolidays] = useState<HolidayItem[]>(() => loadHolidays());
   const [students, setStudents] = useState<Student[]>([]);
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [records, setRecords] = useState<AttendanceRecord[]>(() => loadAttendanceRecords());
   const [turmas, setTurmas] = useState<string[]>([]);
   const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
   const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
@@ -204,6 +205,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState<string>(() =>
     toISODateString(initialDateObj)
   );
+  const todayStr = useMemo(() => toISODateString(new Date()), []);
 
   // Load initial local data & sync with Firebase Firestore real-time listeners
   useEffect(() => {
@@ -389,16 +391,7 @@ export default function App() {
       isInitialStudentsSync = false;
     });
 
-    // Realtime Listener for Attendance Records: Firestore is the absolute authority
-    const unsubRecords = subscribeRecords((fsRecords) => {
-      // In-memory filter out records created for mock students
-      const realRecords = fsRecords.filter(
-        (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_')
-      );
-      setRecords(realRecords);
-      saveAttendanceRecords(realRecords);
-    });
-
+    // Sincronização de turmas (subscribeTurmas)
     const unsubTurmas = subscribeTurmas((fsTurmas) => {
       if (fsTurmas.length > 0) {
         const sortedTurmas = sortTurmasPedagogical(fsTurmas);
@@ -616,7 +609,6 @@ export default function App() {
       unsubStatus();
       unsubCrossTabSync();
       unsubStudents();
-      unsubRecords();
       unsubTurmas();
       unsubUsers();
       unsubActivities();
@@ -628,6 +620,38 @@ export default function App() {
       unsubQuadro();
     };
   }, []);
+
+  // Ouvinte otimizado em tempo real para as chamadas do Dashboard com limit() e filtros por data (where('data', '==', hoje))
+  // Encerra a escuta (cleanup) ao desmontar a tela ou ao trocar de data selecionada.
+  useEffect(() => {
+    const targetDate = selectedDate || todayStr;
+    const unsubRecords = subscribeRecords(
+      (fsRecords) => {
+        // In-memory filter out records created for mock students
+        const realRecords = fsRecords.filter(
+          (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_')
+        );
+        setRecords((prev) => {
+          // Mescla em memória os registros da data consultada com o cache local para manter a integridade global
+          const map = new Map(prev.map((r) => [r.id, r]));
+          realRecords.forEach((r) => map.set(r.id, r));
+          const merged = Array.from(map.values());
+          saveAttendanceRecords(merged);
+          return merged;
+        });
+      },
+      (err) => {
+        console.warn('Erro ao escutar attendanceRecords do dashboard:', err);
+      },
+      targetDate,
+      300
+    );
+
+    return () => {
+      // Cleanup do onSnapshot ao desmontar ou trocar de data
+      unsubRecords();
+    };
+  }, [selectedDate, todayStr]);
 
   // Event listener for date selection from day pills
   useEffect(() => {
@@ -1326,7 +1350,6 @@ export default function App() {
   const [pendingSearchTerm, setPendingSearchTerm] = useState<string>('');
 
   // Contadores em tempo real baseados estritamente na Chamada de Rotina de hoje (Fonte Única da Verdade)
-  const todayStr = toISODateString(new Date());
   const todayConsolidated = useMemo(() => {
     return getDailyConsolidatedMetrics(todayStr, students, records);
   }, [todayStr, students, records]);

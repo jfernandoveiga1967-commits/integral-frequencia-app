@@ -3,6 +3,7 @@ import { getAuth } from 'firebase/auth';
 import {
   getFirestore,
   initializeFirestore,
+  memoryLocalCache,
   doc,
   getDoc,
   getDocFromServer,
@@ -16,6 +17,8 @@ import {
   writeBatch,
   query,
   where,
+  or,
+  limit,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore';
@@ -42,10 +45,12 @@ const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(
   app,
   {
+    localCache: memoryLocalCache(),
     experimentalForceLongPolling: true,
   },
   firebaseConfig.firestoreDatabaseId
 );
+
 export const auth = getAuth(app);
 
 export enum OperationType {
@@ -230,11 +235,21 @@ export const subscribeStudents = subscribeAlunos;
 
 export function subscribeRecords(
   onData: (records: AttendanceRecord[]) => void,
-  onError?: (err: Error) => void
-) {
+  onError?: (err: Error) => void,
+  targetDate?: string,
+  limitCount: number = 300
+): () => void {
   const colRef = collection(db, 'attendanceRecords');
+  const hoje = targetDate || new Date().toISOString().split('T')[0];
+
+  // Limitação de leituras e otimização do dashboard:
+  // Consulta com filtro por data (where('data', '==', hoje) ou 'date' para retrocompatibilidade) e limit()
+  const q = hoje
+    ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
+    : query(colRef, limit(limitCount));
+
   return onSnapshot(
-    colRef,
+    q,
     (snapshot) => {
       const list: AttendanceRecord[] = [];
       snapshot.forEach((docSnap) => {
@@ -243,7 +258,7 @@ export function subscribeRecords(
         list.push({
           id: docSnap.id,
           studentId: data.studentId || '',
-          date: data.date || '',
+          date: data.date || data.data || '',
           weekNumber: Number(data.weekNumber) || 1,
           year: Number(data.year) || 2026,
           activity: data.activity || '',
@@ -262,6 +277,20 @@ export function subscribeRecords(
       handleFirestoreError(error, OperationType.GET, 'attendanceRecords');
     }
   );
+}
+
+/**
+ * Consulta otimizada em tempo real para o Dashboard de chamadas do dia de hoje.
+ * Utiliza explicitamente filtros por data (where('data', '==', hoje)) e limit()
+ * para evitar trazer o histórico completo de chamadas desnecessariamente.
+ */
+export function subscribeDashboardRecords(
+  hoje: string,
+  onData: (records: AttendanceRecord[]) => void,
+  onError?: (err: Error) => void,
+  limitCount: number = 300
+): () => void {
+  return subscribeRecords(onData, onError, hoje, limitCount);
 }
 
 export function subscribeTurmas(
@@ -1080,6 +1109,7 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
     id: record.id,
     studentId: record.studentId,
     date: record.date,
+    data: record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
     weekNumber: record.weekNumber,
     year: record.year,
     activity: record.activity,
@@ -1136,6 +1166,7 @@ export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): 
             id: record.id,
             studentId: record.studentId,
             date: record.date,
+            data: record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
             weekNumber: record.weekNumber,
             year: record.year,
             activity: record.activity,
@@ -1234,6 +1265,7 @@ export async function processAttendanceOutbox(): Promise<number> {
           id: item.record.id,
           studentId: item.record.studentId,
           date: item.record.date,
+          data: item.record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
           weekNumber: item.record.weekNumber,
           year: item.record.year,
           activity: item.record.activity,
@@ -1349,6 +1381,7 @@ export async function seedInitialDataToFirestore(
           id: r.id,
           studentId: r.studentId,
           date: r.date,
+          data: r.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
           weekNumber: r.weekNumber,
           year: r.year,
           activity: r.activity,

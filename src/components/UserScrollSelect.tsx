@@ -9,7 +9,7 @@ interface UserScrollSelectProps {
   users: UserProfile[];
   placeholder?: string;
   badgeLabel?: string;
-  accentColor?: 'amber' | 'blue' | 'slate';
+  accentColor?: 'amber' | 'blue' | 'slate' | 'sky' | 'indigo';
   onSelectUser: (user: UserProfile) => void;
   onClear?: () => void;
 }
@@ -79,6 +79,16 @@ export const UserScrollSelect: React.FC<UserScrollSelectProps> = ({
       btnBorder: 'border-blue-300 focus:border-blue-500 focus:ring-blue-500/20',
       activeBg: 'bg-blue-50',
       tagBg: 'bg-blue-100 text-blue-900 border-blue-300',
+    },
+    sky: {
+      btnBorder: 'border-sky-300 focus:border-sky-500 focus:ring-sky-500/20',
+      activeBg: 'bg-sky-50',
+      tagBg: 'bg-sky-100 text-sky-900 border-sky-300',
+    },
+    indigo: {
+      btnBorder: 'border-indigo-300 focus:border-indigo-500 focus:ring-indigo-500/20',
+      activeBg: 'bg-indigo-50',
+      tagBg: 'bg-indigo-100 text-indigo-900 border-indigo-300',
     },
     slate: {
       btnBorder: 'border-slate-300 focus:border-slate-500 focus:ring-slate-500/20',

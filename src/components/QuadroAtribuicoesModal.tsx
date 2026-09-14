@@ -14,17 +14,20 @@ import {
   Save, 
   Filter, 
   Printer, 
+  FileText,
   ChevronRight,
   ShieldCheck,
   UserCheck,
   ChevronDown,
-  User
+  User,
+  HeartHandshake
 } from 'lucide-react';
 import { TurmaAtribuicao, UserProfile } from '../types';
 import { formatPhoneDisplay, cleanPhoneNumber } from '../utils/whatsappUtils';
 import { getFirstName, buildApoioWhatsAppUrl } from '../utils/atribuicoesStorage';
 import { ApoioWhatsAppModal } from './ApoioWhatsAppModal';
 import { UserScrollSelect } from './UserScrollSelect';
+import { generateQuadroAtribuicoesPDF } from '../utils/pdfGenerator';
 
 export interface QuadroAtribuicoesModalProps {
   isOpen: boolean;
@@ -56,7 +59,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
   // Apoio WhatsApp Modal state
   const [apoioModalState, setApoioModalState] = useState<{
     isOpen: boolean;
-    destinatarioRole: 'adi' | 'monitora' | 'coordenador';
+    destinatarioRole: 'adi' | 'monitora' | 'monitora_assistente' | 'coordenador';
     destinatarioName: string;
     destinatarioPhone?: string;
     turmaName: string;
@@ -89,6 +92,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
       return (
         item.turma.toLowerCase().includes(term) ||
         item.monitoraName.toLowerCase().includes(term) ||
+        (item.monitoraAssistenteName || '').toLowerCase().includes(term) ||
         item.adiName.toLowerCase().includes(term) ||
         (item.espacoBase || '').toLowerCase().includes(term) ||
         (item.observacao || '').toLowerCase().includes(term)
@@ -118,7 +122,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
   };
 
   const openApoioModal = (
-    destinatarioRole: 'adi' | 'monitora',
+    destinatarioRole: 'adi' | 'monitora' | 'monitora_assistente',
     destinatarioName: string,
     destinatarioPhone: string | undefined,
     turmaName: string
@@ -137,7 +141,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
     destinatarioName: string,
     destinatarioPhone: string | undefined,
     turmaName: string,
-    role: 'adi' | 'monitora'
+    role: 'adi' | 'monitora' | 'monitora_assistente'
   ) => {
     const cleanNum = cleanPhoneNumber(destinatarioPhone);
     if (!cleanNum) {
@@ -153,6 +157,14 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
     window.print();
   };
 
+  const handleExportPDF = () => {
+    try {
+      generateQuadroAtribuicoesPDF(atribuicoes, true);
+    } catch (err) {
+      console.error('Erro ao gerar PDF do Quadro de Atribuições:', err);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div 
@@ -160,44 +172,19 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
         role="dialog"
         aria-modal="true"
       >
-        {/* Header */}
+        {/* Header - Limpo e Simplificado */}
         <div className="px-5 py-4 bg-gradient-to-r from-amber-700 via-amber-800 to-slate-900 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300 shadow-inner shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center space-x-2">
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/30 text-amber-200 border border-amber-400/30">
-                  Programa Integral • Colégio Crescer
-                </span>
-                <span className="text-xs text-amber-300/80 font-medium">
-                  {atribuicoes.length} Turmas Cadastradas
-                </span>
-              </div>
-              <h2 className="text-base sm:text-xl font-black leading-tight truncate text-white">
-                Quadro Geral de Atribuições
-              </h2>
-            </div>
-          </div>
+          <h2 className="text-base sm:text-xl font-black leading-tight truncate text-white">
+            Quadro Geral de Atribuições
+          </h2>
 
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={handlePrint}
-              className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-amber-100 transition-colors"
-              title="Imprimir quadro de atribuições"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Imprimir</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-amber-200 hover:text-white hover:bg-white/10 transition-colors"
-              title="Fechar"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-amber-200 hover:text-white hover:bg-white/10 transition-colors"
+            title="Fechar"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Top Filter and Actions Bar */}
@@ -245,14 +232,35 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
           </div>
 
           <div className="flex items-center justify-between sm:justify-end space-x-2 text-xs">
+            {/* Botões de Ação: Imprimir e PDF */}
+            <button
+              onClick={handlePrint}
+              type="button"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-bold shadow-2xs transition-colors"
+              title="Imprimir quadro de atribuições"
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-600" />
+              <span>Imprimir</span>
+            </button>
+
+            <button
+              onClick={handleExportPDF}
+              type="button"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-colors"
+              title="Exportar quadro geral de todas as turmas em PDF"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>PDF</span>
+            </button>
+
             {saveSuccessNotice && (
               <span className="inline-flex items-center space-x-1 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 font-bold animate-in fade-in">
                 <Check className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Atribuição salva com sucesso!</span>
+                <span>Salvo!</span>
               </span>
             )}
-            <span className="text-slate-500 font-medium">
-              Mostrando <strong>{filteredList.length}</strong> de {atribuicoes.length}
+            <span className="text-slate-500 font-medium pl-1">
+              <strong>{filteredList.length}</strong> de {atribuicoes.length}
             </span>
           </div>
         </div>
@@ -316,13 +324,14 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                       {isEditing && editForm ? (
                         /* Edit Mode Form (Coordinator) */
                         <div className="space-y-3 bg-amber-50/50 p-3 rounded-xl border border-amber-200 animate-in fade-in">
+                          {/* Monitora Titular */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
                               <UserScrollSelect
-                                label="Monitora Responsável:"
+                                label="Monitora Titular:"
                                 selectedName={editForm.monitoraName}
                                 users={users}
-                                placeholder="Selecione a monitora..."
+                                placeholder="Selecione a monitora titular..."
                                 accentColor="slate"
                                 onSelectUser={(u) => {
                                   setEditForm({
@@ -344,7 +353,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                             </div>
                             <div>
                               <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
-                                WhatsApp da Monitora:
+                                WhatsApp da Titular:
                               </label>
                               <input
                                 type="tel"
@@ -358,6 +367,56 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                             </div>
                           </div>
 
+                          {/* Monitora Assistente */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <UserScrollSelect
+                                label="Monitora Assistente:"
+                                badgeLabel="Assistente"
+                                selectedName={editForm.monitoraAssistenteName || ''}
+                                users={users}
+                                placeholder="Selecione a monitora assistente..."
+                                accentColor="sky"
+                                onSelectUser={(u) => {
+                                  // Busca o perfil correspondente na lista geral de colaboradores/usuários
+                                  const foundUser = users.find((user) => user.id === u.id || user.name.toLowerCase() === u.name.toLowerCase()) || u;
+                                  const rawPhone = foundUser.phone || '';
+                                  const formattedPhone = rawPhone ? formatPhoneDisplay(rawPhone) : '';
+
+                                  setEditForm({
+                                    ...editForm,
+                                    monitoraAssistenteName: foundUser.name,
+                                    monitoraAssistenteId: foundUser.id,
+                                    monitoraAssistentePhone: formattedPhone,
+                                  });
+                                }}
+                                onClear={() => {
+                                  setEditForm({
+                                    ...editForm,
+                                    monitoraAssistenteName: '',
+                                    monitoraAssistenteId: '',
+                                    monitoraAssistentePhone: '',
+                                  });
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-sky-900 mb-0.5">
+                                WhatsApp da Assistente:
+                              </label>
+                              <input
+                                type="tel"
+                                value={editForm.monitoraAssistentePhone || ''}
+                                onChange={(e) =>
+                                  setEditForm({ ...editForm, monitoraAssistentePhone: e.target.value })
+                                }
+                                placeholder="(XX) XXXXX-XXXX"
+                                className="w-full px-2.5 py-1.5 text-xs font-semibold bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Sua ADI */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
                               <UserScrollSelect
@@ -476,7 +535,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                                 <span>Sua ADI:</span>
                               </div>
                               <div className="text-xs sm:text-sm font-extrabold text-amber-950 truncate">
-                                {item.adiName}
+                                {item.adiName || '—'}
                               </div>
                               <div className="text-[10px] text-amber-700/80 font-semibold flex items-center gap-1">
                                 <Phone className="w-2.5 h-2.5" />
@@ -514,10 +573,10 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                             <div className="min-w-0">
                               <div className="flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                                 <Users className="w-3 h-3 text-slate-400 shrink-0" />
-                                <span>Monitora Responsável:</span>
+                                <span>Monitora Titular:</span>
                               </div>
                               <div className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                                {item.monitoraName}
+                                {item.monitoraName || '—'}
                               </div>
                               <div className="text-[10px] text-slate-500 font-semibold flex items-center gap-1">
                                 <Phone className="w-2.5 h-2.5 text-slate-400" />
@@ -546,6 +605,55 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
                             </div>
+                          </div>
+
+                          {/* Block: Monitora Assistente */}
+                          <div className="bg-sky-50/50 border border-sky-200/80 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider text-sky-700">
+                                <HeartHandshake className="w-3 h-3 text-sky-500 shrink-0" />
+                                <span>Monitora Assistente:</span>
+                              </div>
+                              <div className="text-xs sm:text-sm font-bold text-sky-950 truncate">
+                                {item.monitoraAssistenteName || <span className="text-slate-400 font-normal italic">Não atribuída</span>}
+                              </div>
+                              <div className="text-[10px] text-sky-600/90 font-semibold flex items-center gap-1">
+                                <Phone className="w-2.5 h-2.5 text-sky-400" />
+                                <span>{formatPhoneDisplay(item.monitoraAssistentePhone) || 'Sem telefone cadastrado'}</span>
+                              </div>
+                            </div>
+
+                            {/* WhatsApp Fast Buttons for Monitora Assistente */}
+                            {item.monitoraAssistenteName ? (
+                              <div className="flex items-center space-x-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => triggerOneClickWhatsApp(item.monitoraAssistenteName!, item.monitoraAssistentePhone, item.turma, 'monitora_assistente')}
+                                  className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold text-white bg-sky-600 hover:bg-sky-700 shadow-xs active:scale-95 transition-all"
+                                  title={`Abrir WhatsApp direto com "${item.monitoraAssistenteName}"`}
+                                >
+                                  <Send className="w-3 h-3 text-sky-200" />
+                                  <span>1-Clique</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => openApoioModal('monitora_assistente', item.monitoraAssistenteName!, item.monitoraAssistentePhone, item.turma)}
+                                  className="p-1.5 rounded-lg text-sky-800 hover:bg-sky-100/60 border border-sky-300 bg-sky-50 transition-colors"
+                                  title="Personalizar mensagem antes de enviar"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : isCoord ? (
+                              <button
+                                type="button"
+                                onClick={() => startEdit(item)}
+                                className="px-2 py-1 text-[11px] font-bold text-sky-700 hover:bg-sky-100/70 border border-dashed border-sky-300 rounded-lg transition-colors"
+                              >
+                                + Atribuir
+                              </button>
+                            ) : null}
                           </div>
 
                           {/* Location & Observação */}
@@ -615,6 +723,8 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
             const updated = { ...target };
             if (apoioModalState.destinatarioRole === 'adi') {
               updated.adiPhone = newPhone;
+            } else if (apoioModalState.destinatarioRole === 'monitora_assistente') {
+              updated.monitoraAssistentePhone = newPhone;
             } else {
               updated.monitoraPhone = newPhone;
             }
