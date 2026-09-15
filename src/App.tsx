@@ -1026,7 +1026,7 @@ export default function App() {
       console.warn('Recarregamento do servidor indisponível (mantendo lista local):', err);
       const localList = getLocalUsersList();
       if (localList && localList.length > 0) {
-        const merged = normalizeAndDeduplicateUsers([...localList, ...PRESET_USERS]);
+        const merged = normalizeAndDeduplicateUsers(localList);
         setUsers(merged);
       }
     }
