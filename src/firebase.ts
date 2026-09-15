@@ -454,7 +454,7 @@ export function subscribeUsers(
           const profile: UserProfile = {
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
             name: (data.name && data.name.trim()) || (isMasterAdmin ? 'Fernando Veiga' : ''),
-            email: isMasterAdmin ? ADMIN_EMAIL : (data.email || ''),
+            email: isMasterAdmin ? ((data.email || '') || ADMIN_EMAIL) : (data.email || ''),
             phone: data.phone !== undefined ? data.phone : undefined,
             role,
             cargoLabel,
