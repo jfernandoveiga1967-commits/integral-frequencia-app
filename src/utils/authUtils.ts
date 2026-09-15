@@ -1,4 +1,4 @@
-import { UserProfile } from '../types';
+import { UserProfile, UserRole, UserStatus } from '../types';
 
 export const ADMIN_EMAIL = 'fernando.veiga@crescercampinas.com.br';
 
@@ -108,5 +108,114 @@ export function saveLocalUsersList(users: UserProfile[]): void {
     localStorage.setItem('app_users_list', JSON.stringify(normalized));
   } catch (e) {
     console.error('Erro ao salvar usuários no localStorage:', e);
+  }
+}
+
+// ----- Funções de papel (role) e permissões -----
+
+export function isCoordenador(user: UserProfile | null | undefined): boolean {
+  return user?.role === 'coordenador';
+}
+
+export function canMarkAttendance(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  return user.canMarkAttendance !== false;
+}
+
+export function canManageStudents(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  return user.canManageStudents !== false;
+}
+
+export function canManageTurmas(user: UserProfile | null | undefined): boolean {
+  // Apenas o Coordenador gerencia turmas (não existe um campo dedicado no perfil).
+  return isCoordenador(user);
+}
+
+// ----- Funções de status do colaborador -----
+
+export function getUserStatus(user: UserProfile | null | undefined): UserStatus {
+  const raw = (user?.status || 'ATIVO').toString().toUpperCase();
+  if (raw === 'INATIVO') return 'INATIVO';
+  if (raw === 'DESLIGADO') return 'DESLIGADO';
+  return 'ATIVO';
+}
+
+export function isUserActive(user: UserProfile | null | undefined): boolean {
+  return getUserStatus(user) === 'ATIVO';
+}
+
+export function isUserDismissed(user: UserProfile | null | undefined): boolean {
+  return getUserStatus(user) === 'DESLIGADO';
+}
+
+export function isUserInactiveOrDismissed(user: UserProfile | null | undefined): boolean {
+  const status = getUserStatus(user);
+  return status === 'INATIVO' || status === 'DESLIGADO';
+}
+
+// ----- Badges visuais (cor + rótulo) -----
+
+export interface BadgeStyle {
+  bg: string;
+  text: string;
+  border: string;
+  label: string;
+}
+
+export function getRoleBadgeStyle(role: UserRole | undefined): BadgeStyle {
+  if (role === 'coordenador') {
+    return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300', label: 'Coordenador' };
+  }
+  return { bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-300', label: 'Monitor/Professor' };
+}
+
+export function getUserStatusBadge(user: UserProfile | null | undefined): BadgeStyle {
+  const status = getUserStatus(user);
+  if (status === 'DESLIGADO') {
+    return { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-300', label: 'Desligado' };
+  }
+  if (status === 'INATIVO') {
+    return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300', label: 'Inativo' };
+  }
+  return { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-300', label: 'Ativo' };
+}
+
+// ----- Cardápio / Nutrição -----
+
+export function isNutricionista(user: UserProfile | null | undefined): boolean {
+  if (!user) return false;
+  const label = (user.cargoLabel || '').toLowerCase();
+  if (label.includes('nutri')) return true;
+  return (user.assignedActivities || []).some((a) => String(a).toLowerCase().includes('nutri'));
+}
+
+export function canManageCardapio(user: UserProfile | null | undefined): boolean {
+  return isCoordenador(user) || isNutricionista(user);
+}
+
+// ----- Sessão do usuário logado (persistência local) -----
+
+const CURRENT_USER_KEY = 'app_current_user';
+
+export function getStoredUser(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_KEY);
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch (e) {
+    console.error('Erro ao ler usuário atual do localStorage:', e);
+    return null;
+  }
+}
+
+export function saveStoredUser(user: UserProfile | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(CURRENT_USER_KEY);
+    }
+  } catch (e) {
+    console.error('Erro ao salvar usuário atual no localStorage:', e);
   }
 }
