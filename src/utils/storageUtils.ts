@@ -5,23 +5,21 @@ import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
 import { repairOverlappedPontoRecords } from './pontoUtils';
-import { db } from '../firebase';
-import { collection, getDocs, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+
+export const STUDENTS_KEY = 'integral_frequencia_students_v1';
+export const DELETED_STUDENTS_KEY = 'integral_frequencia_deleted_students_v1';
+export const RECORDS_KEY = 'integral_frequencia_records_v1';
+export const ATTENDANCE_OUTBOX_KEY = 'integral_frequencia_attendance_outbox_v1';
+export const TURMAS_KEY = 'integral_frequencia_turmas_v1';
+export const ACTIVITIES_KEY = 'integral_frequencia_activities_v1';
+export const SCHEDULES_KEY = 'integral_frequencia_schedules_v1';
+export const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
+export const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
+export const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
+export const SEMANARIO_KEY = 'integral_semanario_plans_v1';
+export const ALL_USERS_KEY = 'frequencia_integral_all_users';
 
 export { normalizeAndDeduplicateUsers };
-
-const STUDENTS_KEY = 'integral_frequencia_students_v1';
-export const DELETED_STUDENTS_KEY = 'integral_frequencia_deleted_students_v1';
-const RECORDS_KEY = 'integral_frequencia_records_v1';
-const ATTENDANCE_OUTBOX_KEY = 'integral_frequencia_attendance_outbox_v1';
-const TURMAS_KEY = 'integral_frequencia_turmas_v1';
-const ACTIVITIES_KEY = 'integral_frequencia_activities_v1';
-const SCHEDULES_KEY = 'integral_frequencia_schedules_v1';
-const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
-const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
-const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
-const SEMANARIO_KEY = 'integral_semanario_plans_v1';
-export const ALL_USERS_KEY = 'frequencia_integral_all_users';
 
 export function getDeletedStudentIds(): Set<string> {
   try {
@@ -450,164 +448,32 @@ export function deduplicateStudentsList(
 }
 
 /**
- * Busca inicial de alunos (fetchStudents) com Deduplicação de Cadastro:
- * Agrupa registros pelo e-mail do responsável ou nomeCompleto + turma.
- * Caso existam dois documentos com o mesmo nome na mesma turma, consolida-os
- * automaticamente mantendo apenas o ID mais recente no Firestore e deletando
- * os documentos duplicados antigos no Firestore de forma assíncrona.
+ * Busca de alunos a partir do armazenamento local deduplicado.
  */
 export async function fetchStudents(): Promise<Student[]> {
   try {
-    const studentsCol = collection(db, 'students');
-    const alunosCol = collection(db, 'alunos');
-
-    const [snapStudents, snapAlunos] = await Promise.allSettled([
-      getDocs(studentsCol),
-      getDocs(alunosCol),
-    ]);
-
-    const rawDocsMap = new Map<string, any>();
-
-    if (snapStudents.status === 'fulfilled') {
-      snapStudents.value.forEach((d) => {
-        rawDocsMap.set(d.id, { ...d.data(), id: d.id });
-      });
-    }
-
-    if (snapAlunos.status === 'fulfilled') {
-      snapAlunos.value.forEach((d) => {
-        rawDocsMap.set(d.id, { ...d.data(), id: d.id });
-      });
-    }
-
-    const deletedIds = getDeletedStudentIds();
-    const allList: Student[] = [];
-
-    rawDocsMap.forEach((data, id) => {
-      if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
-        allList.push(normalizeStudent({ ...data, id }));
-      }
-    });
-
-    if (allList.length === 0) {
-      const local = loadStudents();
-      const dedupedLocal = deduplicateStudentsList(local);
-      saveStudents(dedupedLocal);
-      return dedupedLocal;
-    }
-
-    const duplicatesToDelete: string[] = [];
-    const consolidated = deduplicateStudentsList(allList, (winner, olderDuplicates) => {
-      olderDuplicates.forEach((old) => {
-        duplicatesToDelete.push(old.id);
-      });
-    });
-
-    // Se existirem duplicatas com o mesmo nome na mesma turma,
-    // consolida mantendo apenas o ID mais recente e remove as duplicatas antigas do Firestore
-    if (duplicatesToDelete.length > 0) {
-      console.info(
-        `[fetchStudents] Deduplicação automática: consolidando e removendo ${duplicatesToDelete.length} registros duplicados do Firestore:`,
-        duplicatesToDelete
-      );
-
-      for (const oldId of duplicatesToDelete) {
-        removeStudentFromLocalStorage(oldId);
-        markStudentAsDeleted(oldId);
-        try {
-          await deleteDoc(doc(db, 'alunos', oldId));
-          await deleteDoc(doc(db, 'students', oldId));
-        } catch (delErr) {
-          console.warn(`[fetchStudents] Erro ao remover documento duplicado ${oldId} do Firestore:`, delErr);
-        }
-      }
-    }
-
-    // Força atualização imediata da coleção local
-    saveStudents(consolidated);
-    return consolidated;
-  } catch (error) {
-    console.error('Erro na rotina fetchStudents:', error);
     const local = loadStudents();
     return deduplicateStudentsList(local);
+  } catch (error) {
+    console.error('Erro na rotina fetchStudents:', error);
+    return [];
   }
 }
 
 /**
- * Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos:
- * Substitui as chamadas estáticas getDocs na busca da coleção de alunos por um escutador contínuo em tempo real onSnapshot(collection(db, "alunos"), ...).
- * 
- * - Reflexo Imediato de Exclusões: Quando um aluno for excluído ou inativado no painel do administrador,
- *   o ouvinte remove/atualiza automaticamente esse registro na tela de todos os outros dispositivos conectados sem exigir ação manual.
- * - Gestão do Evento (Unsubscribe): Retorna uma função unsubscribe() para limpar o escutador na desmontagem (useEffect).
+ * Escutador de alunos local para compatibilidade.
  */
 export function subscribeAlunos(
   onData: (students: Student[]) => void,
   onError?: (err: Error) => void
 ): () => void {
-  const alunosDocs = new Map<string, any>();
-  const studentsDocs = new Map<string, any>();
-
-  const emit = () => {
-    const combinedMap = new Map<string, any>();
-    // Preenche com 'students' e mescla com 'alunos' para sincronização e integridade total
-    studentsDocs.forEach((val, id) => combinedMap.set(id, val));
-    alunosDocs.forEach((val, id) => combinedMap.set(id, val));
-
-    const deletedIds = getDeletedStudentIds();
-    const list: Student[] = [];
-
-    combinedMap.forEach((data, id) => {
-      if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
-        list.push(normalizeStudent({ ...data, id }));
-      }
-    });
-
-    const deduped = deduplicateStudentsList(list);
-    saveStudents(deduped);
-    onData(deduped);
-  };
-
-  const unsubAlunos = onSnapshot(
-    collection(db, 'alunos'),
-    (snapshot) => {
-      alunosDocs.clear();
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data) {
-          alunosDocs.set(docSnap.id, { ...data, id: docSnap.id });
-        }
-      });
-      emit();
-    },
-    (error) => {
-      if (onError) onError(error);
-      console.error('Erro no listener onSnapshot da coleção alunos:', error);
-    }
-  );
-
-  const unsubStudents = onSnapshot(
-    collection(db, 'students'),
-    (snapshot) => {
-      studentsDocs.clear();
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data) {
-          studentsDocs.set(docSnap.id, { ...data, id: docSnap.id });
-        }
-      });
-      emit();
-    },
-    (error) => {
-      if (onError) onError(error);
-      console.error('Erro no listener onSnapshot da coleção students:', error);
-    }
-  );
-
-  return () => {
-    unsubAlunos();
-    unsubStudents();
-  };
+  try {
+    const local = loadStudents();
+    onData(deduplicateStudentsList(local));
+  } catch (error: any) {
+    if (onError) onError(error);
+  }
+  return () => {};
 }
 
 export const subscribeStudents = subscribeAlunos;

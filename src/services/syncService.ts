@@ -8,7 +8,16 @@ import {
   SemanarioPlan,
   UserProfile,
 } from '../types';
-import { reconnectFirestore, disconnectFirestore, testFirestoreConnection, processAttendanceOutbox, getIsFirestoreQuotaExceeded } from '../firebase';
+import {
+  reconnectFirestore,
+  disconnectFirestore,
+  testFirestoreConnection,
+  processAttendanceOutbox,
+  getIsFirestoreQuotaExceeded,
+  subscribeQuotaState,
+  clearFirestoreQuotaExceeded,
+  forceDirectServerSync,
+} from '../firebase';
 
 export type SyncEventType =
   | 'SYNC_ATTENDANCE_RECORDS'
@@ -82,7 +91,7 @@ let currentConnectionState: ConnectionState = {
   isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
   lastSyncTime: Date.now(),
   pendingOutboxCount: 0,
-  quotaExceeded: false,
+  quotaExceeded: getIsFirestoreQuotaExceeded(),
 };
 
 type ConnectionStatusListener = (state: ConnectionState) => void;
@@ -91,8 +100,8 @@ const statusListeners = new Set<ConnectionStatusListener>();
 function updateConnectionState(partial: Partial<ConnectionState>) {
   currentConnectionState = {
     ...currentConnectionState,
-    quotaExceeded: getIsFirestoreQuotaExceeded(),
     ...partial,
+    quotaExceeded: partial.quotaExceeded !== undefined ? partial.quotaExceeded : getIsFirestoreQuotaExceeded(),
   };
   statusListeners.forEach((listener) => {
     try {
@@ -102,6 +111,11 @@ function updateConnectionState(partial: Partial<ConnectionState>) {
     }
   });
 }
+
+// Subscribe to quota changes from firebase
+subscribeQuotaState((quotaExceeded) => {
+  updateConnectionState({ quotaExceeded });
+});
 
 /**
  * Broadcast an event to all other tabs and windows immediately.

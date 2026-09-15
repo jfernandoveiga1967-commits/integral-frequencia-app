@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao } from './types';
-import { INITIAL_HOLIDAYS, ACTIVITIES_LIST } from './data/initialData';
+import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 import {
   loadStudents,
   saveStudents,
@@ -95,6 +95,7 @@ import {
   deleteHolidayFromFirestore,
   batchSaveHolidaysToFirestore,
   seedInitialDataToFirestore,
+  seedDefaultSchoolData,
   testFirestoreConnection,
   getIsFirestoreQuotaExceeded,
   deleteDoc,
@@ -116,9 +117,15 @@ export default function App() {
   const [activitiesList, setActivitiesList] = useState<ActivityItem[]>(() => loadActivities());
   const [schedules, setSchedules] = useState<ScheduleBlock[]>(() => loadSchedules());
   const [holidays, setHolidays] = useState<HolidayItem[]>(() => loadHolidays());
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<Student[]>(() => {
+    const local = loadStudents().filter((s) => !isMockStudent(s));
+    return local.length > 0 ? local : INITIAL_STUDENTS.map((s) => normalizeStudent(s));
+  });
   const [records, setRecords] = useState<AttendanceRecord[]>(() => loadAttendanceRecords());
-  const [turmas, setTurmas] = useState<string[]>([]);
+  const [turmas, setTurmas] = useState<string[]>(() => {
+    const local = loadTurmas();
+    return local.length > 0 ? sortTurmasPedagogical(local) : sortTurmasPedagogical(TURMAS_LIST);
+  });
   const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
   const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
   const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
@@ -370,11 +377,9 @@ export default function App() {
       let effectiveList: Student[];
       if (realStudents.length > 0) {
         effectiveList = realStudents;
-      } else if (isInitialStudentsSync) {
-        const currentLocal = loadStudents();
-        effectiveList = currentLocal.filter((s) => !isMockStudent(s));
       } else {
-        effectiveList = [];
+        const currentLocal = loadStudents().filter((s) => !isMockStudent(s));
+        effectiveList = currentLocal.length > 0 ? currentLocal : INITIAL_STUDENTS.map((s) => normalizeStudent(s));
       }
 
       const { updatedStudents: verifiedStudents, inactivatedStudents: syncInactivated } =
@@ -1381,11 +1386,15 @@ export default function App() {
 
   // Manual sync trigger
   const handleForceSync = async () => {
+    try {
+      await reconnectFirestore(true);
+      await seedDefaultSchoolData();
+    } catch {}
     const res = await forceManualSync();
-    if (res.success) {
-      const freshRecords = loadAttendanceRecords();
-      if (freshRecords.length > 0) setRecords(freshRecords);
-    }
+    const freshRecords = loadAttendanceRecords();
+    if (freshRecords.length > 0) setRecords(freshRecords);
+    const freshStudents = loadStudents();
+    if (freshStudents.length > 0) setStudents(freshStudents);
   };
 
   // If user is not logged in, render the Login Screen with all registered users

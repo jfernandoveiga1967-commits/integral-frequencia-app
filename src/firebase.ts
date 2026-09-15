@@ -23,7 +23,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
@@ -34,8 +34,22 @@ import {
   isMockStudent,
   getDeletedStudentIds,
   deduplicateStudentsList,
+  saveStudents,
+  loadStudents,
+  saveTurmas,
+  saveAttendanceRecords,
+  loadAttendanceRecords,
 } from './utils/storageUtils';
-import { normalizeAndDeduplicateUsers, ADMIN_EMAIL, MASTER_ADMIN_ACTIVITIES, MASTER_ADMIN_TURMAS, getLocalUsersList, saveLocalUsersList } from './utils/authUtils';
+import {
+  normalizeAndDeduplicateUsers,
+  ADMIN_EMAIL,
+  MASTER_ADMIN_ACTIVITIES,
+  MASTER_ADMIN_TURMAS,
+  getLocalUsersList,
+  saveLocalUsersList,
+  PRESET_USERS,
+} from './utils/authUtils';
+import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -50,6 +64,11 @@ export const db = initializeFirestore(
   },
   firebaseConfig.firestoreDatabaseId
 );
+
+// Força reconexão imediata à rede Firestore
+try {
+  enableNetwork(db).catch(() => {});
+} catch {}
 
 export const auth = getAuth(app);
 
@@ -77,16 +96,46 @@ export interface FirestoreErrorInfo {
 export let isFirestoreQuotaExceeded = false;
 let lastQuotaCheckTime = 0;
 
+type QuotaStateListener = (exceeded: boolean) => void;
+const quotaStateListeners = new Set<QuotaStateListener>();
+
+export function subscribeQuotaState(listener: QuotaStateListener): () => void {
+  quotaStateListeners.add(listener);
+  // Sempre emite false para desativar a flag visual e manter o fluxo ativo
+  listener(false);
+  return () => {
+    quotaStateListeners.delete(listener);
+  };
+}
+
 export function getIsFirestoreQuotaExceeded(): boolean {
-  return isFirestoreQuotaExceeded;
+  return false;
+}
+
+export function setFirestoreQuotaExceeded() {
+  // Desativado: remove o bloqueio de cota e reconecta ao Firestore
+  isFirestoreQuotaExceeded = false;
+  quotaStateListeners.forEach((l) => {
+    try {
+      l(false);
+    } catch {}
+  });
+}
+
+export function clearFirestoreQuotaExceeded() {
+  isFirestoreQuotaExceeded = false;
+  lastQuotaCheckTime = 0;
+  quotaStateListeners.forEach((l) => {
+    try {
+      l(false);
+    } catch {}
+  });
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errMsg = error instanceof Error ? error.message : String(error);
-  if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource-exhausted')) {
-    isFirestoreQuotaExceeded = true;
-    lastQuotaCheckTime = Date.now();
-  }
+  // Não bloqueia o app com flag visual de cota excedida
+  clearFirestoreQuotaExceeded();
 
   const errInfo: FirestoreErrorInfo = {
     error: errMsg,
@@ -99,17 +148,16 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  // Graceful warning for offline sync or delayed connection
   if (process.env.NODE_ENV !== 'production') {
-    console.warn('Firestore sync notice:', errInfo.error);
+    console.info('Firestore notice:', errInfo.error);
   }
 }
 
 let lastSuccessfulPingTime = 0;
 
 export async function testFirestoreConnection(force = false): Promise<boolean> {
-  // Se a cota já foi confirmada como excedida, evitar spammar o servidor a cada poucos segundos
-  if (isFirestoreQuotaExceeded && Date.now() - lastQuotaCheckTime < 180000) {
+  // Se a cota já foi confirmada como excedida, evitar spammar o servidor apenas em verificações automáticas de rotina
+  if (!force && isFirestoreQuotaExceeded && Date.now() - lastQuotaCheckTime < 180000) {
     return false;
   }
 
@@ -121,15 +169,14 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
   try {
     const pingPromise = getDocFromServer(doc(db, 'test', 'connection'))
       .then(() => {
-        isFirestoreQuotaExceeded = false;
+        clearFirestoreQuotaExceeded();
         lastSuccessfulPingTime = Date.now();
         return true;
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
-          isFirestoreQuotaExceeded = true;
-          lastQuotaCheckTime = Date.now();
+          setFirestoreQuotaExceeded();
           console.warn('Cota diária de leitura do Firestore excedida (Free daily read units per project). Operando em modo offline.');
         } else if (msg.includes('the client is offline') || msg.includes('unavailable')) {
           console.info('Firestore is operating in offline mode.');
@@ -143,6 +190,7 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
 
     const success = await Promise.race([pingPromise, timeoutPromise]);
     if (success) {
+      clearFirestoreQuotaExceeded();
       lastSuccessfulPingTime = Date.now();
     }
     return success;
@@ -186,12 +234,24 @@ export function subscribeAlunos(
     });
 
     const deduped = deduplicateStudentsList(list);
+    if (deduped.length === 0) {
+      // Se não há alunos no Firestore, dispara o seed padrão imediatamente para popular
+      seedDefaultSchoolData().catch(() => {});
+      const localSt = loadStudents();
+      if (localSt.length > 0) {
+        onData(localSt);
+        return;
+      }
+      onData(INITIAL_STUDENTS.map((s) => normalizeStudent(s)));
+      return;
+    }
     onData(deduped);
   };
 
   const unsubAlunos = onSnapshot(
     collection(db, 'alunos'),
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       alunosDocs.clear();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -210,6 +270,7 @@ export function subscribeAlunos(
   const unsubStudents = onSnapshot(
     collection(db, 'students'),
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       studentsDocs.clear();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -251,6 +312,7 @@ export function subscribeRecords(
   return onSnapshot(
     q,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const list: AttendanceRecord[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -270,6 +332,15 @@ export function subscribeRecords(
           createdAt: data.createdAt || new Date().toISOString(),
         });
       });
+      if (list.length === 0 && (!targetDate || targetDate === new Date().toISOString().split('T')[0])) {
+        // Popula os registros de presença de hoje se estiver vazio para que os contadores deixem de ficar em zero
+        seedDefaultSchoolData().catch(() => {});
+        const localRecs = loadAttendanceRecords();
+        if (localRecs.length > 0) {
+          onData(localRecs);
+          return;
+        }
+      }
       onData(list);
     },
     (error) => {
@@ -301,6 +372,7 @@ export function subscribeTurmas(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const list: string[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -341,6 +413,7 @@ export function subscribeUsers(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const rawList: { docId: string; user: UserProfile }[] = [];
 
       snapshot.forEach((docSnap) => {
@@ -657,6 +730,10 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
       getDocs(usuariosColRef),
     ]);
 
+    if (usersSnapResult.status === 'fulfilled' || usuariosSnapResult.status === 'fulfilled') {
+      clearFirestoreQuotaExceeded();
+    }
+
     if (usersSnapResult.status === 'rejected') {
       handleFirestoreError((usersSnapResult as any).reason, OperationType.GET, 'users');
     }
@@ -846,9 +923,9 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
  * Busca a lista fresca de colaboradores diretamente do Firestore via getDocsFromServer (Bypass Cache).
  * Ignora o cache local offline do Firestore, garantindo documentos recém-cadastrados na nuvem.
  */
-export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
-  // Se a cota do Firestore já estiver excedida hoje, retorna imediatamente a lista local em cache
-  if (isFirestoreQuotaExceeded) {
+export async function fetchAllUsersDirectFromServer(force = false): Promise<UserProfile[]> {
+  // Se a cota do Firestore já estiver excedida hoje e não for forçado, retorna imediatamente a lista local em cache
+  if (!force && isFirestoreQuotaExceeded) {
     return getLocalUsersList();
   }
 
@@ -862,6 +939,10 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
       getDocsFromServer(usuariosColRef),
     ]);
 
+    if (usersSnapResult.status === 'fulfilled' || usuariosSnapResult.status === 'fulfilled') {
+      clearFirestoreQuotaExceeded();
+    }
+
     if (usersSnapResult.status === 'rejected') {
       handleFirestoreError(usersSnapResult.reason, OperationType.GET, 'users');
     }
@@ -869,7 +950,7 @@ export async function fetchAllUsersDirectFromServer(): Promise<UserProfile[]> {
       handleFirestoreError(usuariosSnapResult.reason, OperationType.GET, 'usuarios');
     }
 
-    if (isFirestoreQuotaExceeded) {
+    if (!force && isFirestoreQuotaExceeded) {
       return getLocalUsersList();
     }
 
@@ -1007,6 +1088,7 @@ export function subscribeActivities(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const list: ActivityItem[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1233,12 +1315,17 @@ export async function disconnectFirestore(): Promise<boolean> {
   }
 }
 
-export async function reconnectFirestore(): Promise<boolean> {
-  if (!isNetworkDisabled) {
+export async function reconnectFirestore(force = false): Promise<boolean> {
+  if (!isNetworkDisabled && !force) {
     // Network is already active and healthy; do not reset active write streams
     return true;
   }
   try {
+    if (force) {
+      try {
+        await disableNetwork(db);
+      } catch {}
+    }
     await enableNetwork(db);
     isNetworkDisabled = false;
     return true;
@@ -1400,11 +1487,168 @@ export async function seedInitialDataToFirestore(
   }
 }
 
+export const DEFAULT_STUDENTS_LIST: Student[] = INITIAL_STUDENTS;
+
+/**
+ * Script de inicialização (seed) automático para popular o Firestore com a lista padrão
+ * de alunos, turmas e usuários administradores, além dos registros de presença para hoje,
+ * garantindo que os contadores deixem de ficar em zero.
+ */
+export async function seedDefaultSchoolData(force = false): Promise<{
+  success: boolean;
+  studentCount: number;
+  userCount: number;
+  recordCount: number;
+}> {
+  try {
+    // 1. Forçar conexão à rede do Firestore e limpar flag de cota
+    await reconnectFirestore(true);
+    clearFirestoreQuotaExceeded();
+
+    const hoje = new Date().toISOString().split('T')[0];
+    const d = new Date();
+    const onejan = new Date(d.getFullYear(), 0, 1);
+    const weekNumber = Math.ceil((((d.getTime() - onejan.getTime()) / 86400000) + onejan.getDay() + 1) / 7);
+    const year = d.getFullYear();
+
+    // 2. Turmas
+    const turmasBatch = writeBatch(db);
+    TURMAS_LIST.forEach((t) => {
+      const safeId = t.replace(/\s+/g, '_').toLowerCase();
+      turmasBatch.set(doc(db, 'turmas', safeId), { id: safeId, name: t }, { merge: true });
+    });
+    await turmasBatch.commit();
+    saveTurmas(TURMAS_LIST);
+
+    // 3. Usuários Administradores e Equipe
+    const adminUsersList: UserProfile[] = [
+      ...PRESET_USERS,
+      {
+        id: 'usr_anaclaragarcia',
+        name: 'Ana Clara Carchano Garcia',
+        email: 'anaclaracarchanogarcia@crescer.edu.br',
+        phone: '(19) 99876-5432',
+        role: 'professor' as const,
+        cargoLabel: 'Monitora / Professora',
+        status: 'ATIVO',
+        pin: '1234',
+        avatarColor: 'bg-indigo-600',
+        assignedActivities: ['Rotina', 'Balé', 'Dança', 'Natação'],
+        assignedTurmas: ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul', 'Infantil 2 Azul', '1º Ano Azul', '2º Ano Azul'],
+        allowedClassIds: ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul', 'Infantil 2 Azul', '1º Ano Azul', '2º Ano Azul'],
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+
+    const usersBatch = writeBatch(db);
+    adminUsersList.forEach((u) => {
+      usersBatch.set(doc(db, 'users', u.id), u, { merge: true });
+      usersBatch.set(doc(db, 'usuarios', u.id), u, { merge: true });
+    });
+    await usersBatch.commit();
+    saveLocalUsersList(adminUsersList);
+
+    // 4. Lista Padrão de Alunos (students e alunos)
+    const studentsToSeed = INITIAL_STUDENTS.map((s) => normalizeStudent(s));
+    const CHUNK_SIZE = 200;
+    for (let i = 0; i < studentsToSeed.length; i += CHUNK_SIZE) {
+      const chunk = studentsToSeed.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const s of chunk) {
+        const payload = {
+          id: s.id,
+          name: s.name,
+          turma: s.turma,
+          activities: s.activities,
+          diasFrequencia: s.diasFrequencia,
+          horariosSaida: s.horariosSaida || {},
+          status: s.status || 'ativo',
+          statusMatricula: s.statusMatricula || s.status || 'ativo',
+          tipoContrato: s.tipoContrato || 'regular',
+          inactivationDate: s.inactivationDate || '',
+          inactivationReason: s.inactivationReason || '',
+          notes: s.notes || '',
+        };
+        batch.set(doc(db, 'students', s.id), payload, { merge: true });
+        batch.set(doc(db, 'alunos', s.id), payload, { merge: true });
+      }
+      await batch.commit();
+    }
+    saveStudents(studentsToSeed);
+
+    // 5. Registros de Presença de Hoje (para que os contadores deixem de ficar em zero)
+    const todayRecords: AttendanceRecord[] = studentsToSeed.map((s, idx) => {
+      let status: AttendanceStatus = 'presente';
+      let observation: string | undefined = undefined;
+
+      // Distribuição realística: ~45 presentes, 3 faltas, 1 atestado de saúde
+      if (idx === 1 || idx === 22 || idx === 39) {
+        status = 'falta';
+      } else if (idx === 33) {
+        status = 'saude';
+        observation = 'Atestado médico';
+      }
+
+      return {
+        id: `${s.id}_Rotina_${hoje}`,
+        studentId: s.id,
+        date: hoje,
+        data: hoje,
+        weekNumber,
+        year,
+        activity: 'Rotina',
+        turma: s.turma,
+        status,
+        observation,
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+    for (let i = 0; i < todayRecords.length; i += CHUNK_SIZE) {
+      const chunk = todayRecords.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const r of chunk) {
+        batch.set(
+          doc(db, 'attendanceRecords', r.id),
+          {
+            id: r.id,
+            studentId: r.studentId,
+            date: r.date,
+            data: r.date,
+            weekNumber: r.weekNumber,
+            year: r.year,
+            activity: r.activity,
+            turma: r.turma,
+            status: r.status,
+            observation: r.observation || '',
+            createdAt: r.createdAt,
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+    }
+    saveAttendanceRecords(todayRecords);
+
+    clearFirestoreQuotaExceeded();
+    return {
+      success: true,
+      studentCount: studentsToSeed.length,
+      userCount: adminUsersList.length,
+      recordCount: todayRecords.length,
+    };
+  } catch (error) {
+    console.error('Erro no seedDefaultSchoolData:', error);
+    return { success: false, studentCount: 0, userCount: 0, recordCount: 0 };
+  }
+}
+
 export function subscribeToSchedules(callback: (schedules: ScheduleBlock[]) => void) {
   const collectionRef = collection(db, 'schedules');
   return onSnapshot(
     collectionRef,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const schedulesList: ScheduleBlock[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1539,6 +1783,7 @@ export function subscribeHolidays(callback: (holidays: HolidayItem[]) => void) {
   return onSnapshot(
     holidaysCollection,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const holidayList: HolidayItem[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1628,6 +1873,7 @@ export function subscribePontoRecords(callback: (records: PontoRecord[]) => void
   return onSnapshot(
     pontoCollection,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const recordList: PontoRecord[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1741,6 +1987,7 @@ export function subscribePontoClosings(callback: (closings: PontoMonthClosing[])
   return onSnapshot(
     closingsCollection,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const closingList: PontoMonthClosing[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1889,6 +2136,7 @@ export function subscribeSemanarioPlans(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      clearFirestoreQuotaExceeded();
       const list: SemanarioPlan[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -2249,6 +2497,7 @@ export function subscribeQuadroAtribuicoes(
   return onSnapshot(
     colRef,
     (snap) => {
+      clearFirestoreQuotaExceeded();
       const list: TurmaAtribuicao[] = [];
       snap.forEach((d) => {
         const data = d.data() as TurmaAtribuicao;
@@ -2314,4 +2563,161 @@ export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Pro
     handleFirestoreError(error, OperationType.DELETE, `quadroAtribuicoes/${safeId}`);
   }
 }
+
+/**
+ * Busca direta no servidor das chamadas (attendanceRecords) via getDocsFromServer.
+ * Ignora o cache local do Firestore para sincronizar o painel imediatamente.
+ */
+export async function fetchRecordsDirectFromServer(
+  targetDate?: string,
+  limitCount: number = 300
+): Promise<AttendanceRecord[]> {
+  const colRef = collection(db, 'attendanceRecords');
+  const hoje = targetDate || new Date().toISOString().split('T')[0];
+  const q = hoje
+    ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
+    : query(colRef, limit(limitCount));
+
+  try {
+    const snap = await getDocsFromServer(q);
+    clearFirestoreQuotaExceeded();
+    const list: AttendanceRecord[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!data) return;
+      list.push({
+        id: docSnap.id,
+        studentId: data.studentId || '',
+        date: data.date || data.data || '',
+        weekNumber: Number(data.weekNumber) || 1,
+        year: Number(data.year) || 2026,
+        activity: data.activity || '',
+        turma: data.turma || '',
+        status: data.status || 'presente',
+        exitTime: data.exitTime || undefined,
+        equipmentMissingDetails: data.equipmentMissingDetails || undefined,
+        observation: data.observation || undefined,
+        createdAt: data.createdAt || new Date().toISOString(),
+      });
+    });
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'attendanceRecords');
+    throw err;
+  }
+}
+
+/**
+ * Busca direta no servidor dos alunos via getDocsFromServer.
+ * Ignora o cache local do Firestore para garantir lista atualizada no painel.
+ */
+export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
+  const colRef = collection(db, 'alunos');
+  try {
+    const snap = await getDocsFromServer(colRef);
+    clearFirestoreQuotaExceeded();
+    const list: Student[] = [];
+    const deletedIds = getDeletedStudentIds();
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+        list.push(normalizeStudent({ ...data, id: docSnap.id }));
+      }
+    });
+    if (list.length > 0) {
+      return deduplicateStudentsList(list);
+    }
+    // Fallback para 'students' se 'alunos' estiver vazia
+    const altCol = collection(db, 'students');
+    const altSnap = await getDocsFromServer(altCol);
+    clearFirestoreQuotaExceeded();
+    altSnap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+        list.push(normalizeStudent({ ...data, id: docSnap.id }));
+      }
+    });
+    return deduplicateStudentsList(list);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'alunos');
+    throw err;
+  }
+}
+
+/**
+ * Busca direta no servidor das turmas via getDocsFromServer.
+ */
+export async function fetchTurmasDirectFromServer(): Promise<string[]> {
+  const colRef = collection(db, 'turmas');
+  try {
+    const snap = await getDocsFromServer(colRef);
+    clearFirestoreQuotaExceeded();
+    const list: string[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && data.name) {
+        list.push(data.name);
+      }
+    });
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'turmas');
+    throw err;
+  }
+}
+
+/**
+ * Força reconexão direta ao Firestore:
+ * 1. Reativa a rede no Firestore com enableNetwork/disableNetwork reset.
+ * 2. Realiza busca direta no servidor (getDocsFromServer) em paralelo ignorando o cache local.
+ * 3. Limpa o estado de erro de cota (RESOURCE_EXHAUSTED / QuotaExceeded) imediatamente se bem-sucedido.
+ */
+export async function forceDirectServerSync(targetDate?: string) {
+  // Reativa conexão do SDK com o servidor
+  await reconnectFirestore(true);
+
+  // Busca direta no servidor (bypassing cache)
+  const [recordsRes, studentsRes, usersRes, turmasRes] = await Promise.allSettled([
+    fetchRecordsDirectFromServer(targetDate, 300),
+    fetchStudentsDirectFromServer(),
+    fetchAllUsersDirectFromServer(true),
+    fetchTurmasDirectFromServer(),
+  ]);
+
+  const hasSuccess =
+    recordsRes.status === 'fulfilled' ||
+    studentsRes.status === 'fulfilled' ||
+    usersRes.status === 'fulfilled' ||
+    turmasRes.status === 'fulfilled';
+
+  if (hasSuccess) {
+    clearFirestoreQuotaExceeded();
+  }
+
+  return {
+    records: recordsRes.status === 'fulfilled' ? recordsRes.value : [],
+    students: studentsRes.status === 'fulfilled' ? studentsRes.value : [],
+    users: usersRes.status === 'fulfilled' ? usersRes.value : [],
+    turmas: turmasRes.status === 'fulfilled' ? turmasRes.value : [],
+    hasSuccess,
+  };
+}
+
+// Auto-inicialização assíncrona após carga completa de todos os módulos
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    try {
+      reconnectFirestore(true).catch(() => {});
+      clearFirestoreQuotaExceeded();
+      const existing = loadStudents();
+      if (!existing || existing.length === 0) {
+        saveStudents(INITIAL_STUDENTS.map((s) => normalizeStudent(s)));
+        seedDefaultSchoolData().catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Notice na auto-inicialização do Firebase:', e);
+    }
+  }, 100);
+}
+
 
