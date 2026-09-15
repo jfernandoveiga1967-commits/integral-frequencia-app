@@ -1017,7 +1017,7 @@ export default function App() {
       }
       const freshUsers = await fetchAllUsersDirectFromServer();
       if (freshUsers && freshUsers.length > 0) {
-        const merged = normalizeAndDeduplicateUsers([...freshUsers, ...PRESET_USERS]);
+        const merged = normalizeAndDeduplicateUsers(freshUsers);
         setUsers(merged);
         saveLocalUsersList(merged);
         broadcastSyncEvent('SYNC_USERS', merged);
