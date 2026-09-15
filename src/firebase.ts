@@ -624,7 +624,7 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     ...user,
     id: targetDocId,
     name: cleanName,
-    email: isMasterAdmin ? ADMIN_EMAIL : emailLower,
+    email: isMasterAdmin ? (emailLower || ADMIN_EMAIL) : emailLower,
     phone: user.phone !== undefined ? user.phone.trim() : '',
     role,
     cargoLabel,
