@@ -1010,7 +1010,7 @@ export default function App() {
       if (getIsFirestoreQuotaExceeded()) {
         const localList = getLocalUsersList();
         if (localList && localList.length > 0) {
-          const merged = normalizeAndDeduplicateUsers([...localList, ...PRESET_USERS]);
+          const merged = normalizeAndDeduplicateUsers(localList);
           setUsers(merged);
         }
         return;
