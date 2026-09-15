@@ -828,7 +828,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
       const profile: UserProfile = {
         id: isMasterAdmin ? 'usr_coord_1' : rawId,
         name: isMasterAdmin ? 'Fernando Veiga' : (isAnaClaraMatch ? 'Ana Clara Carchano Garcia' : rawName || 'Colaborador'),
-        email: isMasterAdmin ? ADMIN_EMAIL : rawEmail,
+        email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
         phone: data.phone !== undefined ? data.phone : undefined,
         role,
         cargoLabel,
@@ -1004,7 +1004,7 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
       const profile: UserProfile = {
         id: isMasterAdmin ? 'usr_coord_1' : rawId,
         name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
-        email: isMasterAdmin ? ADMIN_EMAIL : rawEmail,
+        email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
         phone: data.phone !== undefined ? data.phone : undefined,
         role,
         cargoLabel,
