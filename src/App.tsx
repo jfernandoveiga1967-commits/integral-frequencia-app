@@ -420,7 +420,7 @@ export default function App() {
           effectiveUsers = localList;
           setUsers(effectiveUsers);
         } else {
-          effectiveUsers = normalizeAndDeduplicateUsers([...(fsUsers || []), ...PRESET_USERS]);
+          effectiveUsers = normalizeAndDeduplicateUsers(fsUsers || []);
           setUsers(effectiveUsers);
         }
       }
