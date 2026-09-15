@@ -410,7 +410,7 @@ export default function App() {
       // Deduplicate strictly in memory and merge with presets
       let effectiveUsers: UserProfile[];
       if (fsUsers && fsUsers.length > 0) {
-        effectiveUsers = normalizeAndDeduplicateUsers([...fsUsers, ...PRESET_USERS]);
+        effectiveUsers = normalizeAndDeduplicateUsers(fsUsers);
         setUsers(effectiveUsers);
         saveLocalUsersList(effectiveUsers);
       } else {
