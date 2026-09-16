@@ -60,7 +60,7 @@ export const db = initializeFirestore(
   app,
   {
     localCache: memoryLocalCache(),
-    experimentalForceLongPolling: true,
+
   },
   firebaseConfig.firestoreDatabaseId
 );
