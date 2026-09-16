@@ -301,7 +301,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // Filtered & Sorted Users (Admin always pinned on top + alphabetical A-Z for others)
   const filteredUsers = useMemo(() => {
-    const deduplicatedUsers = normalizeAndDeduplicateUsers(users || []);
+    const deduplicatedUsers = users || [];
     const cleanSearch = searchTerm.toLowerCase().trim();
 
     return deduplicatedUsers
