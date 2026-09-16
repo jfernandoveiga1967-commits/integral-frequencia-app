@@ -2,15 +2,10 @@ import { UserProfile, UserRole, UserStatus } from '../types';
 
 export const ADMIN_EMAIL = 'fernando.veiga@crescercampinas.com.br';
 
-// Atividades padrão atribuídas ao Coordenador/Admin por padrão.
-// Ajuste esta lista conforme as modalidades reais do Programa Integral.
-export const MASTER_ADMIN_ACTIVITIES: string[] = [
-  'Rotina',
-];
-
-// Turmas padrão atribuídas ao Coordenador/Admin por padrão.
-// O Coordenador tem acesso irrestrito independente desta lista (ver lógica de permissões),
-// mas ela é usada como valor de exibição/registro. Ajuste conforme necessário.
+// Atividades e turmas padrão atribuídas ao Coordenador/Admin.
+// O Coordenador tem acesso irrestrito independente destas listas (ver isCoordenador),
+// elas servem apenas como valor de exibição/registro. Ajuste conforme necessário.
+export const MASTER_ADMIN_ACTIVITIES: string[] = ['Rotina'];
 export const MASTER_ADMIN_TURMAS: string[] = [];
 
 export const PRESET_USERS: UserProfile[] = [
@@ -18,12 +13,12 @@ export const PRESET_USERS: UserProfile[] = [
     id: 'usr_coord_1',
     name: 'Fernando Veiga',
     email: ADMIN_EMAIL,
-    role: 'coordenador',
+    role: 'coordenador' as UserRole,
     cargoLabel: 'Coordenador (Administrador)',
     avatarColor: 'bg-amber-500',
     birthDate: '1967-08-12',
     pin: '12/08/1967',
-    status: 'ATIVO',
+    status: 'ATIVO' as UserStatus,
     workShiftType: 'padrao_8h',
     assignedActivities: MASTER_ADMIN_ACTIVITIES,
     assignedTurmas: MASTER_ADMIN_TURMAS,
@@ -34,7 +29,28 @@ export const PRESET_USERS: UserProfile[] = [
     contractSchedule: '07:30 - 17:30',
     baseSalary: 0,
   } as UserProfile,
+  {
+    id: 'usr_nutri_1',
+    name: 'Thaís Grisoni',
+    email: 'thaisgriisoni@gmail.com',
+    role: 'nutricionista' as UserRole,
+    cargoLabel: 'Nutricionista (CRN: 84367)',
+    avatarColor: 'bg-teal-600',
+    birthDate: '1990-01-01',
+    pin: '01/01/1990',
+    status: 'ATIVO' as UserStatus,
+    assignedActivities: [],
+    assignedTurmas: [],
+    allowedClassIds: [],
+    canManageStudents: false,
+    canMarkAttendance: false,
+    company: 'Colégio Crescer',
+  } as UserProfile,
 ];
+
+// ---------------------------------------------------------------------------
+// Autenticação e login
+// ---------------------------------------------------------------------------
 
 export function verifyUserCredentials(
   user: UserProfile,
@@ -53,15 +69,104 @@ export function formatBirthDateToDisplay(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
+// ---------------------------------------------------------------------------
+// Papel do usuário (role) e permissões
+// ---------------------------------------------------------------------------
+
+export function isCoordenador(user?: UserProfile | null): boolean {
+  return user?.role === 'coordenador';
+}
+
+export function isNutricionista(user?: UserProfile | null): boolean {
+  return user?.role === 'nutricionista';
+}
+
+// Coordenador sempre pode gerenciar alunos; demais perfis seguem a flag do próprio usuário.
+export function canManageStudents(user?: UserProfile | null): boolean {
+  if (!user) return false;
+  if (isCoordenador(user)) return true;
+  return user.canManageStudents !== undefined ? Boolean(user.canManageStudents) : false;
+}
+
+// Coordenador sempre pode marcar frequência; demais perfis seguem a flag do próprio usuário.
+export function canMarkAttendance(user?: UserProfile | null): boolean {
+  if (!user) return false;
+  if (isCoordenador(user)) return true;
+  return user.canMarkAttendance !== undefined ? Boolean(user.canMarkAttendance) : false;
+}
+
+// Gestão de turmas (criar/editar/excluir turmas): restrito ao Coordenador.
+export function canManageTurmas(user?: UserProfile | null): boolean {
+  return isCoordenador(user);
+}
+
+// Gestão do Cardápio: Coordenador ou Nutricionista.
+export function canManageCardapio(user?: UserProfile | null): boolean {
+  return isCoordenador(user) || isNutricionista(user);
+}
+
+// Estilo do selo (badge) exibido ao lado do nome/cargo do usuário.
+// Retorna { label, className } — ajuste aqui se o visual não bater com o esperado.
+export function getRoleBadgeStyle(user?: UserProfile | null): { label: string; className: string } {
+  const role = user?.role;
+  switch (role) {
+    case 'coordenador':
+      return { label: 'Coordenador', className: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' };
+    case 'nutricionista':
+      return { label: 'Nutricionista', className: 'bg-teal-500/20 text-teal-300 border border-teal-500/40' };
+    case 'auxiliar':
+      return { label: 'Auxiliar', className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' };
+    case 'professor':
+    default:
+      return { label: 'Monitor / Professor', className: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Status do usuário (ativo / inativo / desligado)
+// ---------------------------------------------------------------------------
+
+export function getUserStatus(user?: UserProfile | null): UserStatus {
+  return (user?.status as UserStatus) || ('ATIVO' as UserStatus);
+}
+
+export function isUserActive(user?: UserProfile | null): boolean {
+  return getUserStatus(user) === 'ATIVO';
+}
+
+export function isUserDismissed(user?: UserProfile | null): boolean {
+  return getUserStatus(user) === 'DESLIGADO';
+}
+
+export function isUserInactiveOrDismissed(user?: UserProfile | null): boolean {
+  return getUserStatus(user) !== 'ATIVO';
+}
+
+// Estilo do selo de status. Retorna { label, className } — ajuste se necessário.
+export function getUserStatusBadge(user?: UserProfile | null): { label: string; className: string } {
+  const status = getUserStatus(user);
+  switch (status) {
+    case 'DESLIGADO':
+      return { label: 'Desligado', className: 'bg-rose-500/20 text-rose-300 border border-rose-500/40' };
+    case 'INATIVO':
+      return { label: 'Inativo', className: 'bg-slate-500/20 text-slate-300 border border-slate-500/40' };
+    case 'ATIVO':
+    default:
+      return { label: 'Ativo', className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Normalização e armazenamento local de usuários
+// ---------------------------------------------------------------------------
+
 export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfile[] {
   const userById = new Map<string, UserProfile>();
 
-  // 1. Carrega primeiro os usuários pré-definidos como base
   PRESET_USERS.forEach((preset) => {
     userById.set(preset.id, { ...preset });
   });
 
-  // 2. Sobrescreve/Mescla com os usuários salvos/recebidos
   if (Array.isArray(rawUsers)) {
     rawUsers.forEach((raw) => {
       if (!raw || !raw.id) return;
@@ -73,6 +178,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         cargoLabel: raw.cargoLabel || existing.cargoLabel || '',
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
+        status: raw.status || existing.status || ('ATIVO' as UserStatus),
         assignedActivities: Array.isArray(raw.assignedActivities)
           ? raw.assignedActivities
           : (existing.assignedActivities || []),
@@ -108,114 +214,5 @@ export function saveLocalUsersList(users: UserProfile[]): void {
     localStorage.setItem('app_users_list', JSON.stringify(normalized));
   } catch (e) {
     console.error('Erro ao salvar usuários no localStorage:', e);
-  }
-}
-
-// ----- Funções de papel (role) e permissões -----
-
-export function isCoordenador(user: UserProfile | null | undefined): boolean {
-  return user?.role === 'coordenador';
-}
-
-export function canMarkAttendance(user: UserProfile | null | undefined): boolean {
-  if (!user) return false;
-  return user.canMarkAttendance !== false;
-}
-
-export function canManageStudents(user: UserProfile | null | undefined): boolean {
-  if (!user) return false;
-  return user.canManageStudents !== false;
-}
-
-export function canManageTurmas(user: UserProfile | null | undefined): boolean {
-  // Apenas o Coordenador gerencia turmas (não existe um campo dedicado no perfil).
-  return isCoordenador(user);
-}
-
-// ----- Funções de status do colaborador -----
-
-export function getUserStatus(user: UserProfile | null | undefined): UserStatus {
-  const raw = (user?.status || 'ATIVO').toString().toUpperCase();
-  if (raw === 'INATIVO') return 'INATIVO';
-  if (raw === 'DESLIGADO') return 'DESLIGADO';
-  return 'ATIVO';
-}
-
-export function isUserActive(user: UserProfile | null | undefined): boolean {
-  return getUserStatus(user) === 'ATIVO';
-}
-
-export function isUserDismissed(user: UserProfile | null | undefined): boolean {
-  return getUserStatus(user) === 'DESLIGADO';
-}
-
-export function isUserInactiveOrDismissed(user: UserProfile | null | undefined): boolean {
-  const status = getUserStatus(user);
-  return status === 'INATIVO' || status === 'DESLIGADO';
-}
-
-// ----- Badges visuais (cor + rótulo) -----
-
-export interface BadgeStyle {
-  bg: string;
-  text: string;
-  border: string;
-  label: string;
-}
-
-export function getRoleBadgeStyle(role: UserRole | undefined): BadgeStyle {
-  if (role === 'coordenador') {
-    return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300', label: 'Coordenador' };
-  }
-  return { bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-300', label: 'Monitor/Professor' };
-}
-
-export function getUserStatusBadge(user: UserProfile | null | undefined): BadgeStyle {
-  const status = getUserStatus(user);
-  if (status === 'DESLIGADO') {
-    return { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-300', label: 'Desligado' };
-  }
-  if (status === 'INATIVO') {
-    return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300', label: 'Inativo' };
-  }
-  return { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-300', label: 'Ativo' };
-}
-
-// ----- Cardápio / Nutrição -----
-
-export function isNutricionista(user: UserProfile | null | undefined): boolean {
-  if (!user) return false;
-  const label = (user.cargoLabel || '').toLowerCase();
-  if (label.includes('nutri')) return true;
-  return (user.assignedActivities || []).some((a) => String(a).toLowerCase().includes('nutri'));
-}
-
-export function canManageCardapio(user: UserProfile | null | undefined): boolean {
-  return isCoordenador(user) || isNutricionista(user);
-}
-
-// ----- Sessão do usuário logado (persistência local) -----
-
-const CURRENT_USER_KEY = 'app_current_user';
-
-export function getStoredUser(): UserProfile | null {
-  try {
-    const raw = localStorage.getItem(CURRENT_USER_KEY);
-    return raw ? (JSON.parse(raw) as UserProfile) : null;
-  } catch (e) {
-    console.error('Erro ao ler usuário atual do localStorage:', e);
-    return null;
-  }
-}
-
-export function saveStoredUser(user: UserProfile | null): void {
-  try {
-    if (user) {
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(CURRENT_USER_KEY);
-    }
-  } catch (e) {
-    console.error('Erro ao salvar usuário atual no localStorage:', e);
   }
 }
