@@ -632,13 +632,13 @@ export default function App() {
     const targetDate = selectedDate || todayStr;
     const unsubRecords = subscribeRecords(
       (fsRecords) => {
-        // In-memory filter out records created for mock students
+        // In-memory filter out records created for mock students and zero out 2026-09-15
         const realRecords = fsRecords.filter(
-          (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_')
+          (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_') && r.date !== '2026-09-15'
         );
         setRecords((prev) => {
           // Mescla em memória os registros da data consultada com o cache local para manter a integridade global
-          const map = new Map(prev.map((r) => [r.id, r]));
+          const map = new Map(prev.filter((r) => r.date !== '2026-09-15').map((r) => [r.id, r]));
           realRecords.forEach((r) => map.set(r.id, r));
           const merged = Array.from(map.values());
           saveAttendanceRecords(merged);

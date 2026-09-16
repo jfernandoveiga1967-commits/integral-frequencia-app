@@ -772,7 +772,12 @@ export function loadAttendanceRecords(): AttendanceRecord[] {
         saveAttendanceRecords([]);
         return [];
       }
-      return parsed;
+      // Zerar chamadas e marcações de 15/09/2026 (hoje)
+      const filtered = parsed.filter((r) => r.date !== '2026-09-15');
+      if (filtered.length !== parsed.length) {
+        saveAttendanceRecords(filtered);
+      }
+      return filtered;
     }
   } catch (e) {
     console.error('Erro ao carregar registros do LocalStorage:', e);

@@ -78,7 +78,19 @@ export function isCoordenador(user?: UserProfile | null): boolean {
 }
 
 export function isNutricionista(user?: UserProfile | null): boolean {
-  return user?.role === 'nutricionista';
+  if (!user) return false;
+  const role = String(user.role || '').toLowerCase();
+  const label = (user.cargoLabel || '').toLowerCase();
+  const name = (user.name || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  return (
+    role === 'nutricionista' ||
+    label.includes('nutri') ||
+    name.includes('thaís grisoni') ||
+    name.includes('thais grisoni') ||
+    email.includes('thaisgriisoni') ||
+    (user.assignedActivities || []).some((a) => String(a).toLowerCase().includes('culinária') || String(a).toLowerCase().includes('nutri'))
+  );
 }
 
 // Coordenador sempre pode gerenciar alunos; demais perfis seguem a flag do próprio usuário.
@@ -105,20 +117,55 @@ export function canManageCardapio(user?: UserProfile | null): boolean {
   return isCoordenador(user) || isNutricionista(user);
 }
 
+export interface BadgeStyle {
+  bg: string;
+  text: string;
+  border: string;
+  label: string;
+  className: string;
+}
+
 // Estilo do selo (badge) exibido ao lado do nome/cargo do usuário.
-// Retorna { label, className } — ajuste aqui se o visual não bater com o esperado.
-export function getRoleBadgeStyle(user?: UserProfile | null): { label: string; className: string } {
-  const role = user?.role;
+// Aceita tanto objeto UserProfile quanto string de cargo/role.
+export function getRoleBadgeStyle(userOrRole?: UserProfile | UserRole | string | null): BadgeStyle {
+  const role = typeof userOrRole === 'object' && userOrRole !== null
+    ? String(userOrRole.role || '')
+    : String(userOrRole || '');
+
   switch (role) {
     case 'coordenador':
-      return { label: 'Coordenador', className: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' };
+      return {
+        bg: 'bg-amber-500/15',
+        text: 'text-amber-300',
+        border: 'border-amber-500/30',
+        label: 'Coordenador',
+        className: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+      };
     case 'nutricionista':
-      return { label: 'Nutricionista', className: 'bg-teal-500/20 text-teal-300 border border-teal-500/40' };
+      return {
+        bg: 'bg-teal-500/15',
+        text: 'text-teal-300',
+        border: 'border-teal-500/30',
+        label: 'Nutricionista',
+        className: 'bg-teal-500/20 text-teal-300 border border-teal-500/40',
+      };
     case 'auxiliar':
-      return { label: 'Auxiliar', className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' };
+      return {
+        bg: 'bg-emerald-500/15',
+        text: 'text-emerald-300',
+        border: 'border-emerald-500/30',
+        label: 'Auxiliar',
+        className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+      };
     case 'professor':
     default:
-      return { label: 'Monitor / Professor', className: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' };
+      return {
+        bg: 'bg-indigo-500/15',
+        text: 'text-indigo-300',
+        border: 'border-indigo-500/30',
+        label: 'Monitor / Professor',
+        className: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40',
+      };
   }
 }
 
@@ -142,17 +189,44 @@ export function isUserInactiveOrDismissed(user?: UserProfile | null): boolean {
   return getUserStatus(user) !== 'ATIVO';
 }
 
-// Estilo do selo de status. Retorna { label, className } — ajuste se necessário.
-export function getUserStatusBadge(user?: UserProfile | null): { label: string; className: string } {
-  const status = getUserStatus(user);
+// Estilo do selo de status. Aceita tanto UserProfile quanto string de status.
+export function getUserStatusBadge(userOrStatus?: UserProfile | UserStatus | string | null): BadgeStyle {
+  let status: string = 'ATIVO';
+  let dataDesligamento: string | undefined;
+
+  if (typeof userOrStatus === 'object' && userOrStatus !== null) {
+    status = String(userOrStatus.status || 'ATIVO').toUpperCase();
+    dataDesligamento = userOrStatus.dataDesligamento;
+  } else if (typeof userOrStatus === 'string') {
+    status = userOrStatus.toUpperCase();
+  }
+
   switch (status) {
     case 'DESLIGADO':
-      return { label: 'Desligado', className: 'bg-rose-500/20 text-rose-300 border border-rose-500/40' };
+      return {
+        label: dataDesligamento ? `Desligado(a) em ${formatBirthDateToDisplay(dataDesligamento)}` : 'Desligado(a)',
+        bg: 'bg-rose-500/15',
+        text: 'text-rose-400',
+        border: 'border-rose-500/30',
+        className: 'bg-rose-500/20 text-rose-300 border border-rose-500/40',
+      };
     case 'INATIVO':
-      return { label: 'Inativo', className: 'bg-slate-500/20 text-slate-300 border border-slate-500/40' };
+      return {
+        label: 'Inativo(a)',
+        bg: 'bg-slate-500/15',
+        text: 'text-slate-400',
+        border: 'border-slate-500/30',
+        className: 'bg-slate-500/20 text-slate-300 border border-slate-500/40',
+      };
     case 'ATIVO':
     default:
-      return { label: 'Ativo', className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' };
+      return {
+        label: 'Ativo(a)',
+        bg: 'bg-emerald-500/15',
+        text: 'text-emerald-400',
+        border: 'border-emerald-500/30',
+        className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+      };
   }
 }
 
