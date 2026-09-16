@@ -1388,7 +1388,6 @@ export default function App() {
   const handleForceSync = async () => {
     try {
       await reconnectFirestore(true);
-      await seedDefaultSchoolData();
     } catch {}
     const res = await forceManualSync();
     const freshRecords = loadAttendanceRecords();
