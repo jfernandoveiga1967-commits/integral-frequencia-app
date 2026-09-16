@@ -187,7 +187,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleConfirmDeleteStudent = async () => {
     if (!studentToDelete || isDeletingStudent) return;
-    if (!isCoordenador && currentUser && !allowedTurmas.includes(studentToDelete.turma)) {
+    if (!isCoordenador && !userCanManageStudents && currentUser && !allowedTurmas.includes(studentToDelete.turma)) {
+      setToastMsg({
+        text: 'Você não tem permissão para excluir alunos desta turma.',
+        type: 'error',
+      });
       setStudentToDelete(null);
       return;
     }
@@ -199,6 +203,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     try {
       // Exclusão efetiva no Firestore de forma assíncrona
       await onDeleteStudent(studentId);
+      setStudents((prev) => prev.filter((s) => s.id !== studentId));
       setToastMsg({
         text: `Aluno "${studentName}" excluído permanentemente com sucesso.`,
         type: 'success',
@@ -671,6 +676,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           {userCanManageStudents && (
             <>
               <button
+                id="btn-toggle-add-student"
                 onClick={() => {
                   setShowAddForm(!showAddForm);
                   setShowBatchForm(false);
@@ -728,6 +734,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 Nome Completo do Aluno:
               </label>
               <input
+                id="input-student-name"
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -1086,6 +1093,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               Cancelar
             </button>
             <button
+              id="btn-submit-add-student"
               type="submit"
               disabled={isSavingSingle}
               className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs cursor-pointer flex items-center space-x-1.5 transition-all"
@@ -2062,6 +2070,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
+                id="input-search-students"
                 type="text"
                 placeholder="Digite o nome..."
                 value={searchTerm}

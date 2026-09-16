@@ -60,7 +60,7 @@ export const db = initializeFirestore(
   app,
   {
     localCache: memoryLocalCache(),
-
+    experimentalForceLongPolling: true,
   },
   firebaseConfig.firestoreDatabaseId
 );
@@ -1174,13 +1174,49 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
 }
 
 export async function deleteStudentFromFirestore(alunoId: string): Promise<void> {
+  if (!alunoId || typeof alunoId !== 'string') {
+    console.warn('[deleteStudentFromFirestore] ID de aluno inválido:', alunoId);
+    return;
+  }
+  const cleanId = alunoId.trim();
+  if (!cleanId) return;
+
   try {
-    const docRefAlunos = doc(db, 'alunos', alunoId);
-    const docRefStudents = doc(db, 'students', alunoId);
-    await deleteDoc(docRefAlunos);
-    await deleteDoc(docRefStudents);
+    const docRefAlunos = doc(db, 'alunos', cleanId);
+    const docRefStudents = doc(db, 'students', cleanId);
+
+    // 1. Exclusão direta pelo ID do documento nas duas coleções em paralelo
+    await Promise.allSettled([
+      deleteDoc(docRefAlunos),
+      deleteDoc(docRefStudents),
+    ]);
+
+    // 2. Busca de segurança caso o documento no Firestore tenha sido salvo com ID gerado automaticamente
+    // e o campo interno 'id' corresponda a cleanId
+    try {
+      const qAlunos = query(collection(db, 'alunos'), where('id', '==', cleanId));
+      const qStudents = query(collection(db, 'students'), where('id', '==', cleanId));
+      const [snapAlunos, snapStudents] = await Promise.all([
+        getDocs(qAlunos),
+        getDocs(qStudents),
+      ]);
+
+      const extraDeletes: Promise<void>[] = [];
+      snapAlunos.forEach((d) => {
+        if (d.id !== cleanId) extraDeletes.push(deleteDoc(d.ref));
+      });
+      snapStudents.forEach((d) => {
+        if (d.id !== cleanId) extraDeletes.push(deleteDoc(d.ref));
+      });
+
+      if (extraDeletes.length > 0) {
+        await Promise.allSettled(extraDeletes);
+      }
+    } catch {
+      // Ignora erro de query secundária
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `alunos/${alunoId}`);
+    handleFirestoreError(error, OperationType.DELETE, `alunos/${cleanId}`);
     throw error;
   }
 }
