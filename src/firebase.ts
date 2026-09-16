@@ -332,15 +332,6 @@ export function subscribeRecords(
           createdAt: data.createdAt || new Date().toISOString(),
         });
       });
-      if (list.length === 0 && (!targetDate || targetDate === new Date().toISOString().split('T')[0])) {
-        // Popula os registros de presença de hoje se estiver vazio para que os contadores deixem de ficar em zero
-        seedDefaultSchoolData().catch(() => {});
-        const localRecs = loadAttendanceRecords();
-        if (localRecs.length > 0) {
-          onData(localRecs);
-          return;
-        }
-      }
       onData(list);
     },
     (error) => {
@@ -1612,66 +1603,12 @@ export async function seedDefaultSchoolData(force = false): Promise<{
     }
     saveStudents(studentsToSeed);
 
-    // 5. Registros de Presença de Hoje (para que os contadores deixem de ficar em zero)
-    const todayRecords: AttendanceRecord[] = studentsToSeed.map((s, idx) => {
-      let status: AttendanceStatus = 'presente';
-      let observation: string | undefined = undefined;
-
-      // Distribuição realística: ~45 presentes, 3 faltas, 1 atestado de saúde
-      if (idx === 1 || idx === 22 || idx === 39) {
-        status = 'falta';
-      } else if (idx === 33) {
-        status = 'saude';
-        observation = 'Atestado médico';
-      }
-
-      return {
-        id: `${s.id}_Rotina_${hoje}`,
-        studentId: s.id,
-        date: hoje,
-        data: hoje,
-        weekNumber,
-        year,
-        activity: 'Rotina',
-        turma: s.turma,
-        status,
-        observation,
-        createdAt: new Date().toISOString(),
-      };
-    });
-
-    for (let i = 0; i < todayRecords.length; i += CHUNK_SIZE) {
-      const chunk = todayRecords.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
-      for (const r of chunk) {
-        batch.set(
-          doc(db, 'attendanceRecords', r.id),
-          {
-            id: r.id,
-            studentId: r.studentId,
-            date: r.date,
-            data: r.date,
-            weekNumber: r.weekNumber,
-            year: r.year,
-            activity: r.activity,
-            turma: r.turma,
-            status: r.status,
-            observation: r.observation || '',
-            createdAt: r.createdAt,
-          },
-          { merge: true }
-        );
-      }
-      await batch.commit();
-    }
-    saveAttendanceRecords(todayRecords);
-
     clearFirestoreQuotaExceeded();
     return {
       success: true,
       studentCount: studentsToSeed.length,
       userCount: adminUsersList.length,
-      recordCount: todayRecords.length,
+      recordCount: 0,
     };
   } catch (error) {
     console.error('Erro no seedDefaultSchoolData:', error);
