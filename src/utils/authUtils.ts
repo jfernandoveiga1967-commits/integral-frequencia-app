@@ -216,3 +216,32 @@ export function saveLocalUsersList(users: UserProfile[]): void {
     console.error('Erro ao salvar usuários no localStorage:', e);
   }
 }
+// ---------------------------------------------------------------------------
+// Usuário atualmente logado (sessão local)
+// ---------------------------------------------------------------------------
+
+const CURRENT_USER_STORAGE_KEY = 'app_current_user';
+
+export function getStoredUser(): UserProfile | null {
+  try {
+    const stored = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored) as UserProfile;
+    }
+  } catch (e) {
+    console.error('Erro ao ler usuário logado do localStorage:', e);
+  }
+  return null;
+}
+
+export function saveStoredUser(user: UserProfile | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.error('Erro ao salvar usuário logado no localStorage:', e);
+  }
+}
