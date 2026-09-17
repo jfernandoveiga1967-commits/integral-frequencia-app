@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { TurmaAtribuicao, UserProfile } from '../types';
 import { formatPhoneDisplay, cleanPhoneNumber } from '../utils/whatsappUtils';
-import { getFirstName, buildApoioWhatsAppUrl } from '../utils/atribuicoesStorage';
+import { getFirstName, buildApoioWhatsAppUrl, getDefaultHorarioTurnoForTurma } from '../utils/atribuicoesStorage';
 import { ApoioWhatsAppModal } from './ApoioWhatsAppModal';
 import { UserScrollSelect } from './UserScrollSelect';
 import { generateQuadroAtribuicoesPDF } from '../utils/pdfGenerator';
@@ -104,7 +104,10 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
 
   const startEdit = (item: TurmaAtribuicao) => {
     setEditingTurmaId(item.id);
-    setEditForm({ ...item });
+    setEditForm({
+      ...item,
+      horarioTurno: item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma),
+    });
   };
 
   const cancelEdit = () => {
@@ -305,7 +308,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                       <div className="flex items-center space-x-1 shrink-0">
                         <span className="text-[10px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200 flex items-center gap-1">
                           <Clock className="w-3 h-3 text-amber-600" />
-                          {item.horarioTurno || '11:40 às 17:40'}
+                          {item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma)}
                         </span>
                         {isCoord && !isEditing && (
                           <button
@@ -471,7 +474,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                                 onChange={(e) =>
                                   setEditForm({ ...editForm, horarioTurno: e.target.value })
                                 }
-                                placeholder="11:40 às 17:40"
+                                placeholder={getDefaultHorarioTurnoForTurma(editForm.turma)}
                                 className="w-full px-2.5 py-1.5 text-xs font-semibold bg-white border border-slate-300 rounded-lg"
                               />
                             </div>

@@ -184,6 +184,31 @@ export const UserScrollSelect: React.FC<UserScrollSelectProps> = ({
 
           {/* Lista com Barra de Rolagem (Scrollable List) */}
           <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 divide-opacity-60 overscroll-contain">
+            {/* Opção explícita de Nenhum(a) / Deixar em branco */}
+            {onClear && (!searchTerm.trim() || 'nenhum'.includes(searchTerm.toLowerCase()) || 'branco'.includes(searchTerm.toLowerCase()) || 'sem'.includes(searchTerm.toLowerCase())) && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClear();
+                  setIsOpen(false);
+                  setSearchTerm('');
+                }}
+                className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                  !selectedName.trim()
+                    ? 'bg-slate-100 text-slate-900 font-bold'
+                    : 'hover:bg-slate-50 text-slate-600'
+                }`}
+              >
+                <div className="flex items-center space-x-2 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+                  <span className="font-semibold text-slate-700 truncate">
+                    Nenhum(a) / Deixar em branco
+                  </span>
+                </div>
+                {!selectedName.trim() && <Check className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
+              </button>
+            )}
+
             {sortedAndFilteredUsers.length === 0 ? (
               <div className="py-4 text-center text-xs text-slate-500">
                 Nenhum colaborador encontrado com "{searchTerm}".

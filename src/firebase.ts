@@ -2506,12 +2506,41 @@ export function subscribeQuadroAtribuicoes(
     colRef,
     (snap) => {
       clearFirestoreQuotaExceeded();
-      const list: TurmaAtribuicao[] = [];
+      const map = new Map<string, TurmaAtribuicao>();
+
       snap.forEach((d) => {
         const data = d.data() as TurmaAtribuicao;
-        list.push({ ...data, id: d.id });
+        const safeId = generateTurmaAtribuicaoId(data.turma || d.id);
+
+        // Se houver documento remanescente com ID não-normalizado (ex: atrib_3º_ano_vermelho), remove do Firestore
+        if (d.id !== safeId && (d.id.includes('º') || d.id.includes('°') || !d.id.startsWith('atrib_'))) {
+          deleteDoc(doc(db, 'quadroAtribuicoes', d.id)).catch(() => {});
+        }
+
+        const normalizedItem: TurmaAtribuicao = {
+          ...data,
+          id: safeId,
+          turma: data.turma || d.id,
+        };
+
+        const existing = map.get(normalizedItem.turma);
+        let shouldReplace = false;
+        if (!existing) {
+          shouldReplace = true;
+        } else if (d.id === safeId && existing.id !== safeId) {
+          shouldReplace = true;
+        } else if (normalizedItem.monitoraName && !existing.monitoraName) {
+          shouldReplace = true;
+        } else if (normalizedItem.updatedAt && existing.updatedAt && normalizedItem.updatedAt > existing.updatedAt) {
+          shouldReplace = true;
+        }
+
+        if (shouldReplace) {
+          map.set(normalizedItem.turma, normalizedItem);
+        }
       });
-      onData(list);
+
+      onData(Array.from(map.values()));
     },
     (error) => {
       console.warn('Erro ao escutar quadroAtribuicoes no Firestore:', error);
@@ -2527,6 +2556,15 @@ export function subscribeQuadroAtribuicoes(
 export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Promise<void> {
   const safeId = generateTurmaAtribuicaoId(item.turma);
   try {
+    // Se o item tinha um ID antigo diferente do safeId normalizado, exclui o documento obsoleto
+    if (item.id && item.id !== safeId) {
+      try {
+        await deleteDoc(doc(db, 'quadroAtribuicoes', item.id));
+      } catch {
+        // ignora se não existir
+      }
+    }
+
     const docRef = doc(db, 'quadroAtribuicoes', safeId);
     const payload = {
       ...item,

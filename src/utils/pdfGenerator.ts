@@ -32,6 +32,7 @@ import {
   isContinuousShift,
   getDayPontoStatus,
 } from './pontoUtils';
+import { getDefaultHorarioTurnoForTurma } from './atribuicoesStorage';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -3711,7 +3712,7 @@ export function generateQuadroAtribuicoesPDF(
       : '—';
 
     const espacoDisplay = item.espacoBase || '—';
-    const horarioDisplay = item.horarioTurno || '11:40 às 17:40';
+    const horarioDisplay = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
     const obsDisplay = item.observacao || '—';
 
     return [

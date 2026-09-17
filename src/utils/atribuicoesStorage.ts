@@ -23,6 +23,29 @@ export function generateTurmaAtribuicaoId(turmaName: string): string {
 }
 
 /**
+ * Retorna o horário de turno padrão configurado por turma:
+ * - Mini Maternal, Maternal, Infantil 1 e Infantil 2: 11:20 - 17:20
+ * - 1º Ano Azul: 11:30 - 17:30
+ * - Demais turmas: 11:40 - 17:40
+ */
+export function getDefaultHorarioTurnoForTurma(turmaName: string): string {
+  if (!turmaName) return '11:40 - 17:40';
+  const clean = turmaName.toLowerCase().trim();
+  if (
+    clean.includes('mini maternal') ||
+    clean.includes('maternal') ||
+    clean.includes('infantil 1') ||
+    clean.includes('infantil 2')
+  ) {
+    return '11:20 - 17:20';
+  }
+  if (clean.includes('1º ano azul') || clean.includes('1ano azul') || clean.includes('1 ano azul')) {
+    return '11:30 - 17:30';
+  }
+  return '11:40 - 17:40';
+}
+
+/**
  * Cria uma atribuição em branco para a turma informada
  */
 export function buildDefaultAtribuicao(turmaName: string): TurmaAtribuicao {
@@ -39,7 +62,7 @@ export function buildDefaultAtribuicao(turmaName: string): TurmaAtribuicao {
     adiName: '',
     adiPhone: '',
     adiId: '',
-    horarioTurno: '',
+    horarioTurno: getDefaultHorarioTurnoForTurma(turmaName),
     espacoBase: turmaName,
     observacao: '',
   };
@@ -166,11 +189,31 @@ export function reconcileAtribuicoesWithTurmas(
 
   (atribuicoes || []).forEach((item) => {
     if (item && item.turma && turmasSet.has(item.turma)) {
-      existingMap.set(item.turma, item);
-      existingMap.set(item.turma.toLowerCase().trim(), item);
-      const sId = generateTurmaAtribuicaoId(item.turma);
-      existingMap.set(sId, item);
-      if (item.id) existingMap.set(item.id, item);
+      const safeId = generateTurmaAtribuicaoId(item.turma);
+      const prev = existingMap.get(item.turma);
+
+      // Prioriza documentos com safeId correto e com dados preenchidos
+      let shouldSet = false;
+      if (!prev) {
+        shouldSet = true;
+      } else if (item.id === safeId && prev.id !== safeId) {
+        shouldSet = true;
+      } else if (item.monitoraName && !prev.monitoraName) {
+        shouldSet = true;
+      } else if (item.updatedAt && prev.updatedAt && item.updatedAt > prev.updatedAt) {
+        shouldSet = true;
+      }
+
+      if (shouldSet) {
+        const normalized: TurmaAtribuicao = {
+          ...item,
+          id: safeId,
+          horarioTurno: item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma),
+        };
+        existingMap.set(item.turma, normalized);
+        existingMap.set(item.turma.toLowerCase().trim(), normalized);
+        existingMap.set(safeId, normalized);
+      }
     }
   });
 
@@ -183,6 +226,7 @@ export function reconcileAtribuicoesWithTurmas(
         ...existing,
         id: safeId,
         turma: tName,
+        horarioTurno: existing.horarioTurno || getDefaultHorarioTurnoForTurma(tName),
       };
     }
     return buildDefaultAtribuicao(tName);
