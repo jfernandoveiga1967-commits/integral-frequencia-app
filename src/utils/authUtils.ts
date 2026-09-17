@@ -269,11 +269,13 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
 
 export function getLocalUsersList(): UserProfile[] {
   try {
-    const stored = localStorage.getItem('app_users_list');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return normalizeAndDeduplicateUsers(parsed);
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('app_users_list');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return normalizeAndDeduplicateUsers(parsed);
+        }
       }
     }
   } catch (e) {
@@ -284,8 +286,10 @@ export function getLocalUsersList(): UserProfile[] {
 
 export function saveLocalUsersList(users: UserProfile[]): void {
   try {
-    const normalized = normalizeAndDeduplicateUsers(users);
-    localStorage.setItem('app_users_list', JSON.stringify(normalized));
+    if (typeof localStorage !== 'undefined') {
+      const normalized = normalizeAndDeduplicateUsers(users);
+      localStorage.setItem('app_users_list', JSON.stringify(normalized));
+    }
   } catch (e) {
     console.error('Erro ao salvar usuários no localStorage:', e);
   }

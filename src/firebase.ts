@@ -454,6 +454,7 @@ export function subscribeUsers(
           const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
 
           const profile: UserProfile = {
+            ...data,
             id: isMasterAdmin ? 'usr_coord_1' : (data.id || docId),
             name: (data.name && data.name.trim()) || (isMasterAdmin ? 'Fernando Veiga' : ''),
             email: isMasterAdmin ? ((data.email || '') || ADMIN_EMAIL) : (data.email || ''),
@@ -468,6 +469,7 @@ export function subscribeUsers(
             motivoDesligamento: data.motivoDesligamento || undefined,
             workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
             assignedActivities,
+            specialtyActivity: data.specialtyActivity || undefined,
             assignedTurmas,
             allowedClassIds: assignedTurmas,
             canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
@@ -767,6 +769,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
       const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
 
       const profile: UserProfile = {
+        ...data,
         id: isMasterAdmin ? 'usr_coord_1' : rawId,
         name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
         email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
@@ -781,6 +784,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         motivoDesligamento: data.motivoDesligamento || undefined,
         workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
         assignedActivities,
+        specialtyActivity: data.specialtyActivity || undefined,
         assignedTurmas,
         allowedClassIds: assignedTurmas,
         canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
@@ -795,7 +799,15 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
           ? Number(data.baseSalary)
           : (isMasterAdmin ? 0 : 1200),
-        company: data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+        regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
+        regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+        valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
+        duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
+        contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
+        hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
+        ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 0,
+        company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+        empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
         updatedAt: data.updatedAt || new Date().toISOString(),
       };
 
@@ -911,6 +923,7 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
       const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
 
       const profile: UserProfile = {
+        ...data,
         id: isMasterAdmin ? 'usr_coord_1' : rawId,
         name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
         email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
@@ -926,6 +939,7 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         motivoDesligamento: data.motivoDesligamento || undefined,
         workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
         assignedActivities,
+        specialtyActivity: data.specialtyActivity || undefined,
         assignedTurmas,
         allowedClassIds: assignedTurmas,
         canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
