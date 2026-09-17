@@ -19,7 +19,7 @@ interface StudentManagerProps {
   onAddStudent: (student: Omit<Student, 'id'>) => void | Promise<void>;
   onBatchAddStudents?: (names: string[], turma: TurmaType, activities: ActivityType[], diasFrequencia?: DayOfWeek[]) => void | Promise<void>;
   onUpdateStudent: (student: Student) => void | Promise<void>;
-  onDeleteStudent: (id: string) => void | Promise<void>;
+  onDeleteStudent: (id: string, studentName?: string, studentTurma?: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
 }
@@ -198,12 +198,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
     const studentName = studentToDelete.name;
     const studentId = studentToDelete.id;
+    const studentTurma = studentToDelete.turma;
     setIsDeletingStudent(true);
 
     try {
       // Exclusão efetiva no Firestore de forma assíncrona
-      await onDeleteStudent(studentId);
-      setStudents((prev) => prev.filter((s) => s.id !== studentId));
+      await onDeleteStudent(studentId, studentName, studentTurma);
+      setStudents((prev) =>
+        prev.filter(
+          (s) =>
+            s.id !== studentId &&
+            !(
+              s.name.trim().toLowerCase() === studentName.trim().toLowerCase() &&
+              s.turma.trim().toLowerCase() === studentTurma.trim().toLowerCase()
+            )
+        )
+      );
       setToastMsg({
         text: `Aluno "${studentName}" excluído permanentemente com sucesso.`,
         type: 'success',

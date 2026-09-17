@@ -33,6 +33,8 @@ import {
   getAttendanceOutbox,
   isMockStudent,
   getDeletedStudentIds,
+  markStudentAsDeleted,
+  removeStudentFromLocalStorage,
   deduplicateStudentsList,
   saveStudents,
   loadStudents,
@@ -1080,14 +1082,113 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
   }
 }
 
-export async function deleteStudentFromFirestore(alunoId: string): Promise<void> {
+export async function deleteStudentFromFirestore(
+  alunoId: string,
+  studentName?: string,
+  studentTurma?: string
+): Promise<{ deletedIds: string[]; count: number }> {
+  const cleanId = (alunoId || '').trim();
+  let resolvedName = (studentName || '').trim();
+  let resolvedTurma = (studentTurma || '').trim();
+
   try {
-    const docRefAlunos = doc(db, 'alunos', alunoId);
-    const docRefStudents = doc(db, 'students', alunoId);
-    await deleteDoc(docRefAlunos);
-    await deleteDoc(docRefStudents);
+    // 1. Se o nome não foi passado, tenta obter os dados a partir do próprio documento se existir
+    if (!resolvedName && cleanId) {
+      try {
+        const [snapAlunosDirect, snapStudentsDirect] = await Promise.allSettled([
+          getDoc(doc(db, 'alunos', cleanId)),
+          getDoc(doc(db, 'students', cleanId)),
+        ]);
+        if (snapAlunosDirect.status === 'fulfilled' && snapAlunosDirect.value.exists()) {
+          const d = snapAlunosDirect.value.data();
+          if (d?.name) resolvedName = String(d.name).trim();
+          if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
+        } else if (snapStudentsDirect.status === 'fulfilled' && snapStudentsDirect.value.exists()) {
+          const d = snapStudentsDirect.value.data();
+          if (d?.name) resolvedName = String(d.name).trim();
+          if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
+        }
+      } catch (err) {
+        console.warn('Aviso ao consultar documento para obter nome do aluno:', err);
+      }
+    }
+
+    // 2. Mapeamento de todos os documentos a serem excluídos (evita referências duplicadas)
+    const docRefsToDelete = new Map<string, any>();
+    const deletedIds = new Set<string>();
+    if (cleanId) deletedIds.add(cleanId);
+
+    // Adiciona referências diretas por ID nas duas coleções
+    if (cleanId) {
+      docRefsToDelete.set(`alunos/${cleanId}`, doc(db, 'alunos', cleanId));
+      docRefsToDelete.set(`students/${cleanId}`, doc(db, 'students', cleanId));
+    }
+
+    // 3. Consultas por ID interno (caso o ID do documento seja diferente do campo 'id')
+    const queryPromises: Promise<any>[] = [];
+    if (cleanId) {
+      queryPromises.push(
+        getDocs(query(collection(db, 'alunos'), where('id', '==', cleanId))),
+        getDocs(query(collection(db, 'students'), where('id', '==', cleanId)))
+      );
+    }
+
+    // 4. Consultas por Nome e Turma (localiza documentos reais e todas as possíveis duplicatas)
+    if (resolvedName) {
+      queryPromises.push(
+        getDocs(query(collection(db, 'alunos'), where('name', '==', resolvedName))),
+        getDocs(query(collection(db, 'students'), where('name', '==', resolvedName)))
+      );
+      // Suporte para registros legados com campo 'nome'
+      queryPromises.push(
+        getDocs(query(collection(db, 'alunos'), where('nome', '==', resolvedName))),
+        getDocs(query(collection(db, 'students'), where('nome', '==', resolvedName)))
+      );
+    }
+
+    const queryResults = await Promise.allSettled(queryPromises);
+    queryResults.forEach((res) => {
+      if (res.status === 'fulfilled' && res.value && typeof res.value.forEach === 'function') {
+        res.value.forEach((docSnap: any) => {
+          const data = docSnap.data() || {};
+          // Se a turma foi especificada, garante que bate com a turma (ou aceita se o documento não tiver turma definida)
+          if (resolvedTurma && data.turma) {
+            const docTurma = String(data.turma).trim().toLowerCase();
+            const targetTurma = resolvedTurma.toLowerCase();
+            if (docTurma !== targetTurma) {
+              return;
+            }
+          }
+          const colPath = docSnap.ref.parent.id; // 'alunos' ou 'students'
+          docRefsToDelete.set(`${colPath}/${docSnap.id}`, docSnap.ref);
+          deletedIds.add(docSnap.id);
+          if (data.id) deletedIds.add(String(data.id).trim());
+        });
+      }
+    });
+
+    // 5. Exclusão em lote (writeBatch) de todos os documentos mapeados
+    const refsList = Array.from(docRefsToDelete.values());
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < refsList.length; i += BATCH_SIZE) {
+      const chunk = refsList.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((r) => batch.delete(r));
+      await batch.commit();
+    }
+
+    // 6. Atualiza registro de alunos excluídos no storage local para evitar ressincronização
+    deletedIds.forEach((sid) => {
+      markStudentAsDeleted(sid);
+      removeStudentFromLocalStorage(sid);
+    });
+
+    return {
+      deletedIds: Array.from(deletedIds),
+      count: refsList.length,
+    };
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `alunos/${alunoId}`);
+    handleFirestoreError(error, OperationType.DELETE, `alunos/${cleanId}`);
     throw error;
   }
 }

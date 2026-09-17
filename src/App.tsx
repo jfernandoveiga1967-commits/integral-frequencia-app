@@ -745,20 +745,39 @@ export default function App() {
     }
   };
 
-  const handleDeleteStudent = async (id: string): Promise<void> => {
-    // 1. Exclusão assíncrona no Firestore (coleções 'alunos' e 'students')
-    // Se a remoção falhar (permissão ou rede), propaga o erro para exibir toast e não remover da tela
-    await deleteStudentFromFirestore(id);
+  const handleDeleteStudent = async (id: string, studentName?: string, studentTurma?: string): Promise<void> => {
+    // 1. Identifica nome e turma caso não tenham sido passados
+    const targetStudent = students.find((s) => s.id === id);
+    const resolvedName = (studentName || targetStudent?.name || '').trim();
+    const resolvedTurma = (studentTurma || targetStudent?.turma || '').trim();
 
-    // 2. Limpeza de Cache ao Deletar:
-    // Remove imediatamente do storage local e marca ID para não ressincronizar
-    removeStudentFromLocalStorage(id);
-    markStudentAsDeleted(id);
+    // 2. Exclusão assíncrona no Firestore (coleções 'alunos' e 'students')
+    // Localiza e remove todos os documentos que correspondem ao aluno (incluindo duplicatas)
+    const { deletedIds } = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma);
 
-    // 3. Atualiza estado da tela apenas após confirmação
+    // 3. Limpeza de Cache ao Deletar:
+    // Remove imediatamente do storage local e marca todos os IDs encontrados para não ressincronizar
+    const allIdsToPurge = new Set<string>([id, ...deletedIds]);
+    allIdsToPurge.forEach((sid) => {
+      removeStudentFromLocalStorage(sid);
+      markStudentAsDeleted(sid);
+    });
+
+    // 4. Atualiza estado da tela removendo tanto pelo ID quanto pelo par nome+turma (para garantir que réplicas sumam da tela)
     let updatedList: Student[] = [];
     setStudents((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
+      const updated = prev.filter((s) => {
+        if (allIdsToPurge.has(s.id)) return false;
+        if (
+          resolvedName &&
+          resolvedTurma &&
+          s.name.trim().toLowerCase() === resolvedName.toLowerCase() &&
+          s.turma.trim().toLowerCase() === resolvedTurma.toLowerCase()
+        ) {
+          return false;
+        }
+        return true;
+      });
       updatedList = updated;
       saveStudents(updated);
       return updated;
@@ -953,7 +972,8 @@ export default function App() {
       saveStudents(updatedStudents);
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
-      studentIdsToRemove.forEach((sid) => deleteStudentFromFirestore(sid));
+      const studentsToRemove = students.filter((s) => s.turma === turmaName);
+      studentsToRemove.forEach((s) => deleteStudentFromFirestore(s.id, s.name, s.turma));
 
       // Clean attendance records for removed students
       const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
