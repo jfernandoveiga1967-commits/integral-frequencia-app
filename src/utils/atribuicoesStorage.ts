@@ -7,15 +7,17 @@ export const ATRIBUICOES_STORAGE_KEY = 'quadro_atribuicoes_integral_v1';
 /**
  * Função utilitária para gerar IDs consistentes e normalizados para o Quadro de Atribuições
  * Remove acentos, símbolos ordinais ('º', 'ª', '°') e padroniza para evitar inconsistências/duplicatas.
+ * Exemplo: '3º Ano Vermelho' ou 'atrib_3º_ano_vermelho' -> 'atrib_3ano_vermelho'
  */
 export function generateTurmaAtribuicaoId(turmaName: string): string {
   if (!turmaName) return 'atrib_desconhecida';
-  const clean = turmaName
+  const str = turmaName.trim().replace(/^atrib_/, '');
+  const clean = str
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove acentos / diacríticos
     .toLowerCase()
     .trim()
-    .replace(/(\d+)\s*[º°ª]?\s*ano/g, '$1ano') // 1º Ano -> 1ano, 3º Ano -> 3ano
+    .replace(/(\d+)\s*[º°ª]?\s*_?ano/g, '$1ano') // 1º Ano -> 1ano, 3º_ano -> 3ano
     .replace(/[º°ª]/g, '') // outros símbolos ordinais
     .replace(/[^a-z0-9]+/g, '_') // caracteres especiais e espaços -> _
     .replace(/^_+|_+$/g, ''); // remove underscores nas extremidades

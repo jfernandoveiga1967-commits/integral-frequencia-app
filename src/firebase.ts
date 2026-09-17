@@ -2552,23 +2552,47 @@ export function subscribeQuadroAtribuicoes(
 
 /**
  * Salva uma atribuição de turma no Firestore (quadroAtribuicoes/{safeId})
+ * 1. Normalização de ID Obrigatória: higieniza a string de identificação (turma/turmaId)
+ *    removendo º, °, acentos e caracteres especiais antes de definir doc(db, 'quadroAtribuicoes', safeId).
+ *    (ex.: '3º Ano Vermelho' -> 'atrib_3ano_vermelho')
+ * 2. Limpeza de Documentos Legados: se o documento salvo anteriormente possuir chave antiga com
+ *    caractere especial ou divergente do safeId, executa deleteDoc() na chave antiga no mesmo fluxo.
  */
 export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Promise<void> {
-  const safeId = generateTurmaAtribuicaoId(item.turma);
+  // 1. Normalização de ID Obrigatória antes de definir a referência doc()
+  const rawIdentifier = item.turma || item.id || '';
+  const safeId = generateTurmaAtribuicaoId(rawIdentifier);
+
   try {
-    // Se o item tinha um ID antigo diferente do safeId normalizado, exclui o documento obsoleto
+    // 2. Limpeza de Documentos Legados: se havia uma chave antiga com caractere especial ou diferente do safeId
+    const legacyKeysToDelete = new Set<string>();
+
     if (item.id && item.id !== safeId) {
-      try {
-        await deleteDoc(doc(db, 'quadroAtribuicoes', item.id));
-      } catch {
-        // ignora se não existir
+      legacyKeysToDelete.add(item.id);
+    }
+
+    // Detecta possíveis chaves legadas com ordinais (º, °) ou acentos baseadas no nome da turma
+    if (item.turma) {
+      const rawWithOrdinal = `atrib_${item.turma.toLowerCase().replace(/\s+/g, '_')}`;
+      if (rawWithOrdinal !== safeId && (rawWithOrdinal.includes('º') || rawWithOrdinal.includes('°'))) {
+        legacyKeysToDelete.add(rawWithOrdinal);
       }
     }
 
+    for (const legacyKey of legacyKeysToDelete) {
+      try {
+        await deleteDoc(doc(db, 'quadroAtribuicoes', legacyKey));
+      } catch {
+        // ignora se o documento legado já não existia
+      }
+    }
+
+    // Referência oficial com o safeId normalizado
     const docRef = doc(db, 'quadroAtribuicoes', safeId);
-    const payload = {
+    const payload: TurmaAtribuicao = {
       ...item,
       id: safeId,
+      turma: item.turma,
       updatedAt: new Date().toISOString(),
     };
     await setDoc(docRef, payload, { merge: true });
@@ -2578,17 +2602,28 @@ export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Pro
   }
 }
 
+// Aliases para conformidade com diferentes nomenclaturas
+export const saveQuadroAtribuicao = saveTurmaAtribuicaoToFirestore;
+export const saveQuadroAtribuicoes = saveTurmaAtribuicaoToFirestore;
+
 /**
  * Salva um lote de atribuições no Firestore
  */
 export async function batchSaveQuadroAtribuicoesToFirestore(items: TurmaAtribuicao[]): Promise<void> {
   try {
     const batch = writeBatch(db);
-    items.forEach((item) => {
-      const safeId = generateTurmaAtribuicaoId(item.turma);
+    for (const item of items) {
+      const safeId = generateTurmaAtribuicaoId(item.turma || item.id);
+      if (item.id && item.id !== safeId) {
+        try {
+          await deleteDoc(doc(db, 'quadroAtribuicoes', item.id));
+        } catch {
+          // ignora se não existir
+        }
+      }
       const docRef = doc(db, 'quadroAtribuicoes', safeId);
-      batch.set(docRef, { ...item, id: safeId, updatedAt: new Date().toISOString() }, { merge: true });
-    });
+      batch.set(docRef, { ...item, id: safeId, turma: item.turma, updatedAt: new Date().toISOString() }, { merge: true });
+    }
     await batch.commit();
   } catch (error) {
     console.warn('Erro ao salvar lote de atribuições no Firestore:', error);
