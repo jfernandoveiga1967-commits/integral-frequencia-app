@@ -52,6 +52,7 @@ import {
   PRESET_USERS,
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
+import { generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -2524,7 +2525,7 @@ export function subscribeQuadroAtribuicoes(
  * Salva uma atribuição de turma no Firestore (quadroAtribuicoes/{safeId})
  */
 export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Promise<void> {
-  const safeId = item.id || `atrib_${item.turma.replace(/\s+/g, '_').toLowerCase()}`;
+  const safeId = generateTurmaAtribuicaoId(item.turma);
   try {
     const docRef = doc(db, 'quadroAtribuicoes', safeId);
     const payload = {
@@ -2546,7 +2547,7 @@ export async function batchSaveQuadroAtribuicoesToFirestore(items: TurmaAtribuic
   try {
     const batch = writeBatch(db);
     items.forEach((item) => {
-      const safeId = item.id || `atrib_${item.turma.replace(/\s+/g, '_').toLowerCase()}`;
+      const safeId = generateTurmaAtribuicaoId(item.turma);
       const docRef = doc(db, 'quadroAtribuicoes', safeId);
       batch.set(docRef, { ...item, id: safeId, updatedAt: new Date().toISOString() }, { merge: true });
     });
@@ -2561,7 +2562,7 @@ export async function batchSaveQuadroAtribuicoesToFirestore(items: TurmaAtribuic
  * Remove uma atribuição de turma do Firestore (quadroAtribuicoes/{safeId})
  */
 export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Promise<void> {
-  const safeId = `atrib_${turmaName.replace(/\s+/g, '_').toLowerCase()}`;
+  const safeId = generateTurmaAtribuicaoId(turmaName);
   try {
     const docRef = doc(db, 'quadroAtribuicoes', safeId);
     await deleteDoc(docRef);

@@ -5,195 +5,70 @@ import { cleanPhoneNumber, generateWhatsAppUrl } from './whatsappUtils';
 export const ATRIBUICOES_STORAGE_KEY = 'quadro_atribuicoes_integral_v1';
 
 /**
- * Atribuições oficiais padrão para todas as turmas do Programa Integral
+ * Função utilitária para gerar IDs consistentes e normalizados para o Quadro de Atribuições
+ * Remove acentos, símbolos ordinais ('º', 'ª', '°') e padroniza para evitar inconsistências/duplicatas.
  */
-export const DEFAULT_QUADRO_ATRIBUICOES: TurmaAtribuicao[] = [
-  {
-    id: 'atrib_mini_maternal_azul',
-    turma: 'Mini Maternal Azul',
-    monitoraName: 'Sthefany Martins',
-    monitoraPhone: '19998123401',
-    adiName: 'Patrícia',
-    adiPhone: '19998123402',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala Mini Maternal',
-    observacao: 'Foco em desfralde, rotina de acolhimento e alimentação.',
-  },
-  {
-    id: 'atrib_maternal_azul',
-    turma: 'Maternal Azul',
-    monitoraName: 'Márcia Souza',
-    monitoraPhone: '19998123403',
-    adiName: 'Patrícia',
-    adiPhone: '19998123402',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala Maternal',
-    observacao: 'Apoio em higiene, almoço e repouso.',
-  },
-  {
-    id: 'atrib_infantil_1_azul',
-    turma: 'Infantil 1 Azul',
-    monitoraName: 'Rosana Silva',
-    monitoraPhone: '19998123404',
-    adiName: 'Juliana',
-    adiPhone: '19998123405',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala Infantil 1',
-    observacao: 'Estimulação psicomotora, ateliê e descanso.',
-  },
-  {
-    id: 'atrib_infantil_2_azul',
-    turma: 'Infantil 2 Azul',
-    monitoraName: 'Aline Ferreira',
-    monitoraPhone: '19998123406',
-    adiName: 'Camila',
-    adiPhone: '19998123407',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala Infantil 2',
-    observacao: 'Autonomia infantil e transições de atividades.',
-  },
-  {
-    id: 'atrib_1ano_azul',
-    turma: '1º Ano Azul',
-    monitoraName: 'Ana Clara Carchano Garcia',
-    monitoraPhone: '19998765432',
-    monitoraId: 'usr_anaclaragarcia',
-    adiName: 'Patrícia',
-    adiPhone: '19998123402',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 1º Ano Azul',
-    observacao: 'Acompanhamento de rotina, tarefas e extracurriculares.',
-  },
-  {
-    id: 'atrib_1ano_vermelho',
-    turma: '1º Ano Vermelho',
-    monitoraName: 'Ana Clara Carchano Garcia',
-    monitoraPhone: '19998765432',
-    monitoraId: 'usr_anaclaragarcia',
-    adiName: 'Juliana',
-    adiPhone: '19998123405',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 1º Ano Vermelho',
-    observacao: 'Acompanhamento pedagógico e apoio no recreio.',
-  },
-  {
-    id: 'atrib_2ano_azul',
-    turma: '2º Ano Azul',
-    monitoraName: 'Sthefany Martins',
-    monitoraPhone: '19998123401',
-    adiName: 'Camila',
-    adiPhone: '19998123407',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 2º Ano Azul',
-    observacao: 'Organização de material e apoio nos momentos de oficinas.',
-  },
-  {
-    id: 'atrib_2ano_vermelho',
-    turma: '2º Ano Vermelho',
-    monitoraName: 'Márcia Souza',
-    monitoraPhone: '19998123403',
-    adiName: 'Rosana',
-    adiPhone: '19998123404',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 2º Ano Vermelho',
-    observacao: 'Supervisão pedagógica e recreação dirigida.',
-  },
-  {
-    id: 'atrib_3ano_azul',
-    turma: '3º Ano Azul',
-    monitoraName: 'Aline Ferreira',
-    monitoraPhone: '19998123406',
-    adiName: 'Juliana',
-    adiPhone: '19998123405',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 3º Ano Azul',
-    observacao: 'Apoio em tarefas escolares e mediação de convivência.',
-  },
-  {
-    id: 'atrib_3ano_vermelho',
-    turma: '3º Ano Vermelho',
-    monitoraName: 'Rosana Silva',
-    monitoraPhone: '19998123404',
-    adiName: 'Patrícia',
-    adiPhone: '19998123402',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 3º Ano Vermelho',
-    observacao: 'Projetos e orientação de estudos.',
-  },
-  {
-    id: 'atrib_4ano_azul',
-    turma: '4º Ano Azul',
-    monitoraName: 'Sthefany Martins',
-    monitoraPhone: '19998123401',
-    adiName: 'Camila',
-    adiPhone: '19998123407',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 4º Ano Azul',
-    observacao: 'Projetos investigativos e hábitos de estudo.',
-  },
-  {
-    id: 'atrib_4ano_vermelho',
-    turma: '4º Ano Vermelho',
-    monitoraName: 'Márcia Souza',
-    monitoraPhone: '19998123403',
-    adiName: 'Rosana',
-    adiPhone: '19998123404',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 4º Ano Vermelho',
-    observacao: 'Orientação de estudos e oficinas temáticas.',
-  },
-  {
-    id: 'atrib_5ano_azul',
-    turma: '5º Ano Azul',
-    monitoraName: 'Aline Ferreira',
-    monitoraPhone: '19998123406',
-    adiName: 'Juliana',
-    adiPhone: '19998123405',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 5º Ano Azul',
-    observacao: 'Autonomia nos estudos e projetos integradores.',
-  },
-  {
-    id: 'atrib_6ano_azul',
-    turma: '6º Ano Azul',
-    monitoraName: 'Ana Clara Carchano Garcia',
-    monitoraPhone: '19998765432',
-    monitoraId: 'usr_anaclaragarcia',
-    adiName: 'Patrícia',
-    adiPhone: '19998123402',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: 'Sala 6º Ano Azul',
-    observacao: 'Acompanhamento da rotina de transição dos Anos Finais.',
-  },
-];
+export function generateTurmaAtribuicaoId(turmaName: string): string {
+  if (!turmaName) return 'atrib_desconhecida';
+  const clean = turmaName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos / diacríticos
+    .toLowerCase()
+    .trim()
+    .replace(/(\d+)\s*[º°ª]?\s*ano/g, '$1ano') // 1º Ano -> 1ano, 3º Ano -> 3ano
+    .replace(/[º°ª]/g, '') // outros símbolos ordinais
+    .replace(/[^a-z0-9]+/g, '_') // caracteres especiais e espaços -> _
+    .replace(/^_+|_+$/g, ''); // remove underscores nas extremidades
+  return `atrib_${clean}`;
+}
 
 /**
- * Carrega a lista do Quadro de Atribuições do localStorage ou usa o padrão
+ * Cria uma atribuição em branco para a turma informada
+ */
+export function buildDefaultAtribuicao(turmaName: string): TurmaAtribuicao {
+  const safeId = generateTurmaAtribuicaoId(turmaName);
+  return {
+    id: safeId,
+    turma: turmaName,
+    monitoraName: '',
+    monitoraPhone: '',
+    monitoraId: '',
+    monitoraAssistenteName: '',
+    monitoraAssistentePhone: '',
+    monitoraAssistenteId: '',
+    adiName: '',
+    adiPhone: '',
+    adiId: '',
+    horarioTurno: '',
+    espacoBase: turmaName,
+    observacao: '',
+  };
+}
+
+/**
+ * Estrutura inicial padrão para as turmas oficiais (sem nomes fictícios pré-atribuídos)
+ */
+export const DEFAULT_QUADRO_ATRIBUICOES: TurmaAtribuicao[] = TURMAS_LIST.map((turmaName) =>
+  buildDefaultAtribuicao(turmaName)
+);
+
+/**
+ * Carrega a lista do Quadro de Atribuições do localStorage
+ * Retorna apenas os registros reais salvos; se vazio, retorna array vazio para priorizar o Firestore
  */
 export function loadLocalQuadroAtribuicoes(): TurmaAtribuicao[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const raw = localStorage.getItem(ATRIBUICOES_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_QUADRO_ATRIBUICOES];
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Garante que todas as turmas oficiais estejam contempladas
-      const existingMap = new Map<string, TurmaAtribuicao>();
-      parsed.forEach((item) => {
-        if (item && item.turma) existingMap.set(item.turma, item);
-      });
-
-      DEFAULT_QUADRO_ATRIBUICOES.forEach((def) => {
-        if (!existingMap.has(def.turma)) {
-          existingMap.set(def.turma, def);
-        }
-      });
-
-      return Array.from(existingMap.values());
+      return parsed;
     }
   } catch (err) {
     console.warn('Erro ao carregar Quadro de Atribuições do LocalStorage:', err);
   }
-  return [...DEFAULT_QUADRO_ATRIBUICOES];
+  return [];
 }
 
 /**
@@ -246,7 +121,10 @@ export function resolveAtribuicaoForTurma(
   atribuicoes: TurmaAtribuicao[],
   users: UserProfile[] = []
 ): TurmaAtribuicao {
-  const found = atribuicoes.find((a) => a.turma === turmaName);
+  const safeId = generateTurmaAtribuicaoId(turmaName);
+  const found = atribuicoes.find(
+    (a) => a.turma === turmaName || a.id === safeId || a.turma?.toLowerCase().trim() === turmaName.toLowerCase().trim()
+  );
   if (found) {
     // Tenta enriquecer com dados atualizados do usuário cadastrado se houver vínculo
     let monitoraPhone = found.monitoraPhone;
@@ -265,26 +143,14 @@ export function resolveAtribuicaoForTurma(
 
     return {
       ...found,
+      id: found.id || safeId,
       monitoraId,
       monitoraPhone,
     };
   }
 
-  // Fallback padrão se for uma turma nova
-  const safeId = `atrib_${turmaName.replace(/\s+/g, '_').toLowerCase()}`;
-  return {
-    id: safeId,
-    turma: turmaName,
-    monitoraName: '',
-    monitoraPhone: '',
-    monitoraAssistenteName: '',
-    monitoraAssistentePhone: '',
-    adiName: '',
-    adiPhone: '',
-    horarioTurno: '11:40 às 17:40',
-    espacoBase: turmaName,
-    observacao: 'Atribuição pedagógica da turma.',
-  };
+  // Fallback padrão se for uma turma nova (em branco)
+  return buildDefaultAtribuicao(turmaName);
 }
 
 /**
@@ -298,30 +164,27 @@ export function reconcileAtribuicoesWithTurmas(
   const turmasSet = new Set(turmasList);
   const existingMap = new Map<string, TurmaAtribuicao>();
 
-  atribuicoes.forEach((item) => {
+  (atribuicoes || []).forEach((item) => {
     if (item && item.turma && turmasSet.has(item.turma)) {
       existingMap.set(item.turma, item);
+      existingMap.set(item.turma.toLowerCase().trim(), item);
+      const sId = generateTurmaAtribuicaoId(item.turma);
+      existingMap.set(sId, item);
+      if (item.id) existingMap.set(item.id, item);
     }
   });
 
   // Garante que cada turma cadastrada tenha seu registro
   return turmasList.map((tName) => {
-    if (existingMap.has(tName)) {
-      return existingMap.get(tName)!;
+    const safeId = generateTurmaAtribuicaoId(tName);
+    const existing = existingMap.get(tName) || existingMap.get(tName.toLowerCase().trim()) || existingMap.get(safeId);
+    if (existing) {
+      return {
+        ...existing,
+        id: safeId,
+        turma: tName,
+      };
     }
-    const safeId = `atrib_${tName.replace(/\s+/g, '_').toLowerCase()}`;
-    return {
-      id: safeId,
-      turma: tName,
-      monitoraName: '',
-      monitoraPhone: '',
-      monitoraAssistenteName: '',
-      monitoraAssistentePhone: '',
-      adiName: '',
-      adiPhone: '',
-      horarioTurno: '11:40 às 17:40',
-      espacoBase: tName,
-      observacao: 'Atribuição pedagógica da turma.',
-    };
+    return buildDefaultAtribuicao(tName);
   });
 }

@@ -32,7 +32,7 @@ import {
   isMockStudent,
   checkAndInactivateExpiredTemporaryStudents,
 } from './utils/storageUtils';
-import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas } from './utils/atribuicoesStorage';
+import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas, generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
@@ -224,9 +224,6 @@ export default function App() {
     setStudents(loadedStudents);
     if (initInactivated.length > 0) {
       saveStudents(loadedStudents);
-      initInactivated.forEach((st) => {
-        saveStudentToFirestore(st).catch(() => {});
-      });
     }
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
@@ -388,7 +385,7 @@ export default function App() {
       setStudents(verifiedStudents);
       saveStudents(verifiedStudents);
 
-      if (syncInactivated.length > 0) {
+      if (realStudents.length > 0 && syncInactivated.length > 0) {
         syncInactivated.forEach((st) => {
           saveStudentToFirestore(st).catch(() => {});
         });
@@ -515,9 +512,8 @@ export default function App() {
         setActivitiesList(healedActivities);
         saveActivities(healedActivities);
       } else {
-        // Seed default initial activities to Firestore
+        // Fallback local caso Firestore esteja temporariamente vazio (sem auto-regravação no servidor)
         const defaultActs = loadActivities();
-        defaultActs.forEach((act) => saveActivityToFirestore(act));
         setActivitiesList(defaultActs);
       }
     });
@@ -604,7 +600,6 @@ export default function App() {
         const local = loadLocalQuadroAtribuicoes();
         if (local && local.length > 0) {
           setQuadroAtribuicoes(local);
-          batchSaveQuadroAtribuicoesToFirestore(local);
         }
       }
     });
@@ -922,7 +917,7 @@ export default function App() {
     saveTurmaToFirestore(name);
 
     // Integração com o Quadro de Atribuições: cria automaticamente a atribuição para a nova turma
-    const safeId = `atrib_${name.replace(/\s+/g, '_').toLowerCase()}`;
+    const safeId = generateTurmaAtribuicaoId(name);
     const newAtribuicao: TurmaAtribuicao = {
       id: safeId,
       turma: name,
@@ -932,9 +927,9 @@ export default function App() {
       monitoraAssistentePhone: '',
       adiName: '',
       adiPhone: '',
-      horarioTurno: '11:40 às 17:40',
+      horarioTurno: '',
       espacoBase: name,
-      observacao: 'Atribuição da turma.',
+      observacao: '',
     };
     setQuadroAtribuicoes((prev) => {
       const filtered = prev.filter((a) => a.turma !== name);
@@ -1326,20 +1321,25 @@ export default function App() {
   }, []);
 
   const handleSaveTurmaAtribuicao = useCallback((item: TurmaAtribuicao) => {
+    const safeId = generateTurmaAtribuicaoId(item.turma);
+    const normalizedItem: TurmaAtribuicao = {
+      ...item,
+      id: safeId,
+    };
     setQuadroAtribuicoes((prev) => {
-      const idx = prev.findIndex((a) => a.turma === item.turma);
+      const idx = prev.findIndex((a) => a.turma === normalizedItem.turma || a.id === safeId);
       let next: TurmaAtribuicao[];
       if (idx >= 0) {
         next = [...prev];
-        next[idx] = item;
+        next[idx] = normalizedItem;
       } else {
-        next = [...prev, item];
+        next = [...prev, normalizedItem];
       }
       saveLocalQuadroAtribuicoes(next);
       broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', next);
       return next;
     });
-    saveTurmaAtribuicaoToFirestore(item);
+    saveTurmaAtribuicaoToFirestore(normalizedItem);
   }, []);
 
   const handleBatchSaveQuadroAtribuicoes = useCallback((items: TurmaAtribuicao[]) => {
