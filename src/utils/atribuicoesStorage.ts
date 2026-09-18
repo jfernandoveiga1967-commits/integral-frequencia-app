@@ -17,7 +17,9 @@ export function generateTurmaAtribuicaoId(turmaName: string): string {
     .replace(/[\u0300-\u036f]/g, '') // remove acentos / diacríticos
     .toLowerCase()
     .trim()
-    .replace(/(\d+)\s*[º°ª]?\s*_?ano/g, '$1ano') // 1º Ano -> 1ano, 3º_ano -> 3ano
+    .replace(/mini[\s_]*maternal/g, 'minimaternal')
+    .replace(/infantil[\s_]*(\d+)/g, 'infantil$1')
+    .replace(/(\d+)[\s_]*[º°ª]?[\s_]*ano/g, '$1ano') // 1º Ano -> 1ano, 3º_ano -> 3ano
     .replace(/[º°ª]/g, '') // outros símbolos ordinais
     .replace(/[^a-z0-9]+/g, '_') // caracteres especiais e espaços -> _
     .replace(/^_+|_+$/g, ''); // remove underscores nas extremidades
@@ -26,7 +28,7 @@ export function generateTurmaAtribuicaoId(turmaName: string): string {
 
 /**
  * Retorna o horário de turno padrão configurado por turma:
- * - Mini Maternal, Maternal, Infantil 1 e Infantil 2: 11:20 - 17:20
+ * - Mini Maternal Azul, Maternal Azul, Infantil 1 Azul e Infantil 2 Azul: 10:20 - 17:20
  * - 1º Ano Azul: 11:30 - 17:30
  * - Demais turmas: 11:40 - 17:40
  */
@@ -35,13 +37,21 @@ export function getDefaultHorarioTurnoForTurma(turmaName: string): string {
   const clean = turmaName.toLowerCase().trim();
   if (
     clean.includes('mini maternal') ||
+    clean.includes('minimaternal') ||
     clean.includes('maternal') ||
     clean.includes('infantil 1') ||
-    clean.includes('infantil 2')
+    clean.includes('infantil1') ||
+    clean.includes('infantil 2') ||
+    clean.includes('infantil2')
   ) {
-    return '11:20 - 17:20';
+    return '10:20 - 17:20';
   }
-  if (clean.includes('1º ano azul') || clean.includes('1ano azul') || clean.includes('1 ano azul')) {
+  if (
+    clean.includes('1º ano azul') ||
+    clean.includes('1ano azul') ||
+    clean.includes('1 ano azul') ||
+    (clean.includes('1º ano') && clean.includes('azul'))
+  ) {
     return '11:30 - 17:30';
   }
   return '11:40 - 17:40';
@@ -207,10 +217,17 @@ export function reconcileAtribuicoesWithTurmas(
       }
 
       if (shouldSet) {
+        let horario = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
+        if (
+          (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
+          horario.includes('11:20')
+        ) {
+          horario = '10:20 - 17:20';
+        }
         const normalized: TurmaAtribuicao = {
           ...item,
           id: safeId,
-          horarioTurno: item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma),
+          horarioTurno: horario,
         };
         existingMap.set(item.turma, normalized);
         existingMap.set(item.turma.toLowerCase().trim(), normalized);
@@ -224,11 +241,18 @@ export function reconcileAtribuicoesWithTurmas(
     const safeId = generateTurmaAtribuicaoId(tName);
     const existing = existingMap.get(tName) || existingMap.get(tName.toLowerCase().trim()) || existingMap.get(safeId);
     if (existing) {
+      let horario = existing.horarioTurno || getDefaultHorarioTurnoForTurma(tName);
+      if (
+        (tName.toLowerCase().includes('maternal') || tName.toLowerCase().includes('infantil')) &&
+        horario.includes('11:20')
+      ) {
+        horario = '10:20 - 17:20';
+      }
       return {
         ...existing,
         id: safeId,
         turma: tName,
-        horarioTurno: existing.horarioTurno || getDefaultHorarioTurnoForTurma(tName),
+        horarioTurno: horario,
       };
     }
     return buildDefaultAtribuicao(tName);

@@ -102,11 +102,22 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
 
   if (!isOpen) return null;
 
+  const getDisplayHorario = (item: TurmaAtribuicao) => {
+    const h = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
+    if (
+      (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
+      h.includes('11:20')
+    ) {
+      return '10:20 - 17:20';
+    }
+    return h;
+  };
+
   const startEdit = (item: TurmaAtribuicao) => {
     setEditingTurmaId(item.id);
     setEditForm({
       ...item,
-      horarioTurno: item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma),
+      horarioTurno: getDisplayHorario(item),
     });
   };
 
@@ -308,7 +319,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                       <div className="flex items-center space-x-1 shrink-0">
                         <span className="text-[10px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200 flex items-center gap-1">
                           <Clock className="w-3 h-3 text-amber-600" />
-                          {item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma)}
+                          {getDisplayHorario(item)}
                         </span>
                         {isCoord && !isEditing && (
                           <button

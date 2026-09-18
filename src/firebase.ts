@@ -52,7 +52,7 @@ import {
   PRESET_USERS,
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
-import { generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
+import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -2517,10 +2517,21 @@ export function subscribeQuadroAtribuicoes(
           deleteDoc(doc(db, 'quadroAtribuicoes', d.id)).catch(() => {});
         }
 
+        let horario = data.horarioTurno;
+        if (!horario) {
+          horario = getDefaultHorarioTurnoForTurma(data.turma || d.id);
+        } else if (
+          (data.turma?.toLowerCase().includes('maternal') || data.turma?.toLowerCase().includes('infantil')) &&
+          horario.includes('11:20')
+        ) {
+          horario = '10:20 - 17:20';
+        }
+
         const normalizedItem: TurmaAtribuicao = {
           ...data,
           id: safeId,
           turma: data.turma || d.id,
+          horarioTurno: horario,
         };
 
         const existing = map.get(normalizedItem.turma);

@@ -3693,7 +3693,7 @@ export function generateQuadroAtribuicoesPDF(
     [
       `Total de Turmas: ${atribuicoes.length}`,
       'Ano Letivo: 2026',
-      'Turno: 11:40 às 17:40',
+      'Turnos: Conforme Atribuição (10:20 / 11:30 / 11:40 às 17:20-17:40)',
     ],
     'landscape'
   );
@@ -3712,7 +3712,13 @@ export function generateQuadroAtribuicoesPDF(
       : '—';
 
     const espacoDisplay = item.espacoBase || '—';
-    const horarioDisplay = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
+    let horarioDisplay = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
+    if (
+      (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
+      horarioDisplay.includes('11:20')
+    ) {
+      horarioDisplay = '10:20 - 17:20';
+    }
     const obsDisplay = item.observacao || '—';
 
     return [
