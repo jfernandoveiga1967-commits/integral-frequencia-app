@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { UserProfile, User, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho } from '../types';
+import { UserProfile, User, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho, TabType, AVAILABLE_APP_TABS, ALL_APP_TAB_IDS } from '../types';
 import { TURMAS_LIST, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import {
   getRoleBadgeStyle,
@@ -179,6 +179,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formPin, setFormPin] = useState('1234');
   const [formActivities, setFormActivities] = useState<ActivityType[]>([]);
   const [formTurmas, setFormTurmas] = useState<string[]>([]);
+  const [formAllowedTabs, setFormAllowedTabs] = useState<TabType[]>([]);
   const [formCanManageStudents, setFormCanManageStudents] = useState(true);
   const [formCanMarkAttendance, setFormCanMarkAttendance] = useState(true);
   const [formPixKey, setFormPixKey] = useState('');
@@ -448,9 +449,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
-    const isThaisUser =
-      user.id === 'usr_nutri_1' ||
-      (user.name && (user.name.toLowerCase().includes('thaís') || user.name.toLowerCase().includes('thais')));
 
     setFormStatus(getUserStatus(user));
     setFormDataDesligamento(user.dataDesligamento || '');
@@ -460,33 +458,31 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     const cleanActs = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
       (a) => !REMOVED_CATEGORY_NAMES.has(a)
     );
-    if (isThaisUser && !cleanActs.includes('Culinária')) {
-      cleanActs.push('Culinária');
-    }
     setFormActivities(cleanActs);
     setFormTurmas(
       Array.isArray(user.allowedClassIds)
         ? user.allowedClassIds
         : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : availableTurmas)
     );
+    const isCoordUser = isCoordenador(user);
+    if (isCoordUser) {
+      setFormAllowedTabs([...ALL_APP_TAB_IDS]);
+    } else {
+      setFormAllowedTabs(Array.isArray(user.allowedTabs) ? [...user.allowedTabs] : []);
+    }
     setFormCanManageStudents(user.canManageStudents !== undefined ? user.canManageStudents : true);
     setFormCanMarkAttendance(user.canMarkAttendance !== undefined ? user.canMarkAttendance : true);
     setFormPixKey(user.pixKey || user.phone || '');
 
-    const shiftType = isThaisUser
-      ? 'continua_6h'
-      : (user.workShiftType || (isContinuousShift(user, user.contractSchedule) ? 'continua_6h' : 'padrao_8h'));
+    const shiftType =
+      user.workShiftType || (isContinuousShift(user, user.contractSchedule) ? 'continua_6h' : 'padrao_8h');
     setFormWorkShiftType(shiftType);
 
-    const sched = user.contractSchedule || (shiftType === 'continua_6h' ? (isThaisUser ? '08:00 - 14:00' : '11:40 - 17:40') : '');
+    const sched = user.contractSchedule || (shiftType === 'continua_6h' ? '11:40 - 17:40' : '');
     setFormContractSchedule(sched);
     const calc = calculateDailyHoursFromSchedule(sched);
 
-    if (isThaisUser) {
-      setFormContractDailyHours(6);
-      setFormContractDailyHoursFormatted('6h 00min');
-      setFormContractDailyMinutes(360);
-    } else if (user.contractDailyHoursFormatted) {
+    if (user.contractDailyHoursFormatted) {
       setFormContractDailyHoursFormatted(user.contractDailyHoursFormatted);
       setFormContractDailyMinutes(user.contractDailyMinutes || parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted));
       setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : calc.dailyHours);
@@ -510,18 +506,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
-    const initialRegime: RegimeTrabalho = isThaisUser
-      ? 'mensalista'
-      : (user.regimeTrabalho === 'professor_horista' ||
-         (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
-          ? 'professor_horista'
-          : 'mensalista');
+    const initialRegime: RegimeTrabalho =
+      user.regimeTrabalho === 'professor_horista' ||
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
+        ? 'professor_horista'
+        : 'mensalista';
     setFormRegimeTrabalho(initialRegime);
     setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
     setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
     setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
-    setFormCompany(isThaisUser ? 'Nutri / Colégio Crescer' : (user.empresa || user.company || 'GADAL - Gestão e Apoio'));
+    setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
   };
 
   const handleReloadUsers = async () => {
@@ -554,6 +549,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPin('1234');
     setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
     setFormTurmas(availableTurmas);
+    setFormAllowedTabs([]);
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setFormPixKey('');
@@ -585,6 +581,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setFormTurmas(formTurmas.filter((t) => t !== turmaName));
     } else {
       setFormTurmas([...formTurmas, turmaName]);
+    }
+  };
+
+  const toggleTabInForm = (tabId: TabType) => {
+    if (formAllowedTabs.includes(tabId)) {
+      setFormAllowedTabs(formAllowedTabs.filter((t) => t !== tabId));
+    } else {
+      setFormAllowedTabs([...formAllowedTabs, tabId]);
     }
   };
 
@@ -670,34 +674,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       parsedAjudaDeCusto = 0;
     }
 
-    const isThaisUser =
-      (editingUser && editingUser.id === 'usr_nutri_1') ||
-      cleanName.toLowerCase().includes('thaís grisoni') ||
-      cleanName.toLowerCase().includes('thais grisoni') ||
-      normalizedEmail.includes('thaisgriisoni') ||
-      normalizedEmail.includes('acessonutri');
-
     const targetId = isMasterAdmin
       ? 'usr_coord_1'
-      : (isThaisUser ? 'usr_nutri_1' : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now())));
+      : (editingUser ? editingUser.id : (existingUserWithEmail ? existingUserWithEmail.id : 'usr_' + Date.now()));
 
-    let effectiveActivities = (formActivities && formActivities.length > 0)
+    const effectiveActivities = (formActivities && formActivities.length > 0)
       ? formActivities.filter((a) => !REMOVED_CATEGORY_NAMES.has(a))
       : (isMasterAdmin ? ['Rotina', 'Natação', 'Balé', 'Dança', 'Judô', 'Futebol', 'Ginástica', 'Flauta'] : []);
-
-    if (isThaisUser && !effectiveActivities.includes('Culinária')) {
-      effectiveActivities = [...effectiveActivities, 'Culinária'];
-    }
 
     const parsedSalary = formBaseSalary !== '' && !isNaN(Number(formBaseSalary)) ? Math.max(0, Number(formBaseSalary)) : (isMasterAdmin ? 0 : 1200);
     
     // Resolve precise minutes and formatted daily hours string
-    let resolvedMinutes = isThaisUser ? 360 : (formWorkShiftType === 'padrao_8h' ? 528 : (isMasterAdmin ? 480 : 360));
-    if (!isThaisUser && formContractDailyMinutes && !isNaN(Number(formContractDailyMinutes)) && Number(formContractDailyMinutes) > 0) {
+    let resolvedMinutes = formWorkShiftType === 'padrao_8h' ? 528 : (isMasterAdmin ? 480 : 360);
+    if (formContractDailyMinutes && !isNaN(Number(formContractDailyMinutes)) && Number(formContractDailyMinutes) > 0) {
       resolvedMinutes = Math.round(Number(formContractDailyMinutes));
     }
     
-    if (!isThaisUser && formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
+    if (formContractDailyHoursFormatted && formContractDailyHoursFormatted.trim()) {
       try {
         const parsed = parseHoursAndMinutesStringToMinutes(formContractDailyHoursFormatted);
         if (!isNaN(parsed) && parsed > 0) {
@@ -706,12 +699,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       } catch (err) {
         console.warn('Formato de carga horária inválido, mantendo valor calculado:', err);
       }
-    } else if (!isThaisUser && formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
+    } else if (formContractDailyHours !== '' && !isNaN(Number(formContractDailyHours))) {
       const parsedHours = Number(formContractDailyHours);
       if (parsedHours > 0) {
         resolvedMinutes = Math.round(parsedHours * 60);
       }
-    } else if (!isThaisUser && formContractSchedule.trim()) {
+    } else if (formContractSchedule.trim()) {
       try {
         const calc = calculateDailyHoursFromSchedule(formContractSchedule);
         if (calc.workedMinutes > 0) {
@@ -726,8 +719,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       resolvedMinutes = 480;
     }
 
-    const formattedHoursStr = isThaisUser ? '6h 00min' : formatMinutesToHoursAndMinutes(resolvedMinutes);
-    const decimalHours = isThaisUser ? 6 : Number((resolvedMinutes / 60).toFixed(2));
+    const formattedHoursStr = formatMinutesToHoursAndMinutes(resolvedMinutes);
+    const decimalHours = Number((resolvedMinutes / 60).toFixed(2));
 
     const effectiveStatus: UserStatus = isMasterAdmin ? 'ATIVO' : formStatus;
     const effectiveDataDesligamento =
@@ -739,9 +732,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         ? formMotivoDesligamento.trim()
         : undefined;
 
-    const finalSchedule = isThaisUser
-      ? (formContractSchedule.trim() || '08:00 - 14:00')
-      : (formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined));
+    const finalSchedule = formContractSchedule.trim() || (isMasterAdmin ? '07:30 - 17:30' : undefined);
     let userHorarioInicio = (editingUser?.horarioInicio || '').trim();
     let userHorarioFim = (editingUser?.horarioFim || '').trim();
     if (finalSchedule) {
@@ -768,6 +759,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       assignedActivities: effectiveActivities,
       assignedTurmas: formTurmas,
       allowedClassIds: formTurmas,
+      allowedTabs: isMasterAdmin || effectiveRole === 'coordenador'
+        ? [...ALL_APP_TAB_IDS]
+        : formAllowedTabs,
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
@@ -778,12 +772,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
-      regimeTrabalho: isThaisUser ? 'mensalista' : formRegimeTrabalho,
-      regimeContratual: isThaisUser
-        ? 'Jornada Contínua / Mensalista (6h)'
-        : (formRegimeTrabalho === 'professor_horista'
-            ? 'Prof. Horista'
-            : (editingUser?.regimeContratual || (formWorkShiftType === 'continua_6h' ? 'Jornada Contínua / Mensalista (6h)' : 'CLT'))),
+      regimeTrabalho: formRegimeTrabalho,
+      regimeContratual: formRegimeTrabalho === 'professor_horista'
+        ? 'Prof. Horista'
+        : (editingUser?.regimeContratual || (formWorkShiftType === 'continua_6h' ? 'Jornada Contínua / Mensalista (6h)' : 'CLT')),
       valorHoraAula: formRegimeTrabalho === 'professor_horista' ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
@@ -791,9 +783,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         ? (parsedHoraAula || 0)
         : Number((parsedSalary / (Number(formContractDivisorHours) || 220)).toFixed(4)),
       ajudaDeCusto: parsedAjudaDeCusto,
-      company: isThaisUser ? 'Nutri / Colégio Crescer' : (formCompany.trim() || 'GADAL - Gestão e Apoio'),
-      empresa: isThaisUser ? 'Nutri / Colégio Crescer' : (formCompany.trim() || 'GADAL - Gestão e Apoio'),
-      workShiftType: isThaisUser ? 'continua_6h' : formWorkShiftType,
+      company: formCompany.trim() || 'GADAL - Gestão e Apoio',
+      empresa: formCompany.trim() || 'GADAL - Gestão e Apoio',
+      workShiftType: formWorkShiftType,
       updatedAt: new Date().toISOString(),
     };
 
@@ -913,33 +905,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleToggleUserActivity = async (user: UserProfile, activityId: ActivityType) => {
-    const isThaisUser =
-      user.id === 'usr_nutri_1' ||
-      (user.name && (user.name.toLowerCase().includes('thaís') || user.name.toLowerCase().includes('thais')));
-
     const currentList = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
       (a) => !REMOVED_CATEGORY_NAMES.has(a)
     );
     const exists = currentList.includes(activityId);
-    let newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
-
-    if (isThaisUser && !newList.includes('Culinária')) {
-      newList.push('Culinária');
-    }
+    const newList = exists ? currentList.filter((a) => a !== activityId) : [...currentList, activityId];
 
     const updated: UserProfile = {
       ...user,
       assignedActivities: newList,
       updatedAt: new Date().toISOString(),
-      ...(isThaisUser
-        ? {
-            company: 'Nutri / Colégio Crescer',
-            empresa: 'Nutri / Colégio Crescer',
-            regimeContratual: 'Jornada Contínua / Mensalista (6h)',
-            regimeTrabalho: 'mensalista' as const,
-            workShiftType: 'continua_6h' as const,
-          }
-        : {}),
     };
     try {
       await Promise.resolve(onSaveUser(updated));
@@ -1033,6 +1008,61 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       showToast(`Turmas de ${user.name} foram limpas.`, 'success');
     } catch (err: any) {
       console.error('Erro ao limpar turmas:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
+  };
+
+  const handleToggleUserTab = async (user: UserProfile, tabId: TabType) => {
+    if (isCoordenador(user)) {
+      showToast('Perfil Coordenador sempre possui acesso a todas as abas.', 'success');
+      return;
+    }
+    const currentList: TabType[] = Array.isArray(user.allowedTabs) ? user.allowedTabs : [];
+    const exists = currentList.includes(tabId);
+    const newList = exists ? currentList.filter((t) => t !== tabId) : [...currentList, tabId];
+
+    const updated: UserProfile = {
+      ...user,
+      allowedTabs: newList,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      const tabMeta = AVAILABLE_APP_TABS.find((t) => t.id === tabId);
+      const tabName = tabMeta ? tabMeta.label : tabId;
+      showToast(`Aba "${tabName}" ${!exists ? 'liberada para' : 'removida de'} ${user.name}`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao atualizar abas permitidas:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
+  };
+
+  const handleAssignAllTabs = async (user: UserProfile) => {
+    const updated: UserProfile = {
+      ...user,
+      allowedTabs: [...ALL_APP_TAB_IDS],
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Todas as abas foram liberadas para ${user.name}!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao liberar abas:', err);
+      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
+    }
+  };
+
+  const handleClearAllTabs = async (user: UserProfile) => {
+    const updated: UserProfile = {
+      ...user,
+      allowedTabs: [],
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await Promise.resolve(onSaveUser(updated));
+      showToast(`Abas de ${user.name} foram desmarcadas.`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao limpar abas:', err);
       showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
     }
   };
@@ -1907,6 +1937,66 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               })}
                             </div>
                           </div>
+                        </div>
+
+                        {/* Abas Liberadas */}
+                        <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 mt-3.5">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/70 text-[11px] font-extrabold text-slate-800">
+                            <span className="flex items-center space-x-1.5 truncate">
+                              <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span className="truncate">
+                                Abas Liberadas ({isCoordenador(user) ? 'Todas (Coordenador)' : `${(user.allowedTabs || []).length} de ${AVAILABLE_APP_TABS.length}`})
+                              </span>
+                            </span>
+                            {!isCoordenador(user) && (
+                              <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssignAllTabs(user)}
+                                  className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                                >
+                                  Marcar Todas
+                                </button>
+                                <span className="text-slate-300">•</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleClearAllTabs(user)}
+                                  className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                                >
+                                  Desmarcar Todas
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {isCoordenador(user) ? (
+                            <div className="p-2.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-amber-800 text-[11px] flex items-center space-x-2">
+                              <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span>Perfil <strong>Coordenador</strong> possui acesso total e irrestrito a todas as abas do sistema por padrão.</span>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 pt-1">
+                              {AVAILABLE_APP_TABS.map((tab) => {
+                                const isAssigned = (user.allowedTabs || []).includes(tab.id);
+                                return (
+                                  <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => handleToggleUserTab(user, tab.id)}
+                                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center justify-between ${
+                                      isAssigned
+                                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                    }`}
+                                    title={isAssigned ? `Clique para revogar ${tab.label}` : `Clique para liberar ${tab.label}`}
+                                  >
+                                    <span className="truncate mr-1">{tab.label}</span>
+                                    <span className="shrink-0">{isAssigned ? '✓' : '+'}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3019,6 +3109,79 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Abas Liberadas */}
+              <div className="pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-800 uppercase tracking-wider text-xs">
+                    Abas Liberadas:
+                  </label>
+                  {formRole !== 'coordenador' && (
+                    <div className="flex items-center space-x-2 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setFormAllowedTabs([...ALL_APP_TAB_IDS])}
+                        className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                      >
+                        Marcar Todas
+                      </button>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        type="button"
+                        onClick={() => setFormAllowedTabs([])}
+                        className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                      >
+                        Desmarcar Todas
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {formRole === 'coordenador' ? (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex items-center space-x-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Perfil <strong>Coordenador</strong> sempre tem acesso total e irrestrito a todas as abas do sistema.</span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-slate-500 mb-2">
+                      Defina quais abas e módulos do aplicativo este colaborador pode visualizar e acessar:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
+                      {AVAILABLE_APP_TABS.map((tab) => {
+                        const isChecked = formAllowedTabs.includes(tab.id);
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => toggleTabInForm(tab.id)}
+                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                              isChecked
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="truncate pr-2">
+                              <span className="text-xs block truncate">{tab.label}</span>
+                              {tab.description && (
+                                <span className="text-[10px] text-slate-400 block truncate font-normal">
+                                  {tab.description}
+                                </span>
+                              )}
+                            </div>
+                            {isChecked ? (
+                              <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">

@@ -83,6 +83,37 @@ export interface ScheduleBlock {
 
 export type UserRole = 'coordenador' | 'professor';
 
+export type TabType =
+  | 'momento'
+  | 'frequencia'
+  | 'semanario'
+  | 'ponto'
+  | 'cardapio'
+  | 'alunos'
+  | 'relatorio'
+  | 'biblioteca'
+  | 'usuarios';
+
+export interface AppTabOption {
+  id: TabType;
+  label: string;
+  description?: string;
+}
+
+export const AVAILABLE_APP_TABS: AppTabOption[] = [
+  { id: 'momento', label: 'Atividades do Momento', description: 'Painel ao vivo das atividades em andamento' },
+  { id: 'frequencia', label: 'Chamada de Frequência', description: 'Lançamento de presença, faltas e saídas' },
+  { id: 'semanario', label: 'Semanário / Planejamento', description: 'Planejamento pedagógico semanal de atividades' },
+  { id: 'ponto', label: 'Livro Ponto', description: 'Registro de ponto eletrônico e folha de frequência' },
+  { id: 'cardapio', label: 'Cardápio e Culinária', description: 'Cardápio semanal e oficina de receitas' },
+  { id: 'alunos', label: 'Alunos e Turmas', description: 'Cadastro e gestão de alunos e turmas' },
+  { id: 'relatorio', label: 'Relatório Semanal', description: 'Relatório analítico semanal de frequência' },
+  { id: 'biblioteca', label: 'Biblioteca de Semanas', description: 'Histórico consolidado de semanas anteriores' },
+  { id: 'usuarios', label: 'Gerenciamento de Usuários', description: 'Administração de colaboradores e permissões' },
+];
+
+export const ALL_APP_TAB_IDS: TabType[] = AVAILABLE_APP_TABS.map((t) => t.id);
+
 export type RegimeTrabalho = 'mensalista' | 'professor_horista';
 
 export type HolidayType = 'feriado' | 'recesso';
@@ -214,6 +245,7 @@ export interface UserProfile {
   specialtyActivity?: ActivityType; // Legacy or primary specialty activity
   assignedTurmas?: string[]; // Turmas assigned to this user (optional)
   allowedClassIds?: string[]; // List of class IDs/names allowed for this teacher/monitor
+  allowedTabs?: TabType[]; // Abas do app liberadas para o usuário (momento, frequencia, etc.)
   canManageStudents?: boolean;
   canMarkAttendance?: boolean;
   pixKey?: string; // Chave PIX (CPF, Telefone, E-mail ou Aleatória)

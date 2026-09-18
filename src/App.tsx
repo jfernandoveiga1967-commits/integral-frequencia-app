@@ -1,6 +1,6 @@
 // Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX } from 'lucide-react';
+import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 import {
@@ -36,7 +36,7 @@ import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribu
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
-import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador, isTabAllowed, getUserAllowedTabs } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { Footer } from './components/Footer';
 import { AttendanceSheet } from './components/AttendanceSheet';
@@ -163,6 +163,13 @@ export default function App() {
       : user;
     setCurrentUser(finalUser);
     saveStoredUser(finalUser);
+
+    if (!isTabAllowed(activeTab, finalUser)) {
+      const allowed = getUserAllowedTabs(finalUser);
+      if (allowed.length > 0) {
+        setActiveTab(allowed[0]);
+      }
+    }
 
     // Verificação de expiração de contratos avulsos ao realizar login
     const currentStudents = loadStudents();
@@ -1490,8 +1497,34 @@ export default function App() {
             </div>
           </div>
         )}
+        {/* Fallback quando o usuário não possui nenhuma aba liberada */}
+        {getUserAllowedTabs(currentUser).length === 0 && (
+          <div className="bg-white rounded-3xl p-8 sm:p-12 text-center max-w-lg mx-auto border border-slate-200 shadow-sm space-y-4 my-8">
+            <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+              <Lock className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-800">Nenhuma aba liberada</h3>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              Nenhuma aba liberada para seu usuário. Entre em contato com a coordenação.
+            </p>
+          </div>
+        )}
+
+        {/* Fallback quando o usuário tenta acessar uma aba não permitida */}
+        {getUserAllowedTabs(currentUser).length > 0 && !isTabAllowed(activeTab, currentUser) && (
+          <div className="bg-white rounded-3xl p-8 sm:p-10 text-center max-w-lg mx-auto border border-slate-200 shadow-sm space-y-4 my-8">
+            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-black text-slate-800">Acesso Restrito</h3>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              Você não possui permissão para acessar esta aba. Entre em contato com a coordenação.
+            </p>
+          </div>
+        )}
+
         {/* Tab 1: Chamada de Frequência */}
-        {activeTab === 'frequencia' && (
+        {activeTab === 'frequencia' && isTabAllowed('frequencia', currentUser) && (
           <AttendanceSheet
             students={students}
             records={records}
@@ -1509,7 +1542,7 @@ export default function App() {
         )}
 
         {/* Tab 2: Atividades do Momento */}
-        {activeTab === 'momento' && (
+        {activeTab === 'momento' && isTabAllowed('momento', currentUser) && (
           <CurrentActivities
             students={students}
             records={records}
@@ -1533,7 +1566,7 @@ export default function App() {
         )}
 
         {/* Tab 3: Semanário / Planejamento Pedagógico */}
-        {activeTab === 'semanario' && (
+        {activeTab === 'semanario' && isTabAllowed('semanario', currentUser) && (
           <SemanarioMain
             plans={semanarioPlans}
             turmas={turmas}
@@ -1550,8 +1583,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Alunos e Turmas (Apenas Coordenador/Admin) */}
-        {activeTab === 'alunos' && isCoordenador(currentUser) && (
+        {/* Tab 4: Alunos e Turmas */}
+        {activeTab === 'alunos' && isTabAllowed('alunos', currentUser) && (
           <StudentManager
             students={students}
             records={records}
@@ -1568,8 +1601,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 4: Relatório Semanal (Apenas Coordenador/Admin) */}
-        {activeTab === 'relatorio' && isCoordenador(currentUser) && (
+        {/* Tab 5: Relatório Semanal */}
+        {activeTab === 'relatorio' && isTabAllowed('relatorio', currentUser) && (
           <WeeklyReport
             students={students}
             records={records}
@@ -1583,8 +1616,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 5: Biblioteca de Semanas (Apenas Coordenador/Admin) */}
-        {activeTab === 'biblioteca' && isCoordenador(currentUser) && (
+        {/* Tab 6: Biblioteca de Semanas */}
+        {activeTab === 'biblioteca' && isTabAllowed('biblioteca', currentUser) && (
           <WeeklyLibrary
             students={students}
             records={records}
@@ -1593,8 +1626,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 6: Gerenciamento de Usuários (Apenas Coordenador/Admin) */}
-        {activeTab === 'usuarios' && isCoordenador(currentUser) && (
+        {/* Tab 7: Gerenciamento de Usuários */}
+        {activeTab === 'usuarios' && isTabAllowed('usuarios', currentUser) && (
           <UserManagement
             currentUser={currentUser}
             users={users}
@@ -1616,8 +1649,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 6: Livro Ponto & Folha de Frequência */}
-        {activeTab === 'ponto' && (
+        {/* Tab 8: Livro Ponto & Folha de Frequência */}
+        {activeTab === 'ponto' && isTabAllowed('ponto', currentUser) && (
           <LivroPonto
             currentUser={currentUser}
             users={users}
@@ -1634,8 +1667,8 @@ export default function App() {
           />
         )}
 
-        {/* Tab 7: Cardápio e Culinária (Cardápio de Almoço e Oficina de Receitas) */}
-        {activeTab === 'cardapio' && (
+        {/* Tab 9: Cardápio e Culinária */}
+        {activeTab === 'cardapio' && isTabAllowed('cardapio', currentUser) && (
           <CardapioCulinaria currentUser={currentUser} />
         )}
       </main>

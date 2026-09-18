@@ -23,7 +23,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
@@ -445,6 +445,10 @@ export function subscribeUsers(
             ? data.allowedClassIds
             : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
+          let allowedTabs: TabType[] = Array.isArray(data.allowedTabs)
+            ? data.allowedTabs
+            : (isMasterAdmin || role === 'coordenador' ? ALL_APP_TAB_IDS : []);
+
           const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
             ? Number(data.contractDailyMinutes)
             : (data.contractDailyHoursFormatted
@@ -473,6 +477,7 @@ export function subscribeUsers(
             specialtyActivity: data.specialtyActivity || undefined,
             assignedTurmas,
             allowedClassIds: assignedTurmas,
+            allowedTabs,
             canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
             canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
             pixKey: data.pixKey || data.phone || undefined,
@@ -587,6 +592,10 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     ? user.allowedClassIds
     : (Array.isArray(user.assignedTurmas) ? user.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
+  const allowedTabs: TabType[] = isMasterAdmin || role === 'coordenador'
+    ? ALL_APP_TAB_IDS
+    : (Array.isArray(user.allowedTabs) ? user.allowedTabs : []);
+
   const resolvedMinutes = user.contractDailyMinutes !== undefined && Number(user.contractDailyMinutes) > 0
     ? Number(user.contractDailyMinutes)
     : (user.contractDailyHoursFormatted
@@ -613,6 +622,7 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     assignedActivities,
     assignedTurmas,
     allowedClassIds: assignedTurmas,
+    allowedTabs,
     canManageStudents: isMasterAdmin ? true : (user.canManageStudents !== undefined ? user.canManageStudents : true),
     canMarkAttendance: isMasterAdmin ? true : (user.canMarkAttendance !== undefined ? user.canMarkAttendance : true),
     pixKey: user.pixKey !== undefined ? user.pixKey.trim() : (user.phone ? user.phone.trim() : ''),
@@ -760,6 +770,10 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         ? data.allowedClassIds
         : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
+      let allowedTabs: TabType[] = Array.isArray(data.allowedTabs)
+        ? data.allowedTabs
+        : (isMasterAdmin || role === 'coordenador' ? ALL_APP_TAB_IDS : []);
+
       const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
         ? Number(data.contractDailyMinutes)
         : (data.contractDailyHoursFormatted
@@ -788,6 +802,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         specialtyActivity: data.specialtyActivity || undefined,
         assignedTurmas,
         allowedClassIds: assignedTurmas,
+        allowedTabs,
         canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
         canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
         pixKey: data.pixKey || data.phone || undefined,
@@ -914,6 +929,10 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         ? data.allowedClassIds
         : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
 
+      let allowedTabs: TabType[] = Array.isArray(data.allowedTabs)
+        ? data.allowedTabs
+        : (isMasterAdmin || role === 'coordenador' ? ALL_APP_TAB_IDS : []);
+
       const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
         ? Number(data.contractDailyMinutes)
         : (data.contractDailyHoursFormatted
@@ -943,6 +962,7 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         specialtyActivity: data.specialtyActivity || undefined,
         assignedTurmas,
         allowedClassIds: assignedTurmas,
+        allowedTabs,
         canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
         canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
         pixKey: data.pixKey || data.phone || undefined,

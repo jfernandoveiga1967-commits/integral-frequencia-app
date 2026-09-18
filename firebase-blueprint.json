@@ -89,6 +89,7 @@
         "pin": { "type": "string", "maxLength": 16 },
         "assignedActivities": { "type": "array" },
         "assignedTurmas": { "type": "array" },
+        "allowedTabs": { "type": "array" },
         "canManageStudents": { "type": "boolean" },
         "canMarkAttendance": { "type": "boolean" },
         "updatedAt": { "type": "string", "maxLength": 64 }

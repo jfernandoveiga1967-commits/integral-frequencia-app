@@ -1,4 +1,4 @@
-import { UserProfile, UserRole, UserStatus } from '../types';
+import { UserProfile, UserRole, UserStatus, TabType, ALL_APP_TAB_IDS } from '../types';
 
 export const ADMIN_EMAIL = 'fernando.veiga@crescercampinas.com.br';
 
@@ -23,6 +23,7 @@ export const PRESET_USERS: UserProfile[] = [
     assignedActivities: MASTER_ADMIN_ACTIVITIES,
     assignedTurmas: MASTER_ADMIN_TURMAS,
     allowedClassIds: MASTER_ADMIN_TURMAS,
+    allowedTabs: ALL_APP_TAB_IDS,
     canManageStudents: true,
     canMarkAttendance: true,
     company: 'GADAL - Gestão e Apoio',
@@ -42,6 +43,7 @@ export const PRESET_USERS: UserProfile[] = [
     assignedActivities: [],
     assignedTurmas: [],
     allowedClassIds: [],
+    allowedTabs: ['cardapio'],
     canManageStudents: false,
     canMarkAttendance: false,
     company: 'Colégio Crescer',
@@ -75,6 +77,26 @@ export function formatBirthDateToDisplay(isoDate: string): string {
 
 export function isCoordenador(user?: UserProfile | null): boolean {
   return user?.role === 'coordenador';
+}
+
+/**
+  * Verifica se uma determinada aba do aplicativo está liberada para o usuário.
+  * - Coordenador: sempre tem acesso irrestrito a todas as abas.
+  * - Demais usuários: apenas se a aba estiver explicitamente em user.allowedTabs.
+  */
+export function isTabAllowed(tab: TabType, user?: UserProfile | null): boolean {
+  if (!user) return false;
+  if (isCoordenador(user)) return true;
+  return Array.isArray(user.allowedTabs) && user.allowedTabs.includes(tab);
+}
+
+/**
+  * Retorna a lista de IDs de abas liberadas para o usuário.
+  */
+export function getUserAllowedTabs(user?: UserProfile | null): TabType[] {
+  if (!user) return [];
+  if (isCoordenador(user)) return ALL_APP_TAB_IDS;
+  return Array.isArray(user.allowedTabs) ? user.allowedTabs : [];
 }
 
 export function isNutricionista(user?: UserProfile | null): boolean {
