@@ -103,14 +103,10 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
   if (!isOpen) return null;
 
   const getDisplayHorario = (item: TurmaAtribuicao) => {
-    const h = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
-    if (
-      (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
-      h.includes('11:20')
-    ) {
-      return '10:20 - 17:20';
+    if (item.horarioTurno && item.horarioTurno.trim() !== '') {
+      return item.horarioTurno.trim();
     }
-    return h;
+    return getDefaultHorarioTurnoForTurma(item.turma);
   };
 
   const startEdit = (item: TurmaAtribuicao) => {

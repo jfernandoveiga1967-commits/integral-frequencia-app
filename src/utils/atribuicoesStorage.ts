@@ -28,7 +28,7 @@ export function generateTurmaAtribuicaoId(turmaName: string): string {
 
 /**
  * Retorna o horário de turno padrão configurado por turma:
- * - Mini Maternal Azul, Maternal Azul, Infantil 1 Azul e Infantil 2 Azul: 10:20 - 17:20
+ * - Mini Maternal Azul, Maternal Azul, Infantil 1 Azul e Infantil 2 Azul: 11:20 às 17:20
  * - 1º Ano Azul: 11:30 - 17:30
  * - Demais turmas: 11:40 - 17:40
  */
@@ -44,7 +44,7 @@ export function getDefaultHorarioTurnoForTurma(turmaName: string): string {
     clean.includes('infantil 2') ||
     clean.includes('infantil2')
   ) {
-    return '10:20 - 17:20';
+    return '11:20 às 17:20';
   }
   if (
     clean.includes('1º ano azul') ||
@@ -217,13 +217,9 @@ export function reconcileAtribuicoesWithTurmas(
       }
 
       if (shouldSet) {
-        let horario = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
-        if (
-          (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
-          horario.includes('11:20')
-        ) {
-          horario = '10:20 - 17:20';
-        }
+        const horario = (item.horarioTurno && typeof item.horarioTurno === 'string' && item.horarioTurno.trim() !== '')
+          ? item.horarioTurno.trim()
+          : getDefaultHorarioTurnoForTurma(item.turma);
         const normalized: TurmaAtribuicao = {
           ...item,
           id: safeId,
@@ -241,13 +237,9 @@ export function reconcileAtribuicoesWithTurmas(
     const safeId = generateTurmaAtribuicaoId(tName);
     const existing = existingMap.get(tName) || existingMap.get(tName.toLowerCase().trim()) || existingMap.get(safeId);
     if (existing) {
-      let horario = existing.horarioTurno || getDefaultHorarioTurnoForTurma(tName);
-      if (
-        (tName.toLowerCase().includes('maternal') || tName.toLowerCase().includes('infantil')) &&
-        horario.includes('11:20')
-      ) {
-        horario = '10:20 - 17:20';
-      }
+      const horario = (existing.horarioTurno && typeof existing.horarioTurno === 'string' && existing.horarioTurno.trim() !== '')
+        ? existing.horarioTurno.trim()
+        : getDefaultHorarioTurnoForTurma(tName);
       return {
         ...existing,
         id: safeId,

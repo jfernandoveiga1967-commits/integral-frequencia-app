@@ -3712,13 +3712,9 @@ export function generateQuadroAtribuicoesPDF(
       : '—';
 
     const espacoDisplay = item.espacoBase || '—';
-    let horarioDisplay = item.horarioTurno || getDefaultHorarioTurnoForTurma(item.turma);
-    if (
-      (item.turma.toLowerCase().includes('maternal') || item.turma.toLowerCase().includes('infantil')) &&
-      horarioDisplay.includes('11:20')
-    ) {
-      horarioDisplay = '10:20 - 17:20';
-    }
+    const horarioDisplay = (item.horarioTurno && item.horarioTurno.trim() !== '')
+      ? item.horarioTurno.trim()
+      : getDefaultHorarioTurnoForTurma(item.turma);
     const obsDisplay = item.observacao || '—';
 
     return [

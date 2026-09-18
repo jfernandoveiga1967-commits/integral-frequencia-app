@@ -2512,20 +2512,15 @@ export function subscribeQuadroAtribuicoes(
         const data = d.data() as TurmaAtribuicao;
         const safeId = generateTurmaAtribuicaoId(data.turma || d.id);
 
-        // Se houver documento remanescente com ID não-normalizado (ex: atrib_3º_ano_vermelho), remove do Firestore
-        if (d.id !== safeId && (d.id.includes('º') || d.id.includes('°') || !d.id.startsWith('atrib_'))) {
+        // Se houver documento remanescente com ID não-canônico no Firestore, remove
+        if (d.id !== safeId) {
           deleteDoc(doc(db, 'quadroAtribuicoes', d.id)).catch(() => {});
         }
 
-        let horario = data.horarioTurno;
-        if (!horario) {
-          horario = getDefaultHorarioTurnoForTurma(data.turma || d.id);
-        } else if (
-          (data.turma?.toLowerCase().includes('maternal') || data.turma?.toLowerCase().includes('infantil')) &&
-          horario.includes('11:20')
-        ) {
-          horario = '10:20 - 17:20';
-        }
+        // Preserva integralmente o horário definido pelo usuário. Só aplica default se estiver genuinamente vazio
+        const horario = (data.horarioTurno && typeof data.horarioTurno === 'string' && data.horarioTurno.trim() !== '')
+          ? data.horarioTurno.trim()
+          : getDefaultHorarioTurnoForTurma(data.turma || d.id);
 
         const normalizedItem: TurmaAtribuicao = {
           ...data,
@@ -2538,11 +2533,13 @@ export function subscribeQuadroAtribuicoes(
         let shouldReplace = false;
         if (!existing) {
           shouldReplace = true;
+        } else if (normalizedItem.updatedAt && existing.updatedAt) {
+          shouldReplace = normalizedItem.updatedAt >= existing.updatedAt;
+        } else if (normalizedItem.updatedAt && !existing.updatedAt) {
+          shouldReplace = true;
         } else if (d.id === safeId && existing.id !== safeId) {
           shouldReplace = true;
         } else if (normalizedItem.monitoraName && !existing.monitoraName) {
-          shouldReplace = true;
-        } else if (normalizedItem.updatedAt && existing.updatedAt && normalizedItem.updatedAt > existing.updatedAt) {
           shouldReplace = true;
         }
 
