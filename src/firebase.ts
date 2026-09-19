@@ -238,15 +238,11 @@ export function subscribeAlunos(
 
     const deduped = deduplicateStudentsList(list);
     if (deduped.length === 0) {
-      // Se não há alunos no Firestore, dispara o seed padrão imediatamente para popular
-      seedDefaultSchoolData().catch(() => {});
-      const localSt = loadStudents();
+      const localSt = loadStudents().filter((s) => !isMockStudent(s));
       if (localSt.length > 0) {
         onData(localSt);
         return;
       }
-      onData(INITIAL_STUDENTS.map((s) => normalizeStudent(s)));
-      return;
     }
     onData(deduped);
   };
@@ -335,15 +331,6 @@ export function subscribeRecords(
           createdAt: data.createdAt || new Date().toISOString(),
         });
       });
-      if (list.length === 0 && (!targetDate || targetDate === new Date().toISOString().split('T')[0])) {
-        // Popula os registros de presença de hoje se estiver vazio para que os contadores deixem de ficar em zero
-        seedDefaultSchoolData().catch(() => {});
-        const localRecs = loadAttendanceRecords();
-        if (localRecs.length > 0) {
-          onData(localRecs);
-          return;
-        }
-      }
       onData(list);
     },
     (error) => {
@@ -2818,11 +2805,6 @@ if (typeof window !== 'undefined') {
     try {
       reconnectFirestore(true).catch(() => {});
       clearFirestoreQuotaExceeded();
-      const existing = loadStudents();
-      if (!existing || existing.length === 0) {
-        saveStudents(INITIAL_STUDENTS.map((s) => normalizeStudent(s)));
-        seedDefaultSchoolData().catch(() => {});
-      }
     } catch (e) {
       console.warn('Notice na auto-inicialização do Firebase:', e);
     }

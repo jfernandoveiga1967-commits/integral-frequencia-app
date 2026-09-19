@@ -94,8 +94,6 @@ import {
   saveHolidayToFirestore,
   deleteHolidayFromFirestore,
   batchSaveHolidaysToFirestore,
-  seedInitialDataToFirestore,
-  seedDefaultSchoolData,
   testFirestoreConnection,
   getIsFirestoreQuotaExceeded,
   deleteDoc,
