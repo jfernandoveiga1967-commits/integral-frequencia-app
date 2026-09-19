@@ -614,11 +614,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
+      auxiliar: 'Auxiliar',
+      nutricionista: 'Nutricionista',
     };
 
     const roleColors: Record<UserRole, string> = {
       coordenador: 'bg-amber-500',
       professor: 'bg-indigo-600',
+      auxiliar: 'bg-emerald-600',
+      nutricionista: 'bg-teal-600',
     };
 
     const formattedPass = formatBirthDateToDisplay(effectiveBirthDate);
@@ -817,18 +821,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const handleQuickRoleChange = async (user: UserProfile, newRole: UserRole) => {
     if (user.role === newRole) return;
     if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
-      showToast('O perfil do Coordenador Geral não pode ser alterado para Monitor/Professor.', 'error');
+      showToast('O perfil do Coordenador Geral não pode ter o cargo alterado.', 'error');
       return;
     }
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',
+      auxiliar: 'Auxiliar',
+      nutricionista: 'Nutricionista',
     };
 
     const roleColors: Record<UserRole, string> = {
       coordenador: 'bg-amber-500',
       professor: 'bg-indigo-600',
+      auxiliar: 'bg-emerald-600',
+      nutricionista: 'bg-teal-600',
     };
 
     const updated: UserProfile = {
@@ -836,6 +844,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       role: newRole,
       cargoLabel: roleLabels[newRole],
       avatarColor: roleColors[newRole],
+      allowedTabs: newRole === 'coordenador' ? [...ALL_APP_TAB_IDS] : user.allowedTabs,
+      canManageStudents: newRole === 'coordenador' ? true : user.canManageStudents,
+      canMarkAttendance: newRole === 'coordenador' ? true : user.canMarkAttendance,
       updatedAt: new Date().toISOString(),
     };
 
@@ -1419,11 +1430,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 {/* Role Filter */}
                 <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0">
-                  {(['TODOS', 'coordenador', 'professor'] as const).map((r) => {
+                  {(['TODOS', 'coordenador', 'professor', 'auxiliar', 'nutricionista'] as const).map((r) => {
                     const labels: Record<string, string> = {
                       TODOS: 'Todos os Cargos',
                       coordenador: 'Coordenação',
                       professor: 'Monitoras / Prof.',
+                      auxiliar: 'Auxiliares',
+                      nutricionista: 'Nutricionista',
                     };
 
                     const isSel = roleFilter === r;
@@ -1769,6 +1782,43 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                                   >
                                     {isCurrent && <span className="mr-1">●</span>}
                                     {st.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Quick Role Control Bar */}
+                        {!isMasterCoord && (
+                          <div className="bg-slate-100/90 border border-slate-200 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                            <div className="flex items-center space-x-2 text-slate-700 font-bold">
+                              <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>Cargo / Categoria:</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {(
+                                [
+                                  { id: 'coordenador', label: 'Coordenador', bgActive: 'bg-amber-500 text-white border-amber-600 shadow-xs' },
+                                  { id: 'professor', label: 'Monitor / Professor', bgActive: 'bg-indigo-600 text-white border-indigo-700 shadow-xs' },
+                                  { id: 'auxiliar', label: 'Auxiliar', bgActive: 'bg-emerald-600 text-white border-emerald-700 shadow-xs' },
+                                  { id: 'nutricionista', label: 'Nutricionista', bgActive: 'bg-teal-600 text-white border-teal-700 shadow-xs' },
+                                ] as const
+                              ).map((r) => {
+                                const isCurrent = (user.role || 'professor') === r.id;
+                                return (
+                                  <button
+                                    key={r.id}
+                                    type="button"
+                                    onClick={() => handleQuickRoleChange(user, r.id as UserRole)}
+                                    className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                      isCurrent
+                                        ? r.bgActive
+                                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {isCurrent && <span className="mr-1">●</span>}
+                                    {r.label}
                                   </button>
                                 );
                               })}
@@ -2433,11 +2483,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Cargo / Categoria de Acesso:
                 </label>
-                {editingUser && (editingUser.role === 'coordenador' || editingUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || editingUser.id === 'usr_coord_1') ? (
+                {editingUser && (editingUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || editingUser.id === 'usr_coord_1') ? (
                   <div className="w-full px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 font-bold text-xs flex items-center justify-between shadow-xs">
                     <span className="flex items-center space-x-1.5">
                       <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Coordenador (Administrador - Acesso Total)</span>
+                      <span>Coordenador Geral (Administrador Master - Acesso Total)</span>
                     </span>
                     <span className="text-[10px] uppercase font-extrabold bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
                       Perfil Principal Protegido
@@ -2446,21 +2496,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 ) : (
                   <div className="space-y-1">
                     <select
-                      value="professor"
-                      disabled
-                      className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-800 font-bold focus:outline-none cursor-not-allowed text-xs"
+                      value={formRole}
+                      onChange={(e) => setFormRole(e.target.value as UserRole)}
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer text-xs"
                     >
+                      <option value="coordenador">Coordenador (Administrador - Acesso Total)</option>
                       <option value="professor">Monitor / Professor (Diário de Classe + Alunos)</option>
+                      <option value="auxiliar">Auxiliar (Apoio Pedagógico)</option>
+                      <option value="nutricionista">Nutricionista (Cardápio e Alimentação)</option>
                     </select>
                     <p className="text-[11px] text-slate-500 font-medium">
-                      🔒 O cadastro e a edição de membros da equipe são exclusivos para o perfil de <strong>Monitor / Professor</strong>.
+                      Atribua o cargo do colaborador. Coordenadores têm acesso total ao sistema; os demais seguem as permissões configuradas.
                     </p>
                   </div>
                 )}
               </div>
 
               {/* Status do Colaborador (Situação Funcional & Livro Ponto) */}
-              {(!editingUser || (editingUser.role !== 'coordenador' && editingUser.email.toLowerCase() !== 'jfernandoveiga1967@gmail.com' && editingUser.id !== 'usr_coord_1')) && (
+              {(!editingUser || (editingUser.email.toLowerCase() !== 'jfernandoveiga1967@gmail.com' && editingUser.id !== 'usr_coord_1')) && (
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="block font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">

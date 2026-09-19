@@ -99,6 +99,20 @@ export interface FirestoreErrorInfo {
 export let isFirestoreQuotaExceeded = false;
 let lastQuotaCheckTime = 0;
 
+export const DEFAULT_ROLE_LABELS: Record<string, string> = {
+  coordenador: 'Coordenador (Administrador)',
+  professor: 'Monitor / Professor',
+  auxiliar: 'Auxiliar',
+  nutricionista: 'Nutricionista',
+};
+
+export const DEFAULT_ROLE_COLORS: Record<string, string> = {
+  coordenador: 'bg-amber-500',
+  professor: 'bg-indigo-600',
+  auxiliar: 'bg-emerald-600',
+  nutricionista: 'bg-teal-600',
+};
+
 type QuotaStateListener = (exceeded: boolean) => void;
 const quotaStateListeners = new Set<QuotaStateListener>();
 
@@ -421,8 +435,12 @@ export function subscribeUsers(
             userEmail === 'coordenacao@crescer.edu.br';
 
           const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-          const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
-          const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
+          const cargoLabel = isMasterAdmin
+            ? (data.cargoLabel || 'Coordenador (Administrador)')
+            : (data.cargoLabel || DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor');
+          const avatarColor = isMasterAdmin
+            ? (data.avatarColor || 'bg-amber-500')
+            : (data.avatarColor || DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600');
 
           let assignedActivities = Array.isArray(data.assignedActivities)
             ? data.assignedActivities
@@ -568,8 +586,8 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     emailLower === 'coordenacao@crescer.edu.br';
 
   const role: UserRole = isMasterAdmin ? 'coordenador' : (user.role || 'professor');
-  const cargoLabel = user.cargoLabel || (role === 'coordenador' ? 'Coordenador (Administrador)' : 'Monitor / Professor');
-  const avatarColor = user.avatarColor || (role === 'coordenador' ? 'bg-amber-500' : 'bg-indigo-600');
+  const cargoLabel = user.cargoLabel || (isMasterAdmin ? 'Coordenador (Administrador)' : (DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor'));
+  const avatarColor = user.avatarColor || (isMasterAdmin ? 'bg-amber-500' : (DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600'));
 
   const assignedActivities = Array.isArray(user.assignedActivities)
     ? user.assignedActivities
@@ -746,8 +764,12 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
         rawEmailLower === 'coordenacao@crescer.edu.br';
 
       const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-      const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
-      const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
+      const cargoLabel = isMasterAdmin
+        ? (data.cargoLabel || 'Coordenador (Administrador)')
+        : (data.cargoLabel || DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor');
+      const avatarColor = isMasterAdmin
+        ? (data.avatarColor || 'bg-amber-500')
+        : (data.avatarColor || DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600');
 
       let assignedActivities = Array.isArray(data.assignedActivities)
         ? data.assignedActivities
@@ -905,8 +927,12 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         rawEmail === 'coordenacao@crescer.edu.br';
 
       const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-      const cargoLabel = isMasterAdmin ? (data.cargoLabel || 'Coordenador (Administrador)') : (data.cargoLabel || 'Monitor / Professor');
-      const avatarColor = isMasterAdmin ? (data.avatarColor || 'bg-amber-500') : (data.avatarColor || 'bg-indigo-600');
+      const cargoLabel = isMasterAdmin
+        ? (data.cargoLabel || 'Coordenador (Administrador)')
+        : (data.cargoLabel || DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor');
+      const avatarColor = isMasterAdmin
+        ? (data.avatarColor || 'bg-amber-500')
+        : (data.avatarColor || DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600');
 
       let assignedActivities = Array.isArray(data.assignedActivities)
         ? data.assignedActivities

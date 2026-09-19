@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   GraduationCap,
   Sparkles,
+  Users,
+  Utensils,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ConnectionState } from '../services/syncService';
@@ -80,6 +82,10 @@ export const Footer: React.FC<FooterProps> = ({
     switch (currentUser.role) {
       case 'coordenador':
         return <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />;
+      case 'auxiliar':
+        return <Users className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'nutricionista':
+        return <Utensils className="w-3.5 h-3.5 text-teal-400" />;
       case 'professor':
       default:
         return <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />;

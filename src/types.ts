@@ -81,7 +81,7 @@ export interface ScheduleBlock {
   updatedAt?: string;
 }
 
-export type UserRole = 'coordenador' | 'professor';
+export type UserRole = 'coordenador' | 'professor' | 'auxiliar' | 'nutricionista';
 
 export type TabType =
   | 'momento'
