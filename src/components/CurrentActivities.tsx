@@ -33,6 +33,11 @@ import {
   Edit3,
   UserCheck,
   ShieldCheck,
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
+  Target,
+  Package,
 } from 'lucide-react';
 import {
   Student,
@@ -47,7 +52,9 @@ import {
   DayOfWeek,
   AttendanceStatus,
   TurmaAtribuicao,
+  SemanarioPlan,
 } from '../types';
+import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
@@ -96,6 +103,7 @@ interface CurrentActivitiesProps {
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
   onNavigateToAttendance: (activity?: ActivityType, turma?: TurmaType, date?: string) => void;
   onUpdateUserPhone?: (userId: string, newPhone: string) => void;
+  todaySemanarioPlans?: SemanarioPlan[];
 }
 
 /**
@@ -157,7 +165,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   onClearRecords,
   onNavigateToAttendance,
   onUpdateUserPhone,
+  todaySemanarioPlans = [],
 }) => {
+  // Plan details expansion state per turma
+  const [expandedPlanTurmas, setExpandedPlanTurmas] = useState<Record<string, boolean>>({});
+
+  const togglePlanExpanded = (turmaName: string) => {
+    setExpandedPlanTurmas((prev) => ({
+      ...prev,
+      [turmaName]: !prev[turmaName],
+    }));
+  };
+
   // Real-time system clock state
   const [systemTime, setSystemTime] = useState<string>(() => {
     const d = new Date();
@@ -1000,6 +1019,20 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
             const isClassActive = activeBlock !== null;
 
+            // Busca os planos correspondentes do Semanário Pedagógico para hoje
+            const activePlan = findMatchingSemanarioPlan(
+              todaySemanarioPlans,
+              turmaName,
+              selectedDate,
+              activeBlock
+            );
+            const nextPlan = findMatchingSemanarioPlan(
+              todaySemanarioPlans,
+              turmaName,
+              selectedDate,
+              nextBlock
+            );
+
             return (
               <div
                 key={turmaName}
@@ -1104,6 +1137,147 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           <div className="flex items-start space-x-1.5 text-slate-600 pt-1 border-t border-slate-200/60 text-[10px] leading-snug">
                             <FileText className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
                             <span className="italic line-clamp-2">{activeBlock.guidelines}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bloco Pedagógico do Semanário (Planejamento para este horário) */}
+                      <div className="rounded-xl border p-2.5 transition-all space-y-2 bg-gradient-to-br from-indigo-50/60 via-white to-purple-50/30 border-indigo-100/90 shadow-2xs">
+                        {/* Cabeçalho do Bloco */}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center space-x-1.5 min-w-0">
+                            <div className="w-5 h-5 rounded-md bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                              <BookOpen className="w-3 h-3" />
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-950 truncate">
+                              Planejamento do Semanário
+                            </span>
+                          </div>
+
+                          {/* Badges de Status / Substituição */}
+                          {activePlan ? (
+                            activePlan.status === 'substituida' ? (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+                                <AlertCircle className="w-3 h-3 text-amber-700" />
+                                <span>Substituição</span>
+                              </span>
+                            ) : activePlan.status === 'realizada' ? (
+                              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>Realizada</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
+                                <Sparkles className="w-3 h-3 text-indigo-600" />
+                                <span>Planejado</span>
+                              </span>
+                            )
+                          ) : null}
+                        </div>
+
+                        {/* Conteúdo do Plano ou Mensagem de Nenhum Planejamento */}
+                        {activePlan ? (
+                          <div className="space-y-1.5">
+                            <div className="space-y-0.5">
+                              <div className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                                {activePlan.title}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                                {activePlan.category && (
+                                  <span className="font-semibold text-indigo-700 bg-white px-1.5 py-0.2 rounded border border-indigo-100">
+                                    {activePlan.category}
+                                  </span>
+                                )}
+                                {(activePlan.adiResponsible || activePlan.teacherName) && (
+                                  <span className="text-slate-500 font-medium truncate">
+                                    <span className="text-slate-400">Resp./ADI:</span>{' '}
+                                    <strong className="text-slate-700">{activePlan.adiResponsible || activePlan.teacherName}</strong>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Alerta de Motivo da Substituição quando houver */}
+                            {activePlan.status === 'substituida' && activePlan.substitutionReason && (
+                              <div className="bg-amber-50 border border-amber-200/90 rounded-lg p-2 text-[10px] text-amber-900 leading-tight space-y-0.5">
+                                <div className="font-extrabold flex items-center gap-1 text-amber-950">
+                                  <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span>Motivo da Substituição:</span>
+                                </div>
+                                <p className="italic text-amber-800">{activePlan.substitutionReason}</p>
+                              </div>
+                            )}
+
+                            {/* Botão Ver Mais / Ver Menos Detalhes Pedagógicos */}
+                            {(activePlan.objectives || activePlan.materials || activePlan.development) && (
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={() => togglePlanExpanded(turmaName)}
+                                  className="w-full mt-1 py-1 px-2 rounded-lg bg-white hover:bg-indigo-50/80 text-indigo-700 border border-indigo-200 text-[10px] font-extrabold transition-colors flex items-center justify-between cursor-pointer shadow-2xs"
+                                >
+                                  <span className="flex items-center space-x-1">
+                                    <FileText className="w-3 h-3 text-indigo-500" />
+                                    <span>
+                                      {expandedPlanTurmas[turmaName]
+                                        ? 'Ocultar Detalhes Pedagógicos'
+                                        : 'Ver Objetivos & Materiais'}
+                                    </span>
+                                  </span>
+                                  {expandedPlanTurmas[turmaName] ? (
+                                    <ChevronUp className="w-3 h-3 text-indigo-600" />
+                                  ) : (
+                                    <ChevronDown className="w-3 h-3 text-indigo-600" />
+                                  )}
+                                </button>
+
+                                {/* Área Expandida com Objetivos BNCC, Materiais e Desenvolvimento */}
+                                {expandedPlanTurmas[turmaName] && (
+                                  <div className="mt-1.5 space-y-1.5 pt-1 border-t border-indigo-100 text-[10px]">
+                                    {activePlan.objectives && (
+                                      <div className="bg-white/90 rounded-lg p-2 border border-slate-200 space-y-0.5">
+                                        <div className="font-extrabold text-slate-800 flex items-center gap-1">
+                                          <Target className="w-3 h-3 text-indigo-600 shrink-0" />
+                                          <span>Objetivos de Aprendizagem & BNCC:</span>
+                                        </div>
+                                        <p className="text-slate-600 leading-relaxed whitespace-pre-line">
+                                          {activePlan.objectives}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {activePlan.materials && (
+                                      <div className="bg-white/90 rounded-lg p-2 border border-slate-200 space-y-0.5">
+                                        <div className="font-extrabold text-slate-800 flex items-center gap-1">
+                                          <Package className="w-3 h-3 text-amber-600 shrink-0" />
+                                          <span>Recursos & Materiais Necessários:</span>
+                                        </div>
+                                        <p className="text-slate-600 leading-relaxed whitespace-pre-line">
+                                          {activePlan.materials}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {activePlan.development && (
+                                      <div className="bg-white/90 rounded-lg p-2 border border-slate-200 space-y-0.5">
+                                        <div className="font-extrabold text-slate-800 flex items-center gap-1">
+                                          <Sparkles className="w-3 h-3 text-emerald-600 shrink-0" />
+                                          <span>Passo a Passo / Desenvolvimento:</span>
+                                        </div>
+                                        <p className="text-slate-600 leading-relaxed whitespace-pre-line">
+                                          {activePlan.development}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-2 py-1.5 px-2 rounded-lg bg-white/70 border border-slate-200/70 text-[10px] text-slate-400">
+                            <BookOpen className="w-3 h-3 text-slate-300 shrink-0" />
+                            <span className="italic">Nenhum planejamento cadastrado para este horário</span>
                           </div>
                         )}
                       </div>
@@ -1308,6 +1482,17 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               <span className="text-[9px] text-slate-500 font-semibold truncate block">
                                 {nextBlock.location}
                               </span>
+                            )}
+                            {nextPlan && (
+                              <div className="mt-0.5 flex items-center space-x-1 text-[9px] text-indigo-800 bg-indigo-50/80 rounded px-1.5 py-0.5 border border-indigo-100/80 max-w-full">
+                                <BookOpen className="w-2.5 h-2.5 shrink-0 text-indigo-600" />
+                                <span className="font-bold truncate">Plano: {nextPlan.title}</span>
+                                {nextPlan.status === 'substituida' && (
+                                  <span className="text-[8px] font-black text-amber-900 bg-amber-100 px-1 rounded-2xs shrink-0">
+                                    Subst.
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

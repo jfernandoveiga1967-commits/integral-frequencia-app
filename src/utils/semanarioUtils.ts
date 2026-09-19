@@ -394,8 +394,8 @@ export function cleanupInvalidTurmaPlans(plans: SemanarioPlan[], schedules?: Sch
 }
 
 /**
- * Amostras Pedagógicas Iniciais: Inicia vazio para não inflar artificialmente
- * os contadores de atividades lançadas sem preenchimento real da equipe.
+ * Amostras Pedagógicas Iniciais para demonstração e visualização instantânea
+ * na aba Atividades do Momento (com planos reais, objetivos BNCC, materiais e status de substituição).
  */
 export function getInitialSamplePlans(
   _currentWeekInfo?: WeekInfo,
@@ -403,7 +403,75 @@ export function getInitialSamplePlans(
   _schedules?: ScheduleBlock[],
   _activitiesList?: ActivityItem[]
 ): SemanarioPlan[] {
-  return [];
+  const todayStr = new Date().toISOString().split('T')[0];
+  const year = new Date().getFullYear();
+
+  return [
+    {
+      id: `sample_plan_1ano_${todayStr}`,
+      turma: '1º Ano A',
+      weekNumber: 38,
+      year: year,
+      date: todayStr,
+      dayOfWeek: 'segunda',
+      timeSlot: '13:30 - 14:30',
+      category: 'Oficina de Artes',
+      title: 'Crescendo com Jesus: Painel Coletivo das Virtudes',
+      objectives: 'BNCC (EI03TS02) Expressar-se livremente por meio de desenho, pintura e colagem, desenvolvendo empatia e cooperação mútua no espaço coletivo.',
+      development: 'Roda de conversa inicial sobre acolhimento e partilha. Em seguida, os alunos produzem estampas manuais com guache para montar o mural colaborativo das boas atitudes.',
+      materials: 'Papel Kraft bobina, tintas guache atóxicas variadas, pincéis chatos nº 12, retalhos de tecido e aventais.',
+      adiResponsible: 'Patrícia',
+      teacherName: 'Ana Clara e Márcia',
+      monitors: 'Ana Clara Carchano Garcia',
+      status: 'pendente',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'Coordenação Pedagógica',
+    },
+    {
+      id: `sample_plan_infantil2_${todayStr}`,
+      turma: 'Infantil II',
+      weekNumber: 38,
+      year: year,
+      date: todayStr,
+      dayOfWeek: 'segunda',
+      timeSlot: '13:30 - 14:30',
+      category: 'Contação de Histórias & Literatura',
+      title: 'História na Sacola Encantada: O Segredo da Joaninha',
+      objectives: 'BNCC (EI02EF03) Demonstrar interesse e atenção ao ouvir a leitura de histórias, poemas e cantigas, associando sons e movimentos corporais.',
+      development: 'Apresentação dos personagens utilizando fantoches de feltro e sonorização com instrumentos de percussão leve. Condução em círculo com tapetes sensoriais.',
+      materials: 'Sacola pedagógica, fantoches de feltro da Joaninha e Grilo, chocalhos sonoros e tapete acolchoado.',
+      adiResponsible: 'Juliana',
+      teacherName: 'Sthefany',
+      monitors: 'Sthefany Santos',
+      status: 'substituida',
+      substitutionReason: 'Atividade adaptada para o espaço multiuso interno em virtude da manutenção do pergolado externo e tempo chuvoso.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'Coordenação Pedagógica',
+    },
+    {
+      id: `sample_plan_maternal_${todayStr}`,
+      turma: 'Maternal I',
+      weekNumber: 38,
+      year: year,
+      date: todayStr,
+      dayOfWeek: 'segunda',
+      timeSlot: '14:30 - 15:30',
+      category: 'Psicomotricidade & Movimento',
+      title: 'Circuito Lúdico dos Pequenos Exploradores',
+      objectives: 'BNCC (EI02CG02) Deslocar seu corpo no espaço, orientando-se por noções de frente, trás, em cima, embaixo.',
+      development: 'Circuito com almofadas firmes, túnel de tecido e cones macios estimulando o engatinhar, equilíbrio e coordenação motora ampla.',
+      materials: 'Colchonetes, túnel de pano, blocos de espuma e música instrumental alegre.',
+      adiResponsible: 'Camila',
+      teacherName: 'Beatriz',
+      monitors: 'Beatriz Oliveira',
+      status: 'realizada',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'Coordenação Pedagógica',
+    },
+  ];
 }
 
 const DAYS_OF_WEEK_ORDER: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];

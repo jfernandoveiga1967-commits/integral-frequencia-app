@@ -48,6 +48,27 @@ export const PRESET_USERS: UserProfile[] = [
     canMarkAttendance: false,
     company: 'Colégio Crescer',
   } as UserProfile,
+  {
+    id: 'usr_monitor_1',
+    name: 'Ana Clara Carchano Garcia',
+    email: 'anaclara.monitora@crescercampinas.com.br',
+    role: 'professor' as UserRole,
+    cargoLabel: 'Monitora de Apoio',
+    avatarColor: 'bg-indigo-600',
+    birthDate: '2001-05-15',
+    pin: '15/05/2001',
+    status: 'ATIVO' as UserStatus,
+    workShiftType: 'padrao_8h',
+    assignedActivities: ['Rotina', 'Oficina de Artes', 'Contação de Histórias & Literatura'],
+    assignedTurmas: ['1º Ano A', 'Infantil II', '1º Ano Azul'],
+    allowedClassIds: ['1º Ano A', 'Infantil II', '1º Ano Azul'],
+    allowedTabs: ['momento', 'frequencia', 'ponto'],
+    canManageStudents: false,
+    canMarkAttendance: true,
+    company: 'GADAL - Gestão e Apoio',
+    contractSchedule: '11:40 - 17:40',
+    baseSalary: 1800,
+  } as UserProfile,
 ];
 
 // ---------------------------------------------------------------------------

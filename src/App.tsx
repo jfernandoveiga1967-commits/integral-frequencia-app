@@ -65,6 +65,7 @@ import {
   subscribePontoClosings,
   savePontoClosingToFirestore,
   subscribeSemanarioPlans,
+  subscribeTodaySemanarioPlans,
   saveSemanarioPlanToFirestore,
   deleteSemanarioPlanFromFirestore,
   batchSaveSemanarioPlansToFirestore,
@@ -184,9 +185,12 @@ export default function App() {
     }
 
     // Redirect user to appropriate initial tab:
-    // Non-admin / non-coordenador users (Monitor / Professor) are directed to 'momento' (or 'frequencia')
+    // If current tab is not in allowed tabs, direct to the first allowed tab
     if (finalUser.role !== 'coordenador') {
-      setActiveTab('momento');
+      const allowed = getUserAllowedTabs(finalUser);
+      if (allowed.length > 0 && !allowed.includes(activeTab)) {
+        setActiveTab(allowed[0]);
+      }
     }
   };
 
@@ -196,12 +200,14 @@ export default function App() {
     setActiveTab('momento');
   };
 
-  // Route protection: ensure non-coordenador cannot stay on restricted management tabs
+  // Route protection: ensure non-coordenador cannot stay on restricted tabs
   useEffect(() => {
     if (currentUser && !isCoordenador(currentUser)) {
-      const restrictedTabs: TabType[] = ['alunos', 'relatorio', 'biblioteca', 'usuarios'];
-      if (restrictedTabs.includes(activeTab)) {
-        setActiveTab('momento');
+      if (!isTabAllowed(activeTab, currentUser)) {
+        const allowed = getUserAllowedTabs(currentUser);
+        if (allowed.length > 0) {
+          setActiveTab(allowed[0]);
+        }
       }
     }
   }, [currentUser, activeTab]);
@@ -362,20 +368,38 @@ export default function App() {
       }
     });
 
-    let isInitialStudentsSync = true;
-    let isInitialTurmasSync = true;
-    let hasHealedAdminUser = false;
-    let hasCleanedMockProfiles = false;
-    let hasHealedActivitiesList = false;
+    return () => {
+      cleanupConnectivity();
+      unsubStatus();
+      unsubCrossTabSync();
+    };
+  }, []);
 
-    // Ouvinte em Tempo Real (onSnapshot) da Coleção de Alunos:
-    // Substitui chamadas estáticas getDocs por escutador reativo contínuo onSnapshot(collection(db, "alunos"), ...)
-    // Garantindo reflexo imediato de exclusões, inativações e inclusões em todos os dispositivos conectados.
+  const isCoord = isCoordenador(currentUser);
+  const isLogged = !!currentUser;
+
+  // Sincronização sob demanda (Zero Overhead para dispositivos móveis com conexão restrita)
+  // Regra: se a aba correspondente não estiver liberada para o usuário, o listener correspondente NÃO é inicializado.
+  // O coordenador possui sempre acesso irrestrito total.
+  const shouldSyncStudents = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncTurmas = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncUsers = isLogged; // Necessário para sincronização em tempo real das próprias permissões e perfil da sessão ativa
+  const shouldSyncActivities = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
+  const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('usuarios', currentUser));
+  const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
+  const shouldSyncPonto = isLogged && (isCoord || isTabAllowed('ponto', currentUser));
+  const shouldSyncSemanario = isLogged && (isCoord || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncQuadro = isLogged && (isCoord || isTabAllowed('alunos', currentUser) || isTabAllowed('usuarios', currentUser));
+  const shouldSyncRecords = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
+
+  const hasHealedActivitiesRef = useRef(false);
+
+  // 1. Alunos em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncStudents) return;
+
     const unsubStudents = subscribeStudents((fsStudents) => {
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
-      
-      // Quando o Firestore retorna dados reativos em tempo real, ele é a autoridade máxima.
-      // Se a lista estiver vazia por ser o primeiro carregamento offline, faz fallback seguro ao storage local.
       let effectiveList: Student[];
       if (realStudents.length > 0) {
         effectiveList = realStudents;
@@ -395,28 +419,41 @@ export default function App() {
           saveStudentToFirestore(st).catch(() => {});
         });
       }
-      isInitialStudentsSync = false;
     });
 
-    // Sincronização de turmas (subscribeTurmas)
+    return () => {
+      unsubStudents();
+    };
+  }, [shouldSyncStudents]);
+
+  // 2. Turmas em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncTurmas) return;
+
     const unsubTurmas = subscribeTurmas((fsTurmas) => {
       if (fsTurmas.length > 0) {
         const sortedTurmas = sortTurmasPedagogical(fsTurmas);
         setTurmas(sortedTurmas);
         saveTurmas(sortedTurmas);
       }
-      isInitialTurmasSync = false;
     });
 
+    return () => {
+      unsubTurmas();
+    };
+  }, [shouldSyncTurmas]);
+
+  // 3. Usuários / Colaboradores em Tempo Real & Sincronização Dinâmica de Permissões
+  useEffect(() => {
+    if (!shouldSyncUsers) return;
+
     const unsubUsers = subscribeUsers((fsUsers) => {
-      // Deduplicate strictly in memory and merge with presets
       let effectiveUsers: UserProfile[];
       if (fsUsers && fsUsers.length > 0) {
         effectiveUsers = normalizeAndDeduplicateUsers(fsUsers);
         setUsers(effectiveUsers);
         saveLocalUsersList(effectiveUsers);
       } else {
-        // Se a resposta da nuvem estiver vazia (modo offline / cota esgotada), preservar os colaboradores salvos no localStorage
         const localList = getLocalUsersList();
         if (localList && localList.length > 1) {
           effectiveUsers = localList;
@@ -427,7 +464,7 @@ export default function App() {
         }
       }
 
-      // Real-time permission sync for current active session
+      // Sincronização dinâmica de permissões da sessão ativa em tempo real
       const activeSelf = currentUserRef.current;
       if (activeSelf) {
         const updatedSelf = effectiveUsers.find(
@@ -454,6 +491,7 @@ export default function App() {
             JSON.stringify(enforcedSelf.allowedClassIds) !== JSON.stringify(activeSelf.allowedClassIds) ||
             JSON.stringify(enforcedSelf.assignedTurmas) !== JSON.stringify(activeSelf.assignedTurmas) ||
             JSON.stringify(enforcedSelf.assignedActivities) !== JSON.stringify(activeSelf.assignedActivities) ||
+            JSON.stringify(enforcedSelf.allowedTabs) !== JSON.stringify(activeSelf.allowedTabs) ||
             enforcedSelf.role !== activeSelf.role ||
             enforcedSelf.name !== activeSelf.name ||
             enforcedSelf.phone !== activeSelf.phone ||
@@ -473,6 +511,15 @@ export default function App() {
       }
     });
 
+    return () => {
+      unsubUsers();
+    };
+  }, [shouldSyncUsers]);
+
+  // 4. Atividades em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncActivities) return;
+
     const unsubActivities = subscribeActivities((fsActivities) => {
       if (fsActivities.length > 0) {
         const officialMap = new Map<string, ActivityItem>();
@@ -486,8 +533,7 @@ export default function App() {
           if (isOfficial) {
             const officialTemplate = officialMap.get(act.id) || officialMap.get(act.name)!;
             const expectedRollCall = officialTemplate.requiresRollCall !== undefined ? officialTemplate.requiresRollCall : false;
-            // If requiresRollCall in Firestore differs from official definition, sync it (once)
-            if (!hasHealedActivitiesList && act.requiresRollCall !== expectedRollCall) {
+            if (!hasHealedActivitiesRef.current && act.requiresRollCall !== expectedRollCall) {
               saveActivityToFirestore({
                 ...officialTemplate,
                 ...act,
@@ -503,9 +549,8 @@ export default function App() {
           return act;
         });
 
-        // If any official activity is missing from Firestore, seed it to Firestore (once)
-        if (!hasHealedActivitiesList) {
-          hasHealedActivitiesList = true;
+        if (!hasHealedActivitiesRef.current) {
+          hasHealedActivitiesRef.current = true;
           ACTIVITIES_LIST.forEach((officialAct) => {
             if (!healedActivities.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
               saveActivityToFirestore(officialAct);
@@ -517,16 +562,33 @@ export default function App() {
         setActivitiesList(healedActivities);
         saveActivities(healedActivities);
       } else {
-        // Fallback local caso Firestore esteja temporariamente vazio (sem auto-regravação no servidor)
         const defaultActs = loadActivities();
         setActivitiesList(defaultActs);
       }
     });
 
+    return () => {
+      unsubActivities();
+    };
+  }, [shouldSyncActivities]);
+
+  // 5. Horários de Atividades em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncSchedules) return;
+
     const unsubSchedules = subscribeToSchedules((fsSchedules) => {
       setSchedules(fsSchedules);
       saveSchedules(fsSchedules);
     });
+
+    return () => {
+      unsubSchedules();
+    };
+  }, [shouldSyncSchedules]);
+
+  // 6. Feriados e Recessos em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncHolidays) return;
 
     const unsubHolidays = subscribeHolidays((fsHolidays) => {
       if (fsHolidays.length > 0) {
@@ -561,6 +623,15 @@ export default function App() {
       }
     });
 
+    return () => {
+      unsubHolidays();
+    };
+  }, [shouldSyncHolidays]);
+
+  // 7 & 8. Livro Ponto: Registros e Fechamentos Mensais em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncPonto) return;
+
     const unsubPontoRecords = subscribePontoRecords((fsPontoRecords) => {
       if (fsPontoRecords && fsPontoRecords.length > 0) {
         setPontoRecords(fsPontoRecords);
@@ -585,6 +656,16 @@ export default function App() {
       }
     });
 
+    return () => {
+      unsubPontoRecords();
+      unsubPontoClosings();
+    };
+  }, [shouldSyncPonto]);
+
+  // 9. Semanário Pedagógico em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncSemanario) return;
+
     const unsubSemanario = subscribeSemanarioPlans((fsPlans) => {
       if (fsPlans && fsPlans.length > 0) {
         setSemanarioPlans(fsPlans);
@@ -596,6 +677,57 @@ export default function App() {
         }
       }
     });
+
+    return () => {
+      unsubSemanario();
+    };
+  }, [shouldSyncSemanario]);
+
+  // 9b. Semanário Pedagógico de HOJE (Leitura Restrita para aba Atividades do Momento sem acesso à aba Semanário completa)
+  const shouldSyncTodaySemanario =
+    isLogged && !shouldSyncSemanario && isTabAllowed('momento', currentUser);
+
+  const [todaySemanarioPlans, setTodaySemanarioPlans] = useState<SemanarioPlan[]>([]);
+
+  useEffect(() => {
+    if (!shouldSyncTodaySemanario) return;
+
+    const targetDate = selectedDate || todayStr;
+    const unsubToday = subscribeTodaySemanarioPlans(
+      targetDate,
+      (fsTodayPlans) => {
+        if (fsTodayPlans && fsTodayPlans.length > 0) {
+          setTodaySemanarioPlans(fsTodayPlans);
+        } else {
+          const localPlans = loadSemanarioPlans();
+          const filtered = localPlans.filter((p) => p.date === targetDate);
+          setTodaySemanarioPlans(filtered);
+        }
+      },
+      (err) => {
+        console.warn('Erro ao escutar planos do dia do Semanário para aba Momento:', err);
+        const localPlans = loadSemanarioPlans();
+        const filtered = localPlans.filter((p) => p.date === targetDate);
+        setTodaySemanarioPlans(filtered);
+      }
+    );
+
+    return () => {
+      unsubToday();
+    };
+  }, [shouldSyncTodaySemanario, selectedDate, todayStr]);
+
+  const effectiveTodaySemanarioPlans = useMemo(() => {
+    const targetDate = selectedDate || todayStr;
+    if (shouldSyncSemanario) {
+      return (semanarioPlans || []).filter((p) => p.date === targetDate);
+    }
+    return todaySemanarioPlans;
+  }, [shouldSyncSemanario, semanarioPlans, todaySemanarioPlans, selectedDate, todayStr]);
+
+  // 10. Quadro de Atribuições em Tempo Real
+  useEffect(() => {
+    if (!shouldSyncQuadro) return;
 
     const unsubQuadro = subscribeQuadroAtribuicoes((fsAtribuicoes) => {
       if (fsAtribuicoes && fsAtribuicoes.length > 0) {
@@ -610,34 +742,21 @@ export default function App() {
     });
 
     return () => {
-      cleanupConnectivity();
-      unsubStatus();
-      unsubCrossTabSync();
-      unsubStudents();
-      unsubTurmas();
-      unsubUsers();
-      unsubActivities();
-      unsubSchedules();
-      unsubHolidays();
-      unsubPontoRecords();
-      unsubPontoClosings();
-      unsubSemanario();
       unsubQuadro();
     };
-  }, []);
+  }, [shouldSyncQuadro]);
 
-  // Ouvinte otimizado em tempo real para as chamadas do Dashboard com limit() e filtros por data (where('data', '==', hoje))
-  // Encerra a escuta (cleanup) ao desmontar a tela ou ao trocar de data selecionada.
+  // 11. Registros de Frequência / Presença em Tempo Real (Dashboard e Chamada)
   useEffect(() => {
+    if (!shouldSyncRecords) return;
+
     const targetDate = selectedDate || todayStr;
     const unsubRecords = subscribeRecords(
       (fsRecords) => {
-        // In-memory filter out records created for mock students and zero out 2026-09-15
         const realRecords = fsRecords.filter(
           (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_') && r.date !== '2026-09-15'
         );
         setRecords((prev) => {
-          // Mescla em memória os registros da data consultada com o cache local para manter a integridade global
           const map = new Map(prev.filter((r) => r.date !== '2026-09-15').map((r) => [r.id, r]));
           realRecords.forEach((r) => map.set(r.id, r));
           const merged = Array.from(map.values());
@@ -653,10 +772,46 @@ export default function App() {
     );
 
     return () => {
-      // Cleanup do onSnapshot ao desmontar ou trocar de data
       unsubRecords();
     };
-  }, [selectedDate, todayStr]);
+  }, [shouldSyncRecords, selectedDate, todayStr]);
+
+  // Diagnóstico em console do total de ouvintes ativos em tempo real
+  useEffect(() => {
+    if (!isLogged) return;
+    const activeListeners = [
+      shouldSyncStudents && 'Alunos (subscribeStudents)',
+      shouldSyncTurmas && 'Turmas (subscribeTurmas)',
+      shouldSyncUsers && 'Usuários (subscribeUsers)',
+      shouldSyncActivities && 'Atividades (subscribeActivities)',
+      shouldSyncSchedules && 'Horários (subscribeToSchedules)',
+      shouldSyncHolidays && 'Feriados/Recessos (subscribeHolidays)',
+      shouldSyncPonto && 'Ponto - Registros (subscribePontoRecords)',
+      shouldSyncPonto && 'Ponto - Fechamentos (subscribePontoClosings)',
+      shouldSyncSemanario && 'Semanário (subscribeSemanarioPlans)',
+      shouldSyncQuadro && 'Quadro de Atribuições (subscribeQuadroAtribuicoes)',
+      shouldSyncRecords && 'Registros de Frequência (subscribeRecords)',
+    ].filter(Boolean) as string[];
+
+    console.info(
+      `[Sincronização Sob Demanda] Usuário: ${currentUser?.name} (${currentUser?.role}). ` +
+      `Ouvintes ativos em tempo real: ${activeListeners.length}/11 [${activeListeners.join(', ')}]`
+    );
+  }, [
+    isLogged,
+    currentUser?.name,
+    currentUser?.role,
+    shouldSyncStudents,
+    shouldSyncTurmas,
+    shouldSyncUsers,
+    shouldSyncActivities,
+    shouldSyncSchedules,
+    shouldSyncHolidays,
+    shouldSyncPonto,
+    shouldSyncSemanario,
+    shouldSyncQuadro,
+    shouldSyncRecords,
+  ]);
 
   // Event listener for date selection from day pills
   useEffect(() => {
@@ -1560,6 +1715,7 @@ export default function App() {
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}
             onNavigateToAttendance={handleNavigateToAttendance}
+            todaySemanarioPlans={effectiveTodaySemanarioPlans}
           />
         )}
 

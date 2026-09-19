@@ -2214,6 +2214,53 @@ export function subscribeSemanarioPlans(
   );
 }
 
+export function subscribeTodaySemanarioPlans(
+  targetDate: string,
+  onData: (plans: SemanarioPlan[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  const colRef = collection(db, 'semanarioPlans');
+  const q = query(colRef, where('date', '==', targetDate));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      clearFirestoreQuotaExceeded();
+      const list: SemanarioPlan[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (!data) return;
+        list.push({
+          id: docSnap.id,
+          turma: data.turma || '',
+          weekNumber: Number(data.weekNumber) || 0,
+          year: Number(data.year) || 2026,
+          date: data.date || '',
+          dayOfWeek: data.dayOfWeek || 'segunda',
+          timeSlot: data.timeSlot || '',
+          category: data.category || '',
+          title: data.title || '',
+          objectives: data.objectives || '',
+          development: data.development || '',
+          materials: data.materials || '',
+          teacherName: data.teacherName || '',
+          status: data.status || 'pendente',
+          substitutionReason: data.substitutionReason || '',
+          photos: Array.isArray(data.photos) ? data.photos : [],
+          notes: data.notes || '',
+          createdAt: data.createdAt || '',
+          updatedAt: data.updatedAt || '',
+          updatedBy: data.updatedBy || '',
+        });
+      });
+      onData(list);
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'semanarioPlans/today');
+    }
+  );
+}
+
 export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
   try {
     const docRef = doc(db, 'semanarioPlans', plan.id);
