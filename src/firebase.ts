@@ -2545,6 +2545,53 @@ export async function getDepartureAlertSettings(): Promise<DepartureAlertSetting
 }
 
 /**
+ * Inscreve-se nas atualizações em tempo real da configuração de aviso de saída antecipada (settings/departureAlert).
+ * Notifica os dispositivos imediatamente ao alterar a antecedência (ex: 5 -> 10 min) sem necessidade de F5,
+ * mantendo também o localStorage sincronizado como salvaguarda offline.
+ */
+export function subscribeDepartureAlertSettings(
+  onData: (settings: DepartureAlertSettings) => void,
+  onError?: (err: any) => void
+): () => void {
+  const docRef = doc(db, 'settings', 'departureAlert');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      if (snap.exists()) {
+        const data = snap.data();
+        const result: DepartureAlertSettings = {
+          id: 'departureAlert',
+          alertMinutes:
+            data.alertMinutes !== undefined && !isNaN(Number(data.alertMinutes))
+              ? Number(data.alertMinutes)
+              : 5,
+          updatedAt: data.updatedAt,
+          updatedBy: data.updatedBy,
+        };
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            localStorage.setItem('integral_departure_alert_settings', JSON.stringify(result));
+          } catch {}
+        }
+        onData(result);
+      } else {
+        const defaultSettings: DepartureAlertSettings = {
+          id: 'departureAlert',
+          alertMinutes: 5,
+        };
+        onData(defaultSettings);
+      }
+    },
+    (error) => {
+      console.warn('Erro ao escutar settings/departureAlert em tempo real:', error);
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'settings/departureAlert');
+    }
+  );
+}
+
+/**
  * Salva o relatório consolidado de refeições do mês no Firestore (mealReports/{monthKey})
  */
 export async function saveMealReportToFirestore(config: MealReportConfig): Promise<void> {

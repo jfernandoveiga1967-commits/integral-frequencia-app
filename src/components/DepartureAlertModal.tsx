@@ -27,6 +27,13 @@ export const DepartureAlertModal: React.FC<DepartureAlertModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Sincroniza o valor selecionado sempre que o modal abrir ou a configuração remota mudar
+  React.useEffect(() => {
+    if (isOpen && currentSettings?.alertMinutes) {
+      setMinutes(currentSettings.alertMinutes);
+    }
+  }, [isOpen, currentSettings?.alertMinutes]);
+
   if (!isOpen) return null;
 
   const quickOptions = [3, 5, 10, 15];

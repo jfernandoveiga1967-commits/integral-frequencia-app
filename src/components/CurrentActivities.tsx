@@ -57,7 +57,7 @@ import {
   SemanarioPlan,
   DepartureAlertSettings,
 } from '../types';
-import { getDepartureAlertSettings } from '../firebase';
+import { getDepartureAlertSettings, subscribeDepartureAlertSettings } from '../firebase';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
 import {
   DepartureAlertItem,
@@ -243,24 +243,36 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Quadro de Atribuições modal
   const [isQuadroModalOpen, setIsQuadroModalOpen] = useState(false);
 
-  // Departure Alert state & settings
-  const [alertSettings, setAlertSettings] = useState<DepartureAlertSettings>({
-    id: 'departureAlert',
-    alertMinutes: 5,
+  // Departure Alert state & settings - Inicializa com localStorage de salvaguarda (se houver) e escuta em tempo real
+  const [alertSettings, setAlertSettings] = useState<DepartureAlertSettings>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = localStorage.getItem('integral_departure_alert_settings');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed.alertMinutes === 'number') {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return {
+      id: 'departureAlert',
+      alertMinutes: 5,
+    };
   });
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [activeDepartureAlerts, setActiveDepartureAlerts] = useState<DepartureAlertItem[]>([]);
 
-  // Carregar configurações de alerta de saída do Firestore na montagem
+  // Escutar configurações de alerta de saída em tempo real do Firestore (onSnapshot)
   useEffect(() => {
-    let isMounted = true;
-    getDepartureAlertSettings().then((settings) => {
-      if (isMounted && settings) {
+    const unsubscribe = subscribeDepartureAlertSettings((settings) => {
+      if (settings && typeof settings.alertMinutes === 'number') {
         setAlertSettings(settings);
       }
     });
     return () => {
-      isMounted = false;
+      unsubscribe();
     };
   }, []);
 

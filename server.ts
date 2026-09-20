@@ -47,7 +47,7 @@ app.get('/api/health', (req, res) => {
 // API Route: Gerador de Propostas Pedagógicas com Gemini
 app.post('/api/gemini/generate-proposal', async (req, res) => {
   try {
-    const { turma, category, theme, dayOfWeek } = req.body;
+    const { turma, category, theme, dayOfWeek, date } = req.body;
 
     const ai = getAIClient();
     if (!ai) {
@@ -61,24 +61,28 @@ app.post('/api/gemini/generate-proposal', async (req, res) => {
 Crie uma proposta pedagógica rica, engajadora, prática e viável para o Semanário do Programa Integral.
 
 Dados da turma e atividade:
-- Turma: ${turma || 'Ensino Fundamental'}
-- Categoria Pedagógica: ${category || 'Atividade Geral'}
-- Tema / Foco opcional: ${theme ? theme : 'Desenvolvimento integral, ludicidade e cooperação'}
-- Dia da semana: ${dayOfWeek || 'Durante a semana'}
+- Turma / Faixa Etária: ${turma || 'Ensino Fundamental'}
+- Categoria Pedagógica / Modalidade: ${category || 'Atividade Geral'}
+- Tema / Foco opcional: ${theme ? theme : 'Desenvolvimento integral, ludicidade, cooperação e autonomia'}
+- Dia da semana e data: ${dayOfWeek || ''} ${date ? `(${date})` : ''}
 
-Regras Pedagógicas:
-1. Alinhamento com a BNCC (Base Nacional Comum Curricular).
-2. Título criativo e lúdico.
-3. Objetivos claros de desenvolvimento (cognitivo, motor, socioemocional ou artístico).
-4. Desenvolvimento metodológico dividido em etapas (1. Acolhimento, 2. Desenvolvimento/Exploração, 3. Fechamento/Reflexão).
-5. Lista de materiais e recursos necessários acessíveis no ambiente escolar.
+Diretrizes Pedagógicas Obrigatórias:
+1. Adaptação Estrita à Faixa Etária da Turma:
+   - Se a turma for Berçário, Mini Maternal, Maternal ou Infantil (1 ou 2): Trata-se de Educação Infantil (crianças de 1 a 5 anos). Use linguagem e dinâmicas adequadas à primeira infância, com foco em Campos de Experiências da BNCC (ex: O eu, o outro e o nós; Corpo, gestos e movimentos), brincadeiras sensoriais, cantigas, exploração lúdica e segurança.
+   - Se a turma for do Ensino Fundamental (1º ao 6º Ano): Trata-se de crianças e pré-adolescentes de 6 a 12 anos. Proponha dinâmicas compatíveis com a maturidade do grupo, desafios cooperativos, raciocínio estratégico, regras de convivência e projetos em grupo da BNCC.
+2. Variação de Conteúdo: Leve em consideração a data e o dia específico para propor uma vivência inédita e dinâmica para este dia (evitando atividades genéricas repetidas).
+3. Estrutura da Resposta:
+   - Título criativo e lúdico com identificação clara da atividade.
+   - Objetivos claros (desenvolvimento motor, cognitivo, socioemocional ou BNCC).
+   - Desenvolvimento metodológico direto em 3 etapas (1. Acolhimento, 2. Desenvolvimento/Exploração, 3. Fechamento/Reflexão).
+   - Materiais simples e acessíveis no ambiente escolar.
 
 Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
 {
-  "title": "Título Criativo e Claro da Proposta",
-  "objectives": "Objetivos claros de aprendizagem e habilidades desenvolvidas (BNCC).",
-  "development": "1. Acolhimento e contextualização...\\n2. Passo a passo da atividade...\\n3. Roda de fechamento e reflexão coletiva.",
-  "materials": "Lista de materiais necessários."
+  "title": "Título Criativo e Específico da Proposta",
+  "objectives": "Objetivos claros de aprendizagem e desenvolvimento para a faixa etária.",
+  "development": "1. Acolhimento e introdução lúdica...\\n2. Passo a passo prático da exploração...\\n3. Fechamento e reflexão coletiva.",
+  "materials": "Lista prática de materiais necessários."
 }`;
 
     const response = await ai.models.generateContent({
@@ -86,6 +90,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 1000,
       },
     });
 
