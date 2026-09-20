@@ -383,7 +383,7 @@ export default function App() {
   // O coordenador possui sempre acesso irrestrito total.
   const shouldSyncStudents = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
   const shouldSyncTurmas = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
-  const shouldSyncUsers = isLogged; // Necessário para sincronização em tempo real das próprias permissões e perfil da sessão ativa
+  const shouldSyncUsers = isLogged; // Otimização ativa: a lista de 24 usuários só é sincronizada após o login; antes do login, a autenticação faz busca pontual por e-mail no Firestore
   const shouldSyncActivities = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
   const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('usuarios', currentUser));
   const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));

@@ -661,7 +661,10 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
   // 1. Persistência imediata no armazenamento local para resiliência total contra quedas de rede ou cota esgotada
   try {
     const currentLocal = getLocalUsersList();
-    const updatedLocal = normalizeAndDeduplicateUsers([updatedData, ...currentLocal]);
+    const updatedLocal = normalizeAndDeduplicateUsers([
+      ...currentLocal.filter((u) => u.id !== targetDocId && u.id !== user.id),
+      updatedData,
+    ]);
     saveLocalUsersList(updatedLocal);
   } catch (localErr) {
     console.warn('Aviso ao salvar usuário em cache local:', localErr);
@@ -701,6 +704,126 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
   }
 
   return updatedData;
+}
+
+export function parseUserProfileFromFirestoreData(data: any, docId: string): UserProfile {
+  const rawName = (data.name || '').trim();
+  const rawEmail = (data.email || '').trim().toLowerCase();
+  const rawId = (data.id || docId || '').trim();
+
+  const rawNameLower = rawName.toLowerCase();
+  const rawEmailLower = rawEmail.toLowerCase();
+
+  const isMasterAdmin =
+    rawEmailLower === ADMIN_EMAIL.toLowerCase() ||
+    rawId === 'usr_coord_1' ||
+    rawNameLower.includes('fernando veiga') ||
+    rawEmailLower === 'coordenacao@crescer.edu.br';
+
+  const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
+  const cargoLabel = isMasterAdmin
+    ? (data.cargoLabel || 'Coordenador (Administrador)')
+    : (data.cargoLabel || DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor');
+  const avatarColor = isMasterAdmin
+    ? (data.avatarColor || 'bg-amber-500')
+    : (data.avatarColor || DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600');
+
+  let assignedActivities = Array.isArray(data.assignedActivities)
+    ? data.assignedActivities
+    : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
+
+  let assignedTurmas = Array.isArray(data.allowedClassIds)
+    ? data.allowedClassIds
+    : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
+
+  let allowedTabs: TabType[] = Array.isArray(data.allowedTabs)
+    ? data.allowedTabs
+    : (isMasterAdmin || role === 'coordenador' ? ALL_APP_TAB_IDS : []);
+
+  const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
+    ? Number(data.contractDailyMinutes)
+    : (data.contractDailyHoursFormatted
+        ? parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted)
+        : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours))
+            ? Math.round(Number(data.contractDailyHours) * 60)
+            : (isMasterAdmin ? 480 : (data.workShiftType === 'padrao_8h' ? 528 : 360))));
+  const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
+
+  return {
+    ...data,
+    id: isMasterAdmin ? 'usr_coord_1' : rawId,
+    name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
+    email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
+    phone: data.phone !== undefined ? data.phone : undefined,
+    role,
+    cargoLabel,
+    avatarColor,
+    birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : '1995-01-01'),
+    pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
+    status: data.status || 'ATIVO',
+    dataDesligamento: data.dataDesligamento || undefined,
+    motivoDesligamento: data.motivoDesligamento || undefined,
+    workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
+    assignedActivities,
+    specialtyActivity: data.specialtyActivity || undefined,
+    assignedTurmas,
+    allowedClassIds: assignedTurmas,
+    allowedTabs,
+    canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
+    canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
+    pixKey: data.pixKey || data.phone || undefined,
+    contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
+    horarioInicio: data.horarioInicio || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).start : undefined),
+    horarioFim: data.horarioFim || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).end : undefined),
+    contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
+    contractDailyMinutes: rawMinutes,
+    contractDailyHoursFormatted: formattedHours,
+    baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
+      ? Number(data.baseSalary)
+      : (isMasterAdmin ? 0 : 1200),
+    regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
+    regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+    valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
+    duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
+    contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
+    hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
+    ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 0,
+    company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+    empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+/**
+ * Busca pontual e restrita de um colaborador por e-mail diretamente no Firestore.
+ * Carrega estritamente o documento da pessoa (limit: 1), preservando privacidade,
+ * cotas de rede e permitindo login com dados sempre frescos sem baixar os demais colaboradores.
+ */
+export async function fetchUserByEmail(email: string): Promise<UserProfile | null> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  try {
+    const usersColRef = collection(db, 'users');
+    let q = query(usersColRef, where('email', '==', cleanEmail), limit(1));
+    let snap = await getDocs(q);
+
+    if (snap.empty) {
+      const usuariosColRef = collection(db, 'usuarios');
+      q = query(usuariosColRef, where('email', '==', cleanEmail), limit(1));
+      snap = await getDocs(q);
+    }
+
+    if (snap.empty) {
+      return null;
+    }
+
+    const docSnap = snap.docs[0];
+    return parseUserProfileFromFirestoreData(docSnap.data(), docSnap.id);
+  } catch (err) {
+    console.warn('Busca pontual de usuário no Firestore indisponível/offline:', err);
+    return null;
+  }
 }
 
 /**
@@ -748,94 +871,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
     const processDoc = (docSnap: any, _colName: string) => {
       const data = docSnap.data();
       if (!data) return;
-
-      const docId = docSnap.id;
-      const rawName = (data.name || '').trim();
-      const rawEmail = (data.email || '').trim().toLowerCase();
-      const rawId = (data.id || docId || '').trim();
-
-      const rawNameLower = rawName.toLowerCase();
-      const rawEmailLower = rawEmail.toLowerCase();
-
-      const isMasterAdmin =
-        rawEmailLower === ADMIN_EMAIL.toLowerCase() ||
-        rawId === 'usr_coord_1' ||
-        rawNameLower.includes('fernando veiga') ||
-        rawEmailLower === 'coordenacao@crescer.edu.br';
-
-      const role = isMasterAdmin ? 'coordenador' : (data.role || 'professor');
-      const cargoLabel = isMasterAdmin
-        ? (data.cargoLabel || 'Coordenador (Administrador)')
-        : (data.cargoLabel || DEFAULT_ROLE_LABELS[role] || 'Monitor / Professor');
-      const avatarColor = isMasterAdmin
-        ? (data.avatarColor || 'bg-amber-500')
-        : (data.avatarColor || DEFAULT_ROLE_COLORS[role] || 'bg-indigo-600');
-
-      let assignedActivities = Array.isArray(data.assignedActivities)
-        ? data.assignedActivities
-        : (isMasterAdmin ? MASTER_ADMIN_ACTIVITIES : []);
-
-      let assignedTurmas = Array.isArray(data.allowedClassIds)
-        ? data.allowedClassIds
-        : (Array.isArray(data.assignedTurmas) ? data.assignedTurmas : (isMasterAdmin ? MASTER_ADMIN_TURMAS : []));
-
-      let allowedTabs: TabType[] = Array.isArray(data.allowedTabs)
-        ? data.allowedTabs
-        : (isMasterAdmin || role === 'coordenador' ? ALL_APP_TAB_IDS : []);
-
-      const rawMinutes = data.contractDailyMinutes !== undefined && data.contractDailyMinutes !== null && !isNaN(Number(data.contractDailyMinutes))
-        ? Number(data.contractDailyMinutes)
-        : (data.contractDailyHoursFormatted
-            ? parseHoursAndMinutesStringToMinutes(data.contractDailyHoursFormatted)
-            : (data.contractDailyHours !== undefined && !isNaN(Number(data.contractDailyHours))
-                ? Math.round(Number(data.contractDailyHours) * 60)
-                : (isMasterAdmin ? 480 : (data.workShiftType === 'padrao_8h' ? 528 : 360))));
-      const formattedHours = data.contractDailyHoursFormatted || formatMinutesToHoursAndMinutes(rawMinutes);
-
-      const profile: UserProfile = {
-        ...data,
-        id: isMasterAdmin ? 'usr_coord_1' : rawId,
-        name: isMasterAdmin ? 'Fernando Veiga' : (rawName || 'Colaborador'),
-        email: isMasterAdmin ? (rawEmail || ADMIN_EMAIL) : rawEmail,
-        phone: data.phone !== undefined ? data.phone : undefined,
-        role,
-        cargoLabel,
-        avatarColor,
-        birthDate: data.birthDate || (isMasterAdmin ? '1967-08-12' : '1995-01-01'),
-        pin: data.pin || (isMasterAdmin ? '12/08/1967' : '1234'),
-        status: data.status || 'ATIVO',
-        dataDesligamento: data.dataDesligamento || undefined,
-        motivoDesligamento: data.motivoDesligamento || undefined,
-        workShiftType: data.workShiftType || (isMasterAdmin ? 'padrao_8h' : 'continua_6h'),
-        assignedActivities,
-        specialtyActivity: data.specialtyActivity || undefined,
-        assignedTurmas,
-        allowedClassIds: assignedTurmas,
-        allowedTabs,
-        canManageStudents: isMasterAdmin ? true : (data.canManageStudents !== undefined ? data.canManageStudents : true),
-        canMarkAttendance: isMasterAdmin ? true : (data.canMarkAttendance !== undefined ? data.canMarkAttendance : true),
-        pixKey: data.pixKey || data.phone || undefined,
-        contractSchedule: data.contractSchedule !== undefined ? data.contractSchedule : (isMasterAdmin ? '07:30 - 17:30' : undefined),
-        horarioInicio: data.horarioInicio || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).start : undefined),
-        horarioFim: data.horarioFim || (data.contractSchedule ? parseContractSchedule(data.contractSchedule).end : undefined),
-        contractDailyHours: data.contractDailyHours !== undefined ? Number(data.contractDailyHours) : Number((rawMinutes / 60).toFixed(2)),
-        contractDailyMinutes: rawMinutes,
-        contractDailyHoursFormatted: formattedHours,
-        baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
-          ? Number(data.baseSalary)
-          : (isMasterAdmin ? 0 : 1200),
-        regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
-        regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
-        valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
-        duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
-        contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
-        hourlyRate: data.hourlyRate !== undefined ? Number(data.hourlyRate) : undefined,
-        ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 0,
-        company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
-        empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
-        updatedAt: data.updatedAt || new Date().toISOString(),
-      };
-
+      const profile = parseUserProfileFromFirestoreData(data, docSnap.id);
       collectedProfiles.push(profile);
     };
 

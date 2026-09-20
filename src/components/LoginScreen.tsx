@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole } from '../types';
 import { LOGO_CRESCER_BASE64, APP_ICON_BASE64 } from '../utils/appLogoData';
-import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay } from '../utils/authUtils';
+import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay, getLocalUsersList, saveLocalUsersList } from '../utils/authUtils';
 import {
   LogIn,
   UserPlus,
@@ -11,11 +11,13 @@ import {
   Calendar,
   Bell,
   BellRing,
+  Loader2,
 } from 'lucide-react';
 import {
   requestNotificationAndAudioPermission,
   getNotificationPermission,
 } from '../utils/notificationUtils';
+import { fetchUserByEmail } from '../firebase';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -41,6 +43,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // New User Form State
   const [customName, setCustomName] = useState('');
@@ -49,53 +52,87 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
   const [customBirthDate, setCustomBirthDate] = useState('1995-05-20');
   const [customError, setCustomError] = useState<string | null>(null);
 
+  const completeLogin = async (matchedUser: UserProfile) => {
+    // Trigger Web Push Notification permission and Audio context unlock on login gesture
+    try {
+      await requestNotificationAndAudioPermission();
+    } catch (err) {
+      console.warn('Could not request notification on login gesture:', err);
+    }
+
+    const isMasterAdmin =
+      (matchedUser.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
+      matchedUser.id === 'usr_coord_1';
+    const resolvedUser: UserProfile = isMasterAdmin
+      ? {
+          ...matchedUser,
+          name: 'Fernando Veiga',
+          email: 'jfernandoveiga1967@gmail.com',
+          role: 'coordenador',
+          cargoLabel: 'Coordenador (Administrador)',
+          avatarColor: 'bg-amber-500',
+          canManageStudents: true,
+          canMarkAttendance: true,
+        }
+      : matchedUser;
+    onLogin(resolvedUser);
+  };
+
   const handleEmailPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
-    if (!loginEmail.trim()) {
+    const emailTrimmed = loginEmail.trim();
+    const passwordTrimmed = loginPassword.trim();
+
+    if (!emailTrimmed) {
       setLoginError('Por favor, informe seu e-mail.');
       return;
     }
 
-    if (!loginPassword.trim()) {
+    if (!passwordTrimmed) {
       setLoginError('Por favor, informe sua senha.');
       return;
     }
 
-    // Search matching user
-    const matchedUser = allRegisteredUsers.find((user) =>
-      verifyUserCredentials(user, loginEmail.trim(), loginPassword.trim())
-    );
+    setIsLoggingIn(true);
 
-    if (matchedUser) {
-      // Trigger Web Push Notification permission and Audio context unlock on login gesture
+    try {
+      // 1. Busca pontual e restrita no Firestore para obter os dados frescos desta pessoa
+      let candidateUser: UserProfile | null = null;
       try {
-        await requestNotificationAndAudioPermission();
+        candidateUser = await fetchUserByEmail(emailTrimmed);
       } catch (err) {
-        console.warn('Could not request notification on login gesture:', err);
+        console.warn('Busca pontual no Firestore indisponível/offline, caindo para cache local:', err);
       }
 
-      const isMasterAdmin =
-        (matchedUser.email || '').trim().toLowerCase() === 'jfernandoveiga1967@gmail.com' ||
-        matchedUser.id === 'usr_coord_1';
-      const resolvedUser: UserProfile = isMasterAdmin
-        ? {
-            ...matchedUser,
-            name: 'Fernando Veiga',
-            email: 'jfernandoveiga1967@gmail.com',
-            role: 'coordenador',
-            cargoLabel: 'Coordenador (Administrador)',
-            avatarColor: 'bg-amber-500',
-            canManageStudents: true,
-            canMarkAttendance: true,
-          }
-        : matchedUser;
-      onLogin(resolvedUser);
-    } else {
+      // 2. Se encontrou no servidor, valida as credenciais contra o documento fresco
+      if (candidateUser && verifyUserCredentials(candidateUser, emailTrimmed, passwordTrimmed)) {
+        try {
+          const currentLocal = getLocalUsersList();
+          saveLocalUsersList([...currentLocal.filter((u) => u.id !== candidateUser!.id), candidateUser]);
+        } catch (e) {
+          console.warn('Erro ao atualizar cache local do usuário logado:', e);
+        }
+        await completeLogin(candidateUser);
+        return;
+      }
+
+      // 3. Fallback: Se não encontrou no servidor ou falhou a rede, busca no cache local existente
+      const matchedLocal = allRegisteredUsers.find((user) =>
+        verifyUserCredentials(user, emailTrimmed, passwordTrimmed)
+      );
+
+      if (matchedLocal) {
+        await completeLogin(matchedLocal);
+        return;
+      }
+
       setLoginError(
         'E-mail ou senha incorretos. Verifique suas credenciais com a coordenação.'
       );
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -131,9 +168,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
     const allowedPublicRole: UserRole = customRole === 'auxiliar' ? 'auxiliar' : 'professor';
     const effectiveRole: UserRole = isMasterAdmin ? 'coordenador' : allowedPublicRole;
 
-    const existingUser = allRegisteredUsers.find(
-      (u) => (u.email || '').trim().toLowerCase() === normalizedEmail
-    );
+    // Busca pontual no Firestore para verificar se o e-mail já existe
+    let existingUser: UserProfile | null = null;
+    try {
+      existingUser = await fetchUserByEmail(normalizedEmail);
+    } catch {
+      // fallback
+    }
+
+    if (!existingUser) {
+      existingUser = allRegisteredUsers.find(
+        (u) => (u.email || '').trim().toLowerCase() === normalizedEmail
+      ) || null;
+    }
 
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
@@ -304,10 +351,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
 
             <button
               type="submit"
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2 text-sm"
+              disabled={isLoggingIn}
+              className={`w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2 text-sm ${
+                isLoggingIn ? 'opacity-70 cursor-not-allowed' : ''
+              }`}
             >
-              <LogIn className="w-5 h-5" />
-              <span>Acessar Diário de Classe</span>
+              {isLoggingIn ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin text-white" />
+                  <span>Validando credenciais...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-5 h-5" />
+                  <span>Acessar Diário de Classe</span>
+                </>
+              )}
             </button>
           </form>
         )}
