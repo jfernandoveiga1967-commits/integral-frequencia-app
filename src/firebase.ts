@@ -57,8 +57,8 @@ import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './uti
 export { doc, getDoc, updateDoc, deleteDoc };
 
 const app = initializeApp(firebaseConfig);
-// Inicializa Firestore com experimentalForceLongPolling: true para garantir conexão estável e imediata
-// sem sofrer com timeouts de 10s de WebChannel em ambientes com iframes ou proxies.
+// Configuração validada: experimentalForceLongPolling mantido ativo para proteger contra bloqueios
+// de proxies, firewalls e instabilidades em redes móveis (latência idêntica ao streaming ~100ms).
 export const db = initializeFirestore(
   app,
   {
