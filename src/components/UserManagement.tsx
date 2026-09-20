@@ -506,9 +506,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
+    // Fonte de verdade única e soberana: regimeTrabalho técnico (não o texto legado de regimeContratual)
     const initialRegime: RegimeTrabalho =
-      user.regimeTrabalho === 'professor_horista' ||
-      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))
+      user.regimeTrabalho === 'professor_horista'
         ? 'professor_horista'
         : 'mensalista';
     setFormRegimeTrabalho(initialRegime);
@@ -779,7 +779,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       regimeTrabalho: formRegimeTrabalho,
       regimeContratual: formRegimeTrabalho === 'professor_horista'
         ? 'Prof. Horista'
-        : (editingUser?.regimeContratual || (formWorkShiftType === 'continua_6h' ? 'Jornada Contínua / Mensalista (6h)' : 'CLT')),
+        : (formWorkShiftType === 'continua_6h'
+            ? 'Jornada Contínua / Mensalista (6h)'
+            : (editingUser?.regimeContratual && !editingUser.regimeContratual.toLowerCase().includes('horista')
+                ? editingUser.regimeContratual
+                : 'CLT')),
       valorHoraAula: formRegimeTrabalho === 'professor_horista' ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
@@ -1733,7 +1737,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
-                              {(user.regimeTrabalho === 'professor_horista' || (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista'))) ? (
+                              {user.regimeTrabalho === 'professor_horista' ? (
                                 <span>
                                   Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>

@@ -495,8 +495,10 @@ export function subscribeUsers(
             baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
               ? Number(data.baseSalary)
               : (isMasterAdmin ? 0 : 1200),
-            regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
-            regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+            regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
+            regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+              ? 'Prof. Horista'
+              : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
             valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
             duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
             contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
@@ -644,8 +646,10 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary))
       ? Number(user.baseSalary)
       : (isMasterAdmin ? 0 : 1200),
-    regimeTrabalho: user.regimeTrabalho || (user.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
-    regimeContratual: user.regimeContratual || (user.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+    regimeTrabalho: (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
+    regimeContratual: (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista')))
+      ? 'Prof. Horista'
+      : (user.regimeContratual && !user.regimeContratual.toLowerCase().includes('horista') ? user.regimeContratual : 'CLT'),
     valorHoraAula: user.valorHoraAula !== undefined && user.valorHoraAula !== null && !isNaN(Number(user.valorHoraAula))
       ? Number(user.valorHoraAula)
       : null,
@@ -781,8 +785,10 @@ export function parseUserProfileFromFirestoreData(data: any, docId: string): Use
     baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
       ? Number(data.baseSalary)
       : (isMasterAdmin ? 0 : 1200),
-    regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
-    regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+    regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
+    regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+      ? 'Prof. Horista'
+      : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
     valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
     duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
     contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,
@@ -1024,8 +1030,10 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
           ? Number(data.baseSalary)
           : (isMasterAdmin ? 0 : 1200),
-        regimeTrabalho: data.regimeTrabalho || (data.regimeContratual?.toLowerCase().includes('horista') ? 'professor_horista' : 'mensalista'),
-        regimeContratual: data.regimeContratual || (data.regimeTrabalho === 'professor_horista' ? 'Prof. Horista' : 'CLT'),
+        regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
+        regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+          ? 'Prof. Horista'
+          : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
         valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
         duracaoAulaMinutos: data.duracaoAulaMinutos !== undefined ? Number(data.duracaoAulaMinutos) : 50,
         contractDivisorHours: data.contractDivisorHours !== undefined ? Number(data.contractDivisorHours) : 220,

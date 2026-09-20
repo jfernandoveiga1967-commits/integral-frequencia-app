@@ -492,6 +492,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       phone: userEditPhone.trim() || undefined,
       pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
       regimeTrabalho: userEditRegimeTrabalho,
+      regimeContratual: userEditRegimeTrabalho === 'professor_horista'
+        ? 'Prof. Horista'
+        : (userEditWorkShiftType === 'continua_6h'
+            ? 'Jornada Contínua / Mensalista (6h)'
+            : (targetUser?.regimeContratual && !targetUser.regimeContratual.toLowerCase().includes('horista')
+                ? targetUser.regimeContratual
+                : 'CLT')),
       valorHoraAula: userEditRegimeTrabalho === 'professor_horista' ? Number(userEditValorHoraAula) : undefined,
       duracaoAulaMinutos: Number(userEditDuracaoAulaMinutos) || DURACAO_AULA_PADRAO_MINUTOS,
       workShiftType: userEditWorkShiftType,
