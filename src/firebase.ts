@@ -23,7 +23,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
@@ -2466,6 +2466,82 @@ export async function getMealReportGlobalSettings(): Promise<MealReportGlobalSet
   }
 
   return null;
+}
+
+/**
+ * Salva a configuração global de aviso de saída antecipada no Firestore (settings/departureAlert)
+ */
+export async function saveDepartureAlertSettings(settings: {
+  alertMinutes: number;
+  updatedBy?: string;
+}): Promise<void> {
+  const docRef = doc(db, 'settings', 'departureAlert');
+  const payload: DepartureAlertSettings = {
+    id: 'departureAlert',
+    alertMinutes: Math.max(1, Math.min(60, Number(settings.alertMinutes) || 5)),
+    updatedAt: new Date().toISOString(),
+    updatedBy: settings.updatedBy || '',
+  };
+
+  try {
+    await setDoc(docRef, payload, { merge: true });
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('integral_departure_alert_settings', JSON.stringify(payload));
+    }
+  } catch (error) {
+    console.warn('Erro ao salvar settings/departureAlert no Firestore, usando fallback local:', error);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('integral_departure_alert_settings', JSON.stringify(payload));
+    }
+    handleFirestoreError(error, OperationType.WRITE, 'settings/departureAlert');
+  }
+}
+
+/**
+ * Recupera a configuração global de aviso de saída antecipada do Firestore (settings/departureAlert)
+ */
+export async function getDepartureAlertSettings(): Promise<DepartureAlertSettings> {
+  const defaultSettings: DepartureAlertSettings = {
+    id: 'departureAlert',
+    alertMinutes: 5,
+  };
+
+  try {
+    const docRef = doc(db, 'settings', 'departureAlert');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const result: DepartureAlertSettings = {
+        id: 'departureAlert',
+        alertMinutes: data.alertMinutes !== undefined && !isNaN(Number(data.alertMinutes)) ? Number(data.alertMinutes) : 5,
+        updatedAt: data.updatedAt,
+        updatedBy: data.updatedBy,
+      };
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('integral_departure_alert_settings', JSON.stringify(result));
+      }
+      return result;
+    }
+  } catch (error) {
+    console.warn('Erro ao ler settings/departureAlert do Firestore, tentando local:', error);
+  }
+
+  // Fallback to local storage
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const local = localStorage.getItem('integral_departure_alert_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed && typeof parsed.alertMinutes === 'number') {
+          return parsed;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao ler integral_departure_alert_settings do localStorage:', e);
+  }
+
+  return defaultSettings;
 }
 
 /**

@@ -375,4 +375,14 @@ export interface TurmaAtribuicao {
   updatedBy?: string;
 }
 
+/**
+ * Configuração Global de Aviso de Saída Antecipada/Customizada de Aluno
+ */
+export interface DepartureAlertSettings {
+  id: 'departureAlert';
+  alertMinutes: number; // Antecedência em minutos para o disparo do aviso (padrão: 5)
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 

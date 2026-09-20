@@ -234,6 +234,29 @@ export function playPontoSuccessSound(): void {
 }
 
 /**
+ * Play a distinctive and pleasant chime notification when a student with custom departure time is about to leave
+ */
+export function playDepartureAlertSound(): void {
+  if (!isAudioNotificationsEnabled()) return;
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    // Harmonious multi-bell chime (F5 -> A5 -> C6) for arrival of departure window
+    playBellHarmonic(ctx, 698.46, now, 0.35, 0.24); // F5
+    playBellHarmonic(ctx, 880.0, now + 0.14, 0.45, 0.28); // A5
+    playBellHarmonic(ctx, 1046.5, now + 0.28, 0.65, 0.32); // C6
+  } catch (err) {
+    console.warn('Departure alert sound error:', err);
+  }
+}
+
+/**
  * Check if Web Notifications are supported in current browser
  */
 export function isNotificationSupported(): boolean {

@@ -9,6 +9,8 @@ import {
   Radio,
   Search,
   Filter,
+  Bell,
+  Volume2,
   ArrowRight,
   Sparkles,
   RefreshCw,
@@ -53,7 +55,18 @@ import {
   AttendanceStatus,
   TurmaAtribuicao,
   SemanarioPlan,
+  DepartureAlertSettings,
 } from '../types';
+import { getDepartureAlertSettings } from '../firebase';
+import { playDepartureAlertSound } from '../utils/notificationUtils';
+import {
+  DepartureAlertItem,
+  evaluateDepartureAlerts,
+  markDepartureAsAlerted,
+  cleanOldDepartureAlertStorageKeys,
+} from '../utils/departureAlertUtils';
+import { DepartureAlertBanner } from './DepartureAlertBanner';
+import { DepartureAlertModal } from './DepartureAlertModal';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
@@ -230,6 +243,27 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Quadro de Atribuições modal
   const [isQuadroModalOpen, setIsQuadroModalOpen] = useState(false);
 
+  // Departure Alert state & settings
+  const [alertSettings, setAlertSettings] = useState<DepartureAlertSettings>({
+    id: 'departureAlert',
+    alertMinutes: 5,
+  });
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+  const [activeDepartureAlerts, setActiveDepartureAlerts] = useState<DepartureAlertItem[]>([]);
+
+  // Carregar configurações de alerta de saída do Firestore na montagem
+  useEffect(() => {
+    let isMounted = true;
+    getDepartureAlertSettings().then((settings) => {
+      if (isMounted && settings) {
+        setAlertSettings(settings);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Apoio WhatsApp Modal state (customizable message)
   const [apoioModalState, setApoioModalState] = useState<{
     isOpen: boolean;
@@ -322,6 +356,59 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
   const userCanMark = canMarkAttendance(currentUser);
   const isCoord = isCoordenador(currentUser);
+
+  // Monitoramento periódico e sob demanda de saídas customizadas de alunos
+  useEffect(() => {
+    const runCheck = () => {
+      // Limpeza de chaves de dias anteriores no localStorage
+      cleanOldDepartureAlertStorageKeys(selectedDate);
+
+      const newAlerts = evaluateDepartureAlerts({
+        students,
+        records,
+        quadroAtribuicoes: atribuicoesList,
+        selectedDate,
+        currentUser,
+        alertMinutes: alertSettings.alertMinutes,
+        simulatedTimeHHMM: isSimulatingTime ? simulatedTime : undefined,
+        dayOfWeekOverride: isSimulatingTime ? simulatedDay : undefined,
+      });
+
+      if (newAlerts.length > 0) {
+        // Gravar no localStorage para evitar repetições no dia
+        newAlerts.forEach((item) => {
+          markDepartureAsAlerted(selectedDate, item.studentId, item.departureTime);
+        });
+
+        // Disparar o som do sistema
+        playDepartureAlertSound();
+
+        // Adicionar aos alertas visuais em exibição
+        setActiveDepartureAlerts((prev) => {
+          const existingIds = new Set(prev.map((a) => a.id));
+          const toAdd = newAlerts.filter((a) => !existingIds.has(a.id));
+          return [...toAdd, ...prev];
+        });
+      }
+    };
+
+    runCheck();
+
+    // Roda a cada 30 segundos
+    const interval = setInterval(runCheck, 30000);
+    return () => clearInterval(interval);
+  }, [
+    students,
+    records,
+    atribuicoesList,
+    selectedDate,
+    currentUser,
+    alertSettings.alertMinutes,
+    isSimulatingTime,
+    simulatedTime,
+    simulatedDay,
+    effectiveCurrentTime,
+  ]);
 
   // Monitora default view filter: 'minhas' vs 'todas'
   const userAssignedTurmas = useMemo(() => {
@@ -867,6 +954,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         </div>
       </div>
 
+      {/* Aviso de Saída Customizada / Antecipada */}
+      <DepartureAlertBanner
+        alerts={activeDepartureAlerts}
+        onDismiss={(alertId) =>
+          setActiveDepartureAlerts((prev) => prev.filter((a) => a.id !== alertId))
+        }
+        onDismissAll={() => setActiveDepartureAlerts([])}
+      />
+
       {/* Filter, Search and Quadro de Atribuições Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2.5">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
@@ -948,6 +1044,30 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
               Sua ADI
             </span>
           </button>
+
+          {/* Button / Indicator: Configuração de Aviso de Saída */}
+          {isCoord ? (
+            <button
+              type="button"
+              onClick={() => setIsAlertModalOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-xs font-extrabold flex items-center justify-center space-x-1.5 transition-all shadow-2xs shrink-0 cursor-pointer"
+              title="Configurar minutos de antecedência do aviso sonoro de saída customizada"
+            >
+              <Bell className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Aviso Saída:</span>
+              <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-black">
+                {alertSettings.alertMinutes} min
+              </span>
+            </button>
+          ) : (
+            <div
+              className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-[11px] font-bold flex items-center space-x-1.5 shrink-0"
+              title="Aviso sonoro automático configurado para saídas customizadas"
+            >
+              <Bell className="w-3.5 h-3.5 text-amber-600" />
+              <span>Saída: {alertSettings.alertMinutes} min antes</span>
+            </div>
+          )}
         </div>
 
         {/* Status Filter Chips */}
@@ -1845,6 +1965,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         currentUser={currentUser}
         onSaveAtribuicao={handleSaveAtribuicaoItem}
         onBatchSaveAtribuicoes={onBatchSaveAtribuicoes}
+      />
+
+      {/* Configuração de Aviso de Saída Modal */}
+      <DepartureAlertModal
+        isOpen={isAlertModalOpen}
+        onClose={() => setIsAlertModalOpen(false)}
+        currentSettings={alertSettings}
+        currentUser={currentUser}
+        onSettingsUpdated={(newSettings) => setAlertSettings(newSettings)}
       />
 
       {/* Apoio WhatsApp Custom Message Modal */}
