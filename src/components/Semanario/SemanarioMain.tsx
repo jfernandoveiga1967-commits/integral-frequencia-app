@@ -49,6 +49,7 @@ import {
   SemanarioAiBatchResult,
 } from '../../utils/semanarioAiGenerator';
 import { SemanarioBatchAiModal } from './SemanarioBatchAiModal';
+import { isCoordenador } from '../../utils/authUtils';
 
 /**
  * Extrai o horário de início (horaInicio) de um timeSlot como '11:20 - 11:30' ou '07:30'
@@ -477,6 +478,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Batch AI Generator: Automatically fills official schedule slots with rich pedagogical proposals
   const handleBatchGenerateAIWeek = (turmaOverride?: string) => {
+    if (!isCoordenador(currentUser)) {
+      alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
+      return;
+    }
+
     const targetTurma = turmaOverride || activeTurma || sortedTurmas[0] || '1º Ano Azul';
     const confirmMsg = `Deseja gerar automaticamente sugestões pedagógicas com IA para a grade horária oficial da turma "${targetTurma}" na ${currentWeek.label}?`;
     if (!window.confirm(confirmMsg)) return;
@@ -520,9 +526,21 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Handler to populate all official turmas com IA real (Gemini 2.5) e concorrência controlada
   const handlePopulateAllTurmasWeek = async () => {
+    if (!isCoordenador(currentUser)) {
+      alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
+      return;
+    }
+
     if (isGeneratingBatchAI) return;
 
-    const confirmMsg = `Deseja gerar as propostas pedagógicas com IA oficial (Gemini) para TODAS as ${sortedTurmas.length} turmas na ${currentWeek.label}? O conteúdo será personalizado para a faixa etária de cada turma.`;
+    const totalEstimatedCalls = sortedTurmas.length * 15;
+    const confirmMsg =
+      `ATENÇÃO - GERAÇÃO EM LOTE COM IA (GEMINI)\n\n` +
+      `Isso vai gerar até ${totalEstimatedCalls} propostas pedagógicas (para todas as ${sortedTurmas.length} turmas na ${currentWeek.label}).\n\n` +
+      `• Se a sua cota diária/por minuto de IA da chave configurada estiver esgotada (ou for do plano gratuito sem Cloud Billing), o sistema aplicará automaticamente o modelo pedagógico padrão curado para garantir que nenhuma turma fique em branco.\n` +
+      `• Você poderá acompanhar o progresso em tempo real no painel.\n\n` +
+      `Deseja iniciar o processo agora?`;
+
     if (!window.confirm(confirmMsg)) return;
 
     const abortController = new AbortController();
@@ -542,6 +560,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         {
           concurrency: 4,
           abortSignal: abortController.signal,
+          currentUser,
           onProgress: (prog) => {
             setAiProgress(prog);
           },
@@ -578,6 +597,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Handler to populate a single turma com IA real (Gemini)
   const handlePopulateSingleTurmaWeek = async (turmaName: string) => {
+    if (!isCoordenador(currentUser)) {
+      alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
+      return;
+    }
+
     const target = turmaName || activeTurma || sortedTurmas[0];
     if (isGeneratingBatchAI || !target) return;
 
@@ -601,6 +625,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         {
           concurrency: 3,
           abortSignal: abortController.signal,
+          currentUser,
           onProgress: (prog) => {
             setAiProgress(prog);
           },
@@ -633,6 +658,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Permite reprocessar apenas os planos que recorreram ao fallback
   const handleRetryFailedBatchPlans = async () => {
+    if (!isCoordenador(currentUser)) return;
     if (lastFailedBatchPlans.length === 0 || isGeneratingBatchAI) return;
 
     const abortController = new AbortController();
@@ -651,6 +677,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           concurrency: 3,
           plansToProcess: lastFailedBatchPlans,
           abortSignal: abortController.signal,
+          currentUser,
           onProgress: (prog) => {
             setAiProgress(prog);
           },
@@ -781,27 +808,31 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   <span>Nova Proposta</span>
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isGeneratingBatchAI}
-                  onClick={() => handlePopulateSingleTurmaWeek(activeTurma)}
-                  className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                  title="Gerar/Restaurar todas as atividades padrão desta turma"
-                >
-                  <Zap className="w-4 h-4 text-amber-300" />
-                  <span>Preencher Grade</span>
-                </button>
+                {isCoordenador(currentUser) && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isGeneratingBatchAI}
+                      onClick={() => handlePopulateSingleTurmaWeek(activeTurma)}
+                      className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
+                      title="Gerar/Restaurar todas as atividades padrão desta turma"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Preencher Grade</span>
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={isGeneratingBatchAI}
-                  onClick={() => handleBatchGenerateAIWeek(activeTurma)}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-lg transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-                  title="Gerar Propostas da Semana com IA para esta turma"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>{isGeneratingBatchAI ? 'Gerando...' : 'Semana com IA'}</span>
-                </button>
+                    <button
+                      type="button"
+                      disabled={isGeneratingBatchAI}
+                      onClick={() => handleBatchGenerateAIWeek(activeTurma)}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-lg transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                      title="Gerar Propostas da Semana com IA para esta turma"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      <span>{isGeneratingBatchAI ? 'Gerando...' : 'Semana com IA'}</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -839,16 +870,18 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   <span>Nova Proposta</span>
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isGeneratingBatchAI}
-                  onClick={handlePopulateAllTurmasWeek}
-                  className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                  title="Povoar grade oficial completa de todas as turmas"
-                >
-                  <Zap className="w-4 h-4 text-amber-300" />
-                  <span>Povoar Todas Turmas</span>
-                </button>
+                {isCoordenador(currentUser) && (
+                  <button
+                    type="button"
+                    disabled={isGeneratingBatchAI}
+                    onClick={handlePopulateAllTurmasWeek}
+                    className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
+                    title="Povoar grade oficial completa de todas as turmas"
+                  >
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    <span>Povoar Todas Turmas</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1300,14 +1333,16 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                 Cadastre novas atividades para este dia ou preencha a grade horária oficial da turma.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => handlePopulateSingleTurmaWeek(activeTurma)}
-                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-2"
-                >
-                  <Zap className="w-4 h-4" />
-                  <span>Preencher Grade Oficial Desta Turma</span>
-                </button>
+                {isCoordenador(currentUser) && (
+                  <button
+                    type="button"
+                    onClick={() => handlePopulateSingleTurmaWeek(activeTurma)}
+                    className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-2"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Preencher Grade Oficial Desta Turma</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleCreateNewPlan(selectedDay, undefined, activeTurma)}

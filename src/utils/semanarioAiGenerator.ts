@@ -1,6 +1,7 @@
-import { ActivityItem, SemanarioPlan, WeekInfo, ScheduleBlock } from '../types';
+import { ActivityItem, SemanarioPlan, WeekInfo, ScheduleBlock, UserProfile } from '../types';
 import { getScheduleBlocksForTurma, generateCuratedProposal, DAYS_OF_WEEK_ORDER } from './semanarioUtils';
 import { getWeekDays } from './dateUtils';
+import { getStoredUser } from './authUtils';
 
 export interface SemanarioAiProgress {
   current: number;
@@ -32,13 +33,20 @@ export async function fetchGeminiProposal(
   dayOfWeek: string,
   date: string,
   theme?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  currentUser?: UserProfile | null
 ): Promise<{ success: boolean; proposal?: { title: string; objectives: string; development: string; materials: string }; error?: string }> {
   try {
+    const userToVerify = currentUser !== undefined ? currentUser : getStoredUser();
+    const userRole = userToVerify?.role || '';
+    const userEmail = userToVerify?.email || '';
+
     const res = await fetch('/api/gemini/generate-proposal', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-user-role': userRole,
+        'x-user-email': userEmail,
       },
       body: JSON.stringify({
         turma,
@@ -46,6 +54,8 @@ export async function fetchGeminiProposal(
         dayOfWeek,
         date,
         theme,
+        userRole,
+        userEmail,
       }),
       signal,
     });
@@ -151,6 +161,7 @@ export async function populateTurmasWithAI(
     onProgress?: (progress: SemanarioAiProgress) => void;
     abortSignal?: AbortSignal;
     plansToProcess?: SemanarioPlan[];
+    currentUser?: UserProfile | null;
   }
 ): Promise<SemanarioAiBatchResult> {
   const plans = options?.plansToProcess || buildPlanTemplatesForTurmas(turmasList, weekInfo, schedules, activitiesList);
@@ -206,7 +217,8 @@ export async function populateTurmasWithAI(
           plan.dayOfWeek,
           plan.date,
           undefined,
-          options?.abortSignal
+          options?.abortSignal,
+          options?.currentUser
         );
 
         if (result.success && result.proposal) {

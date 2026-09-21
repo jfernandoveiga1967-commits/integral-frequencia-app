@@ -44,9 +44,24 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// API Route: Gerador de Propostas Pedagógicas com Gemini
+// API Route: Gerador de Propostas Pedagógicas com Gemini (Restrito a Coordenadores)
 app.post('/api/gemini/generate-proposal', async (req, res) => {
   try {
+    const userRole = (
+      (req.headers['x-user-role'] as string) ||
+      req.body?.user?.role ||
+      req.body?.userRole ||
+      ''
+    ).toLowerCase();
+
+    // Validação estrita de perfil: somente Coordenadores podem solicitar geração por IA
+    if (userRole !== 'coordenador') {
+      return res.status(403).json({
+        error: 'Acesso negado: A geração de propostas pedagógicas com inteligência artificial é restrita exclusivamente a Coordenadores.',
+        forbidden: true,
+      });
+    }
+
     const { turma, category, theme, dayOfWeek, date } = req.body;
 
     const ai = getAIClient();

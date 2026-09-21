@@ -29,6 +29,7 @@ import {
   isTurmaEligibleForProjeto,
 } from '../../utils/semanarioUtils';
 import { getWeekInfo, getWeekDays } from '../../utils/dateUtils';
+import { isCoordenador } from '../../utils/authUtils';
 
 interface SemanarioModalProps {
   isOpen: boolean;
@@ -294,20 +295,36 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
 
   // AI Proposal Generator (Server-side Gemini with rich curated fallback)
   const handleGenerateAIProposal = async (customTheme?: string) => {
+    // Restrição de segurança no cliente: somente Coordenador pode disparar IA
+    if (!isCoordenador(currentUser)) {
+      setAiError('Acesso restrito: Apenas a Coordenação pode gerar propostas pedagógicas com IA.');
+      return;
+    }
+
     setAiLoading(true);
     setAiError(null);
 
     const themeQuery = customTheme !== undefined ? customTheme : (aiTheme || weekTheme);
 
     try {
+      const userRole = currentUser?.role || '';
+      const userEmail = currentUser?.email || '';
+
       const response = await fetch('/api/gemini/generate-proposal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-user-email': userEmail,
+          'x-user-id': currentUser?.id || '',
+        },
         body: JSON.stringify({
           turma,
           category,
           theme: themeQuery,
           dayOfWeek,
+          userRole,
+          userEmail,
         }),
       });
 
@@ -461,19 +478,21 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={() => setShowAiPanel(!showAiPanel)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
-                showAiPanel
-                  ? 'bg-amber-400 text-slate-950 shadow-md'
-                  : 'bg-slate-800 text-amber-300 hover:bg-slate-700 border border-amber-500/30'
-              }`}
-              title="Gerador Assistido por IA (Gemini)"
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>{showAiPanel ? 'Ocultar IA' : 'Assistente IA'}</span>
-            </button>
+            {isCoordenador(currentUser) && (
+              <button
+                type="button"
+                onClick={() => setShowAiPanel(!showAiPanel)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                  showAiPanel
+                    ? 'bg-amber-400 text-slate-950 shadow-md'
+                    : 'bg-slate-800 text-amber-300 hover:bg-slate-700 border border-amber-500/30'
+                }`}
+                title="Gerador Assistido por IA (Gemini)"
+              >
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>{showAiPanel ? 'Ocultar IA' : 'Assistente IA'}</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -485,8 +504,8 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           </div>
         </div>
 
-        {/* AI Assistant Banner / Generator Panel */}
-        {showAiPanel && (
+        {/* AI Assistant Banner / Generator Panel - Exclusivo para Coordenador */}
+        {isCoordenador(currentUser) && showAiPanel && (
           <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-amber-950 text-white p-4 border-b border-indigo-800/40 animate-in slide-in-from-top-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 space-y-2">
@@ -635,14 +654,17 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               <label className="text-xs font-bold text-slate-800">
                 Atividade Proposta
               </label>
-              <button
-                type="button"
-                onClick={() => handleGenerateAIProposal()}
-                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3 text-amber-500" />
-                <span>Sugerir com IA</span>
-              </button>
+              {isCoordenador(currentUser) && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAIProposal()}
+                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer"
+                  title="Gerar Proposta com IA"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span>Sugerir com IA</span>
+                </button>
+              )}
             </div>
             <input
               type="text"

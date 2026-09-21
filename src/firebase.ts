@@ -680,10 +680,15 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     const usuarioDocRef = doc(db, 'usuarios', targetDocId);
     const userDocRef = doc(db, 'users', targetDocId);
 
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       setDoc(usuarioDocRef, updatedData, { merge: true }),
       setDoc(userDocRef, updatedData, { merge: true }),
     ]);
+
+    // Se a gravação na coleção principal 'usuarios' falhou, lança o erro para ser tratado
+    if (results[0].status === 'rejected') {
+      throw results[0].reason;
+    }
 
     // Limpeza opcional de documento legado com ID diferente
     if (user.id && user.id !== targetDocId) {
@@ -705,6 +710,7 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     } else {
       console.warn('Erro na sincronização de nuvem do Firestore (modo de contingência ativo):', error);
     }
+    throw error;
   }
 
   return updatedData;
@@ -1071,10 +1077,13 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
  */
 export async function deleteUserFromFirestore(userId: string): Promise<void> {
   try {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       deleteDoc(doc(db, 'usuarios', userId)),
       deleteDoc(doc(db, 'users', userId)),
     ]);
+    if (results[0].status === 'rejected') {
+      throw results[0].reason;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `usuarios/${userId}`);
     throw error;
@@ -1130,6 +1139,7 @@ export async function saveActivityToFirestore(activity: ActivityItem) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `activities/${activity.id}`);
+    throw error;
   }
 }
 
@@ -1139,6 +1149,7 @@ export async function deleteActivityFromFirestore(activityId: string) {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `activities/${activityId}`);
+    throw error;
   }
 }
 
@@ -1164,10 +1175,13 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       updatedAt: new Date().toISOString(),
     };
 
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       setDoc(doc(db, 'alunos', normalized.id), payload, { merge: true }),
       setDoc(doc(db, 'students', normalized.id), payload, { merge: true }),
     ]);
+    if (results[0].status === 'rejected') {
+      throw results[0].reason;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `alunos/${student.id}`);
     throw error;
@@ -1316,6 +1330,7 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
       recordId: record.id,
     });
     handleFirestoreError(error, OperationType.WRITE, `attendanceRecords/${record.id}`);
+    throw error;
   }
 }
 
@@ -1330,6 +1345,7 @@ export async function deleteAttendanceRecordFromFirestore(recordId: string): Pro
       recordId,
     });
     handleFirestoreError(error, OperationType.DELETE, `attendanceRecords/${recordId}`);
+    throw error;
   }
 }
 
@@ -1375,6 +1391,7 @@ export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): 
       });
     });
     handleFirestoreError(error, OperationType.WRITE, 'attendanceRecords/batchSave');
+    throw error;
   }
 }
 
@@ -1400,6 +1417,7 @@ export async function batchDeleteAttendanceRecordsFromFirestore(recordIds: strin
       });
     });
     handleFirestoreError(error, OperationType.DELETE, 'attendanceRecords/batchDelete');
+    throw error;
   }
 }
 
@@ -1507,6 +1525,7 @@ export async function saveTurmaToFirestore(turmaName: string) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `turmas/${turmaName}`);
+    throw error;
   }
 }
 
@@ -1517,6 +1536,7 @@ export async function deleteTurmaFromFirestore(turmaName: string) {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `turmas/${turmaName}`);
+    throw error;
   }
 }
 
@@ -1777,6 +1797,7 @@ export async function saveScheduleBlockToFirestore(schedule: ScheduleBlock) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `schedules/${schedule.id}`);
+    throw error;
   }
 }
 
@@ -1786,6 +1807,7 @@ export async function deleteScheduleBlockFromFirestore(scheduleId: string) {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `schedules/${scheduleId}`);
+    throw error;
   }
 }
 
@@ -1828,6 +1850,8 @@ export async function batchSyncSchedulesToFirestore(
     }
   } catch (error) {
     console.error('Error batch syncing schedules to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'schedules/batchSync');
+    throw error;
   }
 }
 
@@ -1856,6 +1880,8 @@ export async function saveAllSchedulesToFirestore(schedules: ScheduleBlock[]) {
     }
   } catch (error) {
     console.error('Error saving all schedules to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'schedules/saveAll');
+    throw error;
   }
 }
 
@@ -1910,6 +1936,7 @@ export async function saveHolidayToFirestore(holiday: HolidayItem) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `holidays/${holiday.id}`);
+    throw error;
   }
 }
 
@@ -1919,6 +1946,7 @@ export async function deleteHolidayFromFirestore(holidayId: string) {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `holidays/${holidayId}`);
+    throw error;
   }
 }
 
@@ -1946,6 +1974,8 @@ export async function batchSaveHolidaysToFirestore(holidays: HolidayItem[]) {
     }
   } catch (error) {
     console.error('Error batch saving holidays to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'holidays/batch');
+    throw error;
   }
 }
 
@@ -2023,6 +2053,7 @@ export async function savePontoRecordToFirestore(record: PontoRecord) {
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `pontoRecords/${record.id}`);
+    throw error;
   }
 }
 
@@ -2064,6 +2095,8 @@ export async function batchSavePontoRecordsToFirestore(records: PontoRecord[]) {
     }
   } catch (error) {
     console.error('Error batch saving ponto records:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'pontoRecords/batch');
+    throw error;
   }
 }
 
@@ -2204,6 +2237,7 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `pontoClosings/${closing.id}`);
+    throw error;
   }
 }
 
@@ -2336,6 +2370,7 @@ export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `semanarioPlans/${plan.id}`);
+    throw error;
   }
 }
 
@@ -2345,6 +2380,7 @@ export async function deleteSemanarioPlanFromFirestore(planId: string) {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `semanarioPlans/${planId}`);
+    throw error;
   }
 }
 
@@ -2388,6 +2424,7 @@ export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[])
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
+    throw error;
   }
 }
 
@@ -2424,6 +2461,7 @@ export async function saveMealReportGlobalSettings(settings: {
     console.warn('Erro ao salvar settings/mealReport no Firestore, usando fallback local:', error);
     localStorage.setItem('crescer_meal_global_settings', JSON.stringify(payload));
     handleFirestoreError(error, OperationType.WRITE, 'settings/mealReport');
+    throw error;
   }
 }
 
@@ -2494,6 +2532,7 @@ export async function saveDepartureAlertSettings(settings: {
       localStorage.setItem('integral_departure_alert_settings', JSON.stringify(payload));
     }
     handleFirestoreError(error, OperationType.WRITE, 'settings/departureAlert');
+    throw error;
   }
 }
 
@@ -2632,6 +2671,7 @@ export async function saveMealReportToFirestore(config: MealReportConfig): Promi
   } catch (error) {
     console.warn('Erro ao salvar mealReports no Firestore, mantendo cópia local:', error);
     handleFirestoreError(error, OperationType.WRITE, `mealReports/${config.monthKey}`);
+    throw error;
   }
 }
 
@@ -2684,6 +2724,7 @@ export async function saveMonthlyMenuToFirestore(menu: MonthlyMenu): Promise<voi
   } catch (error) {
     console.warn('Erro ao salvar monthlyMenus no Firestore, mantendo cópia local:', error);
     handleFirestoreError(error, OperationType.WRITE, `monthlyMenus/${menu.monthKey}`);
+    throw error;
   }
 }
 
@@ -2719,6 +2760,7 @@ export async function saveCookingRecipesToFirestore(monthKey: string, recipes: C
   } catch (error) {
     console.warn('Erro ao salvar cookingRecipes no Firestore, mantendo cópia local:', error);
     handleFirestoreError(error, OperationType.WRITE, `cookingRecipes/${monthKey}`);
+    throw error;
   }
 }
 
@@ -2854,6 +2896,7 @@ export async function saveTurmaAtribuicaoToFirestore(item: TurmaAtribuicao): Pro
   } catch (error) {
     console.warn('Erro ao salvar atribuição no Firestore:', error);
     handleFirestoreError(error, OperationType.WRITE, `quadroAtribuicoes/${safeId}`);
+    throw error;
   }
 }
 
@@ -2883,6 +2926,7 @@ export async function batchSaveQuadroAtribuicoesToFirestore(items: TurmaAtribuic
   } catch (error) {
     console.warn('Erro ao salvar lote de atribuições no Firestore:', error);
     handleFirestoreError(error, OperationType.WRITE, 'quadroAtribuicoes/batch');
+    throw error;
   }
 }
 
@@ -2897,6 +2941,7 @@ export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Pro
   } catch (error) {
     console.warn('Erro ao excluir atribuição no Firestore:', error);
     handleFirestoreError(error, OperationType.DELETE, `quadroAtribuicoes/${safeId}`);
+    throw error;
   }
 }
 

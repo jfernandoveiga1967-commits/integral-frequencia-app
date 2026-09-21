@@ -63,6 +63,16 @@ export const SemanarioBatchAiModal: React.FC<SemanarioBatchAiModalProps> = ({
           )}
         </div>
 
+        {/* Quota context note */}
+        {isGenerating && progress.total > 20 && (
+          <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-[11px] text-indigo-200/90 leading-relaxed flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Lote volumoso ({progress.total} propostas):</strong> Se a cota diária de IA gratuita for atingida, as propostas excedentes receberão automaticamente a grade curada padrão de salvaguarda.
+            </span>
+          </div>
+        )}
+
         {/* Progress Bar & Percentage */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
