@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   BookOpen,
   Calendar,
@@ -43,6 +43,12 @@ import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtil
 import { generateSemanarioPDFReport } from '../../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../../utils/printUtils';
 import { PdfViewerModal } from '../PdfViewerModal';
+import {
+  populateTurmasWithAI,
+  SemanarioAiProgress,
+  SemanarioAiBatchResult,
+} from '../../utils/semanarioAiGenerator';
+import { SemanarioBatchAiModal } from './SemanarioBatchAiModal';
 
 /**
  * Extrai o horário de início (horaInicio) de um timeSlot como '11:20 - 11:30' ou '07:30'
@@ -163,6 +169,18 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // AI Batch Generation Modal / Loading State
   const [isGeneratingBatchAI, setIsGeneratingBatchAI] = useState<boolean>(false);
+  const [isAiBatchModalOpen, setIsAiBatchModalOpen] = useState<boolean>(false);
+  const [aiProgress, setAiProgress] = useState<SemanarioAiProgress>({
+    current: 0,
+    total: 0,
+    percent: 0,
+    successCount: 0,
+    failCount: 0,
+  });
+  const [aiSummaryMessage, setAiSummaryMessage] = useState<string | null>(null);
+  const [lastGeneratedBatchPlans, setLastGeneratedBatchPlans] = useState<SemanarioPlan[]>([]);
+  const [lastFailedBatchPlans, setLastFailedBatchPlans] = useState<SemanarioPlan[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // PDF Preview & Print Modal State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
@@ -500,21 +518,172 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     }, 500);
   };
 
-  // Handler to populate all official turmas
-  const handlePopulateAllTurmasWeek = () => {
+  // Handler to populate all official turmas com IA real (Gemini 2.5) e concorrência controlada
+  const handlePopulateAllTurmasWeek = async () => {
+    if (isGeneratingBatchAI) return;
+
+    const confirmMsg = `Deseja gerar as propostas pedagógicas com IA oficial (Gemini) para TODAS as ${sortedTurmas.length} turmas na ${currentWeek.label}? O conteúdo será personalizado para a faixa etária de cada turma.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setIsGeneratingBatchAI(true);
-    const generated = generateCurriculumForTurmasAndWeek(sortedTurmas, currentWeek, schedules, activitiesList);
-    onBatchSavePlans(generated);
-    setTimeout(() => {
+    setIsAiBatchModalOpen(true);
+    setAiSummaryMessage(null);
+    setLastFailedBatchPlans([]);
+
+    try {
+      const result: SemanarioAiBatchResult = await populateTurmasWithAI(
+        sortedTurmas,
+        currentWeek,
+        schedules,
+        activitiesList,
+        {
+          concurrency: 4,
+          abortSignal: abortController.signal,
+          onProgress: (prog) => {
+            setAiProgress(prog);
+          },
+        }
+      );
+
+      setLastGeneratedBatchPlans(result.plans);
+      setLastFailedBatchPlans(result.failedPlans);
+
+      // Salva os planos no Firestore / estado principal
+      onBatchSavePlans(result.plans);
+
+      if (result.wasAborted) {
+        setAiSummaryMessage(
+          `Geração interrompida pelo usuário. Foram salvos ${result.plans.length} planos (${result.successCount} gerados com Gemini, ${result.failCount} com fallback curado).`
+        );
+      } else if (result.failCount === 0) {
+        setAiSummaryMessage(
+          `Parabéns! Todos os ${result.total} planos foram gerados com sucesso pelo Gemini, adaptados à faixa etária de cada turma.`
+        );
+      } else {
+        setAiSummaryMessage(
+          `Processo concluído: ${result.successCount} planos gerados com Gemini e ${result.failCount} preenchidos com o modelo curado de salvaguarda. Você pode clicar em "Tentar Novamente" para reprocessar apenas os que falharam.`
+        );
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setAiSummaryMessage(`Erro durante a geração em lote: ${err.message || 'Falha de conexão'}`);
+      }
+    } finally {
       setIsGeneratingBatchAI(false);
-    }, 400);
+    }
   };
 
-  // Handler to populate a single turma
-  const handlePopulateSingleTurmaWeek = (turmaName: string) => {
+  // Handler to populate a single turma com IA real (Gemini)
+  const handlePopulateSingleTurmaWeek = async (turmaName: string) => {
     const target = turmaName || activeTurma || sortedTurmas[0];
-    const generated = generateCurriculumForTurmasAndWeek([target], currentWeek, schedules, activitiesList);
-    onBatchSavePlans(generated);
+    if (isGeneratingBatchAI || !target) return;
+
+    const confirmMsg = `Deseja gerar as propostas pedagógicas com IA (Gemini) para a turma "${target}" na ${currentWeek.label}?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setIsGeneratingBatchAI(true);
+    setIsAiBatchModalOpen(true);
+    setAiSummaryMessage(null);
+    setLastFailedBatchPlans([]);
+
+    try {
+      const result: SemanarioAiBatchResult = await populateTurmasWithAI(
+        [target],
+        currentWeek,
+        schedules,
+        activitiesList,
+        {
+          concurrency: 3,
+          abortSignal: abortController.signal,
+          onProgress: (prog) => {
+            setAiProgress(prog);
+          },
+        }
+      );
+
+      setLastGeneratedBatchPlans(result.plans);
+      setLastFailedBatchPlans(result.failedPlans);
+      onBatchSavePlans(result.plans);
+
+      if (result.wasAborted) {
+        setAiSummaryMessage(`Geração interrompida. Foram salvos ${result.plans.length} planos.`);
+      } else if (result.failCount === 0) {
+        setAiSummaryMessage(
+          `Sucesso! Todos os ${result.total} planos da turma "${target}" foram gerados com IA oficial.`
+        );
+      } else {
+        setAiSummaryMessage(
+          `Concluído: ${result.successCount} gerados com Gemini e ${result.failCount} com modelo curado.`
+        );
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setAiSummaryMessage(`Erro: ${err.message || 'Falha de conexão'}`);
+      }
+    } finally {
+      setIsGeneratingBatchAI(false);
+    }
+  };
+
+  // Permite reprocessar apenas os planos que recorreram ao fallback
+  const handleRetryFailedBatchPlans = async () => {
+    if (lastFailedBatchPlans.length === 0 || isGeneratingBatchAI) return;
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setIsGeneratingBatchAI(true);
+    setAiSummaryMessage(null);
+
+    try {
+      const result: SemanarioAiBatchResult = await populateTurmasWithAI(
+        [],
+        currentWeek,
+        schedules,
+        activitiesList,
+        {
+          concurrency: 3,
+          plansToProcess: lastFailedBatchPlans,
+          abortSignal: abortController.signal,
+          onProgress: (prog) => {
+            setAiProgress(prog);
+          },
+        }
+      );
+
+      // Atualiza os planos salvos
+      onBatchSavePlans(result.plans);
+      setLastFailedBatchPlans(result.failedPlans);
+
+      if (result.failCount === 0) {
+        setAiSummaryMessage(
+          `Excelente! Todas as ${result.total} propostas pendentes foram regeneradas com sucesso pelo Gemini!`
+        );
+      } else {
+        setAiSummaryMessage(
+          `Nova tentativa concluída: ${result.successCount} recuperadas com sucesso e ${result.failCount} ainda com fallback.`
+        );
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setAiSummaryMessage(`Erro ao tentar novamente: ${err.message}`);
+      }
+    } finally {
+      setIsGeneratingBatchAI(false);
+    }
+  };
+
+  const handleCancelAiBatch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsGeneratingBatchAI(false);
   };
 
   // PDF Export & Preview Modal
@@ -1310,6 +1479,18 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           onDownload={pdfPreviewState.onDownload}
         />
       )}
+
+      {/* Modal de Progresso em Tempo Real da Geração em Lote com Gemini */}
+      <SemanarioBatchAiModal
+        isOpen={isAiBatchModalOpen}
+        isGenerating={isGeneratingBatchAI}
+        progress={aiProgress}
+        summaryMessage={aiSummaryMessage}
+        failedCount={lastFailedBatchPlans.length}
+        onCancel={handleCancelAiBatch}
+        onClose={() => setIsAiBatchModalOpen(false)}
+        onRetryFailed={handleRetryFailedBatchPlans}
+      />
     </div>
   );
 };

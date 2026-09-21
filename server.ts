@@ -77,7 +77,7 @@ Diretrizes Pedagógicas Obrigatórias:
    - Desenvolvimento metodológico direto em 3 etapas (1. Acolhimento, 2. Desenvolvimento/Exploração, 3. Fechamento/Reflexão).
    - Materiais simples e acessíveis no ambiente escolar.
 
-Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
+Retorne EXCLUSIVAMENTE um objeto JSON válido no formato abaixo, sem aspas duplas desescapadas dentro dos textos:
 {
   "title": "Título Criativo e Específico da Proposta",
   "objectives": "Objetivos claros de aprendizagem e desenvolvimento para a faixa etária.",
@@ -85,28 +85,79 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
   "materials": "Lista prática de materiais necessários."
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 1000,
-      },
-    });
+    let response: any = null;
+    let attempts = 0;
+    while (attempts < 2) {
+      try {
+        attempts++;
+        response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 2500,
+          },
+        });
+        break;
+      } catch (err: any) {
+        if (attempts >= 2) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    }
 
-    const responseText = response.text || '';
-    let parsed = null;
+    const responseText = response?.text || '';
+    let parsed: any = null;
     try {
       parsed = JSON.parse(responseText);
     } catch {
       // If parsing raw output fails, attempt to strip markdown code fences
       const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
-      parsed = JSON.parse(cleaned);
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // Fallback: extrai campos individualmente com regex se o JSON tiver ficado imperfeito
+        const titleMatch = cleaned.match(/"title"\s*:\s*"([^"]+)"/);
+        const objMatch = cleaned.match(/"objectives"\s*:\s*"([^"]+)"/);
+        const devMatch = cleaned.match(/"development"\s*:\s*"([^"]+)"/);
+        const matMatch = cleaned.match(/"materials"\s*:\s*"([^"]+)"/);
+        if (titleMatch) {
+          parsed = {
+            title: titleMatch[1],
+            objectives: objMatch ? objMatch[1] : '',
+            development: devMatch ? devMatch[1] : '',
+            materials: matMatch ? matMatch[1] : '',
+          };
+        } else {
+          throw new Error('Falha na interpretação da resposta JSON');
+        }
+      }
     }
+
+    // Normaliza campos para string caso a IA tenha gerado arrays ou objetos aninhados
+    const toStringField = (val: any): string => {
+      if (!val) return '';
+      if (typeof val === 'string') return val;
+      if (Array.isArray(val)) {
+        return val.map((item) => (typeof item === 'string' ? `• ${item}` : JSON.stringify(item))).join('\n');
+      }
+      if (typeof val === 'object') {
+        return Object.entries(val)
+          .map(([k, v]) => `${k}:\n${Array.isArray(v) ? v.map((x) => `  • ${x}`).join('\n') : v}`)
+          .join('\n\n');
+      }
+      return String(val);
+    };
+
+    const normalizedProposal = {
+      title: typeof parsed?.title === 'string' ? parsed.title : (parsed?.title?.name || parsed?.title || 'Proposta Pedagógica'),
+      objectives: toStringField(parsed?.objectives),
+      development: toStringField(parsed?.development),
+      materials: toStringField(parsed?.materials),
+    };
 
     return res.json({
       success: true,
-      proposal: parsed,
+      proposal: normalizedProposal,
     });
   } catch (error: any) {
     console.warn('Erro ao chamar Gemini API para Semanário:', error?.message || error);

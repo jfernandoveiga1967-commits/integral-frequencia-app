@@ -474,7 +474,7 @@ export function getInitialSamplePlans(
   ];
 }
 
-const DAYS_OF_WEEK_ORDER: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+export const DAYS_OF_WEEK_ORDER: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
 /**
  * Gera automaticamente o currículo pedagógico completo para as turmas informadas na semana indicada,
