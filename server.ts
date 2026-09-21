@@ -58,7 +58,7 @@ app.post('/api/gemini/generate-proposal', async (req, res) => {
     }
 
     const prompt = `Você é um coordenador pedagógico sênior especialista em Educação Integral infantil e fundamental (Colégio Crescer).
-Crie uma proposta pedagógica rica, engajadora, prática e viável para o Semanário do Programa Integral.
+Crie uma proposta pedagógica rica, prática e viável para o Semanário do Programa Integral.
 
 Dados da turma e atividade:
 - Turma / Faixa Etária: ${turma || 'Ensino Fundamental'}
@@ -67,22 +67,17 @@ Dados da turma e atividade:
 - Dia da semana e data: ${dayOfWeek || ''} ${date ? `(${date})` : ''}
 
 Diretrizes Pedagógicas Obrigatórias:
-1. Adaptação Estrita à Faixa Etária da Turma:
-   - Se a turma for Berçário, Mini Maternal, Maternal ou Infantil (1 ou 2): Trata-se de Educação Infantil (crianças de 1 a 5 anos). Use linguagem e dinâmicas adequadas à primeira infância, com foco em Campos de Experiências da BNCC (ex: O eu, o outro e o nós; Corpo, gestos e movimentos), brincadeiras sensoriais, cantigas, exploração lúdica e segurança.
-   - Se a turma for do Ensino Fundamental (1º ao 6º Ano): Trata-se de crianças e pré-adolescentes de 6 a 12 anos. Proponha dinâmicas compatíveis com a maturidade do grupo, desafios cooperativos, raciocínio estratégico, regras de convivência e projetos em grupo da BNCC.
-2. Variação de Conteúdo: Leve em consideração a data e o dia específico para propor uma vivência inédita e dinâmica para este dia (evitando atividades genéricas repetidas).
-3. Estrutura da Resposta:
-   - Título criativo e lúdico com identificação clara da atividade.
-   - Objetivos claros (desenvolvimento motor, cognitivo, socioemocional ou BNCC).
-   - Desenvolvimento metodológico direto em 3 etapas (1. Acolhimento, 2. Desenvolvimento/Exploração, 3. Fechamento/Reflexão).
-   - Materiais simples e acessíveis no ambiente escolar.
+1. Adaptação Estrita à Faixa Etária:
+   - Se Educação Infantil (Berçário, Mini Maternal, Maternal, Infantil 1 ou 2): crianças de 1 a 5 anos. Use linguagem de primeira infância, ludicidade, cantigas, exploração sensorial, segurança e Campos de Experiências da BNCC (EI02CG01, EI02CG02, etc.).
+   - Se Ensino Fundamental (1º ao 6º Ano): crianças de 6 a 12 anos. Proponha desafios, cooperação estratégica, regras, autonomia e habilidades da BNCC (EF35EF01, etc.).
+2. Concisão Funcional: O texto deve ser direto e estruturado para caber com elegância no fichamento do professor.
 
-Retorne EXCLUSIVAMENTE um objeto JSON válido no formato abaixo, sem aspas duplas desescapadas dentro dos textos:
+Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown extra, com aspas devidamente escapadas):
 {
   "title": "Título Criativo e Específico da Proposta",
-  "objectives": "Objetivos claros de aprendizagem e desenvolvimento para a faixa etária.",
-  "development": "1. Acolhimento e introdução lúdica...\\n2. Passo a passo prático da exploração...\\n3. Fechamento e reflexão coletiva.",
-  "materials": "Lista prática de materiais necessários."
+  "objectives": "2 a 3 objetivos claros de desenvolvimento e códigos BNCC.",
+  "development": "1. Acolhimento: introdução lúdica.\\n2. Atividade Prática: vivência passo a passo.\\n3. Fechamento: roda de conversa e volta à calma.",
+  "materials": "Lista direta dos materiais necessários."
 }`;
 
     let response: any = null;
@@ -110,24 +105,30 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido no formato abaixo, sem aspas dupla
     try {
       parsed = JSON.parse(responseText);
     } catch {
-      // If parsing raw output fails, attempt to strip markdown code fences
       const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
       try {
         parsed = JSON.parse(cleaned);
       } catch {
-        // Fallback: extrai campos individualmente com regex se o JSON tiver ficado imperfeito
-        const titleMatch = cleaned.match(/"title"\s*:\s*"([^"]+)"/);
-        const objMatch = cleaned.match(/"objectives"\s*:\s*"([^"]+)"/);
-        const devMatch = cleaned.match(/"development"\s*:\s*"([^"]+)"/);
-        const matMatch = cleaned.match(/"materials"\s*:\s*"([^"]+)"/);
-        if (titleMatch) {
-          parsed = {
-            title: titleMatch[1],
-            objectives: objMatch ? objMatch[1] : '',
-            development: devMatch ? devMatch[1] : '',
-            materials: matMatch ? matMatch[1] : '',
+        // Tenta extrair cada campo suportando tanto string quanto array ou objeto
+        try {
+          const extractRawValue = (key: string) => {
+            const regex = new RegExp(`"${key}"\\s*:\\s*(\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\}|"[\\s\\S]*?")`, 'i');
+            const match = cleaned.match(regex);
+            if (!match) return '';
+            try {
+              return JSON.parse(match[1]);
+            } catch {
+              return match[1].replace(/^"|"$/g, '').replace(/\\"/g, '"');
+            }
           };
-        } else {
+
+          parsed = {
+            title: extractRawValue('title') || 'Proposta Pedagógica',
+            objectives: extractRawValue('objectives') || '',
+            development: extractRawValue('development') || '',
+            materials: extractRawValue('materials') || '',
+          };
+        } catch {
           throw new Error('Falha na interpretação da resposta JSON');
         }
       }
