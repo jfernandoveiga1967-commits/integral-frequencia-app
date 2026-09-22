@@ -538,7 +538,7 @@ export default function App() {
                 ...officialTemplate,
                 ...act,
                 requiresRollCall: expectedRollCall,
-              });
+              }).catch((err) => console.warn('Falha na gravação remota:', err));
             }
             return {
               ...officialTemplate,
@@ -553,7 +553,7 @@ export default function App() {
           hasHealedActivitiesRef.current = true;
           ACTIVITIES_LIST.forEach((officialAct) => {
             if (!healedActivities.some((a) => a.id === officialAct.id || a.name === officialAct.name)) {
-              saveActivityToFirestore(officialAct);
+              saveActivityToFirestore(officialAct).catch((err) => console.warn('Falha na gravação remota:', err));
               healedActivities.push(officialAct);
             }
           });
@@ -908,7 +908,13 @@ export default function App() {
 
     // 2. Exclusão assíncrona no Firestore (coleções 'alunos' e 'students')
     // Localiza e remove todos os documentos que correspondem ao aluno (incluindo duplicatas)
-    const { deletedIds } = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma);
+    let deletedIds: string[] = [];
+    try {
+      const res = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma);
+      deletedIds = res.deletedIds || [];
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
+    }
 
     // 3. Limpeza de Cache ao Deletar:
     // Remove imediatamente do storage local e marca todos os IDs encontrados para não ressincronizar
@@ -965,6 +971,7 @@ export default function App() {
       await saveRecordToFirestore(newRecord);
     } catch (err) {
       console.error('Erro ao salvar chamada no Firestore:', err);
+      throw err;
     }
   };
 
@@ -1015,6 +1022,7 @@ export default function App() {
       await batchSaveRecordsToFirestore(batchNewRecords);
     } catch (err) {
       console.error('Erro ao salvar lote de presença no Firestore:', err);
+      throw err;
     }
   };
 
@@ -1063,6 +1071,7 @@ export default function App() {
       await batchDeleteAttendanceRecordsFromFirestore(Array.from(targetKeys));
     } catch (err) {
       console.error('Error clearing Firestore records:', err);
+      throw err;
     }
   };
 
@@ -1074,7 +1083,7 @@ export default function App() {
     setTurmas(updated);
     saveTurmas(updated);
     broadcastSyncEvent('SYNC_TURMAS', updated);
-    saveTurmaToFirestore(name);
+    saveTurmaToFirestore(name).catch((err) => console.warn('Falha na gravação remota:', err));
 
     // Integração com o Quadro de Atribuições: cria automaticamente a atribuição para a nova turma
     const safeId = generateTurmaAtribuicaoId(name);
@@ -1098,7 +1107,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
       return nextList;
     });
-    saveTurmaAtribuicaoToFirestore(newAtribuicao);
+    saveTurmaAtribuicaoToFirestore(newAtribuicao).catch((err) => console.warn('Falha na gravação remota:', err));
 
     return true;
   };
@@ -1108,7 +1117,7 @@ export default function App() {
     setTurmas(updatedTurmas);
     saveTurmas(updatedTurmas);
     broadcastSyncEvent('SYNC_TURMAS', updatedTurmas);
-    deleteTurmaFromFirestore(turmaName);
+    deleteTurmaFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
 
     // Integração com o Quadro de Atribuições: remove imediatamente a atribuição correspondente
     setQuadroAtribuicoes((prev) => {
@@ -1117,7 +1126,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
       return nextList;
     });
-    deleteTurmaAtribuicaoFromFirestore(turmaName);
+    deleteTurmaAtribuicaoFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
 
     if (deleteStudents) {
       // Remove all students belonging to this turma
@@ -1128,7 +1137,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
       const studentsToRemove = students.filter((s) => s.turma === turmaName);
-      studentsToRemove.forEach((s) => deleteStudentFromFirestore(s.id, s.name, s.turma));
+      studentsToRemove.forEach((s) => deleteStudentFromFirestore(s.id, s.name, s.turma).catch((err) => console.warn('Falha na gravação remota:', err)));
 
       // Clean attendance records for removed students
       const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
@@ -1146,14 +1155,14 @@ export default function App() {
       saveStudents(updatedStudents);
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
-      updatedStudents.filter((s) => s.turma === targetTurmaToReassign).forEach((s) => saveStudentToFirestore(s));
+      updatedStudents.filter((s) => s.turma === targetTurmaToReassign).forEach((s) => saveStudentToFirestore(s).catch((err) => console.warn('Falha na gravação remota:', err)));
 
       const updatedRecords = records.map((r) => r.turma === turmaName ? { ...r, turma: targetTurmaToReassign } : r);
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
       broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
 
-      updatedRecords.filter((r) => r.turma === targetTurmaToReassign).forEach((r) => saveRecordToFirestore(r));
+      updatedRecords.filter((r) => r.turma === targetTurmaToReassign).forEach((r) => saveRecordToFirestore(r).catch((err) => console.warn('Falha na gravação remota:', err)));
     }
   };
 
@@ -1266,6 +1275,8 @@ export default function App() {
         saveLocalUsersList(deduplicated);
         return deduplicated;
       });
+      // Relança o erro para permitir confirmação real na interface (useConfirmedAction)
+      throw err;
     }
   };
 
@@ -1316,7 +1327,7 @@ export default function App() {
     setActivitiesList(updatedActs);
     saveActivities(updatedActs);
     broadcastSyncEvent('SYNC_ACTIVITIES', updatedActs);
-    saveActivityToFirestore(activityToSave);
+    saveActivityToFirestore(activityToSave).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleDeleteActivity = (activityId: string) => {
@@ -1324,7 +1335,7 @@ export default function App() {
     setActivitiesList(updatedActs);
     saveActivities(updatedActs);
     broadcastSyncEvent('SYNC_ACTIVITIES', updatedActs);
-    deleteActivityFromFirestore(activityId);
+    deleteActivityFromFirestore(activityId).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   // Schedule Management Handlers
@@ -1340,7 +1351,7 @@ export default function App() {
     setSchedules(updated);
     saveSchedules(updated);
     broadcastSyncEvent('SYNC_SCHEDULES', updated);
-    saveScheduleBlockToFirestore(block);
+    saveScheduleBlockToFirestore(block).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleDeleteScheduleBlock = (id: string) => {
@@ -1348,7 +1359,7 @@ export default function App() {
     setSchedules(updated);
     saveSchedules(updated);
     broadcastSyncEvent('SYNC_SCHEDULES', updated);
-    deleteScheduleBlockFromFirestore(id);
+    deleteScheduleBlockFromFirestore(id).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleBatchSaveSchedules = (
@@ -1360,9 +1371,9 @@ export default function App() {
     saveSchedules(blocks);
     broadcastSyncEvent('SYNC_SCHEDULES', blocks);
     if (deletedIds.length > 0) {
-      batchSyncSchedulesToFirestore(newOrUpdatedOnly || blocks, deletedIds);
+      batchSyncSchedulesToFirestore(newOrUpdatedOnly || blocks, deletedIds).catch((err) => console.warn('Falha na gravação remota:', err));
     } else {
-      saveAllSchedulesToFirestore(newOrUpdatedOnly || blocks);
+      saveAllSchedulesToFirestore(newOrUpdatedOnly || blocks).catch((err) => console.warn('Falha na gravação remota:', err));
     }
   };
 
@@ -1374,7 +1385,7 @@ export default function App() {
       saveHolidays(updated);
       return updated;
     });
-    saveHolidayToFirestore(holiday);
+    saveHolidayToFirestore(holiday).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleDeleteHoliday = (holidayId: string) => {
@@ -1383,13 +1394,13 @@ export default function App() {
       saveHolidays(updated);
       return updated;
     });
-    deleteHolidayFromFirestore(holidayId);
+    deleteHolidayFromFirestore(holidayId).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleBatchSaveHolidays = (batch: HolidayItem[]) => {
     setHolidays(batch);
     saveHolidays(batch);
-    batchSaveHolidaysToFirestore(batch);
+    batchSaveHolidaysToFirestore(batch).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   // Ponto Records & Closings Handlers
@@ -1407,7 +1418,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_PONTO_RECORDS', next);
       return next;
     });
-    savePontoRecordToFirestore(record);
+    savePontoRecordToFirestore(record).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleBatchSavePontoRecords = (recordsToSave: PontoRecord[]) => {
@@ -1420,7 +1431,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_PONTO_RECORDS', merged);
       return merged;
     });
-    batchSavePontoRecordsToFirestore(recordsToSave);
+    batchSavePontoRecordsToFirestore(recordsToSave).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   const handleSavePontoClosing = (closing: PontoMonthClosing) => {
@@ -1437,7 +1448,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_PONTO_CLOSINGS', next);
       return next;
     });
-    savePontoClosingToFirestore(closing);
+    savePontoClosingToFirestore(closing).catch((err) => console.warn('Falha na gravação remota:', err));
   };
 
   // Semanário Pedagogical Planning Handlers
@@ -1455,7 +1466,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
-    saveSemanarioPlanToFirestore(plan);
+    saveSemanarioPlanToFirestore(plan).catch((err) => console.warn('Falha na gravação remota:', err));
   }, []);
 
   const handleDeleteSemanarioPlan = useCallback((planId: string) => {
@@ -1465,7 +1476,7 @@ export default function App() {
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
-    deleteSemanarioPlanFromFirestore(planId);
+    deleteSemanarioPlanFromFirestore(planId).catch((err) => console.warn('Falha na gravação remota:', err));
   }, []);
 
   const handleBatchSaveSemanarioPlans = useCallback((plansToSave: SemanarioPlan[]) => {
@@ -1477,7 +1488,7 @@ export default function App() {
       saveSemanarioPlans(merged);
       return merged;
     });
-    batchSaveSemanarioPlansToFirestore(plansToSave);
+    batchSaveSemanarioPlansToFirestore(plansToSave).catch((err) => console.warn('Falha na gravação remota:', err));
   }, []);
 
   const handleSaveTurmaAtribuicao = useCallback((item: TurmaAtribuicao) => {
@@ -1499,14 +1510,14 @@ export default function App() {
       broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', next);
       return next;
     });
-    saveTurmaAtribuicaoToFirestore(normalizedItem);
+    saveTurmaAtribuicaoToFirestore(normalizedItem).catch((err) => console.warn('Falha na gravação remota:', err));
   }, []);
 
   const handleBatchSaveQuadroAtribuicoes = useCallback((items: TurmaAtribuicao[]) => {
     setQuadroAtribuicoes(items);
     saveLocalQuadroAtribuicoes(items);
     broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', items);
-    batchSaveQuadroAtribuicoesToFirestore(items);
+    batchSaveQuadroAtribuicoesToFirestore(items).catch((err) => console.warn('Falha na gravação remota:', err));
   }, []);
 
   // Quadro de Atribuições estritamente alinhado às turmas ativas de Alunos e Turmas

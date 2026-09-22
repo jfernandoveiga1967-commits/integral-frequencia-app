@@ -175,7 +175,11 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     };
 
     setMonthlyMenu(updatedMenu);
-    await saveMonthlyMenu(updatedMenu);
+    try {
+      await saveMonthlyMenu(updatedMenu);
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
+    }
     showToast(`Cardápio do dia ${updatedDay.dayNumber} atualizado com sucesso!`);
   };
 
@@ -190,7 +194,11 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     }
 
     setRecipes(updatedList);
-    await saveCookingRecipes(monthKey, updatedList);
+    try {
+      await saveCookingRecipes(monthKey, updatedList);
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
+    }
     showToast(`Receita "${savedRecipe.title}" salva com sucesso!`);
   };
 
@@ -199,7 +207,11 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     if (!confirm('Deseja realmente remover esta receita da oficina?')) return;
     const updatedList = recipes.filter((r) => r.id !== recipeId);
     setRecipes(updatedList);
-    await saveCookingRecipes(monthKey, updatedList);
+    try {
+      await saveCookingRecipes(monthKey, updatedList);
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
+    }
     showToast('Receita removida da oficina.');
   };
 

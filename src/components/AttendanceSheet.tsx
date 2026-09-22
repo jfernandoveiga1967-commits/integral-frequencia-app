@@ -9,9 +9,11 @@ import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentSched
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2 } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { useConfirmedAction } from '../hooks/useConfirmedAction';
+import { SaveStatusBanner } from './SaveStatusBanner';
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -23,9 +25,9 @@ interface AttendanceSheetProps {
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
-  onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
-  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
-  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
+  onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
+  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
+  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
 }
 
 export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
@@ -195,6 +197,34 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Observations edit state map (studentId_activity_date -> string)
   const [obsMap, setObsMap] = useState<Record<string, string>>({});
 
+  // Confirmed action for batch operations (Marcar Todos Presentes / Limpar Marcações)
+  const batchAction = useConfirmedAction();
+
+  // Non-blocking batch sync tracker for individual rapid clicks
+  const [individualSyncState, setIndividualSyncState] = useState<{
+    pendingCount: number;
+    totalInBatch: number;
+    syncedCount: number;
+    isComplete: boolean;
+    error: { message: string; retry?: () => Promise<any> | void } | null;
+  }>({
+    pendingCount: 0,
+    totalInBatch: 0,
+    syncedCount: 0,
+    isComplete: false,
+    error: null,
+  });
+
+  const autoClearSyncTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoClearSyncTimerRef.current) {
+        clearTimeout(autoClearSyncTimerRef.current);
+      }
+    };
+  }, []);
+
   // Listen for navigation filter events from other tabs (like CurrentActivities)
   useEffect(() => {
     const handleFilterEvent = (e: CustomEvent<{ activity?: ActivityType; turma?: TurmaType; date?: string }>) => {
@@ -333,7 +363,7 @@ function getCurrentHHMM(): string {
   }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
   // Handlers for status click
-  const handleStatusClick = (
+  const handleStatusClick = async (
     student: Student,
     activity: ActivityType,
     date: string,
@@ -366,7 +396,7 @@ function getCurrentHHMM(): string {
       exitTime = existingRec?.exitTime || getCurrentHHMM();
     }
 
-    onSaveRecord({
+    const recordPayload = {
       studentId: student.id,
       activity,
       turma: student.turma,
@@ -377,7 +407,63 @@ function getCurrentHHMM(): string {
       exitTime: status === 'saida_antecipada' ? exitTime : undefined,
       equipmentMissingDetails: equipmentDetails,
       observation: currentObs || undefined,
-    });
+    };
+
+    // Limpa timer anterior de conclusão suave
+    if (autoClearSyncTimerRef.current) {
+      clearTimeout(autoClearSyncTimerRef.current);
+      autoClearSyncTimerRef.current = null;
+    }
+
+    // Registra início da sincronização de forma não bloqueante
+    setIndividualSyncState((prev) => ({
+      ...prev,
+      pendingCount: prev.pendingCount + 1,
+      totalInBatch: prev.pendingCount === 0 ? 1 : prev.totalInBatch + 1,
+      syncedCount: prev.pendingCount === 0 ? 0 : prev.syncedCount,
+      isComplete: false,
+      error: null,
+    }));
+
+    try {
+      await onSaveRecord(recordPayload);
+
+      setIndividualSyncState((prev) => {
+        const nextPending = Math.max(0, prev.pendingCount - 1);
+        const nextSynced = prev.syncedCount + 1;
+        const isAllDone = nextPending === 0;
+
+        if (isAllDone) {
+          if (autoClearSyncTimerRef.current) clearTimeout(autoClearSyncTimerRef.current);
+          autoClearSyncTimerRef.current = setTimeout(() => {
+            setIndividualSyncState({
+              pendingCount: 0,
+              totalInBatch: 0,
+              syncedCount: 0,
+              isComplete: false,
+              error: null,
+            });
+          }, 3500);
+        }
+
+        return {
+          ...prev,
+          pendingCount: nextPending,
+          syncedCount: nextSynced,
+          isComplete: isAllDone,
+        };
+      });
+    } catch (err: any) {
+      console.error('Erro ao confirmar presença no Firestore:', err);
+      setIndividualSyncState((prev) => ({
+        ...prev,
+        pendingCount: Math.max(0, prev.pendingCount - 1),
+        error: {
+          message: err?.message || 'Falha ao confirmar presença deste aluno no servidor.',
+          retry: () => handleStatusClick(student, activity, date, status, equipmentDetails, obs, exitTimeParam),
+        },
+      }));
+    }
   };
 
   const handleEquipmentModalSave = (details: string) => {
@@ -403,38 +489,68 @@ function getCurrentHHMM(): string {
     });
   }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
-  const handleBatchMarkAllPresent = () => {
+  const handleBatchMarkAllPresent = async () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
 
     if (areAllMarkedPresent) {
-      onClearRecords(studentIds, selectedActivity, selectedDate);
-      setObsMap((prev) => {
-        const next = { ...prev };
-        studentIds.forEach((sid) => {
-          delete next[`${sid}_${selectedActivity}_${selectedDate}`];
-        });
-        return next;
-      });
+      await batchAction.execute(
+        async () => {
+          await onClearRecords(studentIds, selectedActivity, selectedDate);
+        },
+        {
+          pendingMessage: `Desmarcando presença de ${studentIds.length} alunos no Firestore...`,
+          successMessage: `Presenças desmarcadas e sincronizadas no Firestore com sucesso!`,
+          errorMessage: 'Falha ao desmarcar chamada no servidor.',
+          onSuccess: () => {
+            setObsMap((prev) => {
+              const next = { ...prev };
+              studentIds.forEach((sid) => {
+                delete next[`${sid}_${selectedActivity}_${selectedDate}`];
+              });
+              return next;
+            });
+          },
+        }
+      );
     } else {
-      onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+      await batchAction.execute(
+        async () => {
+          await onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+        },
+        {
+          pendingMessage: `Gravando chamada de ${studentIds.length} alunos no Firestore...`,
+          successMessage: `Chamada de ${studentIds.length} alunos gravada e confirmada no Firestore!`,
+          errorMessage: 'Falha ao gravar chamada em lote no servidor.',
+        }
+      );
     }
   };
 
-  const handleClearSelected = () => {
+  const handleClearSelected = async () => {
     const studentIds = filteredStudents.map((s) => s.id);
     if (studentIds.length === 0) return;
     if (window.confirm(`Tem certeza que deseja limpar as marcações de "${selectedActivity}" no dia selecionado?`)) {
-      onClearRecords(studentIds, selectedActivity, selectedDate);
-
-      // Clear local observation state for cleared records
-      setObsMap((prev) => {
-        const next = { ...prev };
-        studentIds.forEach((sid) => {
-          delete next[`${sid}_${selectedActivity}_${selectedDate}`];
-        });
-        return next;
-      });
+      await batchAction.execute(
+        async () => {
+          await onClearRecords(studentIds, selectedActivity, selectedDate);
+        },
+        {
+          pendingMessage: `Removendo marcações de presença no Firestore...`,
+          successMessage: `Marcações removidas e confirmadas no Firestore com sucesso!`,
+          errorMessage: 'Falha ao remover marcações no servidor.',
+          onSuccess: () => {
+            // Clear local observation state for cleared records
+            setObsMap((prev) => {
+              const next = { ...prev };
+              studentIds.forEach((sid) => {
+                delete next[`${sid}_${selectedActivity}_${selectedDate}`];
+              });
+              return next;
+            });
+          },
+        }
+      );
     }
   };
 
@@ -789,7 +905,7 @@ function getCurrentHHMM(): string {
 
             <button
               onClick={handleBatchMarkAllPresent}
-              disabled={filteredStudents.length === 0}
+              disabled={filteredStudents.length === 0 || batchAction.isPending}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs ${
                 areAllMarkedPresent
                   ? 'bg-amber-600 hover:bg-amber-700'
@@ -801,7 +917,12 @@ function getCurrentHHMM(): string {
                   : 'Marcar todos os alunos visíveis como presentes'
               }
             >
-              {areAllMarkedPresent ? (
+              {batchAction.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Sincronizando...</span>
+                </>
+              ) : areAllMarkedPresent ? (
                 <>
                   <XCircle className="w-4 h-4" />
                   <span>Desmarcar Todos</span>
@@ -816,7 +937,7 @@ function getCurrentHHMM(): string {
 
             <button
               onClick={handleClearSelected}
-              disabled={filteredStudents.length === 0}
+              disabled={filteredStudents.length === 0 || batchAction.isPending}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1"
               title="Limpar marcações deste dia"
             >
@@ -825,6 +946,68 @@ function getCurrentHHMM(): string {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Real-time Confirmation Feedback & Batch Sync Indicator */}
+      <div className="space-y-2">
+        {/* Batch Action Banner (Marcar Todos / Limpar) */}
+        <SaveStatusBanner
+          isPending={batchAction.isPending}
+          pendingText={batchAction.pendingMessage}
+          successNotice={batchAction.successNotice}
+          error={batchAction.error}
+          onClearError={batchAction.clearError}
+        />
+
+        {/* Individual Save Error Banner */}
+        {individualSyncState.error && (
+          <SaveStatusBanner
+            isPending={false}
+            error={individualSyncState.error}
+            onClearError={() => setIndividualSyncState((prev) => ({ ...prev, error: null }))}
+          />
+        )}
+
+        {/* Live Non-Blocking Batch Sync Indicator */}
+        {(individualSyncState.pendingCount > 0 || (individualSyncState.isComplete && individualSyncState.totalInBatch > 0)) && (
+          <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs shadow-xs">
+            <div className="flex items-center space-x-2">
+              {individualSyncState.pendingCount > 0 ? (
+                <>
+                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
+                  <span className="font-bold text-slate-700">
+                    Sincronizando com a nuvem ({individualSyncState.syncedCount}/{individualSyncState.totalInBatch})
+                  </span>
+                  <span className="text-slate-400 text-[11px]">
+                    ({individualSyncState.pendingCount} pendente{individualSyncState.pendingCount > 1 ? 's' : ''})
+                  </span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-bold text-emerald-800">
+                    Sincronizado na nuvem ({individualSyncState.totalInBatch}/{individualSyncState.totalInBatch}) ✓
+                  </span>
+                  <span className="text-emerald-700 text-[11px]">
+                    Todos os registros confirmados com sucesso no Firestore
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="text-[11px] font-mono font-medium text-slate-500">
+              {individualSyncState.pendingCount > 0 ? (
+                <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-bold">
+                  Gravando em segundo plano
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
+                  Confirmado
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Attendance Calling Roster Grid / Table */}

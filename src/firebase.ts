@@ -64,6 +64,7 @@ export const db = initializeFirestore(
   {
     localCache: memoryLocalCache(),
     experimentalForceLongPolling: true,
+    ignoreUndefinedProperties: true,
   },
   firebaseConfig.firestoreDatabaseId
 );
@@ -571,6 +572,16 @@ export async function resolveUserFirestoreDocId(user: UserProfile): Promise<stri
   return `usr_${Date.now()}`;
 }
 
+export function removeUndefinedFields<T extends Record<string, any>>(obj: T): T {
+  const clean: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      clean[key] = value;
+    }
+  }
+  return clean as T;
+}
+
 /**
  * Salva o perfil do colaborador no Firestore garantindo gravação com sucesso
  * na coleção 'usuarios' e espelhamento síncrono em 'users'.
@@ -680,9 +691,11 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     const usuarioDocRef = doc(db, 'usuarios', targetDocId);
     const userDocRef = doc(db, 'users', targetDocId);
 
+    const cleanData = removeUndefinedFields(updatedData);
+
     const results = await Promise.allSettled([
-      setDoc(usuarioDocRef, updatedData, { merge: true }),
-      setDoc(userDocRef, updatedData, { merge: true }),
+      setDoc(usuarioDocRef, cleanData, { merge: true }),
+      setDoc(userDocRef, cleanData, { merge: true }),
     ]);
 
     // Se a gravação na coleção principal 'usuarios' falhou, lança o erro para ser tratado

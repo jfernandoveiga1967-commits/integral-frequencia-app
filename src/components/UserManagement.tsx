@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from 'react';
+import { useConfirmedAction } from '../hooks/useConfirmedAction';
+import { SaveStatusBanner } from './SaveStatusBanner';
 import { UserProfile, User, UserRole, UserStatus, ActivityType, ActivityItem, ScheduleBlock, HolidayItem, RegimeTrabalho, TabType, AVAILABLE_APP_TABS, ALL_APP_TAB_IDS } from '../types';
 import { TURMAS_LIST, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import {
@@ -166,6 +168,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+
+  // Confirmed Action Hooks para gravação resiliente com feedback em tempo real
+  const userAction = useConfirmedAction();
+  const modalAction = useConfirmedAction();
+  const [pendingActionLabel, setPendingActionLabel] = useState<string>('');
 
   // User Form State
   const [formName, setFormName] = useState('');
@@ -569,27 +576,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const toggleActivityInForm = (activityId: string) => {
-    if (formActivities.includes(activityId)) {
-      setFormActivities(formActivities.filter((a) => a !== activityId));
-    } else {
-      setFormActivities([...formActivities, activityId]);
-    }
+    setFormActivities((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.includes(activityId) ? list.filter((a) => a !== activityId) : [...list, activityId];
+    });
   };
 
   const toggleTurmaInForm = (turmaName: string) => {
-    if (formTurmas.includes(turmaName)) {
-      setFormTurmas(formTurmas.filter((t) => t !== turmaName));
-    } else {
-      setFormTurmas([...formTurmas, turmaName]);
-    }
+    setFormTurmas((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.includes(turmaName) ? list.filter((t) => t !== turmaName) : [...list, turmaName];
+    });
   };
 
   const toggleTabInForm = (tabId: TabType) => {
-    if (formAllowedTabs.includes(tabId)) {
-      setFormAllowedTabs(formAllowedTabs.filter((t) => t !== tabId));
-    } else {
-      setFormAllowedTabs([...formAllowedTabs, tabId]);
-    }
+    setFormAllowedTabs((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.includes(tabId) ? list.filter((t) => t !== tabId) : [...list, tabId];
+    });
   };
 
   const handleSaveFormSubmit = async (e: React.FormEvent) => {
@@ -765,7 +769,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: formTurmas,
       allowedTabs: isMasterAdmin || effectiveRole === 'coordenador'
         ? [...ALL_APP_TAB_IDS]
-        : formAllowedTabs,
+        : (Array.isArray(formAllowedTabs) ? formAllowedTabs : []),
       canManageStudents: isMasterAdmin ? true : formCanManageStudents,
       canMarkAttendance: isMasterAdmin ? true : formCanMarkAttendance,
       pixKey: formPixKey.trim() || formPhone.trim() || undefined,
@@ -797,28 +801,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      setIsSavingUser(true);
-      await Promise.resolve(onSaveUser(updatedUser));
-      if (onForceReloadUsers) {
-        await onForceReloadUsers().catch(() => {});
+    setPendingActionLabel(`Gravando dados de ${updatedUser.name} no Firestore...`);
+    const success = await modalAction.execute(
+      async () => {
+        setIsSavingUser(true);
+        try {
+          await Promise.resolve(onSaveUser(updatedUser));
+          if (onForceReloadUsers) {
+            await onForceReloadUsers().catch(() => {});
+          }
+        } finally {
+          setIsSavingUser(false);
+        }
+      },
+      {
+        loadingMessage: `Gravando perfil de ${updatedUser.name} no servidor Firestore...`,
+        successMessage: `Perfil de ${updatedUser.name} salvo e confirmado no Firestore com sucesso!`,
+        errorMessage: `Erro ao salvar perfil de ${updatedUser.name} no servidor.`,
       }
-      setEditingUser(null);
-      setIsNewUserModalOpen(false);
-      showToast(`Perfil de ${updatedUser.name} salvo com sucesso!`, 'success');
-    } catch (err: any) {
-      console.warn('Aviso durante salvamento de usuário no Firestore:', err);
-      setEditingUser(null);
-      setIsNewUserModalOpen(false);
-      const isQuota = String(err?.message || '').toLowerCase().includes('quota') ||
-        String(err?.message || '').toLowerCase().includes('resource-exhausted');
-      if (isQuota) {
-        showToast(`Perfil de ${updatedUser.name} salvo localmente! (Aviso: Cota diária gratuita do Firestore atingida. As alterações foram salvas com segurança no navegador)`, 'success');
-      } else {
-        showToast(`Perfil de ${updatedUser.name} salvo com sucesso no dispositivo.`, 'success');
-      }
-    } finally {
-      setIsSavingUser(false);
+    );
+
+    if (success) {
+      showToast(`Perfil de ${updatedUser.name} gravado e confirmado no Firestore!`, 'success');
+      setTimeout(() => {
+        setEditingUser(null);
+        setIsNewUserModalOpen(false);
+      }, 500);
     }
   };
 
@@ -848,19 +856,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       role: newRole,
       cargoLabel: roleLabels[newRole],
       avatarColor: roleColors[newRole],
-      allowedTabs: newRole === 'coordenador' ? [...ALL_APP_TAB_IDS] : user.allowedTabs,
+      allowedTabs: newRole === 'coordenador' ? [...ALL_APP_TAB_IDS] : (user.allowedTabs || []),
       canManageStudents: newRole === 'coordenador' ? true : user.canManageStudents,
       canMarkAttendance: newRole === 'coordenador' ? true : user.canMarkAttendance,
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Cargo de ${user.name} alterado para ${roleLabels[newRole]}!`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao alterar cargo:', err);
-      showToast(`Erro ao alterar cargo no Firestore: ${err?.message || 'Falha de rede ou permissão'}`, 'error');
-    }
+    setPendingActionLabel(`Alterando cargo de ${user.name} para ${roleLabels[newRole]}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Alterando cargo de ${user.name} para ${roleLabels[newRole]} no Firestore...`,
+        successMessage: `Cargo de ${user.name} alterado para ${roleLabels[newRole]} e confirmado no Firestore!`,
+        errorMessage: `Erro ao alterar cargo de ${user.name} no servidor.`,
+      }
+    );
   };
 
   const handleQuickStatusChange = async (user: UserProfile, newStatus: UserStatus) => {
@@ -878,13 +890,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Status de ${user.name} alterado para ${newStatus}!`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao alterar status:', err);
-      showToast(`Erro ao alterar status no Firestore: ${err?.message || 'Falha de rede ou permissão'}`, 'error');
-    }
+    setPendingActionLabel(`Alterando status de ${user.name} para ${newStatus}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Alterando status de ${user.name} para ${newStatus} no Firestore...`,
+        successMessage: `Status de ${user.name} alterado para ${newStatus} e confirmado no Firestore!`,
+        errorMessage: `Erro ao alterar status de ${user.name} no servidor.`,
+      }
+    );
   };
 
   const handleToggleCanManageStudents = async (user: UserProfile) => {
@@ -894,13 +910,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canManageStudents: !currentVal,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Permissão de cadastro de alunos para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao atualizar permissão:', err);
-      showToast(`Erro ao gravar permissão no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    const actionText = !currentVal ? 'liberada' : 'bloqueada';
+    setPendingActionLabel(`Atualizando permissão de cadastro de alunos para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Atualizando permissão de cadastro de alunos no Firestore...`,
+        successMessage: `Permissão de cadastro de alunos para ${user.name} ${actionText} e confirmada no Firestore!`,
+        errorMessage: `Erro ao atualizar permissão de alunos para ${user.name}.`,
+      }
+    );
   };
 
   const handleToggleCanMarkAttendance = async (user: UserProfile) => {
@@ -910,13 +931,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       canMarkAttendance: !currentVal,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Permissão de lançamento de chamada para ${user.name}: ${!currentVal ? 'LIBERADA' : 'BLOQUEADA'}`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao atualizar permissão:', err);
-      showToast(`Erro ao gravar permissão no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    const actionText = !currentVal ? 'liberada' : 'bloqueada';
+    setPendingActionLabel(`Atualizando permissão de chamada para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Atualizando permissão de chamada no Firestore...`,
+        successMessage: `Permissão de chamada para ${user.name} ${actionText} e confirmada no Firestore!`,
+        errorMessage: `Erro ao atualizar permissão de chamada para ${user.name}.`,
+      }
+    );
   };
 
   const handleToggleUserActivity = async (user: UserProfile, activityId: ActivityType) => {
@@ -931,13 +957,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       assignedActivities: newList,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Modalidade ${activityId} ${!exists ? 'atribuída a' : 'removida de'} ${user.name}`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao atualizar atividade do usuário:', err);
-      showToast(`Erro ao salvar alteração no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    const actionText = !exists ? 'atribuída a' : 'removida de';
+    setPendingActionLabel(`Atualizando modalidade ${activityId} para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Atualizando modalidade ${activityId} no Firestore...`,
+        successMessage: `Modalidade ${activityId} ${actionText} ${user.name} e confirmada no Firestore!`,
+        errorMessage: `Erro ao salvar modalidade ${activityId} no Firestore.`,
+      }
+    );
   };
 
   const handleAssignAllActivities = async (user: UserProfile) => {
@@ -949,13 +980,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       assignedActivities: allIds,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Todas as modalidades foram liberadas para ${user.name}!`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao liberar modalidades:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Liberando todas as modalidades para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Liberando modalidades no Firestore...`,
+        successMessage: `Todas as modalidades foram liberadas para ${user.name} e confirmadas no Firestore!`,
+        errorMessage: `Erro ao liberar modalidades no Firestore.`,
+      }
+    );
   };
 
   const handleClearAllActivities = async (user: UserProfile) => {
@@ -964,13 +999,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       assignedActivities: [],
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Modalidades de ${user.name} foram limpas.`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao limpar modalidades:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Limpando modalidades de ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Limpando modalidades no Firestore...`,
+        successMessage: `Modalidades de ${user.name} foram limpas e confirmadas no Firestore!`,
+        errorMessage: `Erro ao limpar modalidades no Firestore.`,
+      }
+    );
   };
 
   const handleToggleUserTurma = async (user: UserProfile, turmaName: string) => {
@@ -986,13 +1025,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: newList,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Turma ${turmaName} ${!exists ? 'liberada para' : 'revogada de'} ${user.name}`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao atualizar turma do usuário:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    const actionText = !exists ? 'liberada para' : 'revogada de';
+    setPendingActionLabel(`Atualizando turma ${turmaName} para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Atualizando turma no Firestore...`,
+        successMessage: `Turma ${turmaName} ${actionText} ${user.name} e confirmada no Firestore!`,
+        errorMessage: `Erro ao salvar turma no Firestore.`,
+      }
+    );
   };
 
   const handleAssignAllTurmas = async (user: UserProfile) => {
@@ -1002,13 +1046,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: availableTurmas,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Todas as turmas foram liberadas para ${user.name}!`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao liberar turmas:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Liberando todas as turmas para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Liberando turmas no Firestore...`,
+        successMessage: `Todas as turmas foram liberadas para ${user.name} e confirmadas no Firestore!`,
+        errorMessage: `Erro ao liberar turmas no Firestore.`,
+      }
+    );
   };
 
   const handleClearAllTurmas = async (user: UserProfile) => {
@@ -1018,13 +1066,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedClassIds: [],
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Turmas de ${user.name} foram limpas.`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao limpar turmas:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Limpando turmas de ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Limpando turmas no Firestore...`,
+        successMessage: `Turmas de ${user.name} foram limpas e confirmadas no Firestore!`,
+        errorMessage: `Erro ao limpar turmas no Firestore.`,
+      }
+    );
   };
 
   const handleToggleUserTab = async (user: UserProfile, tabId: TabType) => {
@@ -1041,15 +1093,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedTabs: newList,
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      const tabMeta = AVAILABLE_APP_TABS.find((t) => t.id === tabId);
-      const tabName = tabMeta ? tabMeta.label : tabId;
-      showToast(`Aba "${tabName}" ${!exists ? 'liberada para' : 'removida de'} ${user.name}`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao atualizar abas permitidas:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    const tabMeta = AVAILABLE_APP_TABS.find((t) => t.id === tabId);
+    const tabName = tabMeta ? tabMeta.label : tabId;
+    const actionText = !exists ? 'liberada para' : 'removida de';
+
+    setPendingActionLabel(`Atualizando aba "${tabName}" para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Gravando alteração da aba "${tabName}" no Firestore...`,
+        successMessage: `Aba "${tabName}" ${actionText} ${user.name} e confirmada no Firestore!`,
+        errorMessage: `Erro ao atualizar aba "${tabName}" no Firestore.`,
+      }
+    );
   };
 
   const handleAssignAllTabs = async (user: UserProfile) => {
@@ -1058,13 +1116,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedTabs: [...ALL_APP_TAB_IDS],
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Todas as abas foram liberadas para ${user.name}!`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao liberar abas:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Liberando todas as abas para ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Liberando abas no Firestore...`,
+        successMessage: `Todas as abas foram liberadas para ${user.name} e confirmadas no Firestore!`,
+        errorMessage: `Erro ao liberar abas no Firestore.`,
+      }
+    );
   };
 
   const handleClearAllTabs = async (user: UserProfile) => {
@@ -1073,13 +1135,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       allowedTabs: [],
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await Promise.resolve(onSaveUser(updated));
-      showToast(`Abas de ${user.name} foram desmarcadas.`, 'success');
-    } catch (err: any) {
-      console.error('Erro ao limpar abas:', err);
-      showToast(`Erro ao salvar no Firestore: ${err?.message || 'Falha de rede'}`, 'error');
-    }
+    setPendingActionLabel(`Limpando abas de ${user.name}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onSaveUser(updated));
+      },
+      {
+        loadingMessage: `Limpando abas no Firestore...`,
+        successMessage: `Abas de ${user.name} foram desmarcadas e confirmadas no Firestore!`,
+        errorMessage: `Erro ao limpar abas no Firestore.`,
+      }
+    );
   };
 
   const confirmDeleteUser = async () => {
@@ -1089,14 +1155,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setUserToDelete(null);
       return;
     }
-    try {
-      await Promise.resolve(onDeleteUser(userToDelete.id));
-      showToast(`Usuário ${userToDelete.name} removido com sucesso.`, 'success');
-      setUserToDelete(null);
-    } catch (err: any) {
-      console.error('Erro ao excluir usuário:', err);
-      showToast(`Erro ao excluir usuário no Firestore: ${err?.message || 'Falha de comunicação ou permissão'}`, 'error');
-    }
+    const deletedUserName = userToDelete.name;
+    const deletedUserId = userToDelete.id;
+    setUserToDelete(null);
+
+    setPendingActionLabel(`Excluindo ${deletedUserName}...`);
+    await userAction.execute(
+      async () => {
+        await Promise.resolve(onDeleteUser(deletedUserId));
+      },
+      {
+        loadingMessage: `Excluindo usuário ${deletedUserName} no Firestore...`,
+        successMessage: `Usuário ${deletedUserName} removido com sucesso e confirmado no Firestore!`,
+        errorMessage: `Erro ao excluir usuário ${deletedUserName} no Firestore.`,
+      }
+    );
   };
 
   // Handlers for Activity Modal
@@ -1388,6 +1461,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       {/* ================= SECTION 1: USERS & PERMISSIONS ================= */}
       {activeSubTab === 'users' && (
         <div className="space-y-6">
+          <SaveStatusBanner
+            id="user-mgmt-status-banner"
+            isPending={userAction.isPending}
+            pendingText={pendingActionLabel || 'Gravando alteração com segurança no Firestore...'}
+            successNotice={userAction.successNotice}
+            error={userAction.error}
+            onClearError={userAction.clearError}
+            className="mb-2"
+          />
+
           {/* Filters, Search & Expand/Collapse Controls */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -2031,7 +2114,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           ) : (
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 pt-1">
                               {AVAILABLE_APP_TABS.map((tab) => {
-                                const isAssigned = (user.allowedTabs || []).includes(tab.id);
+                                const isAssigned = Array.isArray(user.allowedTabs) && user.allowedTabs.includes(tab.id);
                                 return (
                                   <button
                                     key={tab.id}
@@ -2040,7 +2123,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                                     className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer flex items-center justify-between ${
                                       isAssigned
                                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600 opacity-60'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-white hover:text-slate-900'
                                     }`}
                                     title={isAssigned ? `Clique para revogar ${tab.label}` : `Clique para liberar ${tab.label}`}
                                   >
@@ -3208,7 +3291,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
                       {AVAILABLE_APP_TABS.map((tab) => {
-                        const isChecked = formAllowedTabs.includes(tab.id);
+                        const isChecked = Array.isArray(formAllowedTabs) && formAllowedTabs.includes(tab.id);
                         return (
                           <button
                             key={tab.id}
@@ -3216,22 +3299,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             onClick={() => toggleTabInForm(tab.id)}
                             className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                               isChecked
-                                ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold shadow-xs'
-                                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                                ? 'bg-indigo-600 border-indigo-700 text-white font-bold shadow-sm ring-2 ring-indigo-300/70'
+                                : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-slate-50'
                             }`}
                           >
                             <div className="truncate pr-2">
-                              <span className="text-xs block truncate">{tab.label}</span>
+                              <span className={`text-xs block truncate ${isChecked ? 'text-white font-extrabold' : 'text-slate-800 font-medium'}`}>{tab.label}</span>
                               {tab.description && (
-                                <span className="text-[10px] text-slate-400 block truncate font-normal">
+                                <span className={`text-[10px] block truncate font-normal ${isChecked ? 'text-indigo-100' : 'text-slate-400'}`}>
                                   {tab.description}
                                 </span>
                               )}
                             </div>
                             {isChecked ? (
-                              <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <CheckCircle2 className="w-4 h-4 text-white shrink-0 fill-indigo-700" />
                             ) : (
-                              <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                              <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0 bg-white" />
                             )}
                           </button>
                         );
@@ -3240,6 +3323,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </>
                 )}
               </div>
+
+              <SaveStatusBanner
+                id="modal-user-status-banner"
+                isPending={modalAction.isPending}
+                pendingText="Gravando dados do usuário no Firestore..."
+                successNotice={modalAction.successNotice}
+                error={modalAction.error}
+                onClearError={modalAction.clearError}
+                className="mt-3"
+              />
 
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
                 <button
@@ -3255,15 +3348,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 <button
                   type="submit"
-                  disabled={isSavingUser}
+                  disabled={modalAction.isPending || isSavingUser}
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {isSavingUser ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  {modalAction.isPending || isSavingUser ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Gravando no Firestore...</span>
+                    </>
                   ) : (
-                    <Save className="w-4 h-4" />
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>{editingUser ? 'Salvar Alterações' : 'Criar Usuário'}</span>
+                    </>
                   )}
-                  <span>{isSavingUser ? 'Salvando Usuário...' : 'Salvar Usuário'}</span>
                 </button>
               </div>
             </form>

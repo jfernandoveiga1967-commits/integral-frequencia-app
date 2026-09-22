@@ -149,7 +149,11 @@ export function saveMonthlyMenuLocally(menu: MonthlyMenu): void {
  */
 export async function saveMonthlyMenu(menu: MonthlyMenu): Promise<void> {
   saveMonthlyMenuLocally(menu);
-  await saveMonthlyMenuToFirestore(menu);
+  try {
+    await saveMonthlyMenuToFirestore(menu);
+  } catch (err) {
+    console.warn('Falha na gravação remota:', err);
+  }
 }
 
 /**
@@ -209,7 +213,11 @@ export function saveCookingRecipesLocally(monthKey: string, recipes: CookingReci
  */
 export async function saveCookingRecipes(monthKey: string, recipes: CookingRecipe[]): Promise<void> {
   saveCookingRecipesLocally(monthKey, recipes);
-  await saveCookingRecipesToFirestore(monthKey, recipes);
+  try {
+    await saveCookingRecipesToFirestore(monthKey, recipes);
+  } catch (err) {
+    console.warn('Falha na gravação remota:', err);
+  }
 }
 
 /**

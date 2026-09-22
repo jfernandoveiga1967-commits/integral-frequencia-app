@@ -38,34 +38,46 @@ export const AlunosTurmas: React.FC<AlunosTurmasProps> = (props) => {
   }, [props.students]);
 
   const handleAddStudent = async (studentData: Omit<Student, 'id'>) => {
-    if (props.onAddStudent) {
-      await props.onAddStudent(studentData);
-    } else {
-      const newStudent: Student = {
-        ...studentData,
-        id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        status: 'ativo',
-        statusMatricula: 'ativo',
-      };
-      await saveStudentToFirestore(newStudent);
+    try {
+      if (props.onAddStudent) {
+        await props.onAddStudent(studentData);
+      } else {
+        const newStudent: Student = {
+          ...studentData,
+          id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          status: 'ativo',
+          statusMatricula: 'ativo',
+        };
+        await saveStudentToFirestore(newStudent);
+      }
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
     }
   };
 
   const handleUpdateStudent = async (student: Student) => {
-    if (props.onUpdateStudent) {
-      await props.onUpdateStudent(student);
-    } else {
-      await saveStudentToFirestore(student);
+    try {
+      if (props.onUpdateStudent) {
+        await props.onUpdateStudent(student);
+      } else {
+        await saveStudentToFirestore(student);
+      }
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
     }
   };
 
   const handleDeleteStudent = async (id: string) => {
-    if (props.onDeleteStudent) {
-      await props.onDeleteStudent(id);
-    } else {
-      await deleteStudentFromFirestore(id);
-      removeStudentFromLocalStorage(id);
-      markStudentAsDeleted(id);
+    try {
+      if (props.onDeleteStudent) {
+        await props.onDeleteStudent(id);
+      } else {
+        await deleteStudentFromFirestore(id);
+        removeStudentFromLocalStorage(id);
+        markStudentAsDeleted(id);
+      }
+    } catch (err) {
+      console.warn('Falha na gravação remota:', err);
     }
   };
 

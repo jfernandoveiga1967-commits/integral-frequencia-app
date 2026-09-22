@@ -9,6 +9,8 @@ export interface ConfirmedActionError {
 export interface ConfirmedActionOptions<T = any> {
   /** Mensagem customizada de carregamento */
   loadingMessage?: string;
+  /** Mensagem customizada de carregamento (sinônimo) */
+  pendingMessage?: string;
   /** Mensagem exibida ao confirmar a gravação no servidor */
   successMessage?: string;
   /** Mensagem amigável de erro se a operação falhar */
@@ -59,6 +61,7 @@ export function formatFirestoreErrorMessage(err: any, fallback?: string): string
 
 export function useConfirmedAction() {
   const [isPending, setIsPending] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string>('Gravando dados com segurança no Firestore...');
   const [error, setError] = useState<ConfirmedActionError | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
@@ -104,6 +107,8 @@ export function useConfirmedAction() {
         autoClearTimerRef.current = null;
       }
 
+      const currentPendingText = options?.pendingMessage || options?.loadingMessage || 'Gravando dados com segurança no Firestore...';
+      setPendingMessage(currentPendingText);
       setIsPending(true);
       setError(null);
       setSuccessNotice(null);
@@ -152,6 +157,7 @@ export function useConfirmedAction() {
 
   return {
     isPending,
+    pendingMessage,
     error,
     successNotice,
     execute,

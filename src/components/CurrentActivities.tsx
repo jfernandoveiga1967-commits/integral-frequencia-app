@@ -40,6 +40,7 @@ import {
   ChevronUp,
   Target,
   Package,
+  Loader2,
 } from 'lucide-react';
 import {
   Student,
@@ -96,6 +97,8 @@ import {
   buildApoioWhatsAppUrl,
   getFirstName,
 } from '../utils/atribuicoesStorage';
+import { useConfirmedAction } from '../hooks/useConfirmedAction';
+import { SaveStatusBanner } from './SaveStatusBanner';
 
 interface CurrentActivitiesProps {
   students: Student[];
@@ -111,9 +114,9 @@ interface CurrentActivitiesProps {
   quadroAtribuicoes?: TurmaAtribuicao[];
   onSaveAtribuicao?: (atribuicao: TurmaAtribuicao) => void;
   onBatchSaveAtribuicoes?: (items: TurmaAtribuicao[]) => void;
-  onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => void;
-  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
-  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => void;
+  onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
+  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
+  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
   onNavigateToAttendance: (activity?: ActivityType, turma?: TurmaType, date?: string) => void;
   onUpdateUserPhone?: (userId: string, newPhone: string) => void;
   todaySemanarioPlans?: SemanarioPlan[];
@@ -134,12 +137,18 @@ function getEnrolledStudentsForActivity(
   selectedDate?: string,
   activityMap?: Map<string, ActivityItem>
 ): Student[] {
+  const normTurma = turmaName.trim();
   const turmaActiveStudents = students.filter((s) => {
-    if (s.turma !== turmaName) return false;
+    if (s.turma?.trim() !== normTurma) return false;
     const st = s.status || s.statusMatricula || 'ativo';
     if (st !== 'ativo') return false;
-    if (selectedDate && !isStudentActiveOnDate(s, selectedDate)) return false;
-    return isStudentScheduledForDay(s, effectiveDayOfWeek);
+    if (selectedDate) {
+      if (!isStudentActiveOnDate(s, selectedDate)) return false;
+      if (!isStudentScheduledForDate(s, selectedDate)) return false;
+    } else {
+      if (!isStudentScheduledForDay(s, effectiveDayOfWeek)) return false;
+    }
+    return true;
   });
 
   const actMeta = activityMap?.get(activityId);
@@ -320,6 +329,8 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     activityId: string;
     block: ScheduleBlock;
   } | null>(null);
+  const quickRollCallAction = useConfirmedAction();
+  const [quickModalSaveError, setQuickModalSaveError] = useState<{ message: string; retry?: () => Promise<any> | void } | null>(null);
 
   // WhatsApp Notify modal state
   const [whatsAppModalData, setWhatsAppModalData] = useState<{
@@ -510,11 +521,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           activityMap
         );
 
+        const enrolledStudentIds = new Set(enrolledStudents.map((s) => s.id));
         // Attendance records today for this turma & activity
         const recordsToday = records.filter(
           (r) =>
             r.date === selectedDate &&
-            r.turma === turmaName &&
+            (r.turma?.trim() === turmaName.trim() || enrolledStudentIds.has(r.studentId)) &&
             (r.activity === activeBlock.activityId ||
               (isRoutineActivity(activeBlock.activityId) && isRoutineActivity(r.activity)))
         );
@@ -1772,6 +1784,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
             {/* Modal Body */}
             <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              {/* Real-time Confirmation Status Banner */}
+              <SaveStatusBanner
+                isPending={quickRollCallAction.isPending}
+                pendingText={quickRollCallAction.pendingMessage}
+                successNotice={quickRollCallAction.successNotice}
+                error={quickRollCallAction.error || quickModalSaveError}
+                onClearError={() => {
+                  quickRollCallAction.clearError();
+                  setQuickModalSaveError(null);
+                }}
+              />
+
               <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
                 <div>
                   <span className="text-xs font-extrabold text-slate-800">
@@ -1785,31 +1809,62 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    disabled={quickModalStudents.length === 0 || quickRollCallAction.isPending}
+                    onClick={async () => {
                       const studentIds = quickModalStudents.map((s) => s.id);
-                      onBatchMarkPresent(
-                        studentIds,
-                        quickRollCallModal.activityId as ActivityType,
-                        selectedDate
+                      setQuickModalSaveError(null);
+                      await quickRollCallAction.execute(
+                        async () => {
+                          await onBatchMarkPresent(
+                            studentIds,
+                            quickRollCallModal.activityId as ActivityType,
+                            selectedDate
+                          );
+                        },
+                        {
+                          pendingMessage: `Gravando chamada de ${studentIds.length} alunos no Firestore...`,
+                          successMessage: `Chamada gravada e confirmada no Firestore com sucesso!`,
+                          errorMessage: 'Falha ao gravar chamada no servidor.',
+                        }
                       );
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-colors shadow-xs flex items-center space-x-1 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-colors shadow-xs flex items-center space-x-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Marcar Todos Presentes</span>
+                    {quickRollCallAction.isPending ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Sincronizando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Marcar Todos Presentes</span>
+                      </>
+                    )}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
+                    disabled={quickModalStudents.length === 0 || quickRollCallAction.isPending}
+                    onClick={async () => {
                       const studentIds = quickModalStudents.map((s) => s.id);
-                      onClearRecords(
-                        studentIds,
-                        quickRollCallModal.activityId as ActivityType,
-                        selectedDate
+                      setQuickModalSaveError(null);
+                      await quickRollCallAction.execute(
+                        async () => {
+                          await onClearRecords(
+                            studentIds,
+                            quickRollCallModal.activityId as ActivityType,
+                            selectedDate
+                          );
+                        },
+                        {
+                          pendingMessage: `Removendo marcações no Firestore...`,
+                          successMessage: `Marcações removidas com sucesso no Firestore!`,
+                          errorMessage: 'Falha ao remover marcações no servidor.',
+                        }
                       );
                     }}
-                    className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Limpar
                   </button>
@@ -1893,16 +1948,24 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               <button
                                 key={st.id}
                                 type="button"
-                                onClick={() => {
-                                  onSaveRecord({
-                                    studentId: student.id,
-                                    activity: quickRollCallModal.activityId as ActivityType,
-                                    turma: student.turma,
-                                    date: selectedDate,
-                                    weekNumber: currentWeek.weekNumber,
-                                    year: currentWeek.year,
-                                    status: st.id,
-                                  });
+                                onClick={async () => {
+                                  setQuickModalSaveError(null);
+                                  try {
+                                    await onSaveRecord({
+                                      studentId: student.id,
+                                      activity: quickRollCallModal.activityId as ActivityType,
+                                      turma: student.turma,
+                                      date: selectedDate,
+                                      weekNumber: currentWeek.weekNumber,
+                                      year: currentWeek.year,
+                                      status: st.id,
+                                    });
+                                  } catch (err: any) {
+                                    console.error('Erro ao salvar presença no modal:', err);
+                                    setQuickModalSaveError({
+                                      message: err?.message || 'Falha ao salvar presença no Firestore.',
+                                    });
+                                  }
                                 }}
                                 className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
                                   isAct ? st.activeBg : st.inactiveBg
