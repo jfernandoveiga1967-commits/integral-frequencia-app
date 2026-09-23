@@ -103,13 +103,13 @@ interface LivroPontoProps {
   holidays: HolidayItem[];
   pontoRecords: PontoRecord[];
   pontoClosings: PontoMonthClosing[];
-  onSavePontoRecord: (record: PontoRecord) => void;
-  onBatchSavePontoRecords: (records: PontoRecord[]) => void;
-  onSavePontoClosing: (closing: PontoMonthClosing) => void;
-  onSaveHoliday?: (holiday: HolidayItem) => void;
-  onDeleteHoliday?: (id: string) => void;
-  onBatchSaveHolidays?: (holidays: HolidayItem[]) => void;
-  onSaveUser?: (user: UserProfile) => void;
+  onSavePontoRecord: (record: PontoRecord) => Promise<any> | void;
+  onBatchSavePontoRecords: (records: PontoRecord[]) => Promise<any> | void;
+  onSavePontoClosing: (closing: PontoMonthClosing) => Promise<any> | void;
+  onSaveHoliday?: (holiday: HolidayItem) => Promise<any> | void;
+  onDeleteHoliday?: (id: string) => Promise<any> | void;
+  onBatchSaveHolidays?: (holidays: HolidayItem[]) => Promise<any> | void;
+  onSaveUser?: (user: UserProfile) => Promise<any> | void;
 }
 
 export const LivroPonto: React.FC<LivroPontoProps> = ({
@@ -846,7 +846,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   };
 
   // Lock / Unlock Month Closing (Admin Only) with Full Audit Trail
-  const handleToggleMonthLock = () => {
+  const handleToggleMonthLock = async () => {
     if (!isAdmin) return;
 
     const newClosedState = !isMonthClosed;
@@ -924,24 +924,32 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       updatedAt: nowIso,
     };
 
-    onSavePontoClosing(newClosing);
+    try {
+      await onSavePontoClosing(newClosing);
 
-    if (newClosedState) {
+      if (newClosedState) {
+        setPunchFeedback({
+          text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} TRAVADA com sucesso por ${adminName}. Novos registros e edições estão bloqueados.`,
+          type: 'info',
+        });
+      } else {
+        setPunchFeedback({
+          text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} REABERTA com sucesso por ${adminName}. Edições manuais liberadas e auditadas.`,
+          type: 'success',
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao salvar estado de fechamento do mês:', err);
       setPunchFeedback({
-        text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} TRAVADA com sucesso por ${adminName}. Novos registros e edições estão bloqueados.`,
-        type: 'info',
-      });
-    } else {
-      setPunchFeedback({
-        text: `Folha de ${getMonthNameBR(selectedMonth)}/${selectedYear} REABERTA com sucesso por ${adminName}. Edições manuais liberadas e auditadas.`,
-        type: 'success',
+        text: 'Erro ao salvar fechamento/abertura da folha no banco de dados. Tente novamente.',
+        type: 'error',
       });
     }
     setTimeout(() => setPunchFeedback(null), 5000);
   };
 
   // Save Manual Adjustments
-  const handleSaveAdjustments = () => {
+  const handleSaveAdjustments = async () => {
     const closingId = `${selectedUserId}_${monthKey}`;
     const newClosing: PontoMonthClosing = {
       id: closingId,
@@ -997,13 +1005,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       digitalSignatureHash: closingRecord?.digitalSignatureHash || '',
       updatedAt: new Date().toISOString(),
     };
-    onSavePontoClosing(newClosing);
-    setPunchFeedback({ text: 'Ajustes financeiros salvos com sucesso!', type: 'success' });
+    try {
+      await onSavePontoClosing(newClosing);
+      setPunchFeedback({ text: 'Ajustes financeiros salvos com sucesso!', type: 'success' });
+    } catch (err) {
+      console.error('Erro ao salvar ajustes financeiros:', err);
+      setPunchFeedback({ text: 'Erro ao salvar ajustes financeiros no servidor.', type: 'error' });
+    }
     setTimeout(() => setPunchFeedback(null), 3000);
   };
 
   // Digital Signature action for Collaborator / Admin
-  const handleSignReceiptDigitally = () => {
+  const handleSignReceiptDigitally = async () => {
     const closingId = `${selectedUserId}_${monthKey}`;
     const nowIso = new Date().toISOString();
     const hash = generateDigitalSignatureHash(
@@ -1066,11 +1079,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       updatedAt: nowIso,
     };
 
-    onSavePontoClosing(updatedClosing);
-    setPunchFeedback({
-      text: 'Recibo assinado digitalmente com sucesso! Carimbo jurídico registrado.',
-      type: 'success',
-    });
+    try {
+      await onSavePontoClosing(updatedClosing);
+      setPunchFeedback({
+        text: 'Recibo assinado digitalmente com sucesso! Carimbo jurídico registrado.',
+        type: 'success',
+      });
+    } catch (err) {
+      console.error('Erro ao assinar recibo digitalmente:', err);
+      setPunchFeedback({
+        text: 'Erro ao salvar assinatura digital no servidor.',
+        type: 'error',
+      });
+    }
     setTimeout(() => setPunchFeedback(null), 4000);
   };
 
@@ -1152,7 +1173,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   };
 
   // Save Day Edit Modal
-  const handleSaveDayEdit = (recordToSave: PontoRecord) => {
+  const handleSaveDayEdit = async (recordToSave: PontoRecord) => {
     const hasCompletePunches = isDayShiftComplete(recordToSave, isUserContinuous);
     const finalRecord: PontoRecord = {
       ...recordToSave,
@@ -1160,9 +1181,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name || 'Administrador',
     };
-    onSavePontoRecord(finalRecord);
-    setShowEditDayModal(null);
-    setPunchFeedback({ text: 'Registro do dia atualizado e recálculo financeiro aplicado com sucesso!', type: 'success' });
+    try {
+      await onSavePontoRecord(finalRecord);
+      setShowEditDayModal(null);
+      setPunchFeedback({ text: 'Registro do dia atualizado e recálculo financeiro aplicado com sucesso!', type: 'success' });
+    } catch (err) {
+      console.error('Erro ao salvar registro de ponto:', err);
+      setPunchFeedback({ text: 'Erro ao salvar registro de ponto no banco.', type: 'error' });
+    }
     setTimeout(() => setPunchFeedback(null), 3500);
   };
 
@@ -2353,6 +2379,34 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleToggleMonthLock}
+                className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-md cursor-pointer active:scale-95 ${
+                  isMonthClosed
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30'
+                }`}
+                title={
+                  isMonthClosed
+                    ? 'Reabrir e destravar folha mensal para ajustes'
+                    : 'Consolidar valores financeiros e travar folha mensal de ponto contra alterações'
+                }
+              >
+                {isMonthClosed ? (
+                  <>
+                    <Unlock className="w-4 h-4" />
+                    <span>Reabrir / Destravar Folha do Mês</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Fechar Mês / Travar Folha</span>
+                  </>
+                )}
+              </button>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"

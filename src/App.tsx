@@ -1404,7 +1404,7 @@ export default function App() {
   };
 
   // Ponto Records & Closings Handlers
-  const handleSavePontoRecord = (record: PontoRecord) => {
+  const handleSavePontoRecord = async (record: PontoRecord) => {
     setPontoRecords((prev) => {
       const idx = prev.findIndex((r) => r.id === record.id);
       let next: PontoRecord[];
@@ -1418,10 +1418,15 @@ export default function App() {
       broadcastSyncEvent('SYNC_PONTO_RECORDS', next);
       return next;
     });
-    savePontoRecordToFirestore(record).catch((err) => console.warn('Falha na gravação remota:', err));
+    try {
+      await savePontoRecordToFirestore(record);
+    } catch (err) {
+      console.error('Erro ao salvar ponto no Firestore:', err);
+      throw err;
+    }
   };
 
-  const handleBatchSavePontoRecords = (recordsToSave: PontoRecord[]) => {
+  const handleBatchSavePontoRecords = async (recordsToSave: PontoRecord[]) => {
     setPontoRecords((prev) => {
       const map = new Map<string, PontoRecord>();
       prev.forEach((r) => map.set(r.id, r));
@@ -1431,24 +1436,36 @@ export default function App() {
       broadcastSyncEvent('SYNC_PONTO_RECORDS', merged);
       return merged;
     });
-    batchSavePontoRecordsToFirestore(recordsToSave).catch((err) => console.warn('Falha na gravação remota:', err));
+    try {
+      await batchSavePontoRecordsToFirestore(recordsToSave);
+    } catch (err) {
+      console.error('Erro ao salvar lote de pontos no Firestore:', err);
+      throw err;
+    }
   };
 
-  const handleSavePontoClosing = (closing: PontoMonthClosing) => {
-    setPontoClosings((prev) => {
-      const idx = prev.findIndex((c) => c.id === closing.id);
-      let next: PontoMonthClosing[];
-      if (idx >= 0) {
-        next = [...prev];
-        next[idx] = closing;
-      } else {
-        next = [...prev, closing];
-      }
-      savePontoClosings(next);
-      broadcastSyncEvent('SYNC_PONTO_CLOSINGS', next);
-      return next;
-    });
-    savePontoClosingToFirestore(closing).catch((err) => console.warn('Falha na gravação remota:', err));
+  const handleSavePontoClosing = async (closing: PontoMonthClosing) => {
+    try {
+      // Gravação direta no Firestore PRIMEIRO para dados sensíveis de fechamento
+      await savePontoClosingToFirestore(closing);
+      
+      setPontoClosings((prev) => {
+        const idx = prev.findIndex((c) => c.id === closing.id);
+        let next: PontoMonthClosing[];
+        if (idx >= 0) {
+          next = [...prev];
+          next[idx] = closing;
+        } else {
+          next = [...prev, closing];
+        }
+        savePontoClosings(next);
+        broadcastSyncEvent('SYNC_PONTO_CLOSINGS', next);
+        return next;
+      });
+    } catch (err) {
+      console.error('Erro crítico ao salvar fechamento da folha no Firestore:', err);
+      throw err;
+    }
   };
 
   // Semanário Pedagogical Planning Handlers
