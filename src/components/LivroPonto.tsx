@@ -222,6 +222,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [punchFeedback, setPunchFeedback] = useState<{
     text: string;
     type: 'success' | 'info' | 'error';
+    onRetry?: () => void;
   } | null>(null);
 
   // Quick punch button loading/lock state (instant UI block to prevent double clicks)
@@ -639,7 +640,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   ]);
 
   // Handle Quick Punch (Registrar Batida Agora)
-  const handleQuickPunch = () => {
+  const handleQuickPunch = async () => {
     // 1. Bloqueio Instantâneo no primeiro milissegundo do clique
     if (isRegisteringPunchRef.current) return;
     isRegisteringPunchRef.current = true;
@@ -756,7 +757,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     // Immediately trigger state update and save
-    onSavePontoRecord(result.updatedRecord);
+    try {
+      await onSavePontoRecord(result.updatedRecord);
+    } catch (err: any) {
+      console.error('Erro ao salvar ponto no servidor:', err);
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
+      setPunchFeedback({
+        text: 'Erro ao registrar ponto no servidor. Verifique a conexão.',
+        type: 'error',
+        onRetry: () => handleQuickPunch(),
+      });
+      return;
+    }
 
     // 2. Feedback Visual e Sonoro de Confirmação
     playPontoSuccessSound();
@@ -938,14 +951,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           type: 'success',
         });
       }
-    } catch (err) {
+      setTimeout(() => setPunchFeedback(null), 5000);
+    } catch (err: any) {
       console.error('Erro ao salvar estado de fechamento do mês:', err);
+      const errMsg = err?.message ? ` (${err.message})` : '';
       setPunchFeedback({
-        text: 'Erro ao salvar fechamento/abertura da folha no banco de dados. Tente novamente.',
+        text: `Erro ao salvar fechamento/abertura da folha no servidor${errMsg}. O fechamento NÃO foi marcado como concluído.`,
         type: 'error',
+        onRetry: () => handleToggleMonthLock(),
       });
     }
-    setTimeout(() => setPunchFeedback(null), 5000);
   };
 
   // Save Manual Adjustments
@@ -1304,12 +1319,28 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             )}
             <span>{punchFeedback.text}</span>
           </div>
-          <button
-            onClick={() => setPunchFeedback(null)}
-            className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-2">
+            {punchFeedback.onRetry && (
+              <button
+                type="button"
+                onClick={() => {
+                  const retry = punchFeedback.onRetry;
+                  setPunchFeedback(null);
+                  if (retry) retry();
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg transition shadow-md flex items-center space-x-1.5 cursor-pointer active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Tentar Novamente</span>
+              </button>
+            )}
+            <button
+              onClick={() => setPunchFeedback(null)}
+              className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
