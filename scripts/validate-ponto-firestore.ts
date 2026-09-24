@@ -38,10 +38,8 @@ async function runConcreteTests() {
     exit1: '14:00',
     entry2: '14:30',
     exit2: '17:40',
-    totalWorkedMinutes: 330,
-    balanceMinutes: -30,
-    status: 'completo',
-    notes: 'Registro gerado para validação com getDocFromServer sem cache local',
+    status: 'normal',
+    note: 'Registro gerado para validação com getDocFromServer sem cache local',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     updatedBy: 'Auditoria de Teste Automatizado',
@@ -93,7 +91,7 @@ async function runConcreteTests() {
   const testClosingId = `${testClosingUserId}_${testClosingMonthKey}`;
   const nowIso = new Date().toISOString();
 
-  const testClosingRecord: PontoMonthClosing = {
+  const testClosingRecord: any = {
     id: testClosingId,
     userId: testClosingUserId,
     userName: 'Profª Mariana Silva (Teste de Validação)',
@@ -125,9 +123,9 @@ async function runConcreteTests() {
     auditHistory: [
       {
         action: 'travar',
-        changedAt: nowIso,
-        changedBy: 'Coordenação Pedagógica / Direção Teste',
-        reason: 'Fechamento de teste mensal para validação direta getDocFromServer',
+        performedAt: nowIso,
+        performedBy: 'Coordenação Pedagógica / Direção Teste',
+        note: 'Fechamento de teste mensal para validação direta getDocFromServer',
       },
     ],
     updatedAt: nowIso,
@@ -193,7 +191,7 @@ async function runConcreteTests() {
   // Função que simula o fluxo do componente LivroPonto / App quando a conexão falha
   async function simulateClosingWithFailure(failNetwork: boolean) {
     // 1. Cria payload do fechamento
-    const testFailClosing: PontoMonthClosing = {
+    const testFailClosing: any = {
       id: 'test_fail_id',
       userId: 'user_fail_test',
       userName: 'Teste Falha',
@@ -211,7 +209,7 @@ async function runConcreteTests() {
     }
 
     // Se tiver sucesso (não executado durante a falha):
-    localStateIsClosed = testFailClosing.isClosed;
+    localStateIsClosed = Boolean(testFailClosing.isClosed);
   }
 
   try {
@@ -230,7 +228,7 @@ async function runConcreteTests() {
 
     console.log('-> Verificando se o fechamento ficou marcado como concluído:');
     console.log('   localStateIsClosed =', localStateIsClosed);
-    if (localStateIsClosed === true) {
+    if ((localStateIsClosed as boolean) === true) {
       throw new Error('FALHA: O fechamento foi indevidamente marcado como fechado antes da confirmação do servidor!');
     }
     console.log('   Confirmação: localStateIsClosed continua FALSE (segurança garantida!)');
@@ -266,7 +264,7 @@ async function runConcreteTests() {
     // ETAPA 4.1: Travar a folha
     console.log('Etapa 4.1: Travando a folha no Firestore...');
     const lockTime = new Date().toISOString();
-    const lockedData: PontoMonthClosing = {
+    const lockedData: any = {
       id: lockClosingId,
       userId: 'user_test_lock',
       userName: 'Profª Mariana Silva',
@@ -280,9 +278,9 @@ async function runConcreteTests() {
       auditHistory: [
         {
           action: 'travar',
-          changedAt: lockTime,
-          changedBy: 'Coordenação Gestão (Trava)',
-          reason: 'Bloqueio formal da competência 2026-06',
+          performedAt: lockTime,
+          performedBy: 'Coordenação Gestão (Trava)',
+          note: 'Bloqueio formal da competência 2026-06',
         },
       ],
       updatedAt: lockTime,
@@ -318,9 +316,9 @@ async function runConcreteTests() {
       auditHistory: [
         {
           action: 'destravar',
-          changedAt: unlockTime,
-          changedBy: 'Coordenação Gestão (Reabertura)',
-          reason: 'Ajuste solicitado pelo DP',
+          performedAt: unlockTime,
+          performedBy: 'Coordenação Gestão (Reabertura)',
+          note: 'Ajuste solicitado pelo DP',
         },
         ...(lockedData.auditHistory || []),
       ],

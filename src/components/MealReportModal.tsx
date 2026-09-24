@@ -44,7 +44,11 @@ import {
   Clock,
   Loader2,
   Cloud,
+  AlertTriangle,
 } from 'lucide-react';
+import { useConfirmedAction } from '../hooks/useConfirmedAction';
+import { SaveStatusBanner } from './SaveStatusBanner';
+import { toISODateString } from '../utils/dateUtils';
 
 interface MealReportModalProps {
   isOpen: boolean;
@@ -79,6 +83,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   currentUser,
 }) => {
   const currentDate = new Date();
+  const todayStr = toISODateString(currentDate);
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1); // 1-12
 
@@ -93,11 +98,13 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(daysInCurrentMonth).padStart(2, '0')}`
   );
 
+  // Confirmação real de salvamento (useConfirmedAction + SaveStatusBanner)
+  const saveAction = useConfirmedAction();
+
   // Configuração e valores customizados por dia
   const [defaultUnitPrice, setDefaultUnitPrice] = useState<number>(9.0);
   const [contractCompany, setContractCompany] = useState<string>('Cantina & Nutrição Escolar');
   const [isLoadingFromFirestore, setIsLoadingFromFirestore] = useState<boolean>(false);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [responsibleCoordinator, setResponsibleCoordinator] = useState<string>(
     currentUser?.role === 'coordenador' ? (currentUser.name || 'Fernando Veiga') : 'Fernando Veiga'
   );
@@ -171,21 +178,12 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {};
         Object.entries(rawEntries).forEach(([dateKey, val]) => {
           if (!val) return;
-          const isLegacy =
-            val.manualCount !== undefined &&
-            (val.manualCount >= 180 ||
-              val.manualCount === activeEnrolledCount ||
-              val.manualCount === 211 ||
-              val.manualCount === 212 ||
-              val.manualCount === 213 ||
-              val.manualCount === 214 ||
-              val.manualCount === 215 ||
-              val.manualCount === 231);
+          const isExplicitOverride = Boolean(val.isManualOverride && val.manualCount !== undefined);
 
           sanitized[dateKey] = {
             ...val,
-            manualCount: isLegacy ? undefined : val.manualCount,
-            isManualOverride: isLegacy ? false : Boolean(val.isManualOverride),
+            manualCount: isExplicitOverride ? val.manualCount : undefined,
+            isManualOverride: isExplicitOverride,
           };
         });
         return sanitized;
@@ -344,6 +342,13 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
   const totals = useMemo(() => calculateMealTotals(activeEntries), [activeEntries]);
 
+  // Identifica dias letivos no período onde a chamada de Rotina ainda possui alunos pendentes
+  const daysWithPendingCall = useMemo(() => {
+    return activeEntries.filter(
+      (e) => e.isSchoolDay && e.date <= todayStr && (e.pendentes || 0) > 0
+    );
+  }, [activeEntries, todayStr]);
+
   // Presets de Quinzena / Mês
   const handleSelectFirstFortnight = () => {
     setStartDate(`${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`);
@@ -470,11 +475,35 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     setTimeout(() => setSaveSuccessNotice(null), 3500);
   };
 
-  // Salvar no storage local e persistir definitivamente no Firestore
+  // Salvar no storage local e persistir definitivamente no Firestore com confirmação real
   const handleSave = async () => {
-    setIsSaving(true);
     const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
     const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
+
+    // Constrói entries para salvar:
+    // Dias futuros ou sem chamada concluída NÃO devem receber um manualCount pré-preenchido com total de matrículas.
+    // Devem ficar sem valor definido (undefined) até que a chamada real exista, ou usar o systemCount real se já ocorrido.
+    const entriesToSave: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {
+      ...(customEntries || {}),
+    };
+
+    activeEntries.forEach((entry) => {
+      const isManual = Boolean(entry.isManualOverride);
+      const isFutureOrNoCall =
+        entry.date > todayStr ||
+        !entry.isSchoolDay ||
+        (entry.systemCount === 0 && (entry.pendentes || 0) > 0);
+
+      entriesToSave[entry.date] = {
+        ...(entriesToSave[entry.date] || {}),
+        unitPrice: entry.unitPrice,
+        notes: entry.notes || '',
+        isManualOverride: isManual,
+        manualCount: isManual
+          ? entry.manualCount
+          : (isFutureOrNoCall ? undefined : entry.systemCount),
+      };
+    });
 
     const configToSave: MealReportConfig = {
       id: monthKey,
@@ -484,7 +513,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       startDate,
       endDate,
       defaultUnitPrice: cleanUnitPrice,
-      entries: customEntries,
+      entries: entriesToSave,
       contractCompany: cleanCompany,
       providerName: cleanCompany,
       responsibleCoordinator,
@@ -496,31 +525,29 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       updatedBy: currentUser?.name || 'Coordenação',
     };
 
-    try {
-      // 1. Salvar no localStorage (backup e cache local instantâneo)
-      saveMealConfig(configToSave);
-
-      // 2. Persistir no Firestore: documento mensal (mealReports/{monthKey}) E configurações globais (settings/mealReport)
-      await Promise.all([
-        saveMealReportToFirestore(configToSave),
-        saveMealReportGlobalSettings({
-          unitPrice: cleanUnitPrice,
-          providerName: cleanCompany,
-          responsibleCoordinator,
-          coordinatorRole,
-          responsibleFinancial,
-          financialRole,
-          updatedBy: currentUser?.name || 'Coordenação',
-        }),
-      ]);
-
-      showNotice('Configurações e fechamento de refeições salvos no banco de dados (Firestore) com sucesso!');
-    } catch (error) {
-      console.error('Erro ao salvar relatório de refeições no Firestore:', error);
-      showNotice('Salvo localmente com segurança.');
-    } finally {
-      setIsSaving(false);
-    }
+    await saveAction.execute(
+      async () => {
+        // Grava no Firestore primeiro com confirmação real
+        await Promise.all([
+          saveMealReportToFirestore(configToSave),
+          saveMealReportGlobalSettings({
+            unitPrice: cleanUnitPrice,
+            providerName: cleanCompany,
+            responsibleCoordinator,
+            coordinatorRole,
+            responsibleFinancial,
+            financialRole,
+            updatedBy: currentUser?.name || 'Coordenação',
+          }),
+        ]);
+        // Salva cópia local somente após a confirmação do servidor
+        saveMealConfig(configToSave);
+      },
+      {
+        pendingMessage: 'Gravando fechamento de refeições e configurações no Firestore...',
+        successMessage: 'Fechamento e relatório de refeições confirmados e salvos no Firestore com sucesso!',
+      }
+    );
   };
 
   // Navegação de Mês
@@ -662,21 +689,19 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           </div>
         </div>
 
-        {/* Success Toast */}
-        {saveSuccessNotice && (
-          <div className="bg-emerald-600 text-white text-xs font-bold px-6 py-2.5 flex items-center justify-between shrink-0 animate-in slide-in-from-top duration-150">
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{saveSuccessNotice}</span>
-            </div>
-            <button
-              onClick={() => setSaveSuccessNotice(null)}
-              className="p-1 hover:bg-emerald-700 rounded-lg text-emerald-100"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        {/* Save Status Banner com confirmação real (ou avisos locais) */}
+        <div className="px-6 pt-3 shrink-0">
+          <SaveStatusBanner
+            isPending={saveAction.isPending}
+            pendingText={saveAction.pendingMessage}
+            successNotice={saveAction.successNotice || saveSuccessNotice}
+            error={saveAction.error}
+            onClearError={() => {
+              saveAction.clearError();
+              setSaveSuccessNotice(null);
+            }}
+          />
+        </div>
 
         {/* Subheader: Month Picker & Fortnightly Filters */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 shrink-0 space-y-3">
@@ -897,7 +922,18 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         </div>
 
         {/* Scrollable Table Area */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* Banner de Aviso de Chamada de Rotina Pendente */}
+          {daysWithPendingCall.length > 0 && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5 shadow-2xs">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-bold">Aviso sobre Chamada de Rotina Pendente:</span>{' '}
+                Há <strong>{daysWithPendingCall.length} dia(s) letivo(s)</strong> no período selecionado com chamada de Rotina ainda não concluída (alunos pendentes). A contagem de refeições automáticas pode estar subestimada até que a chamada seja concluída pelas turmas.
+              </div>
+            </div>
+          )}
+
           <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -981,12 +1017,23 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                         {/* Chamada Sistema */}
                         <td className="py-2 px-3 text-center">
                           {e.isSchoolDay ? (
-                            <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              title="Presenças registradas na chamada oficial de Rotina"
-                            >
-                              {e.systemCount} al
-                            </span>
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                title="Presenças registradas na chamada oficial de Rotina"
+                              >
+                                {e.systemCount} al
+                              </span>
+                              {e.pendentes !== undefined && e.pendentes > 0 && e.date <= todayStr && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
+                                  title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data; a contagem de refeições pode estar subestimada até a chamada ser concluída.`}
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span>{e.pendentes} pendentes</span>
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-slate-300 font-bold">-</span>
                           )}
@@ -1158,17 +1205,17 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           <div className="flex items-center space-x-2">
             <button
               type="button"
-              disabled={isSaving}
+              disabled={saveAction.isPending}
               onClick={handleSave}
               className={`px-4 py-2.5 rounded-2xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5 ${
-                isSaving ? 'opacity-75 cursor-not-allowed' : ''
+                saveAction.isPending ? 'opacity-75 cursor-not-allowed' : ''
               }`}
               title="Salvar alterações manuais e configurações no Firestore"
             >
-              {isSaving ? (
+              {saveAction.isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Salvando na Nuvem...</span>
+                  <span>Salvando no Firestore...</span>
                 </>
               ) : (
                 <>

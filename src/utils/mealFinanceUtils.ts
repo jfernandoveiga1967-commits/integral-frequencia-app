@@ -138,7 +138,7 @@ export function buildMealEntriesForDateRange(
 
     if (isSchoolDay) {
       // Filtrar registros de presença no dia:
-      // Considera 'presente', 'saida_antecipada' ou 'sem_equipamento' na modalidade 'Rotina' (chamada oficial diária do Integral)
+      // Considera 'presente', 'saida_antecipada' ou 'sem_equipamento' exclusivamente na modalidade 'Rotina'
       const dayRoutineRecords = records.filter(
         (r) =>
           r.date === dateStr &&
@@ -155,76 +155,32 @@ export function buildMealEntriesForDateRange(
         dayPendentes = Math.max(0, activeEnrolledCount - (dayPresentes + dayFaltas + dayAtestados));
         systemCount = dayPresentes;
       } else {
-        // Se não houver registro de rotina mas houver outros registros de chamada do dia
-        const dayAllRecords = records.filter((r) => r.date === dateStr);
-        if (dayAllRecords.length > 0) {
-          hasCallConcluded = true;
-          const presentStudentIds = new Set<string>();
-          let faltasCount = 0;
-          let atestadosCount = 0;
-          dayAllRecords.forEach((r) => {
-            if (r.status === 'presente' || r.status === 'saida_antecipada' || r.status === 'sem_equipamento') {
-              presentStudentIds.add(r.studentId);
-            } else if (r.status === 'falta') {
-              faltasCount++;
-            } else if (r.status === 'saude') {
-              atestadosCount++;
-            }
-          });
-          dayPresentes = presentStudentIds.size;
-          dayFaltas = faltasCount;
-          dayAtestados = atestadosCount;
-          dayPendentes = Math.max(0, activeEnrolledCount - (dayPresentes + dayFaltas + dayAtestados));
-          systemCount = dayPresentes;
-        } else {
-          // Sem chamada realizada no dia (dias pendentes ou futuros):
-          // systemCount permanece 0 até que a chamada seja consolidada.
-          hasCallConcluded = false;
-          systemCount = 0;
-          dayPresentes = 0;
-          dayFaltas = 0;
-          dayAtestados = 0;
-          dayPendentes = activeEnrolledCount;
-        }
+        // Sem chamada de Rotina realizada no dia (dias pendentes ou futuros):
+        // systemCount permanece 0 até que a chamada oficial de Rotina seja registrada.
+        hasCallConcluded = false;
+        systemCount = 0;
+        dayPresentes = 0;
+        dayFaltas = 0;
+        dayAtestados = 0;
+        dayPendentes = activeEnrolledCount;
       }
     }
 
     const savedDay = savedEntries[dateStr];
 
-    // Identifica se foi uma edição manual real realizada durante a sessão atual.
-    // Qualquer resíduo de projeção de matrículas legada (211, 212, 213, 214, 215, 231 ou >= 180) é descartado categoricamente.
-    const isLegacyProjection =
-      savedDay?.manualCount !== undefined &&
-      (savedDay.manualCount >= 180 ||
-        savedDay.manualCount === activeEnrolledCount ||
-        savedDay.manualCount === 211 ||
-        savedDay.manualCount === 212 ||
-        savedDay.manualCount === 213 ||
-        savedDay.manualCount === 214 ||
-        savedDay.manualCount === 215 ||
-        savedDay.manualCount === 231);
-
-    const isRealSessionManualOverride =
-      Boolean(savedDay?.isManualOverride) &&
-      savedDay?.manualCount !== undefined &&
-      !isLegacyProjection;
+    // O valor exibido/usado deve ser systemCount (calculado a partir de attendanceRecords filtrado por Rotina) por padrão,
+    // a menos que isManualOverride: true esteja explicitamente marcado pela coordenação para aquele dia específico.
+    const isExplicitManualOverride = Boolean(savedDay?.isManualOverride && savedDay?.manualCount !== undefined);
 
     let manualCount = 0;
     let isManualOverride = false;
 
     if (isSchoolDay) {
-      if (isRealSessionManualOverride && savedDay?.manualCount !== undefined) {
-        // Edição Manual Real: O valor só deve mudar se o usuário digitar deliberadamente um número diretamente na tela durante a sessão atual
+      if (isExplicitManualOverride && savedDay?.manualCount !== undefined) {
         manualCount = savedDay.manualCount;
         isManualOverride = true;
-      } else if (hasCallConcluded) {
-        // Após a Consolidação da Chamada: Deve espelhar categoricamente o número exato de presenças da coluna CHAMADA (AUTO) (ex: 157 no dia 10)
-        manualCount = systemCount;
-        isManualOverride = false;
       } else {
-        // Antes da Chamada (Dias Futuros / Pendentes): Deve nascer estritamente zerada (0) por padrão.
-        // Remova qualquer resíduo, projeção ou regra antiga que insira 213 ou o número de matriculados nessa coluna antes da chamada.
-        manualCount = 0;
+        manualCount = systemCount;
         isManualOverride = false;
       }
     } else {
