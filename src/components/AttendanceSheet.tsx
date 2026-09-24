@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
@@ -9,7 +9,7 @@ import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentSched
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2 } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
@@ -25,6 +25,7 @@ interface AttendanceSheetProps {
   currentWeek: WeekInfo;
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
+  isLoadingStudents?: boolean;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
@@ -40,6 +41,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   currentWeek,
   selectedDate,
   currentUser = null,
+  isLoadingStudents = false,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
@@ -111,6 +113,28 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const turmasList = allowedTurmas;
 
+  // Contagem auxiliar de alunos ativos matriculados em uma modalidade para a turma selecionada
+  const countStudentsForActivityInTurma = useCallback(
+    (actId: string, turmaName: string) => {
+      if (!students || students.length === 0) return 0;
+      const turmaList = turmaName === 'TODAS'
+        ? students
+        : students.filter((s) => s.turma === turmaName);
+      
+      const activeList = turmaList.filter(
+        (s) => s.status !== 'inativo' && s.status !== 'cancelado'
+      );
+
+      if (actId === 'Rotina') {
+        return activeList.length;
+      }
+      return activeList.filter(
+        (s) => Array.isArray(s.activities) && s.activities.includes(actId)
+      ).length;
+    },
+    [students]
+  );
+
   const [selectedActivity, setSelectedActivity] = useState<ActivityType>(() => {
     if (!isCoordenador && userAssignedActivities.length > 0) {
       const match = OFFICIAL_ROLL_CALL_MODALITIES.find((m) => userAssignedActivities.includes(m));
@@ -133,6 +157,45 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       }
     }
   }, [isCoordenador, allowedActivities.length, allowedActivityIds.join(','), selectedActivity]);
+
+  // Ajuste inteligente e automático da modalidade inicial ao abrir ou trocar de turma:
+  // Se a modalidade selecionada atualmente não possuir alunos matriculados nesta turma específica,
+  // seleciona automaticamente a primeira modalidade dentre as permitidas que REALMENTE tenha alunos.
+  useEffect(() => {
+    if (isCoordenador || selectedTurma === 'TODAS' || students.length === 0) {
+      return;
+    }
+
+    const currentCount = countStudentsForActivityInTurma(selectedActivity, selectedTurma);
+    if (currentCount > 0) {
+      return;
+    }
+
+    const firstWithStudents = allowedActivities.find(
+      (act) => countStudentsForActivityInTurma(act.id, selectedTurma) > 0
+    );
+
+    if (firstWithStudents && firstWithStudents.id !== selectedActivity) {
+      setSelectedActivity(firstWithStudents.id as ActivityType);
+    }
+  }, [
+    selectedTurma,
+    students,
+    allowedActivities,
+    selectedActivity,
+    isCoordenador,
+    countStudentsForActivityInTurma,
+  ]);
+
+  // Verifica se a turma selecionada possui ao menos um aluno matriculado em qualquer modalidade da professora
+  const hasAnyModalityStudentsInTurma = useMemo(() => {
+    if (selectedTurma === 'TODAS' || isCoordenador || students.length === 0) {
+      return true;
+    }
+    return allowedActivities.some(
+      (act) => countStudentsForActivityInTurma(act.id, selectedTurma) > 0
+    );
+  }, [selectedTurma, isCoordenador, students.length, allowedActivities, countStudentsForActivityInTurma]);
 
   // Keep selectedTurma aligned with allowed turmas for non-coordenador
   useEffect(() => {
@@ -674,6 +737,11 @@ function getCurrentHHMM(): string {
             <div className="flex flex-wrap gap-2">
               {allowedActivities.map((act) => {
                 const isSelected = selectedActivity === act.id;
+                const studentCount = selectedTurma !== 'TODAS'
+                  ? countStudentsForActivityInTurma(act.id, selectedTurma)
+                  : undefined;
+                const hasStudents = studentCount === undefined || studentCount > 0;
+
                 return (
                   <button
                     key={act.id}
@@ -681,10 +749,24 @@ function getCurrentHHMM(): string {
                     className={`transition-all cursor-pointer relative rounded-xl ${
                       isSelected
                         ? 'scale-105 shadow-sm ring-2 ring-indigo-500 ring-offset-2'
-                        : 'opacity-80 hover:opacity-100 hover:scale-102'
+                        : hasStudents
+                        ? 'opacity-80 hover:opacity-100 hover:scale-102'
+                        : 'opacity-40 hover:opacity-75'
                     }`}
                   >
                     <ActivityBadge activity={act.id} size="md" iconName={act.icon} customIconUrl={act.customIconUrl} />
+                    {studentCount !== undefined && (
+                      <span
+                        className={`absolute -top-1.5 -right-1.5 text-[9px] font-black px-1.5 py-0.2 rounded-full border shadow-2xs ${
+                          hasStudents
+                            ? 'bg-indigo-600 text-white border-white'
+                            : 'bg-slate-200 text-slate-500 border-slate-300'
+                        }`}
+                        title={`${studentCount} aluno(s) matriculado(s) em ${act.name} no ${selectedTurma}`}
+                      >
+                        {studentCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -1011,14 +1093,40 @@ function getCurrentHHMM(): string {
       </div>
 
       {/* Attendance Calling Roster Grid / Table */}
-      {filteredStudents.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500 space-y-3">
-          <Filter className="w-10 h-10 text-slate-300 mx-auto" />
-          <h3 className="text-base font-bold text-slate-700">Nenhum aluno encontrado</h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Nenhum aluno está cadastrado na atividade "{selectedActivity}" para a turma "{selectedTurma}" com o termo digitado.
+      {isLoadingStudents || (students.length === 0 && !isCoordenador) ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500 space-y-3 shadow-xs">
+          <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <h3 className="text-base font-bold text-slate-800">Carregando lista de alunos...</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Sincronizando registros da turma em tempo real com a nuvem do Colégio Crescer.
           </p>
         </div>
+      ) : filteredStudents.length === 0 ? (
+        !hasAnyModalityStudentsInTurma ? (
+          <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-10 text-center text-amber-900 space-y-3 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+              <Users className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-extrabold text-amber-950">
+              Nenhum aluno desta turma está matriculado nas suas modalidades
+            </h3>
+            <p className="text-xs text-amber-800 max-w-lg mx-auto leading-relaxed">
+              As modalidades atribuídas ao seu usuário são:{' '}
+              <strong className="text-amber-950">
+                {allowedActivities.map((a) => a.name).join(', ')}
+              </strong>
+              , porém a turma <strong>{selectedTurma}</strong> não possui alunos matriculados nessas atividades.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500 space-y-3">
+            <Filter className="w-10 h-10 text-slate-300 mx-auto" />
+            <h3 className="text-base font-bold text-slate-700">Nenhum aluno encontrado</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Nenhum aluno está cadastrado na atividade "{selectedActivity}" para a turma "{selectedTurma}" com o termo digitado.
+            </p>
+          </div>
+        )
       ) : (
         <div id="daily-attendance-sheet" className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           {/* Institutional Print Header */}

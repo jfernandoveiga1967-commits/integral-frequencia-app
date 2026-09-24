@@ -120,6 +120,10 @@ export default function App() {
     const local = loadStudents().filter((s) => !isMockStudent(s));
     return local.length > 0 ? local : INITIAL_STUDENTS.map((s) => normalizeStudent(s));
   });
+  const [isInitialStudentsLoaded, setIsInitialStudentsLoaded] = useState<boolean>(() => {
+    const local = loadStudents().filter((s) => !isMockStudent(s));
+    return local.length > 0;
+  });
   const [records, setRecords] = useState<AttendanceRecord[]>(() => loadAttendanceRecords());
   const [turmas, setTurmas] = useState<string[]>(() => {
     const local = loadTurmas();
@@ -389,7 +393,7 @@ export default function App() {
   const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
   const shouldSyncPonto = isLogged && (isCoord || isTabAllowed('ponto', currentUser));
   const shouldSyncSemanario = isLogged && (isCoord || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser));
-  const shouldSyncQuadro = isLogged && (isCoord || isTabAllowed('alunos', currentUser) || isTabAllowed('usuarios', currentUser));
+  const shouldSyncQuadro = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('usuarios', currentUser));
   const shouldSyncRecords = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
 
   const hasHealedActivitiesRef = useRef(false);
@@ -399,6 +403,7 @@ export default function App() {
     if (!shouldSyncStudents) return;
 
     const unsubStudents = subscribeStudents((fsStudents) => {
+      setIsInitialStudentsLoaded(true);
       const realStudents = fsStudents.filter((s) => !isMockStudent(s));
       let effectiveList: Student[];
       if (realStudents.length > 0) {
@@ -1716,6 +1721,7 @@ export default function App() {
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
+            isLoadingStudents={!isInitialStudentsLoaded && students.length === 0}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}
