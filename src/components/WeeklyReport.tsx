@@ -62,6 +62,9 @@ export const SPECIALIST_WORKSHOPS: ActivityType[] = [
   'Natação',
 ];
 
+// Data de corte oficial: exclui todos os dados anteriores a 24/09/2026 no Relatório Consolidado
+export const REPORT_CUTOFF_DATE = '2026-09-24';
+
 interface WeeklyReportProps {
   students: Student[];
   records: AttendanceRecord[];
@@ -139,8 +142,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   // Filtering Mode State: Por Semana vs Por Período Personalizado
   // -------------------------------------------------------------------------
   const [filterMode, setFilterMode] = useState<'week' | 'period'>('week');
-  const [periodStartDate, setPeriodStartDate] = useState<string>(currentWeek.startDate);
-  const [periodEndDate, setPeriodEndDate] = useState<string>(currentWeek.endDate);
+  const [periodStartDate, setPeriodStartDate] = useState<string>(
+    currentWeek.startDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : currentWeek.startDate
+  );
+  const [periodEndDate, setPeriodEndDate] = useState<string>(
+    currentWeek.endDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : currentWeek.endDate
+  );
   const [activePreset, setActivePreset] = useState<'week' | 'month' | 'last30' | 'year' | 'custom'>('week');
 
   // Preset Date Range Applicator
@@ -149,8 +156,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     const now = new Date();
 
     if (preset === 'week') {
-      setPeriodStartDate(currentWeek.startDate);
-      setPeriodEndDate(currentWeek.endDate);
+      const s = currentWeek.startDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : currentWeek.startDate;
+      const e = currentWeek.endDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : currentWeek.endDate;
+      setPeriodStartDate(s);
+      setPeriodEndDate(e);
       setFilterMode('week');
     } else if (preset === 'month') {
       const year = now.getFullYear();
@@ -158,31 +167,35 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       const start = `${year}-${month}-01`;
       const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
       const end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-      setPeriodStartDate(start);
-      setPeriodEndDate(end);
+      setPeriodStartDate(start < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : start);
+      setPeriodEndDate(end < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : end);
       setFilterMode('period');
     } else if (preset === 'last30') {
       const past = new Date();
       past.setDate(past.getDate() - 30);
       const start = past.toISOString().split('T')[0];
       const end = now.toISOString().split('T')[0];
-      setPeriodStartDate(start);
-      setPeriodEndDate(end);
+      setPeriodStartDate(start < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : start);
+      setPeriodEndDate(end < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : end);
       setFilterMode('period');
     } else if (preset === 'year') {
       const year = now.getFullYear();
-      setPeriodStartDate(`${year}-01-01`);
-      setPeriodEndDate(`${year}-12-31`);
+      const start = `${year}-01-01`;
+      const end = `${year}-12-31`;
+      setPeriodStartDate(start < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : start);
+      setPeriodEndDate(end < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : end);
       setFilterMode('period');
     }
   };
 
-  // Effective Active Range
-  const effectiveStartDate = filterMode === 'week' ? currentWeek.startDate : periodStartDate;
-  const effectiveEndDate = filterMode === 'week' ? currentWeek.endDate : periodEndDate;
+  // Effective Active Range - Exclui estritamente datas anteriores a 24/09/2026
+  const rawStartDate = filterMode === 'week' ? currentWeek.startDate : periodStartDate;
+  const rawEndDate = filterMode === 'week' ? currentWeek.endDate : periodEndDate;
+  const effectiveStartDate = rawStartDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : rawStartDate;
+  const effectiveEndDate = rawEndDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : rawEndDate;
   const effectivePeriodLabel =
     filterMode === 'week'
-      ? currentWeek.label
+      ? `Semana ${currentWeek.weekNumber} (A partir de ${formatDateBR(effectiveStartDate)})`
       : `Período de ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`;
 
   // Effective School Days Calculation (excluding weekends and registered holidays/recesses)
@@ -190,17 +203,21 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     return getEffectiveSchoolDays(effectiveStartDate, effectiveEndDate, holidays);
   }, [effectiveStartDate, effectiveEndDate, holidays]);
 
-  // Filter records according to active range and user roles
+  // Filter records according to active range and user roles (Exclui dados antes de 24/09/2026)
   const activeRecords = useMemo(() => {
     const todayStr = toISODateString(new Date());
     return records.filter((r) => {
       // Validação: chamadas só contam nas estatísticas se pertencerem a dias já ocorridos ou ao dia atual
       if (r.date && r.date > todayStr) return false;
 
+      // Exclusão estrita solicitada: dados antes de 24/09/2026 não constam no Relatório Consolidado
+      if (r.date && r.date < REPORT_CUTOFF_DATE) return false;
+
       // Date range filter
       if (filterMode === 'week') {
         const isThisWeek = r.weekNumber === currentWeek.weekNumber && r.year === currentWeek.year;
         if (!isThisWeek) return false;
+        if (r.date && r.date < effectiveStartDate) return false;
       } else {
         if (!r.date || r.date < effectiveStartDate || r.date > effectiveEndDate) return false;
       }
@@ -512,8 +529,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     convertPendingParam?: boolean
   ) => {
     const targetTurma = turmaParam !== undefined ? turmaParam : pdfNumericTurma;
-    const targetStart = startParam || pdfNumericStartDate || effectiveStartDate;
-    const targetEnd = endParam || pdfNumericEndDate || effectiveEndDate;
+    const rawStart = startParam || pdfNumericStartDate || effectiveStartDate;
+    const rawEnd = endParam || pdfNumericEndDate || effectiveEndDate;
+    const targetStart = rawStart < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : rawStart;
+    const targetEnd = rawEnd < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : rawEnd;
     const targetConvert =
       convertPendingParam !== undefined
         ? convertPendingParam
@@ -527,7 +546,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       turma: targetTurma,
       periodLabel: `De ${formatDateBR(targetStart)} a ${formatDateBR(targetEnd)}`,
       students,
-      records,
+      records: activeRecords,
       holidays,
       convertPastPendingToAbsence: targetConvert,
     });
@@ -743,9 +762,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <span className="text-[11px] font-bold text-slate-500 uppercase">De:</span>
             <input
               type="date"
+              min={REPORT_CUTOFF_DATE}
               value={periodStartDate}
               onChange={(e) => {
-                setPeriodStartDate(e.target.value);
+                const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                setPeriodStartDate(val);
                 setFilterMode('period');
                 setActivePreset('custom');
               }}
@@ -754,9 +775,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <span className="text-[11px] font-bold text-slate-500 uppercase">Até:</span>
             <input
               type="date"
+              min={REPORT_CUTOFF_DATE}
               value={periodEndDate}
               onChange={(e) => {
-                setPeriodEndDate(e.target.value);
+                const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                setPeriodEndDate(val);
                 setFilterMode('period');
                 setActivePreset('custom');
               }}
@@ -1015,6 +1038,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <p className="text-xs text-slate-500 mt-0.5">
               Estatísticas quantitativas diárias de alunos esperados, presenças, faltas, atestados e pendentes.
             </p>
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-50 border border-indigo-200/80 text-[11px] text-indigo-900 font-semibold">
+              <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span>Dados apurados exclusivamente a partir de 24/09/2026 (registros anteriores a 24/09/2026 foram excluídos).</span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
@@ -1419,7 +1446,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                           endDate: effectiveEndDate,
                           periodLabel: effectivePeriodLabel,
                           students,
-                          records,
+                          records: activeRecords,
                         });
                         setPdfPreviewState({
                           isOpen: true,
@@ -1499,8 +1526,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfTurmaStartDate}
-                      onChange={(e) => setPdfTurmaStartDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfTurmaStartDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1508,8 +1539,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfTurmaEndDate}
-                      onChange={(e) => setPdfTurmaEndDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfTurmaEndDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1539,13 +1574,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  const safeStart = pdfTurmaStartDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfTurmaStartDate;
+                  const safeEnd = pdfTurmaEndDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfTurmaEndDate;
                   const result = generateTurmaConsolidatedPeriodPDFReport({
                     turma: selectedPdfTurma,
-                    startDate: pdfTurmaStartDate,
-                    endDate: pdfTurmaEndDate,
-                    periodLabel: `De ${formatDateBR(pdfTurmaStartDate)} a ${formatDateBR(pdfTurmaEndDate)}`,
+                    startDate: safeStart,
+                    endDate: safeEnd,
+                    periodLabel: `De ${formatDateBR(safeStart)} a ${formatDateBR(safeEnd)}`,
                     students,
-                    records,
+                    records: activeRecords,
                   });
                   setPdfPreviewState({
                     isOpen: true,
@@ -1618,8 +1655,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfStudentStartDate}
-                      onChange={(e) => setPdfStudentStartDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfStudentStartDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1627,8 +1668,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfStudentEndDate}
-                      onChange={(e) => setPdfStudentEndDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfStudentEndDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1660,12 +1705,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 onClick={() => {
                   const targetStudent = students.find((s) => s.id === selectedPdfStudentId);
                   if (targetStudent) {
+                    const safeStart = pdfStudentStartDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfStudentStartDate;
+                    const safeEnd = pdfStudentEndDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfStudentEndDate;
                     const result = generateStudentPeriodPDFReport({
                       student: targetStudent,
-                      startDate: pdfStudentStartDate,
-                      endDate: pdfStudentEndDate,
-                      periodLabel: `De ${formatDateBR(pdfStudentStartDate)} a ${formatDateBR(pdfStudentEndDate)}`,
-                      records,
+                      startDate: safeStart,
+                      endDate: safeEnd,
+                      periodLabel: `De ${formatDateBR(safeStart)} a ${formatDateBR(safeEnd)}`,
+                      records: activeRecords,
                     });
                     setPdfPreviewState({
                       isOpen: true,
@@ -1766,8 +1813,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfModalityStartDate}
-                      onChange={(e) => setPdfModalityStartDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfModalityStartDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1775,8 +1826,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfModalityEndDate}
-                      onChange={(e) => setPdfModalityEndDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfModalityEndDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1806,13 +1861,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  const safeStart = pdfModalityStartDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfModalityStartDate;
+                  const safeEnd = pdfModalityEndDate < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : pdfModalityEndDate;
                   const result = generateActivityModalityPeriodPDFReport({
                     activityName: selectedPdfModality,
-                    startDate: pdfModalityStartDate,
-                    endDate: pdfModalityEndDate,
-                    periodLabel: `De ${formatDateBR(pdfModalityStartDate)} a ${formatDateBR(pdfModalityEndDate)}`,
+                    startDate: safeStart,
+                    endDate: safeEnd,
+                    periodLabel: `De ${formatDateBR(safeStart)} a ${formatDateBR(safeEnd)}`,
                     students,
-                    records,
+                    records: activeRecords,
                     teacherName: pdfModalityTeacher,
                   });
                   setPdfPreviewState({
@@ -1891,8 +1948,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       const m = now.getMonth();
                       const first = new Date(y, m, 1);
                       const last = new Date(y, m + 1, 0);
-                      setPdfNumericStartDate(first.toISOString().split('T')[0]);
-                      setPdfNumericEndDate(last.toISOString().split('T')[0]);
+                      const s = first.toISOString().split('T')[0];
+                      const e = last.toISOString().split('T')[0];
+                      setPdfNumericStartDate(s < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : s);
+                      setPdfNumericEndDate(e < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e);
                     }}
                     className="px-2.5 py-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all cursor-pointer"
                   >
@@ -1906,8 +1965,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       const m = now.getMonth() - 1;
                       const first = new Date(y, m, 1);
                       const last = new Date(y, m + 1, 0);
-                      setPdfNumericStartDate(first.toISOString().split('T')[0]);
-                      setPdfNumericEndDate(last.toISOString().split('T')[0]);
+                      const s = first.toISOString().split('T')[0];
+                      const e = last.toISOString().split('T')[0];
+                      setPdfNumericStartDate(s < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : s);
+                      setPdfNumericEndDate(e < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e);
                     }}
                     className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
                   >
@@ -1916,8 +1977,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setPdfNumericStartDate(currentWeek.startDate);
-                      setPdfNumericEndDate(currentWeek.endDate);
+                      const s = currentWeek.startDate;
+                      const e = currentWeek.endDate;
+                      setPdfNumericStartDate(s < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : s);
+                      setPdfNumericEndDate(e < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e);
                     }}
                     className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
                   >
@@ -1929,8 +1992,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       const endD = new Date();
                       const startD = new Date();
                       startD.setDate(endD.getDate() - 30);
-                      setPdfNumericStartDate(startD.toISOString().split('T')[0]);
-                      setPdfNumericEndDate(endD.toISOString().split('T')[0]);
+                      const s = startD.toISOString().split('T')[0];
+                      const e = endD.toISOString().split('T')[0];
+                      setPdfNumericStartDate(s < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : s);
+                      setPdfNumericEndDate(e < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e);
                     }}
                     className="px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer"
                   >
@@ -1949,8 +2014,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Inicial:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfNumericStartDate}
-                      onChange={(e) => setPdfNumericStartDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfNumericStartDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
@@ -1958,8 +2027,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Data Final:</span>
                     <input
                       type="date"
+                      min={REPORT_CUTOFF_DATE}
                       value={pdfNumericEndDate}
-                      onChange={(e) => setPdfNumericEndDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value < REPORT_CUTOFF_DATE ? REPORT_CUTOFF_DATE : e.target.value;
+                        setPdfNumericEndDate(val);
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold"
                     />
                   </div>
