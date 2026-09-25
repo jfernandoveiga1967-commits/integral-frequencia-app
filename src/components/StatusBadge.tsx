@@ -2,8 +2,10 @@ import React from 'react';
 import { AttendanceStatus } from '../types';
 import { CheckCircle2, XCircle, Stethoscope, Shirt, Clock } from 'lucide-react';
 
+export type DisplayAttendanceStatus = AttendanceStatus | 'pendente';
+
 interface StatusBadgeProps {
-  status: AttendanceStatus;
+  status: DisplayAttendanceStatus;
   equipmentDetails?: string;
   exitTime?: string;
   size?: 'sm' | 'md' | 'lg';
@@ -11,17 +13,35 @@ interface StatusBadgeProps {
 }
 
 export const statusConfig: Record<
-  AttendanceStatus,
+  DisplayAttendanceStatus,
   { label: string; shortLabel: string; bg: string; text: string; border: string; activeBg: string; icon: React.ReactNode }
 > = {
   presente: {
     label: 'Presença Confirmada',
     shortLabel: 'Presente',
-    bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    bg: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold',
     text: 'text-emerald-700',
     border: 'border-emerald-300',
     activeBg: 'bg-emerald-600 text-white border-emerald-700',
-    icon: <CheckCircle2 className="w-4 h-4" />,
+    icon: <CheckCircle2 className="w-4 h-4 text-emerald-600" />,
+  },
+  pendente: {
+    label: 'Chamada Pendente',
+    shortLabel: 'Pendente',
+    bg: 'bg-amber-50 text-amber-800 border-amber-300 font-extrabold',
+    text: 'text-amber-800',
+    border: 'border-amber-300',
+    activeBg: 'bg-amber-500 text-white border-amber-600',
+    icon: <Clock className="w-4 h-4 text-amber-600" />,
+  },
+  falta: {
+    label: 'Ausência por Falta',
+    shortLabel: 'Falta',
+    bg: 'bg-rose-50 text-rose-800 border-rose-300 font-extrabold',
+    text: 'text-rose-700',
+    border: 'border-rose-300',
+    activeBg: 'bg-rose-600 text-white border-rose-700',
+    icon: <XCircle className="w-4 h-4 text-rose-600" />,
   },
   saida_antecipada: {
     label: 'Saída Antecipada',
@@ -32,15 +52,6 @@ export const statusConfig: Record<
     activeBg: 'bg-amber-600 text-white border-amber-700',
     icon: <Clock className="w-4 h-4 text-amber-700" />,
   },
-  falta: {
-    label: 'Ausência por Falta',
-    shortLabel: 'Falta',
-    bg: 'bg-rose-50 text-rose-800 border-rose-200',
-    text: 'text-rose-700',
-    border: 'border-rose-300',
-    activeBg: 'bg-rose-600 text-white border-rose-700',
-    icon: <XCircle className="w-4 h-4" />,
-  },
   saude: {
     label: 'Ausência por Saúde',
     shortLabel: 'Saúde',
@@ -48,7 +59,7 @@ export const statusConfig: Record<
     text: 'text-amber-800',
     border: 'border-amber-300',
     activeBg: 'bg-amber-500 text-white border-amber-600',
-    icon: <Stethoscope className="w-4 h-4" />,
+    icon: <Stethoscope className="w-4 h-4 text-amber-600" />,
   },
   sem_equipamento: {
     label: 'Falta de Equipamento / Uniforme / Flauta',
@@ -57,7 +68,7 @@ export const statusConfig: Record<
     text: 'text-orange-800',
     border: 'border-orange-300',
     activeBg: 'bg-orange-600 text-white border-orange-700',
-    icon: <Shirt className="w-4 h-4" />,
+    icon: <Shirt className="w-4 h-4 text-orange-600" />,
   },
 };
 
@@ -68,7 +79,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   size = 'md',
   className = '',
 }) => {
-  const config = statusConfig[status];
+  const config = statusConfig[status] || statusConfig.pendente;
 
   const sizeClasses = {
     sm: 'text-xs px-2 py-0.5 space-x-1',

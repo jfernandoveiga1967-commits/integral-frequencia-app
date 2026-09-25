@@ -71,6 +71,8 @@ function getStatusText(status: string): string {
       return 'Ausência Saúde';
     case 'sem_equipamento':
       return 'Sem Equipamento';
+    case 'pendente':
+      return 'Pendente';
     default:
       return status;
   }
@@ -89,6 +91,8 @@ function getStatusColor(status: string): [number, number, number] {
       return [217, 119, 6]; // amber-600
     case 'sem_equipamento':
       return [234, 88, 12]; // orange-600
+    case 'pendente':
+      return [217, 119, 6]; // amber-600
     default:
       return [51, 65, 85];
   }
@@ -2559,8 +2563,32 @@ export function generateAttendanceDailyPDFReport({
       0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
       1: { cellWidth: 55, fontStyle: 'bold' },
       2: { cellWidth: 25, halign: 'center' },
-      3: { cellWidth: 40, halign: 'center' },
+      3: { cellWidth: 40, halign: 'center', fontStyle: 'bold' },
       4: { cellWidth: 'auto' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 3) {
+        const text = String(data.cell.raw || '');
+        if (text.includes('Presente')) {
+          data.cell.styles.textColor = [22, 163, 74]; // Green 600
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Falta')) {
+          data.cell.styles.textColor = [220, 38, 38]; // Red 600
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Pendente')) {
+          data.cell.styles.textColor = [217, 119, 6]; // Amber 600
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Saída')) {
+          data.cell.styles.textColor = [180, 83, 9]; // Amber 700
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Saúde')) {
+          data.cell.styles.textColor = [217, 119, 6]; // Amber 600
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Sem Equipamento')) {
+          data.cell.styles.textColor = [234, 88, 12]; // Orange 600
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
     },
   });
 
@@ -2777,9 +2805,9 @@ export function generateNumericAttendanceConsolidatedPDFReport({
       0: { cellWidth: 'auto', fontStyle: 'bold' },
       1: { cellWidth: 26, halign: 'center', fontStyle: 'bold' },
       2: { cellWidth: 22, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
-      3: { cellWidth: 20, halign: 'center', textColor: [220, 38, 38] },
+      3: { cellWidth: 20, halign: 'center', textColor: [220, 38, 38], fontStyle: 'bold' },
       4: { cellWidth: 26, halign: 'center', textColor: [217, 119, 6] },
-      5: { cellWidth: 20, halign: 'center', textColor: [100, 116, 139] },
+      5: { cellWidth: 20, halign: 'center', textColor: [217, 119, 6], fontStyle: 'bold' },
       6: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
     },
     didParseCell: (data) => {

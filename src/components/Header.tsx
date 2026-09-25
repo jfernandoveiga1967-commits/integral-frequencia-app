@@ -54,7 +54,14 @@ export const Header: React.FC<HeaderProps> = ({
   pendentesHoje = 0,
   onNavigateToPending,
   currentUser = null,
+  connectionState,
+  onForceSync,
 }) => {
+  // Network and synchronization states
+  const isOnline = connectionState?.isOnline ?? true;
+  const isOffline = !isOnline || connectionState?.status === 'offline';
+  const isSyncing = connectionState?.status === 'syncing' || connectionState?.status === 'reconnecting';
+
   // Sound Notifications state
   const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(() => isAudioNotificationsEnabled());
   const [isAudioReady, setIsAudioReady] = useState<boolean>(() => isAudioContextReady());
@@ -171,10 +178,29 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
 
             {/* 3. Presentes */}
-            <div className="flex items-center space-x-1.5" title="Alunos presentes hoje no Integral (Presença normal + Saída antecipada + Sem uniforme)">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <div
+              className="flex items-center space-x-1.5"
+              title={
+                isOffline
+                  ? 'Modo Offline: exibindo presenças salvas localmente no dispositivo (sem conexão ativa)'
+                  : isSyncing
+                  ? 'Sincronizando presenças em tempo real com o servidor...'
+                  : 'Alunos presentes hoje no Integral (100% sincronizado em tempo real)'
+              }
+            >
+              <span
+                className={`inline-block w-2 h-2 rounded-full shrink-0 transition-colors ${
+                  isOffline
+                    ? 'bg-slate-500'
+                    : isSyncing
+                    ? 'bg-amber-400 animate-ping'
+                    : 'bg-emerald-400 animate-pulse'
+                }`}
+              />
               <span className="text-slate-400 font-medium">Presentes:</span>
-              <span className="font-extrabold text-emerald-400">{presentesHoje}</span>
+              <span className={`font-extrabold ${isOffline ? 'text-emerald-500/80' : 'text-emerald-400'}`}>
+                {presentesHoje}
+              </span>
             </div>
 
             <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
@@ -208,7 +234,11 @@ export const Header: React.FC<HeaderProps> = ({
                   title="Alunos esperados hoje que ainda não receberam marcação de presença/falta na chamada de rotina. Clique para conferir."
                   className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
                 >
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 ${
+                      isOffline ? '' : 'animate-ping'
+                    }`}
+                  />
                   <span className="font-medium text-[11px]">Pendentes:</span>
                   <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
                 </button>
@@ -229,11 +259,17 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
               }`}
             >
-              <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+              <Radio className={`w-4 h-4 ${isOffline ? 'text-slate-400' : 'text-rose-400 animate-pulse'}`} />
               <span>Atividades do Momento</span>
-              <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                Ao Vivo
-              </span>
+              {isOffline ? (
+                <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-slate-700/60 text-slate-300 border border-slate-600">
+                  Cache Local
+                </span>
+              ) : (
+                <span className="ml-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  Ao Vivo
+                </span>
+              )}
             </button>
           )}
 

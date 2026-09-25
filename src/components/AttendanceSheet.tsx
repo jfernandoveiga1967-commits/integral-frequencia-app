@@ -1278,7 +1278,7 @@ function getCurrentHHMM(): string {
                               ? 'bg-amber-50/80 border-amber-200'
                               : currentStatus === 'falta'
                               ? 'bg-rose-50/80 border-rose-200'
-                              : 'bg-slate-50 border-slate-200'
+                              : 'bg-amber-50/30 border-amber-200/80'
                           }`}
                         >
                           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -1290,11 +1290,16 @@ function getCurrentHHMM(): string {
                                 customEquipment={actMeta?.defaultEquipment}
                                 size="sm"
                               />
-                              {rec && (
+                              {rec ? (
                                 <StatusBadge
                                   status={rec.status}
                                   equipmentDetails={rec.equipmentMissingDetails}
                                   exitTime={rec.exitTime}
+                                  size="sm"
+                                />
+                              ) : (
+                                <StatusBadge
+                                  status="pendente"
                                   size="sm"
                                 />
                               )}
