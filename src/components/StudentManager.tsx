@@ -411,15 +411,41 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleQuickReactivate = async (student: Student) => {
     try {
+      const today = toISODateString(new Date());
+      // Se for contrato avulso e estiver com data de término vencida no passado (< today),
+      // converte automaticamente para contrato 'regular' ao reativar, evitando que o useEffect
+      // de expiração automática reverta a inativação no mesmo instante.
+      const isExpiredAvulso =
+        student.tipoContrato === 'avulso' &&
+        Boolean(student.dataTerminoContrato && student.dataTerminoContrato.trim().length > 0 && student.dataTerminoContrato.trim() < today);
+
       const updated: Student = {
         ...student,
         status: 'ativo',
-        inactivationDate: undefined,
-        inactivationReason: undefined,
+        statusMatricula: 'ativo',
+        inactivationDate: '',
+        inactivationReason: '',
+        tipoContrato: isExpiredAvulso ? 'regular' : (student.tipoContrato || 'regular'),
+        dataInicioContrato: isExpiredAvulso ? undefined : student.dataInicioContrato,
+        dataTerminoContrato: isExpiredAvulso ? undefined : student.dataTerminoContrato,
+        diasContratados: isExpiredAvulso ? undefined : student.diasContratados,
+        notes: isExpiredAvulso
+          ? (student.notes ? `${student.notes} (Reativado como Regular em ${formatDateBR(today)})` : `Reativado como Regular em ${formatDateBR(today)}`)
+          : student.notes,
       };
+      (updated as any).updatedAt = new Date().toISOString();
+
       await Promise.resolve(onUpdateStudent(updated));
+      setToastMsg({
+        text: `Aluno "${student.name}" reativado com sucesso! Já está visível na chamada diária.`,
+        type: 'success',
+      });
     } catch (err: any) {
       console.error('Error reactivating student:', err);
+      setToastMsg({
+        text: `Erro ao reativar o aluno "${student.name}". Tente novamente.`,
+        type: 'error',
+      });
     }
   };
 
@@ -586,29 +612,47 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             : defaultWeekDays);
 
       const newStatus = editingStudent.status || 'ativo';
+      const isReactivatingToAtivo = newStatus === 'ativo';
+
+      // Se for alterado para ativo e for avulso com contrato expirado, converte para regular
+      const shouldConvertToRegular =
+        isReactivatingToAtivo &&
+        editingStudent.tipoContrato === 'avulso' &&
+        Boolean(editingStudent.dataTerminoContrato && editingStudent.dataTerminoContrato.trim().length > 0 && editingStudent.dataTerminoContrato.trim() < toISODateString(new Date()));
+
+      const finalTipoContrato: ContractType = shouldConvertToRegular
+        ? 'regular'
+        : (editingStudent.tipoContrato || 'regular');
+
       const studentToSave: Student = {
         ...editingStudent,
         name: trimmedName,
         turma: editingStudent.turma,
         activities: finalActivities,
-        tipoContrato: editingStudent.tipoContrato || 'regular',
-        dataInicioContrato: isAvulso ? editingStudent.dataInicioContrato : undefined,
-        dataTerminoContrato: isAvulso ? editingStudent.dataTerminoContrato : undefined,
-        diasContratados: isAvulso ? editingStudent.diasContratados : undefined,
+        tipoContrato: finalTipoContrato,
+        dataInicioContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataInicioContrato : undefined,
+        dataTerminoContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataTerminoContrato : undefined,
+        diasContratados: isAvulso && !shouldConvertToRegular ? editingStudent.diasContratados : undefined,
         status: newStatus,
+        statusMatricula: newStatus,
         inactivationDate:
           newStatus === 'inativo' || newStatus === 'cancelado'
             ? editingStudent.inactivationDate || toISODateString(new Date())
-            : undefined,
+            : '',
         inactivationReason:
           newStatus === 'inativo' || newStatus === 'cancelado'
             ? editingStudent.inactivationReason
-            : undefined,
+            : '',
         diasFrequencia: effectiveDias,
         horariosSaida: editingStudent.horariosSaida || {},
       };
+      (studentToSave as any).updatedAt = new Date().toISOString();
 
       await Promise.resolve(onUpdateStudent(studentToSave));
+      setToastMsg({
+        text: `Dados de "${trimmedName}" salvos com sucesso!`,
+        type: 'success',
+      });
       setEditingStudent(null);
       setEditFormError(null);
     } catch (err: any) {

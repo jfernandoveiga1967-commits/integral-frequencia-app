@@ -200,8 +200,18 @@ export function normalizeStudent(
   }
 
   // Preservação de Status / Status de Matrícula
-  const rawStatus = s.status || s.statusMatricula || existingStudent?.status || existingStudent?.statusMatricula || 'ativo';
-  const status: StudentStatus = (rawStatus === 'inativo' || rawStatus === 'cancelado') ? rawStatus : 'ativo';
+  let status: StudentStatus = 'ativo';
+  if (s.status === 'inativo' || s.status === 'cancelado') {
+    status = s.status;
+  } else if (s.status === 'ativo') {
+    status = 'ativo';
+  } else if (s.statusMatricula === 'inativo' || s.statusMatricula === 'cancelado') {
+    status = s.statusMatricula;
+  } else if (existingStudent?.status === 'inativo' || existingStudent?.status === 'cancelado') {
+    status = existingStudent.status;
+  } else {
+    status = 'ativo';
+  }
 
   // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
   const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
@@ -222,8 +232,9 @@ export function normalizeStudent(
     diasFrequencia = [...diasContratados];
   }
 
-  const inactivationDate = s.inactivationDate || existingStudent?.inactivationDate || undefined;
-  const inactivationReason = s.inactivationReason || existingStudent?.inactivationReason || undefined;
+  // Se o aluno é ativo, inactivationDate e inactivationReason DEVEM ser estritamente limpos (undefined)
+  const inactivationDate = status === 'ativo' ? undefined : (s.inactivationDate || existingStudent?.inactivationDate || undefined);
+  const inactivationReason = status === 'ativo' ? undefined : (s.inactivationReason || existingStudent?.inactivationReason || undefined);
   const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
 
   return {
@@ -283,7 +294,27 @@ export function mergeStudentData(
   const baseActs = incomingActs.length > 0 ? incomingActs : existingActs;
   const mergedActivities = Array.from(new Set(['Rotina', ...baseActs]));
 
-  const status = incomingStudent.status || (incomingStudent as any).statusMatricula || existingStudent.status || existingStudent.statusMatricula || 'ativo';
+  // Se incomingStudent tem status definido, prevalece o status do incoming
+  let status: StudentStatus = 'ativo';
+  if (incomingStudent.status) {
+    status = incomingStudent.status;
+  } else if ((incomingStudent as any).statusMatricula) {
+    status = (incomingStudent as any).statusMatricula;
+  } else if (existingStudent.status) {
+    status = existingStudent.status;
+  } else if (existingStudent.statusMatricula) {
+    status = existingStudent.statusMatricula;
+  } else {
+    status = 'ativo';
+  }
+
+  // Quando o status resultante for 'ativo', garanta a limpeza estrita das propriedades de inativação
+  const inactivationDate = status === 'ativo'
+    ? undefined
+    : (incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : existingStudent.inactivationDate);
+  const inactivationReason = status === 'ativo'
+    ? undefined
+    : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : existingStudent.inactivationReason);
 
   const tipoContrato: ContractType = incomingStudent.tipoContrato || existingStudent.tipoContrato || 'regular';
   const dataInicioContrato = incomingStudent.dataInicioContrato !== undefined ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;
@@ -309,8 +340,8 @@ export function mergeStudentData(
     horariosSaida: mergedHorarios,
     status,
     statusMatricula: status,
-    inactivationDate: incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : existingStudent.inactivationDate,
-    inactivationReason: incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : existingStudent.inactivationReason,
+    inactivationDate,
+    inactivationReason,
     notes: incomingStudent.notes !== undefined ? incomingStudent.notes : existingStudent.notes,
   };
 }

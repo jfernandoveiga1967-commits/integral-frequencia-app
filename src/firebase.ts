@@ -1173,6 +1173,7 @@ export async function deleteActivityFromFirestore(activityId: string) {
 export async function saveStudentToFirestore(student: Student): Promise<void> {
   try {
     const normalized = normalizeStudent(student);
+    const isAtivo = (normalized.status || 'ativo') === 'ativo';
     const payload = {
       id: normalized.id,
       name: normalized.name,
@@ -1185,9 +1186,9 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       diasFrequencia: normalized.diasFrequencia,
       horariosSaida: normalized.horariosSaida || {},
       status: normalized.status || 'ativo',
-      statusMatricula: normalized.statusMatricula || normalized.status || 'ativo',
-      inactivationDate: normalized.inactivationDate || '',
-      inactivationReason: normalized.inactivationReason || '',
+      statusMatricula: isAtivo ? 'ativo' : (normalized.statusMatricula || normalized.status || 'ativo'),
+      inactivationDate: isAtivo ? '' : (normalized.inactivationDate || ''),
+      inactivationReason: isAtivo ? '' : (normalized.inactivationReason || ''),
       notes: normalized.notes || '',
       updatedAt: new Date().toISOString(),
     };
