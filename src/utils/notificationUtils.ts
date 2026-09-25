@@ -149,6 +149,30 @@ export async function unlockAudioContextAndPlayTest(): Promise<boolean> {
 }
 
 /**
+ * Silently unlocks the audio context on first user interaction anywhere (without playing an unprompted chime)
+ */
+export async function silentUnlockAudioContext(): Promise<boolean> {
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return false;
+
+  try {
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    isAudioUnlocked = true;
+    window.dispatchEvent(
+      new CustomEvent('integral_audio_state_change', {
+        detail: { enabled: isAudioNotificationsEnabled(), isUnlocked: true },
+      })
+    );
+    return true;
+  } catch (err) {
+    console.warn('Silent audio unlock error:', err);
+    return false;
+  }
+}
+
+/**
  * Plays a quick, pleasant 2-note confirmation test sound (C5 -> G5)
  */
 export function playTestSound(): void {
@@ -234,9 +258,10 @@ export function playPontoSuccessSound(): void {
 }
 
 /**
- * Play a distinctive and pleasant chime notification when a student with custom departure time is about to leave
+ * Estágio 1: 1 toque suave (10 minutos antes da saída)
+ * Orientação: Organizar pertences e mochila do aluno
  */
-export function playDepartureAlertSound(): void {
+export function playDepartureStage1Sound(): void {
   if (!isAudioNotificationsEnabled()) return;
 
   const ctx = getOrCreateAudioContext();
@@ -247,12 +272,71 @@ export function playDepartureAlertSound(): void {
       ctx.resume().catch(() => {});
     }
     const now = ctx.currentTime;
-    // Harmonious multi-bell chime (F5 -> A5 -> C6) for arrival of departure window
-    playBellHarmonic(ctx, 698.46, now, 0.35, 0.24); // F5
-    playBellHarmonic(ctx, 880.0, now + 0.14, 0.45, 0.28); // A5
-    playBellHarmonic(ctx, 1046.5, now + 0.28, 0.65, 0.32); // C6
+    // 1 toque suave de sino afinado (F5 - 698.46 Hz)
+    playBellHarmonic(ctx, 698.46, now, 0.45, 0.22);
   } catch (err) {
-    console.warn('Departure alert sound error:', err);
+    console.warn('Departure stage 1 sound error:', err);
+  }
+}
+
+/**
+ * Estágio 2: 2 toques médios (5 minutos antes da saída)
+ * Orientação: Encaminhar aluno ao portão / ponto de encontro
+ */
+export function playDepartureStage2Sound(): void {
+  if (!isAudioNotificationsEnabled()) return;
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    // 2 toques médios em intervalo harmônico (A5 - 880 Hz -> C6 - 1046.5 Hz)
+    playBellHarmonic(ctx, 880.0, now, 0.38, 0.28);
+    playBellHarmonic(ctx, 1046.5, now + 0.16, 0.55, 0.32);
+  } catch (err) {
+    console.warn('Departure stage 2 sound error:', err);
+  }
+}
+
+/**
+ * Estágio 3: Sequência tripla de alerta penetrante (No horário exato / 0 min)
+ * Orientação: Horário atingido - Aluno liberado
+ */
+export function playDepartureStage3Sound(): void {
+  if (!isAudioNotificationsEnabled()) return;
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    // Sequência tripla penetrante de campainha de aviso escolar (G5 -> C6 -> E6)
+    playBellHarmonic(ctx, 783.99, now, 0.32, 0.35); // G5
+    playBellHarmonic(ctx, 1046.5, now + 0.14, 0.45, 0.40); // C6
+    playBellHarmonic(ctx, 1318.5, now + 0.30, 0.70, 0.45); // E6
+  } catch (err) {
+    console.warn('Departure stage 3 sound error:', err);
+  }
+}
+
+/**
+ * Dispara o som de alerta de saída antecipada de acordo com o estágio especificado
+ * @param stage '10m' | '5m' | '0m' (padrão: '5m')
+ */
+export function playDepartureAlertSound(stage?: '10m' | '5m' | '0m'): void {
+  if (stage === '10m') {
+    playDepartureStage1Sound();
+  } else if (stage === '0m') {
+    playDepartureStage3Sound();
+  } else {
+    playDepartureStage2Sound();
   }
 }
 

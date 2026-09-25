@@ -380,8 +380,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const userCanMark = canMarkAttendance(currentUser);
   const isCoord = isCoordenador(currentUser);
 
-  // Monitoramento periódico e sob demanda de saídas customizadas de alunos
+  // Monitoramento sob demanda de saídas customizadas de alunos em modo de simulação
+  // (Em modo normal, o monitoramento contínuo global roda em App.tsx para cobrir todas as abas)
   useEffect(() => {
+    if (!isSimulatingTime) return;
+
     const runCheck = () => {
       // Limpeza de chaves de dias anteriores no localStorage
       cleanOldDepartureAlertStorageKeys(selectedDate);
@@ -393,18 +396,23 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         selectedDate,
         currentUser,
         alertMinutes: alertSettings.alertMinutes,
-        simulatedTimeHHMM: isSimulatingTime ? simulatedTime : undefined,
-        dayOfWeekOverride: isSimulatingTime ? simulatedDay : undefined,
+        simulatedTimeHHMM: simulatedTime,
+        dayOfWeekOverride: simulatedDay,
       });
 
       if (newAlerts.length > 0) {
         // Gravar no localStorage para evitar repetições no dia
         newAlerts.forEach((item) => {
-          markDepartureAsAlerted(selectedDate, item.studentId, item.departureTime);
+          markDepartureAsAlerted(selectedDate, item.studentId, item.departureTime, item.stage);
         });
 
-        // Disparar o som do sistema
-        playDepartureAlertSound();
+        // Disparar o som do sistema correspondente ao estágio
+        const priorityStage = newAlerts.some((a) => a.stage === '0m')
+          ? '0m'
+          : newAlerts.some((a) => a.stage === '5m')
+          ? '5m'
+          : '10m';
+        playDepartureAlertSound(priorityStage);
 
         // Adicionar aos alertas visuais em exibição
         setActiveDepartureAlerts((prev) => {
@@ -417,19 +425,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
     runCheck();
 
-    // Roda a cada 30 segundos
     const interval = setInterval(runCheck, 30000);
     return () => clearInterval(interval);
   }, [
+    isSimulatingTime,
+    simulatedTime,
+    simulatedDay,
     students,
     records,
     atribuicoesList,
     selectedDate,
     currentUser,
     alertSettings.alertMinutes,
-    isSimulatingTime,
-    simulatedTime,
-    simulatedDay,
     effectiveCurrentTime,
   ]);
 
@@ -978,14 +985,16 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         </div>
       </div>
 
-      {/* Aviso de Saída Customizada / Antecipada */}
-      <DepartureAlertBanner
-        alerts={activeDepartureAlerts}
-        onDismiss={(alertId) =>
-          setActiveDepartureAlerts((prev) => prev.filter((a) => a.id !== alertId))
-        }
-        onDismissAll={() => setActiveDepartureAlerts([])}
-      />
+      {/* Aviso de Saída Customizada / Antecipada (em modo de simulação de testes) */}
+      {isSimulatingTime && (
+        <DepartureAlertBanner
+          alerts={activeDepartureAlerts}
+          onDismiss={(alertId) =>
+            setActiveDepartureAlerts((prev) => prev.filter((a) => a.id !== alertId))
+          }
+          onDismissAll={() => setActiveDepartureAlerts([])}
+        />
+      )}
 
       {/* Filter, Search and Quadro de Atribuições Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2.5">

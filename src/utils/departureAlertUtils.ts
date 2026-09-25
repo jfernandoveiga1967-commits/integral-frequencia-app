@@ -8,6 +8,8 @@ import {
 } from './dateUtils';
 import { isCoordenador } from './authUtils';
 
+export type DepartureStage = '10m' | '5m' | '0m';
+
 export interface DepartureAlertItem {
   id: string;
   studentId: string;
@@ -17,6 +19,8 @@ export interface DepartureAlertItem {
   standardTime: string;
   diffMinutes: number;
   triggeredAt: string;
+  stage: DepartureStage;
+  instruction: string;
 }
 
 /**
@@ -124,16 +128,18 @@ export function cleanOldDepartureAlertStorageKeys(currentDateIso: string): void 
 }
 
 /**
- * Verifica se uma saída de aluno já foi alertada hoje
+ * Verifica se uma saída de aluno já foi alertada hoje em um estágio específico (10m, 5m ou 0m)
  */
 export function isDepartureAlreadyAlerted(
   currentDateIso: string,
   studentId: string,
-  departureTime: string
+  departureTime: string,
+  stage?: DepartureStage
 ): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const key = `integral_departure_alerted_${currentDateIso}_${studentId}_${departureTime}`;
+    const stageSuffix = stage ? `_${stage}` : '';
+    const key = `integral_departure_alerted_${currentDateIso}_${studentId}_${departureTime}${stageSuffix}`;
     return Boolean(localStorage.getItem(key));
   } catch {
     return false;
@@ -141,16 +147,18 @@ export function isDepartureAlreadyAlerted(
 }
 
 /**
- * Marca uma saída de aluno como alertada hoje no localStorage
+ * Marca uma saída de aluno como alertada hoje no localStorage em um estágio específico
  */
 export function markDepartureAsAlerted(
   currentDateIso: string,
   studentId: string,
-  departureTime: string
+  departureTime: string,
+  stage?: DepartureStage
 ): void {
   if (typeof window === 'undefined') return;
   try {
-    const key = `integral_departure_alerted_${currentDateIso}_${studentId}_${departureTime}`;
+    const stageSuffix = stage ? `_${stage}` : '';
+    const key = `integral_departure_alerted_${currentDateIso}_${studentId}_${departureTime}${stageSuffix}`;
     localStorage.setItem(key, new Date().toISOString());
   } catch (err) {
     console.warn('Erro ao gravar alerta de saída no localStorage:', err);
@@ -158,7 +166,7 @@ export function markDepartureAsAlerted(
 }
 
 /**
- * Avalia todos os alunos e retorna as saídas customizadas que entraram na janela de alerta agora
+ * Avalia todos os alunos e retorna as saídas customizadas que entraram nos 3 estágios de alerta (10m, 5m, 0m)
  */
 export function evaluateDepartureAlerts(params: {
   students: Student[];
@@ -166,7 +174,7 @@ export function evaluateDepartureAlerts(params: {
   quadroAtribuicoes?: TurmaAtribuicao[];
   selectedDate: string; // YYYY-MM-DD
   currentUser: UserProfile | null;
-  alertMinutes: number;
+  alertMinutes?: number;
   simulatedTimeHHMM?: string; // Opcional para testes e simulações
   dayOfWeekOverride?: DayOfWeek; // Opcional para testes e simulações
 }): DepartureAlertItem[] {
@@ -176,7 +184,6 @@ export function evaluateDepartureAlerts(params: {
     quadroAtribuicoes,
     selectedDate,
     currentUser,
-    alertMinutes,
     simulatedTimeHHMM,
     dayOfWeekOverride,
   } = params;
@@ -253,16 +260,34 @@ export function evaluateDepartureAlerts(params: {
       continue;
     }
 
-    // H. Verificar se está dentro da janela de antecedência configurada
+    // H. Verificar em qual dos 3 estágios automáticos o aluno se enquadra
     const departureMinutes = timeToMinutes(studentDeparture);
     const diffMinutes = departureMinutes - currentMinutes;
 
-    // A janela de alerta é válida de `alertMinutes` até o momento exato da saída (diff >= 0 && diff <= alertMinutes)
-    if (diffMinutes >= 0 && diffMinutes <= alertMinutes) {
-      // I. Verificar se já foi alertado hoje (no localStorage)
-      if (!isDepartureAlreadyAlerted(selectedDate, student.id, studentDeparture)) {
+    let currentStage: DepartureStage | null = null;
+    let stageInstruction = '';
+
+    // 1º Estágio: 10 minutos antes (entre 10 min e > 5 min)
+    if (diffMinutes <= 10 && diffMinutes > 5) {
+      currentStage = '10m';
+      stageInstruction = 'Organizar pertences e mochila do aluno';
+    }
+    // 2º Estágio: 5 minutos antes (entre 5 min e > 0 min)
+    else if (diffMinutes <= 5 && diffMinutes > 0) {
+      currentStage = '5m';
+      stageInstruction = 'Encaminhar aluno ao portão / ponto de encontro';
+    }
+    // 3º Estágio: No horário exato / 0 min (com tolerância de até 5 minutos após o horário)
+    else if (diffMinutes <= 0 && diffMinutes >= -5) {
+      currentStage = '0m';
+      stageInstruction = 'Horário atingido: Aluno liberado';
+    }
+
+    // Se estiver em um estágio ativo e ainda não alertado neste estágio hoje
+    if (currentStage) {
+      if (!isDepartureAlreadyAlerted(selectedDate, student.id, studentDeparture, currentStage)) {
         alertsToTrigger.push({
-          id: `${student.id}_${studentDeparture}`,
+          id: `${student.id}_${studentDeparture}_${currentStage}`,
           studentId: student.id,
           studentName: student.name,
           turma: student.turma,
@@ -270,6 +295,8 @@ export function evaluateDepartureAlerts(params: {
           standardTime: standardDeparture,
           diffMinutes,
           triggeredAt: new Date().toISOString(),
+          stage: currentStage,
+          instruction: stageInstruction,
         });
       }
     }

@@ -14,6 +14,7 @@ import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
 import { SaveStatusBanner } from './SaveStatusBanner';
+import { playDepartureAlertSound } from '../utils/notificationUtils';
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -457,6 +458,10 @@ function getCurrentHHMM(): string {
     let exitTime = exitTimeParam;
     if (status === 'saida_antecipada' && !exitTime) {
       exitTime = existingRec?.exitTime || getCurrentHHMM();
+    }
+
+    if (status === 'saida_antecipada') {
+      playDepartureAlertSound();
     }
 
     const recordPayload = {

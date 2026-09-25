@@ -1,7 +1,7 @@
 // Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao } from './types';
+import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock } from 'lucide-react';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 import {
   loadStudents,
@@ -49,10 +49,27 @@ import { LivroPonto } from './components/LivroPonto';
 import { SemanarioMain } from './components/Semanario/SemanarioMain';
 import { CardapioCulinaria } from './components/CardapioCulinaria';
 import { LoginScreen } from './components/LoginScreen';
+import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
+import {
+  DepartureAlertItem,
+  DepartureStage,
+  evaluateDepartureAlerts,
+  cleanOldDepartureAlertStorageKeys,
+  markDepartureAsAlerted,
+} from './utils/departureAlertUtils';
+import {
+  silentUnlockAudioContext,
+  isAudioContextReady,
+  playDepartureAlertSound,
+  playDepartureStage1Sound,
+  playDepartureStage2Sound,
+  playDepartureStage3Sound,
+} from './utils/notificationUtils';
 import {
   subscribeStudents,
   subscribeRecords,
+  subscribeDepartureAlertSettings,
   subscribeDashboardRecords,
   subscribeTurmas,
   subscribeUsers,
@@ -148,6 +165,41 @@ export default function App() {
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
+
+  // Rastreamento para disparo de som em tempo real apenas quando registros recebidos forem novidade
+  const isInitialRecordsSnapshotRef = useRef(true);
+  const previousRecordsStatusMapRef = useRef<Map<string, string>>(new Map());
+
+  // Silent Auto-Unlock do AudioContext no primeiro toque/clique em qualquer lugar da tela
+  const [audioUnlockedToast, setAudioUnlockedToast] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isAudioContextReady()) return;
+
+    const handleFirstInteraction = async () => {
+      const success = await silentUnlockAudioContext();
+      if (success) {
+        setAudioUnlockedToast(true);
+        setTimeout(() => setAudioUnlockedToast(false), 4500);
+      }
+      removeListeners();
+    };
+
+    const removeListeners = () => {
+      window.removeEventListener('click', handleFirstInteraction, true);
+      window.removeEventListener('touchstart', handleFirstInteraction, true);
+      window.removeEventListener('keydown', handleFirstInteraction, true);
+    };
+
+    window.addEventListener('click', handleFirstInteraction, { capture: true, passive: true });
+    window.addEventListener('touchstart', handleFirstInteraction, { capture: true, passive: true });
+    window.addEventListener('keydown', handleFirstInteraction, { capture: true, passive: true });
+
+    return () => {
+      removeListeners();
+    };
+  }, []);
 
   const handleLogin = (user: UserProfile) => {
     const isMasterAdmin =
@@ -762,6 +814,30 @@ export default function App() {
         const realRecords = fsRecords.filter(
           (r) => !isMockStudent({ id: r.studentId }) && !r.id.startsWith('st-1_') && !r.id.startsWith('st-2_') && !r.id.startsWith('st-3_') && r.date !== '2026-09-15'
         );
+
+        // Detectar novas saídas antecipadas vindas da nuvem (outros aparelhos)
+        if (!isInitialRecordsSnapshotRef.current) {
+          let hasNewSaidaAntecipada = false;
+          realRecords.forEach((r) => {
+            if (r.status === 'saida_antecipada') {
+              const previousStatus = previousRecordsStatusMapRef.current.get(r.id);
+              if (previousStatus !== 'saida_antecipada') {
+                hasNewSaidaAntecipada = true;
+              }
+            }
+          });
+
+          if (hasNewSaidaAntecipada) {
+            playDepartureAlertSound();
+          }
+        } else {
+          isInitialRecordsSnapshotRef.current = false;
+        }
+
+        realRecords.forEach((r) => {
+          previousRecordsStatusMapRef.current.set(r.id, r.status);
+        });
+
         setRecords((prev) => {
           const map = new Map(prev.filter((r) => r.date !== '2026-09-15').map((r) => [r.id, r]));
           realRecords.forEach((r) => map.set(r.id, r));
@@ -1547,6 +1623,118 @@ export default function App() {
     return reconcileAtribuicoesWithTurmas(quadroAtribuicoes, turmas);
   }, [quadroAtribuicoes, turmas]);
 
+  // Configuração global de avisos de saída antecipada
+  const [departureAlertSettings, setDepartureAlertSettings] = useState<DepartureAlertSettings>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cached = localStorage.getItem('integral_departure_alert_settings');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed.alertMinutes === 'number') {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return {
+      id: 'departureAlert',
+      alertMinutes: 5,
+    };
+  });
+
+  const [activeDepartureAlerts, setActiveDepartureAlerts] = useState<DepartureAlertItem[]>([]);
+  const [departureToastMessage, setDepartureToastMessage] = useState<{
+    title: string;
+    description: string;
+    stage: DepartureStage;
+  } | null>(null);
+
+  // Escuta configurações de alerta de saída em tempo real do Firestore
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubAlertSettings = subscribeDepartureAlertSettings((settings) => {
+      if (settings && typeof settings.alertMinutes === 'number') {
+        setDepartureAlertSettings(settings);
+      }
+    });
+    return () => {
+      unsubAlertSettings();
+    };
+  }, [currentUser]);
+
+  // Monitoramento GLOBAL contínuo de saídas customizadas de alunos (3 estágios graduais automáticos)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const runGlobalDepartureCheck = () => {
+      cleanOldDepartureAlertStorageKeys(selectedDate);
+
+      const newAlerts = evaluateDepartureAlerts({
+        students,
+        records,
+        quadroAtribuicoes: effectiveQuadroAtribuicoes,
+        selectedDate,
+        currentUser,
+      });
+
+      if (newAlerts.length > 0) {
+        // Grava no localStorage com sufixo do estágio para garantir disparo único por estágio
+        newAlerts.forEach((item) => {
+          markDepartureAsAlerted(selectedDate, item.studentId, item.departureTime, item.stage);
+        });
+
+        // Dispara o som correspondente à maior urgência entre os novos alertas
+        const hasStage0 = newAlerts.some((a) => a.stage === '0m');
+        const hasStage5 = newAlerts.some((a) => a.stage === '5m');
+        if (hasStage0) {
+          playDepartureStage3Sound();
+        } else if (hasStage5) {
+          playDepartureStage2Sound();
+        } else {
+          playDepartureStage1Sound();
+        }
+
+        // Emite Toast com orientação de ação do estágio
+        const priorityAlert =
+          newAlerts.find((a) => a.stage === '0m') ||
+          newAlerts.find((a) => a.stage === '5m') ||
+          newAlerts[0];
+
+        setDepartureToastMessage({
+          title:
+            priorityAlert.stage === '0m'
+              ? `🚨 Horário de Saída Atingido: ${priorityAlert.studentName} (${priorityAlert.turma})`
+              : priorityAlert.stage === '5m'
+              ? `🚶 5 min para Saída: ${priorityAlert.studentName} (${priorityAlert.turma})`
+              : `⏳ 10 min para Saída: ${priorityAlert.studentName} (${priorityAlert.turma})`,
+          description: priorityAlert.instruction,
+          stage: priorityAlert.stage,
+        });
+
+        setTimeout(() => {
+          setDepartureToastMessage(null);
+        }, 7000);
+
+        // Atualiza a lista visual de alertas, substituindo estágios anteriores do mesmo aluno
+        setActiveDepartureAlerts((prev) => {
+          const newStudentIds = new Set(newAlerts.map((a) => a.studentId));
+          const filteredPrev = prev.filter((a) => !newStudentIds.has(a.studentId));
+          return [...newAlerts, ...filteredPrev];
+        });
+      }
+    };
+
+    runGlobalDepartureCheck();
+    const interval = setInterval(runGlobalDepartureCheck, 30000);
+    return () => clearInterval(interval);
+  }, [
+    currentUser,
+    students,
+    records,
+    effectiveQuadroAtribuicoes,
+    selectedDate,
+  ]);
+
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
     if (date) {
@@ -1649,6 +1837,15 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
+        {/* Global Departure Alert Banner (Alerta de Saída Antecipada visível em qualquer aba) */}
+        <DepartureAlertBanner
+          alerts={activeDepartureAlerts}
+          onDismiss={(alertId) =>
+            setActiveDepartureAlerts((prev) => prev.filter((a) => a.id !== alertId))
+          }
+          onDismissAll={() => setActiveDepartureAlerts([])}
+        />
+
         {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente na aba Chamada de Frequência */}
         {activeTab === 'frequencia' && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
           <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
@@ -2074,6 +2271,50 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast visual para os 3 estágios graduais de saída antecipada */}
+      {departureToastMessage && (
+        <div
+          className={`fixed top-5 right-5 z-50 flex items-start space-x-3 p-3.5 sm:p-4 text-white text-xs font-bold rounded-2xl shadow-2xl border backdrop-blur-md max-w-sm sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-300 ${
+            departureToastMessage.stage === '0m'
+              ? 'bg-rose-600/95 border-rose-300 ring-2 ring-rose-400/50 shadow-rose-950/40'
+              : departureToastMessage.stage === '5m'
+              ? 'bg-orange-600/95 border-orange-300 shadow-orange-950/30'
+              : 'bg-amber-600/95 border-amber-300 shadow-amber-950/30'
+          }`}
+        >
+          <div className="p-2 bg-white/20 rounded-xl shrink-0 mt-0.5">
+            {departureToastMessage.stage === '0m' ? (
+              <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
+            ) : departureToastMessage.stage === '5m' ? (
+              <Bell className="w-4 h-4 text-white animate-bounce" />
+            ) : (
+              <Clock className="w-4 h-4 text-white" />
+            )}
+          </div>
+          <div className="space-y-0.5 flex-1 pr-1">
+            <div className="text-xs font-black tracking-tight">{departureToastMessage.title}</div>
+            <div className="text-[11px] text-white/95 font-medium leading-snug">{departureToastMessage.description}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDepartureToastMessage(null)}
+            className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
+            title="Fechar"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Toast visual de desbloqueio do áudio pelo navegador */}
+      {audioUnlockedToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2.5 px-4 py-3 bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold rounded-2xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+          <span className="text-emerald-300">Áudio liberado:</span>
+          <span className="text-slate-200">Alertas sonoros de chamada e saída ativos</span>
         </div>
       )}
     </div>
