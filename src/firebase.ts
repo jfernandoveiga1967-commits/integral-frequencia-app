@@ -312,16 +312,20 @@ export function subscribeRecords(
   onData: (records: AttendanceRecord[]) => void,
   onError?: (err: Error) => void,
   targetDate?: string,
-  limitCount: number = 300
+  limitCount?: number
 ): () => void {
   const colRef = collection(db, 'attendanceRecords');
   const hoje = targetDate || new Date().toISOString().split('T')[0];
 
-  // Limitação de leituras e otimização do dashboard:
-  // Consulta com filtro por data (where('data', '==', hoje) ou 'date' para retrocompatibilidade) e limit()
+  // Integridade e completude dos registros de frequência:
+  // Quando há filtro por data (targetDate / hoje), entrega 100% dos registros do dia (Rotina e Oficinas)
+  // sem truncar em 300, eliminando cortes de paginação e pendências fantasmas.
+  // Caso limitCount seja explicitamente passado, ele é respeitado (com teto padrão de segurança de 1500 caso sem data).
   const q = hoje
-    ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
-    : query(colRef, limit(limitCount));
+    ? (limitCount && limitCount > 0
+        ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
+        : query(colRef, or(where('data', '==', hoje), where('date', '==', hoje))))
+    : query(colRef, limit(limitCount && limitCount > 0 ? limitCount : 1500));
 
   return onSnapshot(
     q,
@@ -356,15 +360,15 @@ export function subscribeRecords(
 }
 
 /**
- * Consulta otimizada em tempo real para o Dashboard de chamadas do dia de hoje.
- * Utiliza explicitamente filtros por data (where('data', '==', hoje)) e limit()
- * para evitar trazer o histórico completo de chamadas desnecessariamente.
+ * Consulta em tempo real para o Dashboard de chamadas do dia de hoje.
+ * Utiliza explicitamente filtros por data (where('data', '==', hoje) ou 'date')
+ * trazendo todos os lançamentos do dia sem truncar turmas.
  */
 export function subscribeDashboardRecords(
   hoje: string,
   onData: (records: AttendanceRecord[]) => void,
   onError?: (err: Error) => void,
-  limitCount: number = 300
+  limitCount?: number
 ): () => void {
   return subscribeRecords(onData, onError, hoje, limitCount);
 }
@@ -2961,16 +2965,20 @@ export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Pro
 /**
  * Busca direta no servidor das chamadas (attendanceRecords) via getDocsFromServer.
  * Ignora o cache local do Firestore para sincronizar o painel imediatamente.
+ * Quando há filtro por data (targetDate / hoje), entrega 100% dos registros do dia (Rotina e Oficinas)
+ * sem truncamento, garantindo integridade nos números e fechamento das chamadas.
  */
 export async function fetchRecordsDirectFromServer(
   targetDate?: string,
-  limitCount: number = 300
+  limitCount?: number
 ): Promise<AttendanceRecord[]> {
   const colRef = collection(db, 'attendanceRecords');
   const hoje = targetDate || new Date().toISOString().split('T')[0];
   const q = hoje
-    ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
-    : query(colRef, limit(limitCount));
+    ? (limitCount && limitCount > 0
+        ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
+        : query(colRef, or(where('data', '==', hoje), where('date', '==', hoje))))
+    : query(colRef, limit(limitCount && limitCount > 0 ? limitCount : 1500));
 
   try {
     const snap = await getDocsFromServer(q);
@@ -3072,7 +3080,7 @@ export async function forceDirectServerSync(targetDate?: string) {
 
   // Busca direta no servidor (bypassing cache)
   const [recordsRes, studentsRes, usersRes, turmasRes] = await Promise.allSettled([
-    fetchRecordsDirectFromServer(targetDate, 300),
+    fetchRecordsDirectFromServer(targetDate),
     fetchStudentsDirectFromServer(),
     fetchAllUsersDirectFromServer(true),
     fetchTurmasDirectFromServer(),

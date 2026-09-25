@@ -97,6 +97,7 @@ import {
   batchSaveHolidaysToFirestore,
   testFirestoreConnection,
   getIsFirestoreQuotaExceeded,
+  forceDirectServerSync,
   deleteDoc,
   doc,
   db,
@@ -772,8 +773,7 @@ export default function App() {
       (err) => {
         console.warn('Erro ao escutar attendanceRecords do dashboard:', err);
       },
-      targetDate,
-      300
+      targetDate
     );
 
     return () => {
@@ -1603,6 +1603,19 @@ export default function App() {
       await reconnectFirestore(true);
     } catch {}
     const res = await forceManualSync();
+    try {
+      const directSync = await forceDirectServerSync(todayStr);
+      if (directSync.records && directSync.records.length > 0) {
+        saveAttendanceRecords(directSync.records);
+        setRecords(directSync.records);
+      }
+      if (directSync.students && directSync.students.length > 0) {
+        saveStudents(directSync.students);
+        setStudents(directSync.students);
+      }
+    } catch (e) {
+      console.warn('Sync direto do servidor no handleForceSync:', e);
+    }
     const freshRecords = loadAttendanceRecords();
     if (freshRecords.length > 0) setRecords(freshRecords);
     const freshStudents = loadStudents();
