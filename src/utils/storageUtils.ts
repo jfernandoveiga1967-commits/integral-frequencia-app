@@ -232,9 +232,10 @@ export function normalizeStudent(
     diasFrequencia = [...diasContratados];
   }
 
-  // Se o aluno é ativo, inactivationDate e inactivationReason DEVEM ser estritamente limpos (undefined)
-  const inactivationDate = status === 'ativo' ? undefined : (s.inactivationDate || existingStudent?.inactivationDate || undefined);
-  const inactivationReason = status === 'ativo' ? undefined : (s.inactivationReason || existingStudent?.inactivationReason || undefined);
+  // Se o aluno é ativo, inactivationDate e inactivationReason DEVEM ser estritamente limpos como string vazia ''
+  // para garantir que a gravação no Firestore com ignoreUndefinedProperties e merge: true realmente sobrescreva os valores antigos.
+  const inactivationDate = status === 'ativo' ? '' : (s.inactivationDate || existingStudent?.inactivationDate || '');
+  const inactivationReason = status === 'ativo' ? '' : (s.inactivationReason || existingStudent?.inactivationReason || '');
   const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
 
   return {
@@ -308,13 +309,13 @@ export function mergeStudentData(
     status = 'ativo';
   }
 
-  // Quando o status resultante for 'ativo', garanta a limpeza estrita das propriedades de inativação
+  // Quando o status resultante for 'ativo', garanta a limpeza estrita das propriedades de inativação como '' (string vazia)
   const inactivationDate = status === 'ativo'
-    ? undefined
-    : (incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : existingStudent.inactivationDate);
+    ? ''
+    : (incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : (existingStudent.inactivationDate || ''));
   const inactivationReason = status === 'ativo'
-    ? undefined
-    : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : existingStudent.inactivationReason);
+    ? ''
+    : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : (existingStudent.inactivationReason || ''));
 
   const tipoContrato: ContractType = incomingStudent.tipoContrato || existingStudent.tipoContrato || 'regular';
   const dataInicioContrato = incomingStudent.dataInicioContrato !== undefined ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;

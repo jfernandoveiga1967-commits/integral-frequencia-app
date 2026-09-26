@@ -429,6 +429,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         dataInicioContrato: isExpiredAvulso ? undefined : student.dataInicioContrato,
         dataTerminoContrato: isExpiredAvulso ? undefined : student.dataTerminoContrato,
         diasContratados: isExpiredAvulso ? undefined : student.diasContratados,
+        diasFrequencia: isExpiredAvulso
+          ? ['segunda', 'terca', 'quarta', 'quinta', 'sexta']
+          : (student.diasFrequencia && student.diasFrequencia.length > 0 ? student.diasFrequencia : ['segunda', 'terca', 'quarta', 'quinta', 'sexta']),
         notes: isExpiredAvulso
           ? (student.notes ? `${student.notes} (Reativado como Regular em ${formatDateBR(today)})` : `Reativado como Regular em ${formatDateBR(today)}`)
           : student.notes,
