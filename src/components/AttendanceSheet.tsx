@@ -83,14 +83,71 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   }, [activitiesList]);
 
   const isCoordenador = currentUser?.role === 'coordenador';
-  const userAssignedActivities = useMemo(() => currentUser?.assignedActivities || [], [currentUser]);
-  const userAssignedTurmas = useMemo(() => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [], [currentUser]);
+  const userAssignedActivities = useMemo(() => {
+    if (!currentUser) return [];
+    const list = currentUser.assignedActivities || [];
+    if (list.length === 0 && currentUser.specialtyActivity) {
+      return [currentUser.specialtyActivity];
+    }
+    return list;
+  }, [currentUser]);
 
-  // Para Monitor/Professor: apenas as modalidades atribuídas dentre as oficiais. Para Coordenador: todas as 8 modalidades oficiais.
+  const userAssignedTurmas = useMemo(() => {
+    if (!currentUser) return [];
+    return currentUser.allowedClassIds || currentUser.assignedTurmas || [];
+  }, [currentUser]);
+
+  const normalizeStr = (s?: string) =>
+    (s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  // Para Monitor/Professor: rigorosamente as modalidades atribuídas ao perfil do usuário no Gerenciamento de Usuários (Judô, Balé, Futebol, Culinária, Natação, etc.).
+  // Para Coordenador: todas as modalidades oficiais especialistas de chamada.
   const allowedActivities = useMemo(() => {
     if (isCoordenador) return rollCallActivities;
-    return rollCallActivities.filter((act) => userAssignedActivities.includes(act.id));
-  }, [rollCallActivities, isCoordenador, userAssignedActivities]);
+    if (userAssignedActivities.length === 0) return [];
+
+    const active = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+    const result: ActivityItem[] = [];
+
+    userAssignedActivities.forEach((actName) => {
+      const normTarget = normalizeStr(actName);
+      const found =
+        rollCallActivities.find((a) => normalizeStr(a.id) === normTarget || normalizeStr(a.name) === normTarget) ||
+        active.find((a) => normalizeStr(a.id) === normTarget || normalizeStr(a.name) === normTarget);
+
+      if (found) {
+        if (!result.some((r) => normalizeStr(r.id) === normalizeStr(found.id))) {
+          result.push(found);
+        }
+      } else {
+        result.push({
+          id: actName as ActivityType,
+          name: actName,
+          icon:
+            normTarget.includes('culinaria')
+              ? 'Utensils'
+              : normTarget.includes('judo')
+              ? 'Award'
+              : normTarget.includes('bale')
+              ? 'Sparkles'
+              : normTarget.includes('futebol')
+              ? 'Trophy'
+              : normTarget.includes('natacao')
+              ? 'Waves'
+              : 'Activity',
+          description: `Modalidade de ${actName}`,
+          defaultEquipment: '',
+          requiresRollCall: true,
+        });
+      }
+    });
+
+    return result;
+  }, [rollCallActivities, activitiesList, isCoordenador, userAssignedActivities]);
 
   const allowedActivityIds = useMemo(() => allowedActivities.map((a) => a.id), [allowedActivities]);
 
@@ -108,8 +165,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
     const sorted = sortTurmasPedagogical(rawList);
     if (isCoordenador || !currentUser) return sorted;
-    const userTurmaSet = new Set(userAssignedTurmas);
-    return sorted.filter((t) => userTurmaSet.has(t));
+    const userTurmaSet = new Set(userAssignedTurmas.map((t) => normalizeStr(t)));
+    return sorted.filter((t) => userTurmaSet.has(normalizeStr(t)));
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
   const turmasList = allowedTurmas;
@@ -138,8 +195,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   const [selectedActivity, setSelectedActivity] = useState<ActivityType>(() => {
     if (!isCoordenador && userAssignedActivities.length > 0) {
-      const match = OFFICIAL_ROLL_CALL_MODALITIES.find((m) => userAssignedActivities.includes(m));
-      if (match) return match;
+      return userAssignedActivities[0] as ActivityType;
     }
     return 'Rotina';
   });
@@ -149,8 +205,15 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Sincroniza a modalidade selecionada conforme permissões do usuário
   useEffect(() => {
     if (!isCoordenador) {
-      if (allowedActivities.length > 0 && !allowedActivityIds.includes(selectedActivity)) {
-        setSelectedActivity(allowedActivities[0].id as ActivityType);
+      if (allowedActivities.length > 0) {
+        const isCurrentAllowed = allowedActivities.some(
+          (a) =>
+            normalizeStr(a.id) === normalizeStr(selectedActivity) ||
+            normalizeStr(a.name) === normalizeStr(selectedActivity)
+        );
+        if (!isCurrentAllowed) {
+          setSelectedActivity(allowedActivities[0].id as ActivityType);
+        }
       }
     } else {
       if (!OFFICIAL_ROLL_CALL_MODALITIES.includes(selectedActivity)) {
@@ -334,14 +397,25 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         const studentActs = Array.isArray(student.activities) ? student.activities : [];
 
         // Activity filter - MUST match allowedActivityIds
-        if (!allowedActivityIds.includes(selectedActivity)) {
+        if (!isCoordenador) {
+          const isActAllowed = allowedActivities.some(
+            (a) =>
+              normalizeStr(a.id) === normalizeStr(selectedActivity) ||
+              normalizeStr(a.name) === normalizeStr(selectedActivity)
+          );
+          if (!isActAllowed) {
+            return false;
+          }
+        } else if (!allowedActivityIds.includes(selectedActivity)) {
           return false;
         }
 
         const matchesActivity =
           selectedActivity === 'Rotina'
             ? true
-            : studentActs.includes(selectedActivity);
+            : studentActs.some(
+                (act) => normalizeStr(act) === normalizeStr(selectedActivity)
+              );
 
         // Turma filter
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;

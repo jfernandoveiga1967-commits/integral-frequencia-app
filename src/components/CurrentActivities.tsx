@@ -440,16 +440,94 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     effectiveCurrentTime,
   ]);
 
-  // Monitora default view filter: 'minhas' vs 'todas'
-  const userAssignedTurmas = useMemo(() => {
-    return new Set(currentUser?.allowedClassIds || currentUser?.assignedTurmas || []);
-  }, [currentUser]);
+  // Modalidades atribuídas ao perfil do usuário logado
+  const userAssignedActivities = useMemo(() => {
+    if (isCoord || !currentUser) return [];
+    const list = currentUser.assignedActivities || [];
+    if (list.length === 0 && currentUser.specialtyActivity) {
+      return [currentUser.specialtyActivity];
+    }
+    return list;
+  }, [currentUser, isCoord]);
 
-  const [turmaScopeFilter, setTurmaScopeFilter] = useState<'minhas' | 'todas'>(() => {
-    if (isCoord || !currentUser) return 'todas';
-    const assigned = currentUser.allowedClassIds || currentUser.assignedTurmas || [];
-    return assigned.length > 0 ? 'minhas' : 'todas';
-  });
+  // Turmas atribuídas ao perfil do usuário logado
+  const userAssignedTurmasList = useMemo(() => {
+    if (isCoord || !currentUser) return [];
+    return currentUser.allowedClassIds || currentUser.assignedTurmas || [];
+  }, [currentUser, isCoord]);
+
+  const userAssignedTurmasSet = useMemo(() => {
+    return new Set(userAssignedTurmasList);
+  }, [userAssignedTurmasList]);
+
+  const normalizeStr = (s?: string) =>
+    (s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const userAssignedActivitiesSet = useMemo(() => {
+    return new Set(userAssignedActivities.map((a) => normalizeStr(a)));
+  }, [userAssignedActivities]);
+
+  const userAssignedTurmasNormalizedSet = useMemo(() => {
+    return new Set(userAssignedTurmasList.map((t) => normalizeStr(t)));
+  }, [userAssignedTurmasList]);
+
+  // Blocos da Grade Horária que atendem rigorosamente a:
+  // a) O dia da semana da atividade na Grade Horária corresponde ao dia atual (effectiveDayOfWeek).
+  // b) A modalidade da atividade está inclusa na lista 'modalidades' do perfil do usuário.
+  // c) A turma está inclusa na lista 'turmas' do perfil do usuário.
+  const userTodayScheduleBlocks = useMemo(() => {
+    if (isCoord || !currentUser) {
+      return schedules.filter((s) => s.dayOfWeek === effectiveDayOfWeek);
+    }
+    return schedules.filter((s) => {
+      const matchesDay = s.dayOfWeek === effectiveDayOfWeek;
+      const matchesActivity =
+        userAssignedActivities.includes(s.activityId) ||
+        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
+      const matchesTurma =
+        userAssignedTurmasSet.has(s.turma) ||
+        userAssignedTurmasNormalizedSet.has(normalizeStr(s.turma));
+      return matchesDay && matchesActivity && matchesTurma;
+    });
+  }, [
+    schedules,
+    effectiveDayOfWeek,
+    isCoord,
+    currentUser,
+    userAssignedActivities,
+    userAssignedActivitiesSet,
+    userAssignedTurmasSet,
+    userAssignedTurmasNormalizedSet,
+  ]);
+
+  // Outros dias da semana em que este professor possui aulas na Grade Horária
+  const userOtherDaysWithClasses = useMemo(() => {
+    if (isCoord || !currentUser) return [];
+    const otherBlocks = schedules.filter((s) => {
+      const matchesActivity =
+        userAssignedActivities.includes(s.activityId) ||
+        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
+      const matchesTurma =
+        userAssignedTurmasSet.has(s.turma) ||
+        userAssignedTurmasNormalizedSet.has(normalizeStr(s.turma));
+      return matchesActivity && matchesTurma;
+    });
+    const daysOrder: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+    const distinctDays = Array.from(new Set(otherBlocks.map((b) => b.dayOfWeek)));
+    return daysOrder.filter((d) => distinctDays.includes(d));
+  }, [
+    schedules,
+    isCoord,
+    currentUser,
+    userAssignedActivities,
+    userAssignedActivitiesSet,
+    userAssignedTurmasSet,
+    userAssignedTurmasNormalizedSet,
+  ]);
 
   // Map of activity ID -> ActivityItem
   const activityMap = useMemo(() => {
@@ -461,15 +539,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     return map;
   }, [activitiesList]);
 
-  // Allowed turmas for user sorted pedagogically
+  // Allowed turmas for user sorted pedagogically:
+  // Para coordenador: todas as turmas cadastradas na escola.
+  // Para Monitor / Professor (não-admin/coordenação): SOMENTE as turmas que possuem aulas agendadas hoje que cumpram os critérios (a, b, c).
   const allowedTurmas = useMemo(() => {
-    const sorted = sortTurmasPedagogical(turmas);
-    if (isCoord || !currentUser) return sorted;
-    if (turmaScopeFilter === 'minhas' && userAssignedTurmas.size > 0) {
-      return sorted.filter((t) => userAssignedTurmas.has(t));
+    if (isCoord || !currentUser) {
+      return sortTurmasPedagogical(turmas);
     }
-    return sorted;
-  }, [turmas, isCoord, currentUser, turmaScopeFilter, userAssignedTurmas]);
+    const turmasWithClassToday = Array.from(
+      new Set(userTodayScheduleBlocks.map((s) => s.turma))
+    );
+    return sortTurmasPedagogical(turmasWithClassToday);
+  }, [turmas, isCoord, currentUser, userTodayScheduleBlocks]);
 
   // Compute activity state per turma
   const turmaStatuses = useMemo(() => {
@@ -481,9 +562,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
     return allowedTurmas.map((turmaName) => {
       // All blocks for this turma on this day
-      const turmaBlocks = schedules
-        .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
-        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+      // Para Monitor/Professor: exibe rigorosamente apenas as atividades que correspondem às suas modalidades atribuídas
+      const turmaBlocks = isCoord || !currentUser
+        ? schedules
+            .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
+            .sort((a, b) => a.startTime.localeCompare(b.startTime))
+        : userTodayScheduleBlocks
+            .filter((s) => s.turma === turmaName)
+            .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
       // Se for final de semana e não estiver em modo de simulação, nenhum bloco está em andamento
       if (isWeekendLocked) {
@@ -1020,31 +1106,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             )}
           </div>
 
-          {/* Scope filter for Monitoras */}
-          {userAssignedTurmas.size > 0 && !isCoord && (
-            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs font-bold shrink-0 self-start md:self-auto">
-              <button
-                type="button"
-                onClick={() => setTurmaScopeFilter('minhas')}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  turmaScopeFilter === 'minhas'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Minha Turma
-              </button>
-              <button
-                type="button"
-                onClick={() => setTurmaScopeFilter('todas')}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  turmaScopeFilter === 'todas'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Todas as Turmas
-              </button>
+          {/* Scope indicator for Monitor/Professor */}
+          {!isCoord && (
+            <div className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-extrabold flex items-center space-x-1.5 shrink-0 shadow-2xs">
+              <Users className="w-3.5 h-3.5 text-indigo-600" />
+              <span>
+                {userAssignedActivities.length > 0
+                  ? userAssignedActivities.join(', ')
+                  : 'Sua Modalidade'}
+              </span>
+              <span className="text-[10px] text-indigo-600 font-bold">
+                ({allowedTurmas.length} {allowedTurmas.length === 1 ? 'turma hoje' : 'turmas hoje'})
+              </span>
             </div>
           )}
 
@@ -1055,8 +1128,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
               onChange={(e) => setSelectedActivityFilter(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
-              <option value="TODAS">Todas as Atividades</option>
-              {activitiesList.map((act) => (
+              <option value="TODAS">
+                {isCoord ? 'Todas as Atividades' : 'Todas Minhas Atividades'}
+              </option>
+              {(isCoord
+                ? activitiesList
+                : activitiesList.filter((act) => userAssignedActivities.includes(act.id))
+              ).map((act) => (
                 <option key={act.id} value={act.id}>
                   {act.name} {act.requiresRollCall !== false ? '(Chamada)' : '(Grade)'}
                 </option>
@@ -1141,7 +1219,82 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       </div>
 
       {/* Grid of Class Cards (3-4 columns for desktop & compact density) */}
-      {filteredTurmas.length === 0 ? (
+      {!isCoord && userTodayScheduleBlocks.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 sm:p-12 text-center shadow-xs space-y-4 max-w-2xl mx-auto">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 mx-auto flex items-center justify-center shadow-inner">
+            <Calendar className="w-8 h-8 text-indigo-600" />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-bold">
+              <Clock className="w-3.5 h-3.5 text-slate-500" />
+              <span>
+                {effectiveDayOfWeek.toUpperCase()} • {effectiveCurrentTime}
+              </span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-slate-900">
+              Você não possui atividades agendadas para o dia de hoje.
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
+              Não foram encontradas aulas de{' '}
+              <strong className="text-slate-800 font-extrabold">
+                {userAssignedActivities.length > 0
+                  ? userAssignedActivities.join(', ')
+                  : 'suas modalidades'}
+              </strong>{' '}
+              programadas na Grade Horária para hoje ({effectiveDayOfWeek.charAt(0).toUpperCase() + effectiveDayOfWeek.slice(1)}-feira) nas suas turmas atribuídas.
+            </p>
+          </div>
+
+          {/* Se tiver aulas em outros dias da semana, exibe os dias programados de forma amigável */}
+          {userOtherDaysWithClasses.length > 0 ? (
+            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 text-left">
+              <div className="flex items-center space-x-2 text-xs font-extrabold text-indigo-950">
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>Dias com atividades na sua grade semanal:</span>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {userOtherDaysWithClasses.map((day) => {
+                  const dayNames: Record<DayOfWeek, string> = {
+                    segunda: 'Segunda-feira',
+                    terca: 'Terça-feira',
+                    quarta: 'Quarta-feira',
+                    quinta: 'Quinta-feira',
+                    sexta: 'Sexta-feira',
+                  };
+                  return (
+                    <span
+                      key={day}
+                      className="px-3 py-1 rounded-xl bg-white text-indigo-700 border border-indigo-200 text-xs font-extrabold shadow-2xs flex items-center space-x-1.5"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{dayNames[day]}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 text-xs text-slate-500">
+              Caso você tenha aulas neste dia, solicite à Coordenação que cadastre ou vincule seus horários na <strong>Grade Horária</strong> e confira suas turmas e modalidades em <strong>Gerenciamento de Usuários</strong>.
+            </div>
+          )}
+
+          {/* Turmas e Modalidades vinculadas ao perfil */}
+          <div className="pt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500">
+            <span className="font-semibold">Suas turmas atribuídas:</span>
+            {userAssignedTurmasList.length > 0 ? (
+              userAssignedTurmasList.map((t) => (
+                <span key={t} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold border border-slate-200">
+                  {t}
+                </span>
+              ))
+            ) : (
+              <span className="italic text-slate-400">Nenhuma turma vinculada</span>
+            )}
+          </div>
+        </div>
+      ) : filteredTurmas.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-xs space-y-2.5">
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
             <Search className="w-5 h-5" />
