@@ -217,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
             {justificadosHoje > 0 && (
               <>
                 <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-                <div className="flex items-center space-x-1.5" title="Ausências justificadas / Atestados de saúde hoje">
+                <div className="flex items-center space-x-1.5" title="Ausências justificadas hoje">
                   <span className="text-slate-400 font-medium">Atestados:</span>
                   <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
                 </div>

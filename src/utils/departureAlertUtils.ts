@@ -217,7 +217,7 @@ export function evaluateDepartureAlerts(params: {
     if (r.date === selectedDate) {
       if (r.status === 'saida_antecipada' || Boolean(r.exitTime)) {
         departedOrAbsentStudentIds.add(r.studentId);
-      } else if (r.status === 'falta' || r.status === 'saude') {
+      } else if (r.status === 'falta') {
         departedOrAbsentStudentIds.add(r.studentId);
       }
     }

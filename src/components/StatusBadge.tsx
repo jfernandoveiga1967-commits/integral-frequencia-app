@@ -1,6 +1,6 @@
 import React from 'react';
 import { AttendanceStatus } from '../types';
-import { CheckCircle2, XCircle, Stethoscope, Shirt, Clock } from 'lucide-react';
+import { CheckCircle2, XCircle, Shirt, Clock } from 'lucide-react';
 
 export type DisplayAttendanceStatus = AttendanceStatus | 'pendente';
 
@@ -51,15 +51,6 @@ export const statusConfig: Record<
     border: 'border-amber-400',
     activeBg: 'bg-amber-600 text-white border-amber-700',
     icon: <Clock className="w-4 h-4 text-amber-700" />,
-  },
-  saude: {
-    label: 'Ausência por Saúde',
-    shortLabel: 'Saúde',
-    bg: 'bg-amber-50 text-amber-800 border-amber-200',
-    text: 'text-amber-800',
-    border: 'border-amber-300',
-    activeBg: 'bg-amber-500 text-white border-amber-600',
-    icon: <Stethoscope className="w-4 h-4 text-amber-600" />,
   },
   sem_equipamento: {
     label: 'Falta de Equipamento / Uniforme / Flauta',

@@ -151,8 +151,8 @@ export function buildMealEntriesForDateRange(
           (r) => r.status === 'presente' || r.status === 'saida_antecipada' || r.status === 'sem_equipamento'
         ).length;
         dayFaltas = dayRoutineRecords.filter((r) => r.status === 'falta').length;
-        dayAtestados = dayRoutineRecords.filter((r) => r.status === 'saude').length;
-        dayPendentes = Math.max(0, activeEnrolledCount - (dayPresentes + dayFaltas + dayAtestados));
+        dayAtestados = 0;
+        dayPendentes = Math.max(0, activeEnrolledCount - (dayPresentes + dayFaltas));
         systemCount = dayPresentes;
       } else {
         // Sem chamada de Rotina realizada no dia (dias pendentes ou futuros):

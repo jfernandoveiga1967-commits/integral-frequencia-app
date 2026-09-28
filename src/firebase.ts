@@ -343,7 +343,7 @@ export function subscribeRecords(
           year: Number(data.year) || 2026,
           activity: data.activity || '',
           turma: data.turma || '',
-          status: data.status || 'presente',
+          status: (data.status === 'saude' ? 'falta' : (data.status || 'presente')) as AttendanceStatus,
           exitTime: data.exitTime || undefined,
           equipmentMissingDetails: data.equipmentMissingDetails || undefined,
           observation: data.observation || undefined,
@@ -1704,11 +1704,11 @@ export async function seedDefaultSchoolData(force = false): Promise<{
       let status: AttendanceStatus = 'presente';
       let observation: string | undefined = undefined;
 
-      // Distribuição realística: ~45 presentes, 3 faltas, 1 atestado de saúde
+      // Distribuição realística: ~45 presentes, 4 faltas
       if (idx === 1 || idx === 22 || idx === 39) {
         status = 'falta';
       } else if (idx === 33) {
-        status = 'saude';
+        status = 'falta';
         observation = 'Atestado médico';
       }
 
@@ -2996,7 +2996,7 @@ export async function fetchRecordsDirectFromServer(
         year: Number(data.year) || 2026,
         activity: data.activity || '',
         turma: data.turma || '',
-        status: data.status || 'presente',
+        status: (data.status === 'saude' ? 'falta' : (data.status || 'presente')) as AttendanceStatus,
         exitTime: data.exitTime || undefined,
         equipmentMissingDetails: data.equipmentMissingDetails || undefined,
         observation: data.observation || undefined,

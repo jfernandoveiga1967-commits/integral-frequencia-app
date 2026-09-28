@@ -76,12 +76,10 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
       presente: number;
       falta: number;
       sem_equipamento: number;
-      saude: number;
       rate: number;
       distinctDaysCount: number;
       mediaPresente: number;
       mediaFalta: number;
-      mediaSaude: number;
     }
   >();
 
@@ -111,12 +109,10 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
       presente: 0,
       falta: 0,
       sem_equipamento: 0,
-      saude: 0,
       rate: 100,
       distinctDaysCount: 0,
       mediaPresente: 0,
       mediaFalta: 0,
-      mediaSaude: 0,
     };
 
     let datesSet = weekDatesMap.get(r.weekNumber);
@@ -132,7 +128,6 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
     if (r.status === 'presente' || r.status === 'saida_antecipada') existing.presente += 1;
     else if (r.status === 'falta') existing.falta += 1;
     else if (r.status === 'sem_equipamento') existing.sem_equipamento += 1;
-    else if (r.status === 'saude') existing.saude += 1;
 
     weekStatsMap.set(r.weekNumber, existing);
   });
@@ -144,7 +139,6 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
     stat.distinctDaysCount = distinctDays;
     stat.mediaPresente = Math.round(stat.presente / distinctDays);
     stat.mediaFalta = Math.round(stat.falta / distinctDays);
-    stat.mediaSaude = Math.round(stat.saude / distinctDays);
     stat.rate = stat.total > 0 ? Math.round((stat.presente / stat.total) * 100) : 100;
   });
 
@@ -442,16 +436,10 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
                         <span className="text-emerald-700 font-extrabold">{stats.mediaPresente} Presentes</span>
                         <span className="text-slate-400">•</span>
                         <span className="text-rose-700 font-extrabold">{stats.mediaFalta} Faltas</span>
-                        {stats.mediaSaude > 0 && (
-                          <>
-                            <span className="text-slate-400">•</span>
-                            <span className="text-amber-700 font-bold">{stats.mediaSaude} Saúde</span>
-                          </>
-                        )}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-1 text-center pt-1 border-t border-slate-200/60 text-[11px]">
+                    <div className="grid grid-cols-3 gap-1 text-center pt-1 border-t border-slate-200/60 text-[11px]">
                       <div>
                         <span className="block text-slate-400 text-[10px]">Média Pres.</span>
                         <span className="font-bold text-emerald-600">{stats.mediaPresente}</span>
@@ -459,10 +447,6 @@ export const WeeklyLibrary: React.FC<WeeklyLibraryProps> = ({
                       <div>
                         <span className="block text-slate-400 text-[10px]">Média Faltas</span>
                         <span className="font-bold text-rose-600">{stats.mediaFalta}</span>
-                      </div>
-                      <div>
-                        <span className="block text-slate-400 text-[10px]">Média Saúde</span>
-                        <span className="font-bold text-amber-600">{stats.mediaSaude}</span>
                       </div>
                       <div>
                         <span className="block text-slate-400 text-[10px]">Dias Lançados</span>

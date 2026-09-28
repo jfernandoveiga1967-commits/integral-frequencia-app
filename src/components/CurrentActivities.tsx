@@ -630,7 +630,6 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
         const presents = recordsToday.filter((r) => r.status === 'presente').length;
         const faltas = recordsToday.filter((r) => r.status === 'falta').length;
-        const saude = recordsToday.filter((r) => r.status === 'saude').length;
         const semEquip = recordsToday.filter((r) => r.status === 'sem_equipamento').length;
         const saidaAnt = recordsToday.filter((r) => r.status === 'saida_antecipada').length;
 
@@ -653,7 +652,6 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           statusType,
           presents,
           faltas,
-          saude,
           semEquip,
           saidaAnt,
         };
@@ -744,7 +742,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     records.forEach((r) => {
       if (
         r.date === selectedDate &&
-        (r.status === 'falta' || r.status === 'saude') &&
+        r.status === 'falta' &&
         isRoutineActivity(r.activity)
       ) {
         absentRoutineStudentIds.add(r.studentId);
@@ -764,7 +762,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           return;
         }
 
-        // Desconsidera faltas / atestados do dia na rotina geral
+        // Desconsidera faltas do dia na rotina geral
         if (absentRoutineStudentIds.has(student.id)) {
           return;
         }
@@ -783,7 +781,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           if (actRec.status === 'presente' || actRec.status === 'sem_equipamento') {
             activePresentStudentIds.add(student.id);
           }
-          // Se for falta, saude ou saida_antecipada, não inclui
+          // Se for falta ou saida_antecipada, não inclui
         } else {
           // Sem registro para a atividade específica ainda:
           // Checa se tem registro na rotina geral
@@ -2053,8 +2051,6 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             ? 'bg-emerald-50/50 border-emerald-200'
                             : currentStatus === 'falta'
                             ? 'bg-rose-50/50 border-rose-200'
-                            : currentStatus === 'saude'
-                            ? 'bg-purple-50/50 border-purple-200'
                             : currentStatus === 'sem_equipamento'
                             ? 'bg-amber-50/50 border-amber-200'
                             : currentStatus === 'saida_antecipada'
@@ -2085,12 +2081,6 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               label: 'Falta',
                               activeBg: 'bg-rose-600 text-white border-rose-600',
                               inactiveBg: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
-                            },
-                            {
-                              id: 'saude' as AttendanceStatus,
-                              label: 'Saúde',
-                              activeBg: 'bg-purple-600 text-white border-purple-600',
-                              inactiveBg: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
                             },
                             {
                               id: 'sem_equipamento' as AttendanceStatus,

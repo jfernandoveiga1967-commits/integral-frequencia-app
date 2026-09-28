@@ -464,7 +464,6 @@ function getCurrentHHMM(): string {
         presente: 0,
         saidaAntecipada: 0,
         falta: 0,
-        saude: 0,
         semEquipamento: 0,
         pendente: filteredStudents.length,
         total: filteredStudents.length,
@@ -474,7 +473,6 @@ function getCurrentHHMM(): string {
     let presente = 0;
     let saidaAntecipada = 0;
     let falta = 0;
-    let saude = 0;
     let semEquipamento = 0;
     let pendente = 0;
 
@@ -489,15 +487,13 @@ function getCurrentHHMM(): string {
         saidaAntecipada++;
       } else if (rec.status === 'falta') {
         falta++;
-      } else if (rec.status === 'saude') {
-        saude++;
       } else if (rec.status === 'sem_equipamento') {
         semEquipamento++;
       }
     });
 
-    const total = presente + saidaAntecipada + falta + saude + semEquipamento + pendente;
-    return { presente, saidaAntecipada, falta, saude, semEquipamento, pendente, total };
+    const total = presente + saidaAntecipada + falta + semEquipamento + pendente;
+    return { presente, saidaAntecipada, falta, semEquipamento, pendente, total };
   }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
   // Handlers for status click
@@ -1003,10 +999,6 @@ function getCurrentHHMM(): string {
               <Shirt className="w-3.5 h-3.5 text-orange-600" />
               <span>{stats.semEquipamento} Sem Equip.</span>
             </span>
-            <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-200 flex items-center space-x-1">
-              <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
-              <span>{stats.saude} Saúde</span>
-            </span>
             <span className="px-2 py-1 rounded-md bg-rose-100 text-rose-800 border border-rose-200 flex items-center space-x-1">
               <XCircle className="w-3.5 h-3.5 text-rose-600" />
               <span>{stats.falta} Faltas</span>
@@ -1353,8 +1345,6 @@ function getCurrentHHMM(): string {
                               ? 'bg-amber-50/90 border-amber-200'
                               : currentStatus === 'sem_equipamento'
                               ? 'bg-orange-50/80 border-orange-200'
-                              : currentStatus === 'saude'
-                              ? 'bg-amber-50/80 border-amber-200'
                               : currentStatus === 'falta'
                               ? 'bg-rose-50/80 border-rose-200'
                               : 'bg-amber-50/30 border-amber-200/80'
@@ -1430,22 +1420,7 @@ function getCurrentHHMM(): string {
                                 <span>Sem Equip.</span>
                               </button>
 
-                              {/* 4. SAÚDE */}
-                              <button
-                                type="button"
-                                onClick={() => handleStatusClick(student, act, selectedDate, 'saude')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
-                                  currentStatus === 'saude'
-                                    ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                                    : 'bg-white hover:bg-amber-50 text-amber-900 border-slate-200 hover:border-amber-300'
-                                }`}
-                                title="Ausência por motivo de saúde ou atestado médico"
-                              >
-                                <Stethoscope className="w-3.5 h-3.5" />
-                                <span>Saúde</span>
-                              </button>
-
-                              {/* 5. FALTA */}
+                              {/* 4. FALTA */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusClick(student, act, selectedDate, 'falta')}

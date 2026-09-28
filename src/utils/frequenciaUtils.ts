@@ -34,7 +34,7 @@ export function isFaltaStatus(status: AttendanceStatus | string | null | undefin
 export function isJustificadoStatus(status: AttendanceStatus | string | null | undefined): boolean {
   if (!status) return false;
   const s = status.trim().toLowerCase();
-  return s === 'saude' || s === 'justificado' || s === 'atestado';
+  return s === 'justificado' || s === 'atestado';
 }
 
 /**

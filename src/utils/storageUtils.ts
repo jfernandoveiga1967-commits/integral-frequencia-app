@@ -798,6 +798,14 @@ export function loadAttendanceRecords(): AttendanceRecord[] {
     const data = localStorage.getItem(RECORDS_KEY);
     if (data) {
       let parsed: AttendanceRecord[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        parsed = parsed.map((r) => {
+          if ((r as any).status === 'saude') {
+            return { ...r, status: 'falta' as AttendanceStatus };
+          }
+          return r;
+        });
+      }
       // Check if records are the initial 82 seed records (generated automatically)
       const isInitialSeed = parsed.some((r) => r.id.startsWith('st-1_') || r.id.startsWith('st-2_') || r.id.startsWith('st-3_'));
       if (isInitialSeed) {

@@ -2218,27 +2218,6 @@ export default function App() {
                       >
                         Falta
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const dateObj = new Date(todayStr + 'T12:00:00');
-                          const isoWeek = getISOWeekNumber(dateObj);
-                          handleSaveRecord({
-                            studentId: student.id,
-                            turma: student.turma,
-                            activity: 'Rotina',
-                            date: todayStr,
-                            weekNumber: currentWeek?.weekNumber || isoWeek.weekNumber,
-                            year: currentWeek?.year || isoWeek.year,
-                            status: 'saude',
-                            observation: 'Atestado Médico / Ausência Justificada',
-                          });
-                        }}
-                        className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
-                        title="Lançar Atestado / Saúde"
-                      >
-                        Atestado
-                      </button>
                     </div>
                   </div>
                 ))

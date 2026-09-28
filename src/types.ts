@@ -16,7 +16,6 @@ export type TurmaType = string;
 export type AttendanceStatus =
   | 'presente'
   | 'falta'
-  | 'saude'
   | 'sem_equipamento'
   | 'saida_antecipada';
 
