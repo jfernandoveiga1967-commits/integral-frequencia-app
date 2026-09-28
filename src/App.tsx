@@ -1973,6 +1973,7 @@ export default function App() {
             currentWeek={currentWeek}
             activitiesList={activitiesList}
             schedules={schedules}
+            quadroAtribuicoes={quadroAtribuicoes}
             onSavePlan={handleSaveSemanarioPlan}
             onDeletePlan={handleDeleteSemanarioPlan}
             onBatchSavePlans={handleBatchSaveSemanarioPlans}

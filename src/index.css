@@ -194,6 +194,22 @@
     break-inside: avoid !important;
   }
 
+  /* Quebra de página obrigatória por turma no relatório consolidado */
+  .turma-page-break,
+  .turma-print-section + .turma-print-section,
+  .page-break-before-always,
+  .print\:break-before-page,
+  [data-break-before="page"] {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .turma-print-section:first-child,
+  .turma-print-section:first-of-type {
+    page-break-before: auto !important;
+    break-before: auto !important;
+  }
+
   /* Suporte a múltiplas páginas de PDF renderizado */
   .pdf-printable-page {
     page-break-after: always;

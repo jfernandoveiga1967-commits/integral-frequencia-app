@@ -32,6 +32,7 @@ export interface PdfViewerModalProps {
   onDownload?: () => void;
   children?: React.ReactNode;
   htmlContent?: React.ReactNode;
+  extraToolbar?: React.ReactNode;
 }
 
 export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
@@ -49,6 +50,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   onDownload,
   children,
   htmlContent,
+  extraToolbar,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -312,6 +314,13 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Extra Toolbar (e.g. Filters / Selectors) */}
+        {extraToolbar && (
+          <div className="bg-slate-950/95 border-b border-slate-800 px-4 py-2.5 sm:px-6 shrink-0 print:hidden no-print z-20">
+            {extraToolbar}
+          </div>
+        )}
 
         {/* Sub-bar filename info (Hidden in Print) */}
         <div className="bg-slate-950/70 px-4 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 print:hidden no-print print-hidden shrink-0">

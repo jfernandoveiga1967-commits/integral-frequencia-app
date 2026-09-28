@@ -14,6 +14,7 @@ import {
   Layers,
   GraduationCap,
   FileDown,
+  FileText,
   AlertCircle,
   Users,
   X,
@@ -25,7 +26,7 @@ import {
   CalendarDays,
   Zap,
 } from 'lucide-react';
-import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaType, UserProfile, WeekInfo } from '../../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaAtribuicao, TurmaType, UserProfile, WeekInfo } from '../../types';
 import { SemanarioCard } from './SemanarioCard';
 import { SemanarioModal } from './SemanarioModal';
 import {
@@ -72,6 +73,7 @@ interface SemanarioMainProps {
   currentWeek: WeekInfo;
   activitiesList?: ActivityItem[];
   schedules?: ScheduleBlock[];
+  quadroAtribuicoes?: TurmaAtribuicao[];
   onSavePlan: (plan: SemanarioPlan) => void;
   onDeletePlan: (planId: string) => void;
   onBatchSavePlans: (plans: SemanarioPlan[]) => void;
@@ -124,6 +126,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   currentWeek,
   activitiesList,
   schedules,
+  quadroAtribuicoes,
   onSavePlan,
   onDeletePlan,
   onBatchSavePlans,
@@ -193,6 +196,10 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     title?: string;
     onDownload?: () => void;
   }>({ isOpen: false });
+
+  // Quick Filter State for PDF Preview Modal
+  const [pdfFilterTurma, setPdfFilterTurma] = useState<string>('all');
+  const [pdfFilterDay, setPdfFilterDay] = useState<string>('all');
 
   // Add Turma Handler
   const handleAddTurmaSubmit = (e: React.FormEvent) => {
@@ -713,35 +720,149 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     setIsGeneratingBatchAI(false);
   };
 
-  // PDF Export & Preview Modal
-  const handleExportPDF = (turmaFilter?: string) => {
-    const targetTurma = turmaFilter || activeTurma || 'all';
-    const plansToExport = turmaFilter
-      ? weekPlans.filter((p) => p.turma === turmaFilter)
-      : activeTurma
-      ? filteredActiveTurmaPlans
+  // PDF Export & Preview Modal with dynamic turma and day filters
+  const handleExportPDF = (turmaFilter?: string, dayFilter?: string) => {
+    const targetTurma = turmaFilter !== undefined ? turmaFilter : (activeTurma || 'all');
+    const targetDay = dayFilter !== undefined ? dayFilter : 'all';
+
+    setPdfFilterTurma(targetTurma);
+    setPdfFilterDay(targetDay);
+
+    const plansToExport = targetTurma && targetTurma !== 'all'
+      ? weekPlans.filter((p) => p.turma === targetTurma)
       : weekPlans;
 
     const result = generateSemanarioPDFReport(
       plansToExport,
       currentWeek,
       targetTurma,
-      selectedDay,
+      targetDay,
       currentUser,
-      false
+      false,
+      sortedTurmas
     );
 
     const isAll = targetTurma === 'all';
+    const dayLabels: Record<string, string> = {
+      segunda: 'Segunda-feira',
+      terca: 'Terça-feira',
+      quarta: 'Quarta-feira',
+      quinta: 'Quinta-feira',
+      sexta: 'Sexta-feira',
+    };
+    const dayText = targetDay !== 'all' ? ` — ${dayLabels[targetDay] || targetDay}` : ' — Semana Completa';
+
     setPdfPreviewState({
       isOpen: true,
       doc: result.doc,
       blobUrl: result.blobUrl,
       dataUrl: result.dataUrl || result.dataUri,
       filename: result.filename,
-      title: `Semanário Pedagógico — Semana ${currentWeek.weekNumber} (${isAll ? 'Todas as Turmas' : targetTurma})`,
+      title: `Semanário Pedagógico • Semana ${currentWeek.weekNumber} (${isAll ? 'Todas as Turmas' : targetTurma}${dayText})`,
       onDownload: result.download,
     });
   };
+
+  // Seletor rápido no topo da Pré-Visualização Oficial do PDF
+  const pdfModalToolbar = (
+    <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+      {/* 1. Seleção Rápida de Turma */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+          <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
+          <span>Turma:</span>
+        </span>
+
+        {/* [ Todas as Turmas (PDF Geral) ] */}
+        <button
+          type="button"
+          onClick={() => handleExportPDF('all', pdfFilterDay)}
+          className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs ${
+            pdfFilterTurma === 'all'
+              ? 'bg-indigo-600 text-white shadow-indigo-600/30 ring-2 ring-indigo-400/50'
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+          }`}
+          title="Relatório Consolidado de Todas as Turmas (com quebra de página por turma)"
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span>Todas as Turmas (PDF Geral)</span>
+        </button>
+
+        {/* [ Turma Atual ] */}
+        {activeTurma && (
+          <button
+            type="button"
+            onClick={() => handleExportPDF(activeTurma, pdfFilterDay)}
+            className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs ${
+              pdfFilterTurma === activeTurma
+                ? 'bg-amber-500 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-400/50'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+            }`}
+            title={`Exportar apenas a Turma Atual: ${activeTurma}`}
+          >
+            <GraduationCap className="w-3.5 h-3.5" />
+            <span>Turma Atual ({activeTurma})</span>
+          </button>
+        )}
+
+        {/* Seletor dropdown para alternar qualquer turma */}
+        <div className="relative">
+          <select
+            value={pdfFilterTurma}
+            onChange={(e) => handleExportPDF(e.target.value, pdfFilterDay)}
+            className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/40 cursor-pointer"
+            title="Escolher turma para o PDF"
+          >
+            <option value="all">Todas as Turmas</option>
+            {sortedTurmas.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* 2. Filtro de Dia: Segunda a Sexta */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+          <Calendar className="w-3.5 h-3.5 text-amber-400" />
+          <span>Filtro de Dia:</span>
+        </span>
+
+        {/* Semana Completa */}
+        <button
+          type="button"
+          onClick={() => handleExportPDF(pdfFilterTurma, 'all')}
+          className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs ${
+            pdfFilterDay === 'all'
+              ? 'bg-emerald-600 text-white font-extrabold ring-2 ring-emerald-400/50'
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+          }`}
+          title="Compilação Semanal (Segunda a Sexta)"
+        >
+          Semana Completa
+        </button>
+
+        {/* Dias de Segunda a Sexta */}
+        {DAYS_OF_WEEK_CONFIG.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => handleExportPDF(pdfFilterTurma, d.id)}
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+              pdfFilterDay === d.id
+                ? 'bg-amber-500 text-slate-950 font-black ring-2 ring-amber-400/50'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+            }`}
+            title={`Filtrar apenas ${d.label}`}
+          >
+            {d.short}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   // Direct Print immediately via CSS @media print and same window
   const handlePrint = () => {
@@ -808,40 +929,26 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   <span>Nova Proposta</span>
                 </button>
 
-                {isCoordenador(currentUser) && (
-                  <>
-                    <button
-                      type="button"
-                      disabled={isGeneratingBatchAI}
-                      onClick={() => handlePopulateSingleTurmaWeek(activeTurma)}
-                      className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                      title="Gerar/Restaurar todas as atividades padrão desta turma"
-                    >
-                      <Zap className="w-4 h-4 text-amber-300" />
-                      <span>Preencher Grade</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isGeneratingBatchAI}
-                      onClick={() => handleBatchGenerateAIWeek(activeTurma)}
-                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-lg transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-                      title="Gerar Propostas da Semana com IA para esta turma"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span>{isGeneratingBatchAI ? 'Gerando...' : 'Semana com IA'}</span>
-                    </button>
-                  </>
-                )}
-
+                {/* PDF do Dia (Turma Selecionada) */}
                 <button
                   type="button"
-                  onClick={() => handleExportPDF(activeTurma)}
-                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                  title="Exportar PDF desta Turma"
+                  onClick={() => handleExportPDF(activeTurma, selectedDay)}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/50 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                  title={`Exportar PDF de ${DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label || selectedDay} da turma ${activeTurma}`}
+                >
+                  <FileText className="w-4 h-4 text-amber-400" />
+                  <span>PDF do Dia</span>
+                </button>
+
+                {/* PDF da Semana (Turma Selecionada) */}
+                <button
+                  type="button"
+                  onClick={() => handleExportPDF(activeTurma, 'all')}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-200 border border-slate-700 hover:border-indigo-500/50 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                  title={`Exportar PDF da Semana Completa (Segunda a Sexta) da turma ${activeTurma}`}
                 >
                   <FileDown className="w-4 h-4 text-indigo-400" />
-                  <span>PDF da Turma</span>
+                  <span>PDF da Semana</span>
                 </button>
               </>
             ) : (
@@ -883,14 +990,26 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   </button>
                 )}
 
+                {/* PDF Geral da Semana (Todas as Turmas) */}
                 <button
                   type="button"
-                  onClick={() => handleExportPDF()}
-                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                  title="Exportar PDF Institucional Oficial de Todas as Turmas"
+                  onClick={() => handleExportPDF('all', 'all')}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-200 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                  title="Exportar PDF Oficial da Semana de Todas as Turmas (com quebra de página por turma)"
                 >
                   <FileDown className="w-4 h-4 text-indigo-400" />
-                  <span>PDF Geral</span>
+                  <span>PDF Geral (Semana)</span>
+                </button>
+
+                {/* PDF Geral do Dia (Todas as Turmas) */}
+                <button
+                  type="button"
+                  onClick={() => handleExportPDF('all', selectedDay)}
+                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                  title={`Exportar PDF de Todas as Turmas para ${DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label || selectedDay}`}
+                >
+                  <FileText className="w-4 h-4 text-amber-400" />
+                  <span>PDF Geral (Dia)</span>
                 </button>
               </>
             )}
@@ -1013,7 +1132,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           </div>
 
           {/* Grid of Class Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 print:hidden no-print">
             {displayedTurmas.map((t) => {
               const turmaPlans = weekPlans.filter((p) => p.turma === t);
               // Atividades que possuem texto/conteúdo pedagógico salvo (descricao, conteudo ou proposta preenchidos)
@@ -1152,10 +1271,132 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   </div>
 
                   {/* Card Action Footer */}
-                  <div className="p-4 pt-2 border-t border-slate-100 bg-white">
+                  <div className="p-4 pt-2 border-t border-slate-100 bg-white space-y-2">
+                    {/* Botões de Exportação Rápida de PDF por Turma */}
+                    <div
+                      className="grid grid-cols-2 gap-1.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportPDF(t, selectedDay);
+                        }}
+                        className="py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center space-x-1 cursor-pointer active:scale-95 shadow-xs"
+                        title={`Exportar PDF de ${DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label || selectedDay} da turma ${t}`}
+                      >
+                        <FileText className="w-3.5 h-3.5 text-amber-600" />
+                        <span>PDF do Dia</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportPDF(t, 'all');
+                        }}
+                        className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/80 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center space-x-1 cursor-pointer active:scale-95 shadow-xs"
+                        title={`Exportar PDF da Semana Completa (Segunda a Sexta) da turma ${t}`}
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>PDF da Semana</span>
+                      </button>
+                    </div>
+
                     <div className="w-full py-2 px-3 bg-slate-50 group-hover:bg-indigo-600 group-hover:text-white text-indigo-700 rounded-xl text-xs font-extrabold flex items-center justify-between transition-colors shadow-xs">
                       <span>Ver Atividades da Turma</span>
                       <ChevronRightIcon className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Relatório Consolidado de Impressão Geral por Turma (Visível apenas na impressão quando visão geral) */}
+          <div className="print-only hidden print:block space-y-8">
+            {sortedTurmas.map((turma, turmaIndex) => {
+              const turmaPlans = weekPlans.filter((p) => p.turma === turma);
+              return (
+                <div
+                  key={turma}
+                  className={`turma-print-section p-4 ${
+                    turmaIndex > 0 ? 'print:break-before-page page-break-before-always' : ''
+                  }`}
+                  style={turmaIndex > 0 ? { breakBefore: 'page', pageBreakBefore: 'always' } : undefined}
+                >
+                  <div className="border-b-2 border-slate-900 pb-2 mb-4 text-center">
+                    <h1 className="text-base font-black uppercase text-slate-900">
+                      INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
+                    </h1>
+                    <h2 className="text-xs font-bold uppercase text-slate-700">
+                      SEMANÁRIO PEDAGÓGICO — SEMANA {currentWeek.weekNumber}
+                    </h2>
+                    <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300 mt-1">
+                      <span>Turma: <strong className="text-slate-900">{turma}</strong></span>
+                      <span>Período: {currentWeek.startDate} a {currentWeek.endDate}</span>
+                      <span>Atividades Cadastradas: {turmaPlans.length}</span>
+                    </div>
+                  </div>
+
+                  {/* Atividades da Turma agrupadas por Dia */}
+                  {turmaPlans.length === 0 ? (
+                    <p className="text-xs italic text-slate-500 py-6 text-center">
+                      Nenhuma proposta pedagógica cadastrada para esta turma nesta semana.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {DAYS_OF_WEEK_CONFIG.map((d) => {
+                        const dayPlans = turmaPlans.filter((p) => p.dayOfWeek === d.id);
+                        if (dayPlans.length === 0) return null;
+                        return (
+                          <div key={d.id} className="border border-slate-300 rounded-lg overflow-hidden">
+                            <div className="bg-slate-800 text-white font-bold text-xs px-3 py-1">
+                              {d.label.toUpperCase()} ({dayPlans.length} {dayPlans.length === 1 ? 'atividade' : 'atividades'})
+                            </div>
+                            <div className="divide-y divide-slate-200">
+                              {dayPlans.map((plan) => (
+                                <div key={plan.id} className="p-2.5 text-xs space-y-1">
+                                  <div className="flex items-center justify-between font-bold">
+                                    <span className="text-slate-900 font-extrabold">{plan.category}: {plan.title}</span>
+                                    <span className="text-[10px] uppercase px-1.5 py-0.5 bg-slate-100 rounded">
+                                      {plan.status === 'realizada' ? 'Realizada' : plan.status === 'substituida' ? 'Substituída' : 'Pendente'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    Horário: {plan.timeSlot || 'Integral'} • Responsável: {plan.teacherName || 'Monitora'}
+                                  </div>
+                                  {plan.development && (
+                                    <div className="text-[11px] text-slate-700 whitespace-pre-line pt-1">
+                                      {plan.development}
+                                    </div>
+                                  )}
+                                  {plan.materials && (
+                                    <div className="text-[10px] text-slate-600 pt-0.5">
+                                      <strong>Materiais:</strong> {plan.materials}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Assinaturas da Turma */}
+                  <div className="print-avoid-break print-signatures mt-8 pt-4 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
+                    <div>
+                      <div className="border-t border-slate-400 pt-1 font-bold">Fernando Veiga</div>
+                      <div className="text-[10px] text-slate-500">Coordenação Pedagógica / DP GAVAR</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-slate-400 pt-1 font-bold">
+                        {currentUser?.name || 'Professora / Monitora'}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Equipe Pedagógica • {turma}</div>
                     </div>
                   </div>
                 </div>
@@ -1203,8 +1444,30 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
               </div>
             </div>
 
-            {/* Turma Switcher */}
-            <div className="flex flex-wrap items-center gap-2.5 print:hidden no-print">
+            {/* Turma Switcher & Quick PDF Export */}
+            <div className="flex flex-wrap items-center gap-2 print:hidden no-print">
+              {/* PDF do Dia (Turma) */}
+              <button
+                type="button"
+                onClick={() => handleExportPDF(activeTurma, selectedDay)}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/90 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs active:scale-95"
+                title={`Exportar PDF de ${DAYS_OF_WEEK_CONFIG.find((d) => d.id === selectedDay)?.label || selectedDay} desta turma`}
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-600" />
+                <span>PDF do Dia</span>
+              </button>
+
+              {/* PDF da Semana (Turma) */}
+              <button
+                type="button"
+                onClick={() => handleExportPDF(activeTurma, 'all')}
+                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/90 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs active:scale-95"
+                title="Exportar PDF da Semana Completa (Segunda a Sexta) desta turma"
+              >
+                <FileDown className="w-3.5 h-3.5 text-indigo-600" />
+                <span>PDF da Semana</span>
+              </button>
+
               {/* Quick Select another turma */}
               <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
                 <span className="text-xs font-bold text-slate-500">Turma:</span>
@@ -1409,6 +1672,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         currentUser={currentUser}
         activitiesList={activitiesList}
         schedules={schedules}
+        quadroAtribuicoes={quadroAtribuicoes}
         weekNumber={currentWeek.weekNumber}
         year={currentWeek.year}
         defaultDayOfWeek={defaultDayForModal}
@@ -1512,6 +1776,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           filename={pdfPreviewState.filename}
           title={pdfPreviewState.title}
           onDownload={pdfPreviewState.onDownload}
+          extraToolbar={pdfModalToolbar}
         />
       )}
 

@@ -3090,7 +3090,8 @@ export function generateSemanarioPDFReport(
   selectedTurma: string = 'all',
   selectedDay: string = 'all',
   currentUser?: UserProfile | null,
-  saveImmediately: boolean = false
+  saveImmediately: boolean = false,
+  availableTurmas?: string[]
 ): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -3103,64 +3104,14 @@ export function generateSemanarioPDFReport(
   const rightMargin = 196;
   const printableWidth = rightMargin - leftMargin;
 
-  // Filter labels for Header Tier 4
-  const filterDetails: string[] = [];
-  filterDetails.push(`Semana ${weekInfo.weekNumber} (${formatDateBR(weekInfo.startDate)} a ${formatDateBR(weekInfo.endDate)})`);
-  if (selectedTurma && selectedTurma !== 'all') {
-    filterDetails.push(`Turma: ${selectedTurma}`);
-  } else {
-    filterDetails.push('Todas as 13 Turmas Oficiais');
-  }
-  if (selectedDay && selectedDay !== 'all') {
-    const dayLabels: Record<string, string> = {
-      segunda: 'Segunda-feira',
-      terca: 'Terça-feira',
-      quarta: 'Quarta-feira',
-      quinta: 'Quinta-feira',
-      sexta: 'Sexta-feira',
-    };
-    filterDetails.push(`Dia: ${dayLabels[selectedDay] || selectedDay}`);
-  }
+  const dayLabels: Record<string, string> = {
+    segunda: 'Segunda-feira',
+    terca: 'Terça-feira',
+    quarta: 'Quarta-feira',
+    quinta: 'Quinta-feira',
+    sexta: 'Sexta-feira',
+  };
 
-  // Draw the official 4-tier institutional header
-  drawOfficialHeader(
-    doc,
-    'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
-    'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
-    filterDetails,
-    'portrait'
-  );
-
-  let currentY = 36;
-
-  // KPI Metrics Banner
-  const total = plans.length;
-  const realizadas = plans.filter((p) => p.status === 'realizada').length;
-  const pendentes = plans.filter((p) => p.status === 'pendente').length;
-  const substituidas = plans.filter((p) => p.status === 'substituida').length;
-  const taxa = total > 0 ? Math.round((realizadas / total) * 100) : 0;
-
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.setDrawColor(226, 232, 240); // slate-200
-  doc.roundedRect(leftMargin, currentY, printableWidth, 14, 2, 2, 'FD');
-
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42); // slate-900
-  doc.text('RESUMO DO PLANEJAMENTO:', leftMargin + 4, currentY + 5.5);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(51, 65, 85);
-  doc.text(
-    `Total de Propostas: ${total}   |   Realizadas: ${realizadas} (${taxa}%)   |   Pendentes: ${pendentes}   |   Substituídas: ${substituidas}`,
-    leftMargin + 4,
-    currentY + 10.5
-  );
-
-  currentY += 18;
-
-  // Days order
   const dayOrder: Array<{ id: DayOfWeek; label: string }> = [
     { id: 'segunda', label: 'Segunda-feira' },
     { id: 'terca', label: 'Terça-feira' },
@@ -3173,96 +3124,45 @@ export function generateSemanarioPDFReport(
     ? dayOrder
     : dayOrder.filter((d) => d.id === selectedDay);
 
-  if (plans.length === 0) {
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Nenhuma proposta pedagógica cadastrada para o filtro selecionado.', leftMargin, currentY + 10);
-    currentY += 25;
+  // Determina lista de turmas a processar:
+  // Se for uma turma específica ('selectedTurma !== all'): apenas ela.
+  // Se for 'all': todas as turmas presentes nos planos ou registradas, ordenadas pedagogicamente.
+  let turmasToProcess: string[] = [];
+  if (selectedTurma && selectedTurma !== 'all') {
+    turmasToProcess = [selectedTurma];
   } else {
-    activeDays.forEach((day) => {
-      const dayPlans = plans.filter((p) => p.dayOfWeek === day.id);
-      if (dayPlans.length === 0) return;
-
-      // Check for page overflow
-      if (currentY > 230) {
-        doc.addPage();
-        drawOfficialHeader(
-          doc,
-          'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
-          'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
-          filterDetails,
-          'portrait'
-        );
-        currentY = 36;
-      }
-
-      // Day Header Section
-      doc.setFillColor(30, 41, 59); // slate-800
-      doc.roundedRect(leftMargin, currentY, printableWidth, 7, 1.5, 1.5, 'F');
-      doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text(`${day.label.toUpperCase()} (${dayPlans.length} ${dayPlans.length === 1 ? 'atividade' : 'atividades'})`, leftMargin + 4, currentY + 5);
-
-      currentY += 9;
-
-      // Table of Proposals for this Day
-      const tableRows = dayPlans.map((p) => {
-        let statusStr = 'Pendente';
-        if (p.status === 'realizada') statusStr = 'Realizada';
-        if (p.status === 'substituida') {
-          statusStr = p.substitutionReason ? `Substituída (${p.substitutionReason})` : 'Substituída';
-        }
-
-        const detailsText = [
-          `Turma: ${p.turma}${p.timeSlot ? ` • Horário: ${p.timeSlot}` : ''} • Responsável: ${p.teacherName || 'Monitora'}`,
-          p.objectives ? `Objetivos / BNCC: ${p.objectives}` : '',
-          p.development ? `Desenvolvimento: ${p.development}` : '',
-          p.materials ? `Materiais: ${p.materials}` : '',
-        ].filter(Boolean).join('\n');
-
-        return [
-          `${p.category}\n[${statusStr}]`,
-          `${p.title.toUpperCase()}\n\n${detailsText}`,
-        ];
-      });
-
-      autoTable(doc, {
-        startY: currentY,
-        head: [['Categoria / Status', 'Proposta Pedagógica, Objetivos & Desenvolvimento']],
-        body: tableRows,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [71, 85, 105], // slate-600
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: 7.5,
-          cellPadding: 2,
-        },
-        bodyStyles: {
-          fontSize: 7,
-          cellPadding: 2.5,
-          textColor: [30, 41, 59],
-          valign: 'top',
-        },
-        columnStyles: {
-          0: { cellWidth: 42, fontStyle: 'bold' },
-          1: { cellWidth: 140 },
-        },
-        margin: { left: leftMargin, right: 14 },
-        didDrawPage: (data) => {
-          currentY = data.cursor?.y || currentY;
-        },
-      });
-
-      currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : currentY + 10;
-    });
+    const fromPlans = Array.from(new Set(plans.map((p) => p.turma).filter(Boolean)));
+    const candidateList = fromPlans.length > 0 ? fromPlans : (availableTurmas || []);
+    turmasToProcess = sortTurmasPedagogical(candidateList);
+    if (turmasToProcess.length === 0) {
+      turmasToProcess = ['Todas as Turmas'];
+    }
   }
 
-  // Signatures Section
-  if (currentY > 245) {
-    doc.addPage();
+  // =========================================================================
+  // QUEBRA DE PÁGINA OBRIGATÓRIA POR TURMA NO RELATÓRIO CONSOLIDADO:
+  // Cada turma começa rigorosamente no topo de uma nova página (doc.addPage()).
+  // NUNCA duas turmas diferentes compartilham a mesma folha/página.
+  // =========================================================================
+  turmasToProcess.forEach((turmaName, turmaIndex) => {
+    if (turmaIndex > 0) {
+      doc.addPage();
+    }
+
+    const turmaPlans = plans.filter((p) => p.turma === turmaName);
+
+    // Filter labels for Header Tier 4
+    const filterDetails: string[] = [
+      `Semana ${weekInfo.weekNumber} (${formatDateBR(weekInfo.startDate)} a ${formatDateBR(weekInfo.endDate)})`,
+      `Turma: ${turmaName}`,
+    ];
+    if (selectedDay && selectedDay !== 'all') {
+      filterDetails.push(`Dia: ${dayLabels[selectedDay] || selectedDay}`);
+    } else {
+      filterDetails.push('Compilação Semanal (Segunda a Sexta)');
+    }
+
+    // Draw the official 4-tier institutional header for this turma
     drawOfficialHeader(
       doc,
       'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
@@ -3270,42 +3170,177 @@ export function generateSemanarioPDFReport(
       filterDetails,
       'portrait'
     );
-    currentY = 36;
-  }
 
-  const sigY = Math.max(currentY + 12, 255);
+    let currentY = 36;
 
-  doc.setDrawColor(148, 163, 184); // slate-400
-  doc.setLineWidth(0.3);
-  doc.line(20, sigY, 90, sigY);
-  doc.line(120, sigY, 190, sigY);
+    // KPI Metrics Banner for this Turma
+    const total = turmaPlans.length;
+    const realizadas = turmaPlans.filter((p) => p.status === 'realizada').length;
+    const pendentes = turmaPlans.filter((p) => p.status === 'pendente').length;
+    const substituidas = turmaPlans.filter((p) => p.status === 'substituida').length;
+    const taxa = total > 0 ? Math.round((realizadas / total) * 100) : 0;
 
-  // Assinatura 1 - Coordenação
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text('Fernando Veiga', 55, sigY + 4, { align: 'center' });
+    doc.setFillColor(248, 250, 252); // slate-50
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.roundedRect(leftMargin, currentY, printableWidth, 14, 2, 2, 'FD');
 
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text('Coordenação do Programa Integral / DP GAVAR', 55, sigY + 7.5, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text(`RESUMO DA TURMA — ${turmaName.toUpperCase()}:`, leftMargin + 4, currentY + 5.5);
 
-  // Assinatura 2 - Monitoria / Professora
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(currentUser?.name || 'Professora / Monitora Responsável', 155, sigY + 4, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(51, 65, 85);
+    doc.text(
+      `Total de Propostas: ${total}   |   Realizadas: ${realizadas} (${taxa}%)   |   Pendentes: ${pendentes}   |   Substituídas: ${substituidas}`,
+      leftMargin + 4,
+      currentY + 10.5
+    );
 
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text('Equipe de Monitoria & Desenvolvimento Pedagógico', 155, sigY + 7.5, { align: 'center' });
+    currentY += 18;
+
+    if (turmaPlans.length === 0) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Nenhuma proposta pedagógica cadastrada para esta turma no filtro selecionado.', leftMargin, currentY + 10);
+      currentY += 25;
+    } else {
+      activeDays.forEach((day) => {
+        const dayPlans = turmaPlans.filter((p) => p.dayOfWeek === day.id);
+        if (dayPlans.length === 0) return;
+
+        // Check for page overflow inside the same turma
+        if (currentY > 230) {
+          doc.addPage();
+          drawOfficialHeader(
+            doc,
+            'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
+            'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+            filterDetails,
+            'portrait'
+          );
+          currentY = 36;
+        }
+
+        // Day Header Section
+        doc.setFillColor(30, 41, 59); // slate-800
+        doc.roundedRect(leftMargin, currentY, printableWidth, 7, 1.5, 1.5, 'F');
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.text(
+          `${day.label.toUpperCase()} (${dayPlans.length} ${dayPlans.length === 1 ? 'atividade' : 'atividades'})`,
+          leftMargin + 4,
+          currentY + 5
+        );
+
+        currentY += 9;
+
+        // Table of Proposals for this Day in this Turma
+        const tableRows = dayPlans.map((p) => {
+          let statusStr = 'Pendente';
+          if (p.status === 'realizada') statusStr = 'Realizada';
+          if (p.status === 'substituida') {
+            statusStr = p.substitutionReason ? `Substituída (${p.substitutionReason})` : 'Substituída';
+          }
+
+          const detailsText = [
+            `Horário: ${p.timeSlot || 'Integral'} • Responsável: ${p.teacherName || 'Monitora'}`,
+            p.objectives ? `Proposta / Intenção: ${p.objectives}` : '',
+            p.development ? `${p.development}` : '',
+            p.materials ? `Materiais: ${p.materials}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+
+          return [
+            `${p.category}\n[${statusStr}]`,
+            `${p.title.toUpperCase()}\n\n${detailsText}`,
+          ];
+        });
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [['Categoria / Status', 'Proposta Pedagógica & Desenvolvimento']],
+          body: tableRows,
+          theme: 'grid',
+          headStyles: {
+            fillColor: [71, 85, 105], // slate-600
+            textColor: 255,
+            fontStyle: 'bold',
+            fontSize: 7.5,
+            cellPadding: 2,
+          },
+          bodyStyles: {
+            fontSize: 7,
+            cellPadding: 2.5,
+            textColor: [30, 41, 59],
+            valign: 'top',
+          },
+          columnStyles: {
+            0: { cellWidth: 42, fontStyle: 'bold' },
+            1: { cellWidth: 140 },
+          },
+          margin: { left: leftMargin, right: 14 },
+          didDrawPage: (data) => {
+            currentY = data.cursor?.y || currentY;
+          },
+        });
+
+        currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : currentY + 10;
+      });
+    }
+
+    // Assinaturas para cada turma ao final de sua seção
+    if (currentY > 245) {
+      doc.addPage();
+      drawOfficialHeader(
+        doc,
+        'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
+        'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+        filterDetails,
+        'portrait'
+      );
+      currentY = 36;
+    }
+
+    const sigY = Math.max(currentY + 10, 256);
+
+    doc.setDrawColor(148, 163, 184); // slate-400
+    doc.setLineWidth(0.3);
+    doc.line(20, sigY, 90, sigY);
+    doc.line(120, sigY, 190, sigY);
+
+    // Assinatura 1 - Coordenação
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('Fernando Veiga', 55, sigY + 4, { align: 'center' });
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Coordenação do Programa Integral / DP GAVAR', 55, sigY + 7.5, { align: 'center' });
+
+    // Assinatura 2 - Monitoria / Professora
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(currentUser?.name || 'Professora / Monitora Responsável', 155, sigY + 4, { align: 'center' });
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Equipe Pedagógica • ${turmaName}`, 155, sigY + 7.5, { align: 'center' });
+  });
 
   applyPageNumbersAndFooters(doc, 'portrait');
 
   const cleanTurma = selectedTurma === 'all' ? 'Todas_Turmas' : selectedTurma.replace(/[\/\s:]+/g, '_');
-  const filename = `Semanario_Integral_Semana_${weekInfo.weekNumber}_${cleanTurma}.pdf`;
+  const cleanDay = selectedDay !== 'all' ? `_${selectedDay}` : '_Semana_Completa';
+  const filename = `Semanario_Integral_Semana_${weekInfo.weekNumber}_${cleanTurma}${cleanDay}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

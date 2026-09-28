@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole } from '../types';
-import { LOGO_CRESCER_BASE64, APP_ICON_BASE64 } from '../utils/appLogoData';
+import { LOGO_CRESCER_BASE64 } from '../utils/appLogoData';
 import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay, getLocalUsersList, saveLocalUsersList } from '../utils/authUtils';
 import {
   LogIn,
@@ -238,28 +238,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
 
         {/* Header Branding */}
         <div className="text-center mb-6 select-none">
-          {/* School Logo (white card for contrast against dark background) */}
-          <div className="flex justify-center mb-4">
-            <div className="bg-white rounded-2xl px-5 py-3 shadow-lg inline-block border border-white/20">
+          {/* Official School Logo (Colégio Crescer - Integral) */}
+          <div className="flex justify-center mb-5">
+            <div className="bg-white rounded-2xl px-6 py-3.5 shadow-xl inline-flex items-center justify-center border border-white/20">
               <img
                 src={LOGO_CRESCER_BASE64}
                 alt="Instituto Educacional Crescer"
-                className="h-12 sm:h-14 w-auto object-contain"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          </div>
-
-          <div className="inline-flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3.5 py-1 rounded-full text-amber-400 text-xs font-extrabold uppercase tracking-wider mb-3">
-            <span>COLÉGIO CRESCER</span>
-          </div>
-          
-          <div className="flex justify-center mb-3">
-            <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-xl shadow-indigo-500/20 ring-4 ring-slate-800 bg-slate-800 flex items-center justify-center">
-              <img
-                src={APP_ICON_BASE64}
-                alt="Logo do Aplicativo"
-                className="w-full h-full object-cover"
+                className="h-14 sm:h-16 w-auto object-contain"
                 referrerPolicy="no-referrer"
               />
             </div>

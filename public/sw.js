@@ -1,8 +1,9 @@
-const CACHE_NAME = 'integral-frequencia-v4.0';
+const CACHE_NAME = 'integral-frequencia-v4.1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/favicon.ico',
   '/icon.svg',
   '/pwa-192.png',
   '/pwa-512.png',

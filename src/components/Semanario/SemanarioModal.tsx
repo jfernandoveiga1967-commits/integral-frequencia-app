@@ -21,7 +21,7 @@ import {
   Square,
   Users,
 } from 'lucide-react';
-import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaType, UserProfile } from '../../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaAtribuicao, TurmaType, UserProfile } from '../../types';
 import {
   getCategoriesForTurma,
   getScheduleBlocksForTurma,
@@ -30,6 +30,8 @@ import {
 } from '../../utils/semanarioUtils';
 import { getWeekInfo, getWeekDays } from '../../utils/dateUtils';
 import { isCoordenador } from '../../utils/authUtils';
+import { fetchGeminiProposal } from '../../utils/semanarioAiGenerator';
+import { loadLocalQuadroAtribuicoes, resolveAtribuicaoForTurma } from '../../utils/atribuicoesStorage';
 
 interface SemanarioModalProps {
   isOpen: boolean;
@@ -42,6 +44,7 @@ interface SemanarioModalProps {
   currentUser?: UserProfile | null;
   activitiesList?: ActivityItem[];
   schedules?: ScheduleBlock[];
+  quadroAtribuicoes?: TurmaAtribuicao[];
   weekNumber: number;
   year: number;
   defaultDate?: string;
@@ -68,6 +71,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   currentUser,
   activitiesList,
   schedules,
+  quadroAtribuicoes,
   weekNumber,
   year,
   defaultDate,
@@ -143,13 +147,29 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     return getScheduleBlocksForTurma(turma, dayOfWeek, schedules);
   }, [turma, dayOfWeek, schedules]);
 
-  // Registered staff suggestions for ADI and Monitors
-  const staffSuggestions = useMemo(() => {
-    if (!users || users.length === 0) {
-      return ['Patrícia', 'Sthefany', 'Márcia', 'Rosana', 'Juliana', 'Aline', 'Camila'];
+  // Quadro de Atribuições consolidado (com fallback seguro ao localStorage)
+  const effectiveAtribuicoes = useMemo(() => {
+    if (quadroAtribuicoes && quadroAtribuicoes.length > 0) {
+      return quadroAtribuicoes;
     }
-    return users.map((u) => u.name).filter(Boolean);
-  }, [users]);
+    return loadLocalQuadroAtribuicoes();
+  }, [quadroAtribuicoes]);
+
+  // Registered staff suggestions for ADI and Monitors (prioritizing assigned staff from Quadro de Atribuições)
+  const staffSuggestions = useMemo(() => {
+    const turmaAtribuicao = resolveAtribuicaoForTurma(turma, effectiveAtribuicoes, users);
+    const priority = [
+      turmaAtribuicao.adiName,
+      turmaAtribuicao.monitoraName,
+      turmaAtribuicao.monitoraAssistenteName,
+    ].filter(Boolean) as string[];
+
+    const allUsers = (!users || users.length === 0)
+      ? ['Patrícia', 'Sthefany', 'Márcia', 'Rosana', 'Juliana', 'Aline', 'Camila']
+      : users.map((u) => u.name).filter(Boolean);
+
+    return Array.from(new Set([...priority, ...allUsers]));
+  }, [users, turma, effectiveAtribuicoes]);
 
   // Other available turmas for replication (excluding the current active turma)
   const availableTargetTurmas = useMemo(() => {
@@ -295,66 +315,131 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
 
   // AI Proposal Generator (Server-side Gemini with rich curated fallback)
   const handleGenerateAIProposal = async (customTheme?: string) => {
-    // Restrição de segurança no cliente: somente Coordenador pode disparar IA
-    if (!isCoordenador(currentUser)) {
-      setAiError('Acesso restrito: Apenas a Coordenação pode gerar propostas pedagógicas com IA.');
-      return;
-    }
-
     setAiLoading(true);
     setAiError(null);
 
-    const themeQuery = customTheme !== undefined ? customTheme : (aiTheme || weekTheme);
+    // O tema da semana inserido pela monitora é prioridade obrigatória; se vazio, a IA sugere
+    const currentThemeText = customTheme !== undefined ? customTheme : (weekTheme.trim() || aiTheme.trim());
+    const themeQuery = currentThemeText ? currentThemeText : undefined;
+
+    // Fonte prioritária e mandatória: Quadro de Atribuições vinculado à turma selecionada
+    const turmaAtribuicao = resolveAtribuicaoForTurma(turma, effectiveAtribuicoes, users);
+    const turmaAdis = [turmaAtribuicao.adiName?.trim()].filter(Boolean) as string[];
+    const turmaMonitors = [
+      turmaAtribuicao.monitoraName?.trim(),
+      turmaAtribuicao.monitoraAssistenteName?.trim(),
+    ].filter(Boolean) as string[];
+
+    // Fallback geral apenas se a turma não tiver atribuições preenchidas no quadro
+    const activeStaff = (users || []).filter((u) => u.status !== 'INATIVO');
+    const fallbackAdis = activeStaff
+      .filter(
+        (u) =>
+          u.role === 'auxiliar' ||
+          (u.cargoLabel && u.cargoLabel.toLowerCase().includes('adi')) ||
+          (u.cargoLabel && u.cargoLabel.toLowerCase().includes('auxiliar'))
+      )
+      .map((u) => u.name)
+      .filter(Boolean);
+
+    const fallbackMonitors = activeStaff
+      .filter(
+        (u) =>
+          u.role === 'professor' ||
+          (u.cargoLabel && u.cargoLabel.toLowerCase().includes('monitor')) ||
+          (u.cargoLabel && u.cargoLabel.toLowerCase().includes('professor'))
+      )
+      .map((u) => u.name)
+      .filter(Boolean);
+
+    const staffList = {
+      adis: turmaAdis.length > 0 ? turmaAdis : (fallbackAdis.length > 0 ? fallbackAdis : ['Patrícia']),
+      monitors: turmaMonitors.length > 0 ? turmaMonitors : (fallbackMonitors.length > 0 ? fallbackMonitors : ['Márcia']),
+      turmaAtribuicao: {
+        adi: turmaAtribuicao.adiName || undefined,
+        monitora: turmaAtribuicao.monitoraName || undefined,
+        assistente: turmaAtribuicao.monitoraAssistenteName || undefined,
+      },
+    };
+
+    const targetDate = getDateForDay(dayOfWeek);
 
     try {
-      const userRole = currentUser?.role || '';
-      const userEmail = currentUser?.email || '';
+      const result = await fetchGeminiProposal(
+        turma,
+        category,
+        dayOfWeek,
+        targetDate,
+        themeQuery,
+        undefined,
+        currentUser,
+        staffList
+      );
 
-      const response = await fetch('/api/gemini/generate-proposal', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': userRole,
-          'x-user-email': userEmail,
-          'x-user-id': currentUser?.id || '',
-        },
-        body: JSON.stringify({
-          turma,
-          category,
-          theme: themeQuery,
-          dayOfWeek,
-          userRole,
-          userEmail,
-        }),
-      });
+      if (result.success && result.proposal) {
+        const prop = result.proposal;
+        if (prop.title) setTitle(prop.title);
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.proposal) {
-          setTitle(data.proposal.title || title);
-          setDevelopment(data.proposal.development || development);
-          setObjectives(data.proposal.objectives || objectives);
-          setMaterials(data.proposal.materials || materials);
-          if (themeQuery && !weekTheme) {
-            setWeekTheme(themeQuery);
-          }
-          setAiLoading(false);
-          return;
+        // Se a monitora não digitou tema, preenche com o tema pedagógico relevante sugerido pela IA
+        if (prop.theme && !weekTheme.trim()) {
+          setWeekTheme(prop.theme);
         }
+
+        // Fonte prioritária e mandatória: Quadro de Atribuições vinculado à turma
+        const finalAdi = turmaAtribuicao.adiName?.trim() || prop.suggestedAdi || '';
+        if (finalAdi) {
+          setAdiResponsible(finalAdi);
+        }
+
+        const exactTurmaMonitor = turmaAtribuicao.monitoraName?.trim()
+          ? (turmaAtribuicao.monitoraAssistenteName?.trim()
+              ? `${turmaAtribuicao.monitoraName.trim()} e ${turmaAtribuicao.monitoraAssistenteName.trim()}`
+              : turmaAtribuicao.monitoraName.trim())
+          : '';
+        const finalMonitor = exactTurmaMonitor || prop.suggestedMonitor || '';
+        if (finalMonitor) {
+          setMonitors(finalMonitor);
+        }
+
+        // Formatação estruturada obrigatória da descrição (🎯 OBJETIVO, 🎨 MATERIAIS, 📝 PASSO A PASSO, 💡 DICA PARA A MONITORA)
+        const formattedDev = prop.formattedDevelopment || prop.development || '';
+        setDevelopment(formattedDev);
+        setObjectives(prop.objectives || '');
+        setMaterials(prop.materials || '');
+
+        setAiLoading(false);
+        return;
       }
-    } catch {
-      // Fallback seamlessly to high-quality curated pedagogical bank
+    } catch (err: any) {
+      console.warn('Aviso na geração com IA (recorrendo ao modelo pedagógico curado):', err);
     }
 
-    // Curated pedagogical generator fallback
+    // Fallback pedagógico curado de alta fidelidade alinhado à Escola Crescer
     const curated = generateCuratedProposal(turma, category, themeQuery);
     setTitle(curated.title);
-    setDevelopment(curated.development);
+    setDevelopment(curated.formattedDevelopment || curated.development);
     setObjectives(curated.objectives);
     setMaterials(curated.materials);
-    if (themeQuery && !weekTheme) {
-      setWeekTheme(themeQuery);
+
+    if (curated.theme && !weekTheme.trim()) {
+      setWeekTheme(curated.theme);
     }
+
+    const fallbackResolvedAdi = turmaAtribuicao.adiName?.trim() || staffList.adis[0] || '';
+    if (fallbackResolvedAdi) {
+      setAdiResponsible(fallbackResolvedAdi);
+    }
+
+    const fallbackResolvedMonitor =
+      (turmaAtribuicao.monitoraName?.trim()
+        ? (turmaAtribuicao.monitoraAssistenteName?.trim()
+            ? `${turmaAtribuicao.monitoraName.trim()} e ${turmaAtribuicao.monitoraAssistenteName.trim()}`
+            : turmaAtribuicao.monitoraName.trim())
+        : staffList.monitors.join(' e ')) || '';
+    if (fallbackResolvedMonitor) {
+      setMonitors(fallbackResolvedMonitor);
+    }
+
     setAiLoading(false);
   };
 
@@ -478,21 +563,19 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            {isCoordenador(currentUser) && (
-              <button
-                type="button"
-                onClick={() => setShowAiPanel(!showAiPanel)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
-                  showAiPanel
-                    ? 'bg-amber-400 text-slate-950 shadow-md'
-                    : 'bg-slate-800 text-amber-300 hover:bg-slate-700 border border-amber-500/30'
-                }`}
-                title="Gerador Assistido por IA (Gemini)"
-              >
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>{showAiPanel ? 'Ocultar IA' : 'Assistente IA'}</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowAiPanel(!showAiPanel)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                showAiPanel
+                  ? 'bg-amber-400 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-amber-300 hover:bg-slate-700 border border-amber-500/30'
+              }`}
+              title="Gerador Assistido por IA (Gemini)"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>{showAiPanel ? 'Ocultar IA' : 'Assistente IA'}</span>
+            </button>
 
             <button
               type="button"
@@ -504,8 +587,8 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           </div>
         </div>
 
-        {/* AI Assistant Banner / Generator Panel - Exclusivo para Coordenador */}
-        {isCoordenador(currentUser) && showAiPanel && (
+        {/* AI Assistant Banner / Generator Panel */}
+        {showAiPanel && (
           <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-amber-950 text-white p-4 border-b border-indigo-800/40 animate-in slide-in-from-top-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 space-y-2">
@@ -516,7 +599,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-300">
-                  Gere passo a passo metodológico, objetivos alinhados à BNCC e materiais para a turma{' '}
+                  Gere proposta acolhedora, dinâmica prática e materiais para a turma{' '}
                   <strong className="text-white">{turma}</strong> na categoria{' '}
                   <strong className="text-amber-200">{category || 'selecionada'}</strong>.
                 </p>
@@ -650,21 +733,30 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
 
           {/* 3. Atividade Proposta */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-bold text-slate-800">
-                Atividade Proposta
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-800 flex items-center space-x-1">
+                <span>Atividade Proposta</span>
+                <span className="text-rose-500">*</span>
               </label>
-              {isCoordenador(currentUser) && (
-                <button
-                  type="button"
-                  onClick={() => handleGenerateAIProposal()}
-                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer"
-                  title="Gerar Proposta com IA"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-500" />
-                  <span>Sugerir com IA</span>
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={aiLoading}
+                onClick={() => handleGenerateAIProposal()}
+                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                title="Sugerir atividade estruturada com Inteligência Artificial"
+              >
+                {aiLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                    <span className="text-amber-700">Sugerindo com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+                    <span>Sugerir com IA</span>
+                  </>
+                )}
+              </button>
             </div>
             <input
               type="text"
@@ -727,7 +819,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
               Descrição
             </label>
             <textarea
-              rows={4}
+              rows={6}
               value={development}
               onChange={(e) => setDevelopment(e.target.value)}
               placeholder="Descreva o passo a passo detalhado da proposta: acolhimento, desenvolvimento da atividade, dinâmica pedagógica e encerramento..."

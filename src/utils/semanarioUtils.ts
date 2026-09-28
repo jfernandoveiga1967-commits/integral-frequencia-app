@@ -533,7 +533,106 @@ export function generateCurriculumForTurmasAndWeek(
 }
 
 /**
- * Gerador de sugestão pedagógica com IA e biblioteca curricular por modalidade
+ * Formata a descrição da proposta pedagógica conforme a estrutura oficial da Escola Crescer:
+ * - Categorias Gerais: [CATEGORIA]:\n[Título]\n\nProposta:\n...\n\nDinâmica:\n...\n\nMateriais (se aplicável):\n• ...\n\nImportante:\n...
+ * - Devocional: Devocional:\n[Título]\n\nProposta:\n...\n\nVersículo:\n...\n\nAtividades:\n...\n\nImportante:\n...
+ * - Contação de História: Contação de História:\n[Título]\n\nLivro:\n...\n\nProposta:\n...\n\nDinâmica:\n...\n\nMateriais (se aplicável):\n• ...\n\nImportante:\n...
+ * - Artes: Artes:\n[Título]\n\nProposta:\n...\n\nDinâmica:\n...\n\nMateriais (se aplicável):\n• ...\n\nImportante:\n...
+ *
+ * REGRA MANDATÓRIA: Sem códigos BNCC, sem Markdown pesado (** ou #), texto corrido em caixa baixa.
+ */
+export function formatPedagogicalDescription(
+  categoryName: string,
+  title: string,
+  proposta: string,
+  dinamica: string,
+  materiais?: string,
+  importante?: string,
+  extra?: { livro?: string; versiculo?: string }
+): string {
+  const cleanCat = (categoryName || 'Atividade Geral').trim();
+  const isDev = cleanCat.toLowerCase().includes('devocional');
+  const isCont =
+    cleanCat.toLowerCase().includes('história') ||
+    cleanCat.toLowerCase().includes('historia') ||
+    cleanCat.toLowerCase().includes('livro') ||
+    cleanCat.toLowerCase().includes('leitura') ||
+    cleanCat.toLowerCase().includes('literatura');
+
+  const imp =
+    importante?.trim() ||
+    'Promova a escuta atenta, acolha cada criança com carinho e mantenha um alinhamento constante de apoio mútuo com a equipe da sala.';
+
+  const formatList = (m?: string): string => {
+    if (!m) return '';
+    const lines = m
+      .split('\n')
+      .map((l) => l.replace(/^[-*•]\s*/, '').trim())
+      .filter(Boolean);
+    if (!lines.length) return '';
+    return lines.map((l) => `• ${l}`).join('\n');
+  };
+
+  const matBlock = formatList(materiais);
+
+  if (isDev) {
+    return [
+      `Devocional:`,
+      title.trim(),
+      '',
+      `Proposta:`,
+      proposta.trim(),
+      '',
+      `Atividades:`,
+      dinamica.trim(),
+      '',
+      `Versículo:`,
+      extra?.versiculo?.trim() || 'Lucas 6:31 - Como vocês querem que os outros lhes façam, façam também vocês a eles.',
+      '',
+      `Importante:`,
+      imp,
+    ].join('\n');
+  }
+
+  if (isCont) {
+    const livroStr = extra?.livro?.trim() || 'O Monstro das Cores, de Anna Llenas (Editora Aletria).';
+    return [
+      `Contação de História:`,
+      title.trim(),
+      '',
+      `Proposta:`,
+      proposta.trim(),
+      '',
+      `Atividades:`,
+      dinamica.trim(),
+      '',
+      `Livro:`,
+      livroStr,
+      '',
+      matBlock ? `Materiais (se aplicável):\n${matBlock}\n` : '',
+      `Importante:`,
+      imp,
+    ].filter(Boolean).join('\n');
+  }
+
+  return [
+    `${cleanCat}:`,
+    title.trim(),
+    '',
+    `Proposta:`,
+    proposta.trim(),
+    '',
+    `Atividades:`,
+    dinamica.trim(),
+    '',
+    matBlock ? `Materiais (se aplicável):\n${matBlock}\n` : '',
+    `Importante:`,
+    imp,
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * Gerador de sugestão pedagógica curada por modalidade alinhada à persona da Escola Crescer
  */
 export function generateCuratedProposal(
   turma: string,
@@ -541,162 +640,162 @@ export function generateCuratedProposal(
   theme?: string
 ): {
   title: string;
+  theme?: string;
   objectives: string;
   development: string;
   materials: string;
+  dicaMonitora?: string;
+  formattedDevelopment?: string;
 } {
   const cleanTheme = (theme || '').trim();
   const cat = (category || '').toLowerCase();
+  const isUpperElementary = /4[º°o]|5[º°o]|6[º°o]/i.test(turma || '');
 
-  if (cat.includes('natação') || cat.includes('natacao') || cat.includes('piscina') || cat.includes('aquática')) {
-    return {
-      title: cleanTheme ? `Natação Educativa: ${cleanTheme}` : 'Circuito Aquático: Respiração, Flutuação e Propulsão Lúdica',
-      objectives: 'Desenvolver a segurança no meio aquático, controle respiratório, coordenação motora dos membros e autonomia na água.',
-      development: '1. Entrada orientada na piscina e aquecimento articular na borda.\n2. Exercícios lúdicos de respiração (bolhinhas) e flutuação em estrela com pranchinhas.\n3. Percurso com propulsão de pernas e mergulho seguro para resgate de argolas.',
-      materials: 'Pranchas de EVA, espaguetes flutuadores, argolas de mergulho, óculos e toucas.',
+  let base: {
+    categoryHeader: string;
+    title: string;
+    proposta: string;
+    dinamica: string;
+    materials: string;
+    dicaMonitora?: string;
+    extra?: { livro?: string; versiculo?: string };
+  };
+
+  if (cat.includes('devocional')) {
+    base = {
+      categoryHeader: 'Devocional',
+      title: 'O coração que acolhe e agradece',
+      proposta: 'proporcionar um momento sereno de reflexão sobre a gratidão e o amor de Deus, fortalecendo a empatia e os laços de amizade na rotina escolar.',
+      dinamica: 'a monitora reúne a turma em roda e convida cada criança a segurar a pedrinha da gratidão, compartilhando uma palavra de carinho antes de uma oração simples e acolhedora.',
+      materials: 'Pedrinhas decorativas da gratidão\nBíblia infantil com linguagem acessível',
+      dicaMonitora: 'acolha os sentimentos trazidos pelas crianças com sensibilidade e respeito ao tempo individual de expressão.',
+      extra: {
+        versiculo: '1 Tessalonicenses 5:18 - Em tudo dai graças, porque esta é a vontade de Deus em Cristo Jesus para convosco.',
+      },
+    };
+  } else if (cat.includes('história') || cat.includes('historia') || cat.includes('leitura') || cat.includes('literatura')) {
+    base = {
+      categoryHeader: 'Contação de História',
+      title: 'A viagem mágica das emoções coloridas',
+      proposta: 'despertar o prazer da leitura e o imaginário infantil por meio da apreciação afetuosa das ilustrações e da narrativa.',
+      dinamica: 'a monitora reúne a turma e realiza a leitura mediada com pausas para instigar as percepções das crianças sobre os sentimentos dos personagens, permitindo o manuseio afetuoso do livro.',
+      materials: 'Livro impresso O monstro das cores\nPotes transparentes e novelos de lã colorida',
+      dicaMonitora: 'incentive a participação espontânea de todas as crianças e valorize as interpretações individuais sobre a história.',
+      extra: {
+        livro: 'O Monstro das Cores, de Anna Llenas (Editora Aletria).',
+      },
+    };
+  } else if (cat.includes('artes') || cat.includes('desenho') || cat.includes('pintura')) {
+    if (isUpperElementary) {
+      base = {
+        categoryHeader: 'Artes',
+        title: 'Mosaicos e formas da imaginação',
+        proposta: 'explorar técnicas de composição expressiva, estimulando a percepção estética, a paciência e a criatividade autônoma na produção artística.',
+        dinamica: 'com mediação da equipe, os alunos delimitam o desenho em papel cartão e recortam pequenos fragmentos de papéis texturizados para preencher a composição com cuidado e precisão.',
+        materials: 'Papel cartão rígido\nRetalhos de papéis texturizados e coloridos\nTesouras sem ponta e cola branca',
+        dicaMonitora: 'valorize a persistência no acabamento e o estilo expressivo individual de cada criação.',
+      };
+    } else {
+      base = {
+        categoryHeader: 'Artes',
+        title: 'Ateliê das texturas e cores naturais',
+        proposta: 'explorar a sensibilidade artística, a percepção de cores e formas e a coordenação motora fina em uma vivência plástica acolhedora.',
+        dinamica: 'a monitora organiza as bancadas com suportes amplos e tintas; as crianças experimentam livremente misturas de tons e carimbos para compor sua produção com carinho.',
+        materials: 'Papel kraft\nTintas guache atóxicas\nPincéis largos e esponjas',
+        dicaMonitora: 'deixe as crianças explorarem as misturas de cores com liberdade antes de definir a forma final.',
+      };
+    }
+  } else if (cat.includes('natação') || cat.includes('natacao') || cat.includes('piscina') || cat.includes('aquática')) {
+    base = {
+      categoryHeader: 'Natação',
+      title: 'O circuito dos pequenos golfinhos',
+      proposta: 'estimular a segurança no meio aquático, a respiração suave e a autonomia corporal de forma lúdica e afetuosa.',
+      dinamica: 'a equipe orienta a entrada na água com brincadeiras de sopro e flutuação em estrela assistida, seguida do resgate de argolas coloridas na parte rasa.',
+      materials: 'Pranchas de EVA\nArgolas de mergulho para água rasa\nEspaguetes flutuadores',
+      dicaMonitora: 'mantenha a atenção visual contínua e encoraje com palavras afetuosas as crianças que apresentarem receio.',
+    };
+  } else if (cat.includes('balé') || cat.includes('bale')) {
+    base = {
+      categoryHeader: 'Balé',
+      title: 'A dança dos lenços encantados',
+      proposta: 'desenvolver a postura suave, a expressão corporal e o ritmo clássico de forma leve e lúdica.',
+      dinamica: 'a turma realiza movimentos de meia ponta e giros suaves segurando lenços de seda coloridos ao som de melodia clássica serena.',
+      materials: 'Lenços de seda coloridos\nAparelho de som e sapatilhas',
+      dicaMonitora: 'demonstre os passos com entusiasmo e acolha a espontaneidade gestual de cada aluna.',
+    };
+  } else if (cat.includes('judô') || cat.includes('judo') || cat.includes('marcial')) {
+    base = {
+      categoryHeader: 'Judô',
+      title: 'Mestres do equilíbrio e do respeito mútuo',
+      proposta: 'trabalhar o autocontrole, a disciplina afetuosa, o equilíbrio e o cuidado com a segurança nas quedas suaves.',
+      dinamica: 'cerimonial de saudação inicial com respeito mútuo, seguido de rolamentos suaves no tatame e jogos cooperativos de equilíbrio em duplas.',
+      materials: 'Tatame amortecedor\nKimonos e faixas',
+      dicaMonitora: 'reforce que o cuidado e a proteção ao parceiro são o princípio fundamental do treino.',
+    };
+  } else if (cat.includes('futebol') || cat.includes('esporte')) {
+    base = {
+      categoryHeader: 'Futebol',
+      title: 'A rede dos passes solidários',
+      proposta: 'aprimorar a coordenação motora ampla, a visão de jogo e a cooperação em equipe através de desafios participativos com bola.',
+      dinamica: 'circuito de condução de bola entre cones baixos, seguido de partida recreativa onde o ponto só é validado após a participação de todos os colegas.',
+      materials: 'Bolas de futebol infantil\nCones demarcadores\nColetes coloridos',
+      dicaMonitora: 'incentive o passe e a celebração do esforço coletivo acima de qualquer competição.',
+    };
+  } else if (cat.includes('música') || cat.includes('musicalização') || cat.includes('ritmo') || cat.includes('flauta')) {
+    base = {
+      categoryHeader: 'Musicalização',
+      title: 'A sinfonia dos sons da natureza',
+      proposta: 'apurar a escuta atenta, a sensibilidade rítmica e a sincronia corporal com brincadeiras sonoras acolhedoras.',
+      dinamica: 'a monitora propõe jogos de ecos rítmicos com palmas e estalos; em seguida, distribui pequenos instrumentos para acompanhar uma canção suave.',
+      materials: 'Chocalhos de sementes\nClavas de madeira\nPandeiros infantis',
+      dicaMonitora: 'comece com andamentos calmos e celebre a harmonia coletiva do grupo ao tocar junto.',
+    };
+  } else if (cat.includes('culinária') || cat.includes('nutricional')) {
+    base = {
+      categoryHeader: 'Culinária Infantil',
+      title: 'Chefs mirins e o arco-íris dos sabores',
+      proposta: 'promover hábitos saudáveis e a curiosidade sensorial pela variedade de frutas frescas em uma vivência gastronômica alegre.',
+      dinamica: 'após a higienização cuidadosa das mãos e colocação das touquinhas, as crianças cortam pedacinhos de frutas com espátulas plásticas e montam seus espetinhos coloridos.',
+      materials: 'Frutas frescas da estação\nEspátulas plásticas seguras\nPratinhos e toucas higiênicas',
+      dicaMonitora: 'estimule as crianças a sentirem os aromas e provarem novos sabores com tranquilidade.',
+    };
+  } else if (cat.includes('robótica') || cat.includes('robotica') || cat.includes('computacional')) {
+    base = {
+      categoryHeader: 'Robótica Educacional',
+      title: 'Pequenos inventores e as engrenagens curiosas',
+      proposta: 'despertar o raciocínio investigativo e a colaboração em equipe através da montagem de mecanismos simples.',
+      dinamica: 'em duplas, as crianças exploram o encaixe de eixos e engrenagens para criar um protótipo funcional, dialogando sobre como aprimorar o movimento.',
+      materials: 'Kits de blocos estruturais didáticos\nEixos e rodinhas plásticas',
+      dicaMonitora: 'estimule a reflexão diante dos desafios, fazendo perguntas investigativas com carinho.',
+    };
+  } else {
+    base = {
+      categoryHeader: category || 'Vivência Integrada',
+      title: 'A trilha dos passos cooperativos',
+      proposta: 'proporcionar uma vivência participativa e cooperativa, promovendo a integração afetiva e a autonomia das crianças no espaço coletivo.',
+      dinamica: 'a monitora introduz a dinâmica de forma lúdica, distribuindo os materiais e orientando as crianças passo a passo para que todas brinquem e colaborem juntas.',
+      materials: 'Materiais pedagógicos de apoio da sala\nPranchetas e recursos lúdicos',
+      dicaMonitora: 'mantenha a atenção afetuosa a cada criança, apoiando quem necessitar de mediação mais próxima e celebrando os avanços do grupo.',
     };
   }
 
-  if (cat.includes('balé') || cat.includes('bale')) {
-    return {
-      title: cleanTheme ? `Expressão no Balé: ${cleanTheme}` : 'Iniciação ao Balé Clássico: Postura, Flexibilidade e Graça',
-      objectives: 'Desenvolver a postura corporal, musicalidade, noções de ritmo clássico e coordenação espacial.',
-      development: '1. Aquecimento no chão com flex e ponta dos pés e borboletinha.\n2. Exercícios de barra e centro com posições fundamentais de braços e pés (1ª e 2ª posição).\n3. Coreografia lúdica simulando conto de fadas e reverência final.',
-      materials: 'Sapatilhas, espelho de sala de dança, lenços de seda coloridos e música clássica.',
-    };
-  }
+  const formattedDevelopment = formatPedagogicalDescription(
+    base.categoryHeader,
+    base.title,
+    base.proposta,
+    base.dinamica,
+    base.materials,
+    base.dicaMonitora,
+    base.extra
+  );
 
-  if (cat.includes('judô') || cat.includes('judo') || cat.includes('marcial')) {
-    return {
-      title: cleanTheme ? `Caminho Suave: ${cleanTheme}` : 'Judô Pedagógico: Disciplina, Amortecimento de Quedas (Ukemi) e Respeito',
-      objectives: 'Trabalhar o autocontrole, respeito mútuo, equilíbrio corporal, noção de segurança nas quedas e espírito esportivo.',
-      development: '1. Cerimonial de abertura (Rei) no tatame e aquecimento dinâmico com rolamentos.\n2. Prática dos amortecimentos de queda (Ushiro-Ukemi) em superfície macia.\n3. Jogos de equilíbrio em duplas respeitando a pegada no kimono (Kumi-kata) e saudação de encerramento.',
-      materials: 'Tatame amortecedor, kimonos, faixas e cronômetro lúdico.',
-    };
-  }
-
-  if (cat.includes('futebol') || cat.includes('esporte')) {
-    return {
-      title: cleanTheme ? `Clube do Futebol: ${cleanTheme}` : 'Futebol Cooperativo: Domínio de Bola, Passe Preciso e Jogo Coletivo',
-      objectives: 'Aprimorar a coordenação motora ampla, visão de jogo, precisão nos passes e espírito de equipe.',
-      development: '1. Aquecimento lúdico com corrida e controle da bola entre cones.\n2. Treinamento de passe e finalização em mini-gols com rodízio de funções.\n3. Mini-jogo cooperativo com foco na troca de passes e respeito às regras.',
-      materials: 'Bolas de futebol infantil, cones demarcadores, coletes coloridos e mini-traves.',
-    };
-  }
-
-  if (cat.includes('dança') || cat.includes('danca')) {
-    return {
-      title: cleanTheme ? `Oficina de Ritmos: ${cleanTheme}` : 'Dança & Expressão: Ritmos Brasileiros e Consciência Corporal',
-      objectives: 'Estimular a liberdade expressiva, percepção rítmica, lateralidade e integração em grupo.',
-      development: '1. Aquecimento corporal com isolamento de movimentos (cabeça, ombros, quadris).\n2. Exploração de movimentos de dança com fitas e panos ao som de ritmos brasileiros.\n3. Montagem de uma sequência coreográfica simples e relaxamento no solo.',
-      materials: 'Fitas de cetim, aparelho de som, pandeiro e colchonetes.',
-    };
-  }
-
-  if (cat.includes('flauta') || cat.includes('instrumentos')) {
-    return {
-      title: cleanTheme ? `Musicalização com Flauta: ${cleanTheme}` : 'Flauta Doce: Emissão Sonora, Digitação e Pequenas Melodias',
-      objectives: 'Desenvolver a respiração diafragmática, afinação, coordenação motora fina e leitura musical básica.',
-      development: '1. Exercícios respiratórios e aquecimento sonoro com notas longas (Si, Lá, Sol).\n2. Treinamento da digitação correta dos furos com auxílio do dedilhado visual.\n3. Execução em uníssono de uma melodia folclórica infantil.',
-      materials: 'Flautas doces germânicas, pastas com partituras simplificadas e metrônomo.',
-    };
-  }
-
-  if (cat.includes('ginástica') || cat.includes('ginastica')) {
-    return {
-      title: cleanTheme ? `Ginástica Artística: ${cleanTheme}` : 'Ginástica e Acrobacias: Rolamentos, Estrelas e Equilíbrio',
-      objectives: 'Desenvolver a flexibilidade, força muscular funcional, coordenação acrobática e segurança corporal.',
-      development: '1. Aquecimento dinâmico e alongamento dos grandes grupos musculares.\n2. Estações de ginástica de solo: vela, ponte assistida e rolamento para frente em plano inclinado.\n3. Caminhada em trave baixa com controle postural.',
-      materials: 'Colchões tipo plinth, trave de solo baixa, fita e bolas de ginástica rítmica.',
-    };
-  }
-
-  if (cat.includes('robótica') || cat.includes('robotica') || cat.includes('computacional')) {
-    return {
-      title: cleanTheme ? `Robótica Educacional: ${cleanTheme}` : 'Mundo Maker: Construção de Mecanismos e Pensamento Computacional',
-      objectives: 'Estimular o raciocínio lógico, noções de engrenagens e alavancas, resolução colaborativa de problemas e tecnologia.',
-      development: '1. Apresentação do desafio: construir um mecanismo motorizado simples (ex: catavento ou carrinho).\n2. Montagem em duplas utilizando peças de encaixe e engrenagens.\n3. Teste de funcionamento, ajustes mecânicos e demonstração coletiva.',
-      materials: 'Kits de blocos estruturais/robótica, motores didáticos, baterias e manuais de montagem.',
-    };
-  }
-
-  if (cat.includes('devocional') || cat.includes('valores') || cat.includes('espiritualidade')) {
-    return {
-      title: cleanTheme ? `Momento de Valores: ${cleanTheme}` : 'Momento Devocional: Gratidão, Solidariedade e Amor ao Próximo',
-      objectives: 'Cultivar sentimentos de gratidão, empatia, respeito às diferenças e reflexão sobre a bondade no dia a dia.',
-      development: '1. Acomodação em roda com música suave de louvor/reflexão.\n2. Leitura dialogada de uma história de princípios (ex: o Bom Samaritano ou o Valor da Amizade).\n3. Dinâmica da "Árvore da Gratidão": cada criança cola uma folha com um agradecimento sincero.',
-      materials: 'Mural da árvore, folhas de papel colorido, canetinhas, Bíblia ilustrada e som ambiente.',
-    };
-  }
-
-  if (cat.includes('almoço') || cat.includes('almoco') || cat.includes('refeição')) {
-    return {
-      title: cleanTheme ? `Educação Nutricional: ${cleanTheme}` : 'Almoço Saudável & Autonomia: Cores no Prato e Higiene Bucal',
-      objectives: 'Incentivar o consumo de saladas e legumes, a mastigação consciente, a postura à mesa e a higiene após as refeições.',
-      development: '1. Higienização das mãos antes de entrar no refeitório.\n2. Incentivo à experimentação de novos vegetais e organização do próprio prato.\n3. Escovação dental orientada e descarte correto de resíduos.',
-      materials: 'Refeitório escolar, pratos, talheres adequados, kits de escovação dental e espelhos.',
-    };
-  }
-
-  if (cat.includes('acolhimento') || cat.includes('roda')) {
-    return {
-      title: cleanTheme ? `Roda de Acolhimento: ${cleanTheme}` : 'Roda de Acolhimento & Cápsula do Afeto',
-      objectives: 'Estimular a oralidade, o pertencimento ao grupo escolar, o respeito aos turnos de fala e a conexão afetiva.',
-      development: '1. Recepção calorosa com música suave e acomodação em círculo.\n2. Dinâmica do "Espelho Mágico": cada aluno diz uma qualidade que admira no colega.\n3. Apresentação da rotina prevista para o dia e combinados da turma.',
-      materials: 'Almofadas, caixa decorada, cartazes de combinados e música ambiente.',
-    };
-  }
-
-  if (cat.includes('artes') || cat.includes('expressão')) {
-    return {
-      title: cleanTheme ? `Ateliê de Artes: ${cleanTheme}` : 'Ateliê Criativo: Pintura com Pigmentos Naturais',
-      objectives: 'Explorar texturas, cores primárias/secundárias, motricidade fina e liberdade expressiva.',
-      development: '1. Apresentação de pós naturais (açafrão, café, beterraba, espinafre) dissolvidos em água e cola.\n2. Experimentação livre em folhas encorpadas usando pincéis, esponjas e dedinhos.\n3. Exposição dos trabalhos no varal pedagógico da sala.',
-      materials: 'Papel canson A3, tintas naturais/tempera, pincéis chatos, potes de água e panos.',
-    };
-  }
-
-  if (cat.includes('contação') || cat.includes('contacao') || cat.includes('histórias') || cat.includes('historias') || cat.includes('literatura')) {
-    return {
-      title: cleanTheme ? `Viagem Literária: ${cleanTheme}` : 'Teatro de Sombras & Contação de Lendas Brasileiras',
-      objectives: 'Despertar o imaginário, interpretação narrativa e valorização da cultura popular brasileira.',
-      development: '1. Ambientação com meia-luz e tela de tecido iluminada por lanterna.\n2. Narração da história com silhuetas de personagens em varetas.\n3. Convite para que as crianças assumam as sombras e recriem o final da narrativa.',
-      materials: 'Tecido branco esticado, lanterna potente, silhuetas em papel cartão e varetas.',
-    };
-  }
-
-  if (cat.includes('culinária') || cat.includes('nutricional')) {
-    return {
-      title: cleanTheme ? `Oficina Nutricional: ${cleanTheme}` : 'Oficina Masterchef Mirim: Espetinhos de Frutas Divertidos',
-      objectives: 'Promover hábitos alimentares saudáveis, noções de higiene e classificação de alimentos por cores e sabores.',
-      development: '1. Higienização das mãos e colocação de toucas higiênicas.\n2. Identificação das frutas (banana, morango, uva, manga) e suas vitaminas.\n3. Montagem dos espetinhos coloridos e degustação coletiva.',
-      materials: 'Frutas frescas da estação, tábuas plásticas, cortadores lúdicos, pratinhos e toucas.',
-    };
-  }
-
-  if (cat.includes('música') || cat.includes('musicalização') || cat.includes('ritmo')) {
-    return {
-      title: cleanTheme ? `Banda do Integral: ${cleanTheme}` : 'Oficina de Percussão Corporal e Paisagens Sonoras',
-      objectives: 'Trabalhar a percepção auditiva, pulsação rítmica, coordenação motora bilateral e sincronia.',
-      development: '1. Jogo dos sons: identificação de timbres com olhos vendados.\n2. Construção de células rítmicas com palmas, pés e estalos.\n3. Acompanhamento de uma canção folclórica utilizando instrumentos de percussão leve.',
-      materials: 'Chocalhos, pandeiros infantis, triângulos, clavas e caixas de som.',
-    };
-  }
-
-  if (cat.includes('projeto')) {
-    return {
-      title: cleanTheme ? `Projeto Integrador: ${cleanTheme}` : 'Projeto Científico: Laboratório de Experiências Práticas',
-      objectives: 'Fomentar a curiosidade científica, metodologia investigativa, formulação de hipóteses e registro de resultados.',
-      development: '1. Pergunta disparadora e levantamento de hipóteses pelos alunos.\n2. Execução do experimento seguro em grupos (ex: densidade de líquidos ou germinação acelerada).\n3. Registro das conclusões em diário de bordo com desenhos e gráficos.',
-      materials: 'Tubos de ensaio plásticos, corantes alimentares, lupa, cadernos de anotações e réguas.',
-    };
-  }
-
-  // Padrão / Vivência Integrada
   return {
-    title: cleanTheme ? `Vivência Pedagógica: ${cleanTheme}` : 'Atividade Pedagógica & Expressão Criativa',
-    objectives: 'Promover o desenvolvimento integral, a criatividade, autonomia e integração em grupo.',
-    development: '1. Apresentação da proposta e diálogo inicial com o grupo.\n2. Desenvolvimento prático da atividade de forma participativa e colaborativa.\n3. Roda de partilha e avaliação coletiva da experiência.',
-    materials: 'Materiais pedagógicos de apoio, pranchetas e registros visuais.',
+    title: base.title,
+    theme: cleanTheme || 'Desenvolvimento integral e convivência fraterna',
+    objectives: base.proposta,
+    development: formattedDevelopment,
+    materials: base.materials,
+    dicaMonitora: base.dicaMonitora,
+    formattedDevelopment,
   };
 }

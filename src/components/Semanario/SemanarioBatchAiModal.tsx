@@ -46,7 +46,7 @@ export const SemanarioBatchAiModal: React.FC<SemanarioBatchAiModalProps> = ({
               </h3>
               <p className="text-xs text-slate-400">
                 {isGenerating
-                  ? 'Gerando planos pedagógicos adaptados à faixa etária e BNCC...'
+                  ? 'Gerando planos pedagógicos integrados e acolhedores...'
                   : isCompleted
                   ? 'Processo de geração finalizado!'
                   : 'Geração interrompida pelo usuário.'}
