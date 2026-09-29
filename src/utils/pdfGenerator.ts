@@ -67,8 +67,6 @@ function getStatusText(status: string): string {
       return 'Saída Antecipada';
     case 'falta':
       return 'Falta';
-    case 'saude':
-      return 'Ausência Saúde';
     case 'sem_equipamento':
       return 'Sem Equipamento';
     case 'pendente':
@@ -87,8 +85,6 @@ function getStatusColor(status: string): [number, number, number] {
       return [217, 119, 6]; // amber-600
     case 'falta':
       return [220, 38, 38]; // red-600
-    case 'saude':
-      return [217, 119, 6]; // amber-600
     case 'sem_equipamento':
       return [234, 88, 12]; // orange-600
     case 'pendente':
@@ -1118,7 +1114,6 @@ export function generateStudentPeriodPDFReport({
   const pres = baseRecords.filter((r) => r.status === 'presente').length;
   const saidaAnt = baseRecords.filter((r) => r.status === 'saida_antecipada').length;
   const falta = baseRecords.filter((r) => r.status === 'falta').length;
-  const saude = baseRecords.filter((r) => r.status === 'saude').length;
   const semEquip = studentRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
@@ -1167,10 +1162,9 @@ export function generateStudentPeriodPDFReport({
     { label: 'Presenças', value: pres, color: [22, 163, 74] as [number, number, number] },
     { label: 'Saída Ant.', value: saidaAnt, color: [217, 119, 6] as [number, number, number] },
     { label: 'Faltas', value: falta, color: [220, 38, 38] as [number, number, number] },
-    { label: 'Saúde', value: saude, color: [217, 119, 6] as [number, number, number] },
     { label: 'Sem Equip.', value: semEquip, color: [234, 88, 12] as [number, number, number] },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 15, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 43, 15, 3.3, metrics);
 
   startY += 21;
 
@@ -1312,7 +1306,6 @@ export function generateTurmaConsolidatedPeriodPDFReport({
   const pres = turmaRecords.filter((r) => r.status === 'presente').length;
   const saidaAnt = turmaRecords.filter((r) => r.status === 'saida_antecipada').length;
   const falta = turmaRecords.filter((r) => r.status === 'falta').length;
-  const saude = turmaRecords.filter((r) => r.status === 'saude').length;
   const semEquip = turmaRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
@@ -1361,10 +1354,9 @@ export function generateTurmaConsolidatedPeriodPDFReport({
     { label: 'Presenças', value: pres, color: [22, 163, 74] as [number, number, number] },
     { label: 'Saída Ant.', value: saidaAnt, color: [217, 119, 6] as [number, number, number] },
     { label: 'Faltas', value: falta, color: [220, 38, 38] as [number, number, number] },
-    { label: 'Saúde', value: saude, color: [217, 119, 6] as [number, number, number] },
     { label: 'Sem Equip.', value: semEquip, color: [234, 88, 12] as [number, number, number] },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 43, 14, 3.3, metrics);
 
   startY += 19;
 
@@ -1375,7 +1367,6 @@ export function generateTurmaConsolidatedPeriodPDFReport({
     const stPres = stRecords.filter((r) => r.status === 'presente').length;
     const stSaidaAnt = stRecords.filter((r) => r.status === 'saida_antecipada').length;
     const stFalta = stRecords.filter((r) => r.status === 'falta').length;
-    const stSaude = stRecords.filter((r) => r.status === 'saude').length;
     const stEquip = stRecords.filter((r) => r.status === 'sem_equipamento').length;
     const stRate = stTotal > 0 ? Math.round(((stPres + stSaidaAnt) / stTotal) * 100) : '-';
 
@@ -1531,7 +1522,6 @@ export function generateActivityModalityPeriodPDFReport({
   const pres = activityRecords.filter((r) => r.status === 'presente').length;
   const saidaAnt = activityRecords.filter((r) => r.status === 'saida_antecipada').length;
   const falta = activityRecords.filter((r) => r.status === 'falta').length;
-  const saude = activityRecords.filter((r) => r.status === 'saude').length;
   const semEquip = activityRecords.filter((r) => r.status === 'sem_equipamento').length;
   const rate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
@@ -1580,10 +1570,9 @@ export function generateActivityModalityPeriodPDFReport({
     { label: 'Presenças', value: pres, color: [22, 163, 74] as [number, number, number] },
     { label: 'Saída Ant.', value: saidaAnt, color: [217, 119, 6] as [number, number, number] },
     { label: 'Faltas', value: falta, color: [220, 38, 38] as [number, number, number] },
-    { label: 'Saúde', value: saude, color: [217, 119, 6] as [number, number, number] },
     { label: 'Sem Equip.', value: semEquip, color: [234, 88, 12] as [number, number, number] },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 14, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 43, 14, 3.3, metrics);
 
   startY += 19;
 
@@ -1594,7 +1583,6 @@ export function generateActivityModalityPeriodPDFReport({
     const stPres = stRecords.filter((r) => r.status === 'presente').length;
     const stSaidaAnt = stRecords.filter((r) => r.status === 'saida_antecipada').length;
     const stFalta = stRecords.filter((r) => r.status === 'falta').length;
-    const stSaude = stRecords.filter((r) => r.status === 'saude').length;
     const stEquip = stRecords.filter((r) => r.status === 'sem_equipamento').length;
     const stRate = stTotal > 0 ? Math.round(((stPres + stSaidaAnt) / stTotal) * 100) : '-';
 
@@ -2448,7 +2436,6 @@ export function generateAttendanceDailyPDFReport({
   let pres = 0;
   let saidaAnt = 0;
   let falta = 0;
-  let saude = 0;
   let semEquip = 0;
   let pendente = 0;
 
@@ -2460,7 +2447,6 @@ export function generateAttendanceDailyPDFReport({
       if (rec.status === 'presente') pres++;
       else if (rec.status === 'saida_antecipada') saidaAnt++;
       else if (rec.status === 'falta') falta++;
-      else if (rec.status === 'saude') saude++;
       else if (rec.status === 'sem_equipamento') semEquip++;
     }
   });
@@ -2505,10 +2491,9 @@ export function generateAttendanceDailyPDFReport({
     { label: 'Presentes', value: pres, color: [22, 163, 74] as [number, number, number] },
     { label: 'Saída Ant.', value: saidaAnt, color: [217, 119, 6] as [number, number, number] },
     { label: 'Faltas', value: falta, color: [220, 38, 38] as [number, number, number] },
-    { label: 'Saúde', value: saude, color: [217, 119, 6] as [number, number, number] },
     { label: 'Sem Equip.', value: semEquip, color: [234, 88, 12] as [number, number, number] },
   ];
-  drawMetricBoxes(doc, 14, startY, 34, 13.5, 3, metrics);
+  drawMetricBoxes(doc, 14, startY, 43, 13.5, 3.3, metrics);
 
   startY += 18;
 
@@ -2580,9 +2565,6 @@ export function generateAttendanceDailyPDFReport({
           data.cell.styles.fontStyle = 'bold';
         } else if (text.includes('Saída')) {
           data.cell.styles.textColor = [180, 83, 9]; // Amber 700
-          data.cell.styles.fontStyle = 'bold';
-        } else if (text.includes('Saúde')) {
-          data.cell.styles.textColor = [217, 119, 6]; // Amber 600
           data.cell.styles.fontStyle = 'bold';
         } else if (text.includes('Sem Equipamento')) {
           data.cell.styles.textColor = [234, 88, 12]; // Orange 600
@@ -2728,7 +2710,6 @@ export function generateNumericAttendanceConsolidatedPDFReport({
       String(day.totalEsperados),
       String(day.presentes),
       String(day.faltas),
-      String(day.justificados),
       String(day.pendentes),
       rateStr,
     ];
@@ -2737,43 +2718,40 @@ export function generateNumericAttendanceConsolidatedPDFReport({
   const totalEsperadosAcumulados = consolidated.totalEsperadosAcumulados;
   const totalPresencasAcumuladas = consolidated.totalPresentesAcumulados;
   const totalFaltasAcumuladas = consolidated.totalFaltasAcumuladas;
-  const totalSaudeAcumuladas = consolidated.totalJustificadosAcumulados;
   const totalPendentesAcumulados = consolidated.totalPendentesAcumulados;
   const taxaGeral = consolidated.taxaPresencaGeral;
 
-  // Metric Cards (6 cards proportionally distributed: 14 margin + 6 * 28 + 5 * 2.5 = 194.5mm)
+  // Metric Cards (5 cards proportionally distributed: 14 margin + 5 * 33.6 + 4 * 3.5 = 196mm)
   const metrics = [
     { label: 'Dias Letivos', value: `${consolidated.schoolDaysCount} d`, color: [15, 23, 42] as [number, number, number] },
     { label: 'Total Esperados', value: totalEsperadosAcumulados, color: [79, 70, 229] as [number, number, number] },
     { label: 'Presenças', value: totalPresencasAcumuladas, color: [22, 163, 74] as [number, number, number] },
     { label: 'Faltas', value: totalFaltasAcumuladas, color: [220, 38, 38] as [number, number, number] },
-    { label: 'Atestados/Saúde', value: totalSaudeAcumuladas, color: [217, 119, 6] as [number, number, number] },
     {
       label: 'Pendentes',
       value: totalPendentesAcumulados,
       color: totalPendentesAcumulados > 0 ? ([194, 65, 12] as [number, number, number]) : ([100, 116, 139] as [number, number, number]),
     },
   ];
-  drawMetricBoxes(doc, 14, startY, 28, 14, 2.5, metrics);
+  drawMetricBoxes(doc, 14, startY, 33.6, 14, 3.5, metrics);
 
   startY += 18;
 
   // Main Numerical Table with Foot Row - Rigorous Mathematical Balance:
-  // Presenças + Faltas + Atestados + Pendentes === Total Esperados
+  // Presenças + Faltas + Pendentes === Total Esperados
   autoTable(doc, {
     startY,
-    head: [['Data / Dia da Semana', 'Total Esperados', 'Presenças', 'Faltas', 'Atestados / Saúde', 'Pendentes', '% Assiduidade']],
+    head: [['Data / Dia da Semana', 'Total Esperados', 'Presenças', 'Faltas', 'Pendentes', '% Assiduidade']],
     body:
       tableData.length > 0
         ? tableData
-        : [['Nenhum dia letivo encontrado para o período selecionado', '-', '-', '-', '-', '-', '-']],
+        : [['Nenhum dia letivo encontrado para o período selecionado', '-', '-', '-', '-', '-']],
     foot: [
       [
         'TOTAIS DO PERÍODO',
         String(totalEsperadosAcumulados),
         String(totalPresencasAcumuladas),
         String(totalFaltasAcumuladas),
-        String(totalSaudeAcumuladas),
         String(totalPendentesAcumulados),
         `${taxaGeral}%`,
       ],
@@ -2803,12 +2781,11 @@ export function generateNumericAttendanceConsolidatedPDFReport({
     },
     columnStyles: {
       0: { cellWidth: 'auto', fontStyle: 'bold' },
-      1: { cellWidth: 26, halign: 'center', fontStyle: 'bold' },
-      2: { cellWidth: 22, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
-      3: { cellWidth: 20, halign: 'center', textColor: [220, 38, 38], fontStyle: 'bold' },
-      4: { cellWidth: 26, halign: 'center', textColor: [217, 119, 6] },
-      5: { cellWidth: 20, halign: 'center', textColor: [217, 119, 6], fontStyle: 'bold' },
-      6: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 30, halign: 'center', fontStyle: 'bold' },
+      2: { cellWidth: 26, halign: 'center', textColor: [22, 163, 74], fontStyle: 'bold' },
+      3: { cellWidth: 26, halign: 'center', textColor: [220, 38, 38], fontStyle: 'bold' },
+      4: { cellWidth: 26, halign: 'center', textColor: [217, 119, 6], fontStyle: 'bold' },
+      5: { cellWidth: 28, halign: 'center', fontStyle: 'bold' },
     },
     didParseCell: (data) => {
       if (data.section === 'foot' && data.column.index === 0) {

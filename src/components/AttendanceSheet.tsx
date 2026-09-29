@@ -9,7 +9,7 @@ import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentSched
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Stethoscope, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';

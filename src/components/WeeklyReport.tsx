@@ -33,7 +33,6 @@ import {
   Shirt,
   CheckCircle2,
   XCircle,
-  Stethoscope,
   AlertTriangle,
   Copy,
   Check,

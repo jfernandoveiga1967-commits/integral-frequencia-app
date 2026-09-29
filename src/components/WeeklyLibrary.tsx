@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   XCircle,
   Shirt,
-  Stethoscope,
   ChevronRight,
   ClipboardCheck,
   BarChart3,

@@ -24,7 +24,6 @@ import {
   Palmtree,
   SlidersHorizontal,
   X,
-  Stethoscope,
   Shirt,
   LogOut,
   Eye,
