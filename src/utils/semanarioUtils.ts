@@ -799,3 +799,64 @@ export function generateCuratedProposal(
     formattedDevelopment,
   };
 }
+
+/**
+ * Converte string de horário ou timeSlot em minutos absolutos do dia (0 a 1439).
+ * Suporta formatos como:
+ * - "11:20 - 11:30"
+ * - "07:30"
+ * - "7:30"
+ * - "07h30" / "13h" / "15h00"
+ * Retorna 9999 para horários ausentes ou não identificáveis (colocando-os ao final).
+ */
+export function parseTimeToMinutes(rawTime?: string | null): number {
+  if (!rawTime || typeof rawTime !== 'string') return 9999;
+  const cleaned = rawTime.trim();
+
+  // Padrão 1: HH:MM (ex: "11:20 - 11:30", "07:30", "7:30")
+  const colonMatch = cleaned.match(/(\d{1,2}):(\d{2})/);
+  if (colonMatch) {
+    const hours = parseInt(colonMatch[1], 10);
+    const minutes = parseInt(colonMatch[2], 10);
+    return hours * 60 + minutes;
+  }
+
+  // Padrão 2: HHhMM ou HHh (ex: "07h30", "11h", "15h00")
+  const hMatch = cleaned.match(/(\d{1,2})h(\d{2})?/i);
+  if (hMatch) {
+    const hours = parseInt(hMatch[1], 10);
+    const minutes = hMatch[2] ? parseInt(hMatch[2], 10) : 0;
+    return hours * 60 + minutes;
+  }
+
+  return 9999;
+}
+
+/**
+ * Extrai os minutos de início de um item/plano pedagógico a partir de seus campos de horário
+ * (horarioInicio, horario, timeSlot, startTime).
+ */
+export function getStartMinutes(item: any): number {
+  if (!item) return 9999;
+  const rawTime =
+    item.horarioInicio ||
+    item.horario ||
+    item.timeSlot ||
+    item.startTime ||
+    '';
+  const minutes = parseTimeToMinutes(rawTime);
+  if (minutes !== 9999) return minutes;
+
+  // Fallback defensivo: tenta extrair horário do título ou categoria caso ausente
+  if (typeof item.title === 'string') {
+    const titleMin = parseTimeToMinutes(item.title);
+    if (titleMin !== 9999) return titleMin;
+  }
+  if (typeof item.category === 'string') {
+    const catMin = parseTimeToMinutes(item.category);
+    if (catMin !== 9999) return catMin;
+  }
+
+  return 9999;
+}
+

@@ -20,6 +20,7 @@ import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
+import { parseTimeToMinutes, getStartMinutes } from './semanarioUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
 import {
@@ -3188,6 +3189,15 @@ export function generateSemanarioPDFReport(
         const dayPlans = turmaPlans.filter((p) => p.dayOfWeek === day.id);
         if (dayPlans.length === 0) return;
 
+        // Ordenação estritamente cronológica por horário de início (Time-Based Parsing)
+        // Garante a sequência da linha do tempo diária da escola (Acolhimento -> Atividade -> Almoço -> Lanche -> Saída)
+        const sortedDayPlans = [...dayPlans].sort((a, b) => {
+          const minA = getStartMinutes(a);
+          const minB = getStartMinutes(b);
+          if (minA !== minB) return minA - minB;
+          return (a.title || a.category || '').localeCompare(b.title || b.category || '', 'pt-BR');
+        });
+
         // Check for page overflow inside the same turma
         if (currentY > 230) {
           doc.addPage();
@@ -3208,15 +3218,15 @@ export function generateSemanarioPDFReport(
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(255, 255, 255);
         doc.text(
-          `${day.label.toUpperCase()} (${dayPlans.length} ${dayPlans.length === 1 ? 'atividade' : 'atividades'})`,
+          `${day.label.toUpperCase()} (${sortedDayPlans.length} ${sortedDayPlans.length === 1 ? 'atividade' : 'atividades'})`,
           leftMargin + 4,
           currentY + 5
         );
 
         currentY += 9;
 
-        // Table of Proposals for this Day in this Turma
-        const tableRows = dayPlans.map((p) => {
+        // Table of Proposals for this Day in this Turma (Ordenadas cronologicamente)
+        const tableRows = sortedDayPlans.map((p) => {
           let statusStr = 'Pendente';
           if (p.status === 'realizada') statusStr = 'Realizada';
           if (p.status === 'substituida') {
@@ -3224,7 +3234,7 @@ export function generateSemanarioPDFReport(
           }
 
           const detailsText = [
-            `Horário: ${p.timeSlot || 'Integral'} • Responsável: ${p.teacherName || 'Monitora'}`,
+            `Horário: ${p.timeSlot || 'Integral'} • Responsável: ${p.teacherName || p.monitors || p.adiResponsible || 'Monitora'}`,
             p.objectives ? `Proposta / Intenção: ${p.objectives}` : '',
             p.development ? `${p.development}` : '',
             p.materials ? `Materiais: ${p.materials}` : '',
@@ -3232,15 +3242,17 @@ export function generateSemanarioPDFReport(
             .filter(Boolean)
             .join('\n\n');
 
+          const timePrefix = p.timeSlot ? `${p.timeSlot}\n` : '';
+
           return [
-            `${p.category}\n[${statusStr}]`,
+            `${timePrefix}${p.category}\n[${statusStr}]`,
             `${p.title.toUpperCase()}\n\n${detailsText}`,
           ];
         });
 
         autoTable(doc, {
           startY: currentY,
-          head: [['Categoria / Status', 'Proposta Pedagógica & Desenvolvimento']],
+          head: [['Horário • Categoria / Status', 'Proposta Pedagógica & Desenvolvimento']],
           body: tableRows,
           theme: 'grid',
           headStyles: {

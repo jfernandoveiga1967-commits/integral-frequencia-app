@@ -38,6 +38,8 @@ import {
   getCategoryBadgeStyle,
   cleanupInvalidTurmaPlans,
   isPlanContentFilled,
+  getStartMinutes,
+  parseTimeToMinutes,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
@@ -406,12 +408,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       return true;
     });
 
-    // Ordenação estritamente cronológica pelo horário de início (horaInicio) em ordem crescente
+    // Ordenação estritamente cronológica pelo horário de início em minutos absolutos (Time-Based Parsing)
     return [...list].sort((a, b) => {
-      const timeA = extractStartTime(a.timeSlot);
-      const timeB = extractStartTime(b.timeSlot);
-      const timeCompare = timeA.localeCompare(timeB);
-      if (timeCompare !== 0) return timeCompare;
+      const minA = getStartMinutes(a);
+      const minB = getStartMinutes(b);
+      if (minA !== minB) return minA - minB;
       return (a.category || '').localeCompare(b.category || '', 'pt-BR');
     });
   }, [activeTurmaDaySchedulePlans, activeTurma, selectedCategory, selectedStatus, searchTerm]);
