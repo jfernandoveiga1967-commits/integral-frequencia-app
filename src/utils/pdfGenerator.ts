@@ -17,7 +17,7 @@ import {
   TurmaAtribuicao,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
-import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays } from './dateUtils';
+import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { parseTimeToMinutes, getStartMinutes } from './semanarioUtils';
@@ -3846,6 +3846,262 @@ export function generateQuadroAtribuicoesPDF(
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const filename = `Quadro_Geral_Atribuicoes_Integral_${dateStr}.pdf`;
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+// ---------------------------------------------------------------------------
+// 17. RELAÇÃO NOMINAL DE ALUNOS (Lista Cadastral Formal sem elementos de chamada)
+// ---------------------------------------------------------------------------
+
+export interface GenerateNominalListPDFOptions {
+  title?: string;
+  specialty?: string;
+  turma?: string;
+  dayOfWeek?: DayOfWeek | 'todos' | string;
+  students: Student[];
+  currentUser?: UserProfile | null;
+  saveImmediately?: boolean;
+}
+
+export function generateNominalListPDF({
+  title,
+  specialty = 'TODAS',
+  turma = 'TODAS',
+  dayOfWeek = 'todos',
+  students = [],
+  currentUser,
+  saveImmediately = false,
+}: GenerateNominalListPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+
+  // Normalização e filtragem defensiva
+  const normalizeStr = (s?: string) =>
+    (s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const isAllSpecialties = !specialty || specialty === 'TODAS' || specialty === 'TODOS';
+  const isAllReforco = !isAllSpecialties && normalizeStr(specialty) === 'reforco';
+  const isAllTurmas = !turma || turma === 'TODAS' || turma === 'TODOS';
+  const isAllDays = !dayOfWeek || dayOfWeek === 'todos' || dayOfWeek === 'TODOS';
+
+  const dayLabelsMap: Record<string, string> = {
+    segunda: 'Segunda-feira',
+    terca: 'Terça-feira',
+    quarta: 'Quarta-feira',
+    quinta: 'Quinta-feira',
+    sexta: 'Sexta-feira',
+  };
+
+  const dayShortMap: Record<string, string> = {
+    segunda: 'Seg',
+    terca: 'Ter',
+    quarta: 'Qua',
+    quinta: 'Qui',
+    sexta: 'Sex',
+  };
+
+  // Filtragem dos alunos
+  const filteredStudents = (Array.isArray(students) ? students : []).filter((s) => {
+    if (!s || typeof s !== 'object') return false;
+    const st = s.status || s.statusMatricula || 'ativo';
+    if (st !== 'ativo') return false;
+
+    // Filtro por turma
+    if (!isAllTurmas && s.turma !== turma) {
+      return false;
+    }
+
+    // Filtro por modalidade
+    if (!isAllSpecialties) {
+      if (isAllReforco) {
+        const hasReforco =
+          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'reforco')) ||
+          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
+          (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
+        if (!hasReforco) return false;
+      } else {
+        const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(specialty));
+        const hasSpec =
+          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === normalizeStr(specialty))) ||
+          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === normalizeStr(specialty)));
+        if (!hasAct && !hasSpec) return false;
+      }
+    }
+
+    // Filtro por dia da semana
+    if (!isAllDays) {
+      const scheduledOnDay = isStudentScheduledForDay(s, dayOfWeek as DayOfWeek);
+      if (!scheduledOnDay) return false;
+    }
+
+    return true;
+  });
+
+  // Ordenação Estrita Alfabética
+  const sortedStudents = [...filteredStudents].sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', 'pt-BR')
+  );
+
+  // Determinar Título Oficial
+  let docTitle = title;
+  if (!docTitle) {
+    if (isAllReforco) {
+      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — REFORÇO ESCOLAR';
+    } else if (!isAllSpecialties) {
+      docTitle = `RELAÇÃO NOMINAL DE ALUNOS — ${specialty.toUpperCase()}`;
+    } else if (!isAllTurmas) {
+      docTitle = `RELAÇÃO NOMINAL DE ALUNOS — TURMA ${turma.toUpperCase()}`;
+    } else {
+      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS MATRICULADOS';
+    }
+  }
+
+  const subtitle = 'Cadastro Oficial de Matrícula • Programa Integral';
+
+  // Detalhes de Filtro no Cabeçalho (Tier 4)
+  const filterDetails: string[] = [];
+  if (isAllReforco) {
+    filterDetails.push('Modalidade: Reforço Escolar (Atendimento Paralelo)');
+  } else if (!isAllSpecialties) {
+    filterDetails.push(`Modalidade: ${specialty}`);
+  } else {
+    filterDetails.push('Modalidade: Todas as Modalidades');
+  }
+
+  filterDetails.push(isAllTurmas ? 'Turma: Todas as Turmas' : `Turma: ${turma}`);
+
+  if (!isAllDays) {
+    filterDetails.push(`Dia: ${dayLabelsMap[dayOfWeek] || dayOfWeek}`);
+  } else {
+    filterDetails.push('Frequência: Todos os Dias');
+  }
+
+  filterDetails.push(`Total: ${sortedStudents.length} ${sortedStudents.length === 1 ? 'aluno' : 'alunos'}`);
+
+  if (currentUser?.name) {
+    filterDetails.push(`Coord: ${currentUser.name}`);
+  }
+
+  // Desenhar cabeçalho oficial institucional de 4 níveis
+  drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
+
+  // Preparar linhas da tabela cadastral limpa (SEM elementos de chamada, presenças ou faltas)
+  const tableRows = sortedStudents.map((st, idx) => {
+    const num = String(idx + 1).padStart(2, '0');
+    const studentName = (st.name || '').trim().toUpperCase();
+    const studentTurma = st.turma || '—';
+
+    // Formatar dias de frequência
+    let freqDaysStr = 'Seg a Sex (Todos)';
+    if (Array.isArray(st.diasFrequencia) && st.diasFrequencia.length > 0 && st.diasFrequencia.length < 5) {
+      freqDaysStr = st.diasFrequencia.map((d) => dayShortMap[d] || d).join(', ');
+    }
+
+    // Horário de saída
+    let exitTime = '18:00';
+    if (!isAllDays && st.horariosSaida && st.horariosSaida[dayOfWeek as DayOfWeek]) {
+      exitTime = st.horariosSaida[dayOfWeek as DayOfWeek] || '18:00';
+    } else if (st.horarioSaida) {
+      exitTime = st.horarioSaida;
+    }
+
+    // Modalidades / Observação Cadastral
+    const allMods: string[] = [];
+    if (Array.isArray(st.modalidadesEspeciais) && st.modalidadesEspeciais.length > 0) {
+      allMods.push(...st.modalidadesEspeciais);
+    } else if (Array.isArray(st.specialties) && st.specialties.length > 0) {
+      allMods.push(...st.specialties);
+    }
+    if (Array.isArray(st.activities) && st.activities.length > 0) {
+      st.activities.forEach((act) => {
+        if (!allMods.includes(act)) allMods.push(act);
+      });
+    }
+
+    const modalidadesStr = allMods.length > 0 ? allMods.join(', ') : 'Rotina Regular';
+
+    return [num, studentName, studentTurma, freqDaysStr, exitTime, modalidadesStr];
+  });
+
+  // Renderizar autoTable
+  autoTable(doc, {
+    startY: 37,
+    head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
+    body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—']],
+    theme: 'striped',
+    headStyles: {
+      fillColor: [15, 23, 42], // slate-900
+      textColor: [255, 255, 255],
+      fontSize: 8,
+      fontStyle: 'bold',
+      halign: 'left',
+      cellPadding: 2.8,
+    },
+    styles: {
+      fontSize: 7.8,
+      cellPadding: 2.2,
+      textColor: [30, 41, 59], // slate-800
+      lineColor: [226, 232, 240], // slate-200
+      lineWidth: 0.2,
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252], // slate-50
+    },
+    columnStyles: {
+      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
+      1: { cellWidth: 62, fontStyle: 'bold' },
+      2: { cellWidth: 28, halign: 'center' },
+      3: { cellWidth: 32, halign: 'center' },
+      4: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+      5: { cellWidth: 'auto', halign: 'left' },
+    },
+    margin: { left: 14, right: 14, top: 37, bottom: 14 },
+    didDrawPage: (data) => {
+      // Se não for a primeira página, redesenhar cabeçalho compacto
+      if (data.pageNumber > 1) {
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, pageWidth, 12, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`${docTitle} — (Continuação)`, 14, 8);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(203, 213, 225);
+        doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+      }
+    },
+  });
+
+  // Aplicar rodapés e paginação
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  // Gerar nome de arquivo amigável e higienizado
+  const cleanSpec = (isAllReforco ? 'Reforco' : !isAllSpecialties ? specialty : 'Geral').replace(/[\/\s]+/g, '_');
+  const cleanTurma = (!isAllTurmas ? turma : 'TodasTurmas').replace(/[\/\s]+/g, '_');
+  const cleanDay = (!isAllDays ? (dayShortMap[dayOfWeek] || dayOfWeek) : 'Semana').replace(/[\/\s]+/g, '_');
+  const dateStr = new Date().toISOString().split('T')[0];
+  const filename = `Relacao_Nominal_${cleanSpec}_${cleanTurma}_${cleanDay}_${dateStr}.pdf`;
+
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');
