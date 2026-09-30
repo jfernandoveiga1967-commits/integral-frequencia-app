@@ -9,7 +9,7 @@ import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentSched
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
@@ -62,6 +62,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         icon:
           name === 'Rotina'
             ? 'Clock'
+            : name === 'Reforço'
+            ? 'BookMarked'
             : name === 'Natação'
             ? 'Waves'
             : name === 'Futebol'
@@ -85,16 +87,29 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const isCoordenador = currentUser?.role === 'coordenador';
   const userAssignedActivities = useMemo(() => {
     if (!currentUser) return [];
-    const list = currentUser.assignedActivities || [];
+    let list: string[] = [];
+    if (Array.isArray(currentUser.assignedActivities)) {
+      list = currentUser.assignedActivities.filter((a) => typeof a === 'string' && a.trim().length > 0);
+    }
     if (list.length === 0 && currentUser.specialtyActivity) {
-      return [currentUser.specialtyActivity];
+      if (Array.isArray(currentUser.specialtyActivity)) {
+        list = (currentUser.specialtyActivity as any[]).filter((a) => typeof a === 'string' && a.trim().length > 0);
+      } else if (typeof currentUser.specialtyActivity === 'string' && currentUser.specialtyActivity.trim()) {
+        list = [currentUser.specialtyActivity.trim()];
+      }
     }
     return list;
   }, [currentUser]);
 
   const userAssignedTurmas = useMemo(() => {
     if (!currentUser) return [];
-    return currentUser.allowedClassIds || currentUser.assignedTurmas || [];
+    if (Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0) {
+      return currentUser.allowedClassIds.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    }
+    if (Array.isArray(currentUser.assignedTurmas) && currentUser.assignedTurmas.length > 0) {
+      return currentUser.assignedTurmas.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    }
+    return [];
   }, [currentUser]);
 
   const normalizeStr = (s?: string) =>
@@ -185,6 +200,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
       if (actId === 'Rotina') {
         return activeList.length;
+      }
+      if (normalizeStr(actId) === normalizeStr('Reforço')) {
+        return activeList.filter(
+          (s) =>
+            s.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr('Reforço')))
+        ).length;
       }
       return activeList.filter(
         (s) => Array.isArray(s.activities) && s.activities.includes(actId)
@@ -410,14 +432,18 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
           return false;
         }
 
+        const isReforco = normalizeStr(selectedActivity) === normalizeStr('Reforço');
         const matchesActivity =
           selectedActivity === 'Rotina'
             ? true
+            : isReforco
+            ? (student.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
+               studentActs.some((act) => normalizeStr(act) === normalizeStr('Reforço')))
             : studentActs.some(
                 (act) => normalizeStr(act) === normalizeStr(selectedActivity)
               );
 
-        // Turma filter
+        // Turma filter (quando 'Reforço' estiver selecionado com 'TODAS', agrupa todos os alunos da modalidade de todas as turmas)
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
 
         // Search filter
@@ -429,6 +455,18 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         return matchesActivity && matchesTurma && matchesSearch;
       })
       .sort((a, b) => {
+        // Alunos de Reforço no TOPO da lista
+        const aIsReforco = Boolean(
+          a.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
+          a.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
+        );
+        const bIsReforco = Boolean(
+          b.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
+          b.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
+        );
+        if (aIsReforco && !bIsReforco) return -1;
+        if (!aIsReforco && bIsReforco) return 1;
+
         const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
         if (turmaCompare !== 0) return turmaCompare;
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
@@ -1199,7 +1237,38 @@ function getCurrentHHMM(): string {
           </div>
         )
       ) : (
-        <div id="daily-attendance-sheet" className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="space-y-4">
+          {normalizeStr(selectedActivity) === normalizeStr('Reforço') && (
+            <div className="bg-amber-500/10 border border-amber-300 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                  <BookMarked className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-amber-950 uppercase tracking-wide flex items-center gap-1.5">
+                    <span>Chamada Consolidada de Reforço Escolar (Multiturmas)</span>
+                    <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold">
+                      {filteredStudents.length} aluno(s) convocados
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-amber-900 leading-tight">
+                    Agrupamento dinâmico de todos os alunos vinculados ao Reforço Escolar, independente da turma de origem.
+                  </p>
+                </div>
+              </div>
+              {selectedTurma !== 'TODAS' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTurma('TODAS')}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+                >
+                  Ver Todas as Turmas Convocadas
+                </button>
+              )}
+            </div>
+          )}
+
+          <div id="daily-attendance-sheet" className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           {/* Institutional Print Header */}
           <div className="print-only p-4 border-b-2 border-slate-900 text-center space-y-1">
             <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
@@ -1253,8 +1322,18 @@ function getCurrentHHMM(): string {
 
           <div className="divide-y divide-slate-100">
             {filteredStudents.map((student) => {
+              const isReforcoStudent = Boolean(
+                student.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
+                student.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
+              );
+
               // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
-              const activitiesToDisplay = student.activities.filter(
+              const studentAllActs = [
+                ...(student.activities || []),
+                ...(isReforcoStudent ? ['Reforço'] : [])
+              ];
+              const uniqueActs = Array.from(new Set(studentAllActs));
+              const activitiesToDisplay = uniqueActs.filter(
                 (a) =>
                   allowedActivityIds.includes(a as ActivityType) &&
                   (selectedActivity === 'TODAS' || a === selectedActivity)
@@ -1263,7 +1342,12 @@ function getCurrentHHMM(): string {
               const departureTimeToday = getStudentDepartureTimeForDate(student, selectedDate);
 
               return (
-                <div key={student.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
+                <div
+                  key={student.id}
+                  className={`p-4 transition-colors space-y-3 ${
+                    isReforcoStudent ? 'bg-amber-50/40 border-l-4 border-l-amber-500' : 'hover:bg-slate-50/80'
+                  }`}
+                >
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                     {/* Student Info */}
                     <div className="flex items-start space-x-3">
@@ -1275,11 +1359,49 @@ function getCurrentHHMM(): string {
                           <h3 className="font-bold text-slate-900 text-sm md:text-base">
                             {student.name}
                           </h3>
+                          {isReforcoStudent && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-xs animate-pulse flex items-center space-x-1">
+                              <span>⚡ ENVIAR PARA O REFORÇO</span>
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
                           <span className="font-medium px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
                             {student.turma}
                           </span>
+                          {isReforcoStudent && (() => {
+                            const targetAct = selectedActivity === 'TODAS' ? 'Rotina' : selectedActivity;
+                            const reforcoRec = recordMap.get(`${student.id}_${targetAct}_${selectedDate}`) ||
+                              recordMap.get(`${student.id}_Reforço_${selectedDate}`);
+                            const isEncaminhado = Boolean(
+                              reforcoRec?.observation?.includes('Reforço') || reforcoRec?.observation?.includes('Encaminhado')
+                            );
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onSaveRecord({
+                                    studentId: student.id,
+                                    activity: targetAct as ActivityType,
+                                    turma: student.turma,
+                                    date: selectedDate,
+                                    weekNumber: currentWeek.weekNumber,
+                                    year: currentWeek.year,
+                                    status: 'presente',
+                                    observation: 'Encaminhado para a sala de Reforço',
+                                  });
+                                }}
+                                className={`text-[10px] font-black px-2.5 py-0.5 rounded-lg border transition-all cursor-pointer shadow-2xs flex items-center space-x-1 ${
+                                  isEncaminhado
+                                    ? 'bg-amber-600 text-white border-amber-700'
+                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                                }`}
+                                title="Registrar que o aluno foi encaminhado à sala de reforço"
+                              >
+                                <span>{isEncaminhado ? '✅ Encaminhado ao Reforço' : '👉 Confirmar Envio ao Reforço'}</span>
+                              </button>
+                            );
+                          })()}
                           {student.tipoContrato === 'avulso' && (
                             <span
                               className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs flex items-center space-x-0.5"
@@ -1506,6 +1628,7 @@ function getCurrentHHMM(): string {
               <div className="text-[10px] text-slate-600">Colégio Crescer</div>
             </div>
           </div>
+        </div>
         </div>
       )}
       {/* On-screen PDF Viewer Modal */}

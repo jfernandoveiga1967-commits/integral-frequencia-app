@@ -125,10 +125,10 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
   // Responsible teacher(s) for the current activity
   const responsibleTeachers = useMemo(() => {
     const list = users.filter((u) => {
-      const matchAssigned = u.assignedActivities?.some(
+      const matchAssigned = Array.isArray(u.assignedActivities) && u.assignedActivities.some(
         (act) => act.trim().toLowerCase() === selectedActivityId.trim().toLowerCase()
       );
-      const matchSpecialty = u.specialtyActivity?.trim().toLowerCase() === selectedActivityId.trim().toLowerCase();
+      const matchSpecialty = typeof u.specialtyActivity === 'string' && u.specialtyActivity.trim().toLowerCase() === selectedActivityId.trim().toLowerCase();
       return matchAssigned || matchSpecialty;
     });
     return list;
@@ -206,8 +206,8 @@ export const ActivityScheduleView: React.FC<ActivityScheduleViewProps> = ({
     // 1. Try to find teacher assigned to both this activity AND this turma
     const specific = users.find(
       (u) =>
-        (u.assignedActivities?.includes(block.activityId) || u.specialtyActivity === block.activityId) &&
-        (u.assignedTurmas?.includes(block.turma) || u.allowedClassIds?.includes(block.turma))
+        ((Array.isArray(u.assignedActivities) && u.assignedActivities.includes(block.activityId)) || u.specialtyActivity === block.activityId) &&
+        ((Array.isArray(u.assignedTurmas) && u.assignedTurmas.includes(block.turma)) || (Array.isArray(u.allowedClassIds) && u.allowedClassIds.includes(block.turma)))
     );
     if (specific) {
       return { name: specific.name, phone: specific.phone, avatarColor: specific.avatarColor };

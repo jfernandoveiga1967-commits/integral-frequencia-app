@@ -1968,6 +1968,7 @@ export default function App() {
           <SemanarioMain
             plans={semanarioPlans}
             turmas={turmas}
+            students={students}
             users={users}
             currentUser={currentUser}
             currentWeek={currentWeek}

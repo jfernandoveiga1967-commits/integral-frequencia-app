@@ -94,10 +94,14 @@ export function useWebPushNotifications({
       const currentTimeStr = `${String(currentHours).padStart(2, '0')}:${String(currentMinutes).padStart(2, '0')}`;
 
       const isCoord = isCoordenador(currentUser);
-      const userTurmas = new Set(
-        currentUser.allowedClassIds || currentUser.assignedTurmas || []
-      );
-      const userActivities = new Set(currentUser.assignedActivities || []);
+      const turmasArray = Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0
+        ? currentUser.allowedClassIds
+        : (Array.isArray(currentUser.assignedTurmas) ? currentUser.assignedTurmas : []);
+      const userTurmas = new Set(turmasArray);
+      const actsArray = Array.isArray(currentUser.assignedActivities)
+        ? currentUser.assignedActivities
+        : (typeof currentUser.specialtyActivity === 'string' ? [currentUser.specialtyActivity] : []);
+      const userActivities = new Set(actsArray);
 
       // Filter blocks applicable to this user
       const relevantBlocks = schedules.filter((block) => {

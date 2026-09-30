@@ -7,6 +7,21 @@ import { isStudentScheduledForDate, isStudentActiveOnDate, getEffectiveSchoolDay
 export type AttendanceCategory = 'PRESENTE' | 'FALTA' | 'JUSTIFICADO' | 'PENDENTE';
 
 /**
+ * Normaliza o status do registro de presença de forma defensiva (Runtime Safety).
+ * Se o status for nulo, indefinido, vazio ou 'saude' legado, converte dinamicamente para 'falta'
+ * sem interromper o fluxo da aplicação.
+ */
+export function normalizeAttendanceStatus(rawStatus: any): AttendanceStatus {
+  if (!rawStatus) return 'falta';
+  const clean = String(rawStatus).trim().toLowerCase();
+  if (clean === 'saude' || clean === 'falta') return 'falta';
+  if (clean === 'presente') return 'presente';
+  if (clean === 'sem_equipamento' || clean === 'sem-equipamento' || clean === 'sem equipamento') return 'sem_equipamento';
+  if (clean === 'saida_antecipada' || clean === 'saida-antecipada' || clean === 'saida antecipada') return 'saida_antecipada';
+  return 'falta';
+}
+
+/**
  * Checks if a record status counts as PRESENTE (Presença Efetiva no Integral).
  * In accordance with pedagogical and administrative rules:
  * - 'presente': Regular attendance
@@ -21,11 +36,12 @@ export function isPresencaStatus(status: AttendanceStatus | string | null | unde
 
 /**
  * Checks if a record status counts as FALTA (Ausência Não Justificada).
+ * Se o status for indefinido ou 'saude' legado, conta defensivamente como falta.
  */
 export function isFaltaStatus(status: AttendanceStatus | string | null | undefined): boolean {
-  if (!status) return false;
+  if (!status) return true;
   const s = status.trim().toLowerCase();
-  return s === 'falta';
+  return s === 'falta' || s === 'saude';
 }
 
 /**
@@ -67,14 +83,15 @@ export function resolveStudentAttendanceCategory(
   dateStr: string
 ): AttendanceCategory {
   // If there is an explicit recorded status on this date, respect it directly
-  if (record && record.status) {
-    if (isPresencaStatus(record.status)) {
+  if (record) {
+    const safeStatus = normalizeAttendanceStatus(record.status);
+    if (isPresencaStatus(safeStatus)) {
       return 'PRESENTE';
     }
-    if (isFaltaStatus(record.status)) {
+    if (isFaltaStatus(safeStatus)) {
       return 'FALTA';
     }
-    if (isJustificadoStatus(record.status)) {
+    if (isJustificadoStatus(safeStatus)) {
       return 'JUSTIFICADO';
     }
   }

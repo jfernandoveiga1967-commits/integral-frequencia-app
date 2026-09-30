@@ -122,7 +122,7 @@ export function isNutricionista(user?: UserProfile | null): boolean {
     name.includes('thaís grisoni') ||
     name.includes('thais grisoni') ||
     email.includes('thaisgriisoni') ||
-    (user.assignedActivities || []).some((a) => String(a).toLowerCase().includes('culinária') || String(a).toLowerCase().includes('nutri'))
+    (Array.isArray(user.assignedActivities) ? user.assignedActivities : []).some((a) => String(a).toLowerCase().includes('culinária') || String(a).toLowerCase().includes('nutri'))
   );
 }
 

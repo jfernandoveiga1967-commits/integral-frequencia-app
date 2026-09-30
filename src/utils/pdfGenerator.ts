@@ -903,10 +903,10 @@ export function generateActivitySchedulePDF({
   if (!resolvedTeacher) {
     const specialists = users.filter(
       (u) =>
-        u.assignedActivities?.some(
+        (Array.isArray(u.assignedActivities) && u.assignedActivities.some(
           (act) => act.toLowerCase() === activityName.toLowerCase()
-        ) ||
-        u.specialtyActivity?.toLowerCase() === activityName.toLowerCase()
+        )) ||
+        (typeof u.specialtyActivity === 'string' && u.specialtyActivity.toLowerCase() === activityName.toLowerCase())
     );
     if (specialists.length > 0) {
       resolvedTeacher = specialists.map((s) => s.name).join(', ');
@@ -3143,8 +3143,8 @@ export function generateSemanarioPDFReport(
     // Draw the official 4-tier institutional header for this turma
     drawOfficialHeader(
       doc,
-      'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
-      'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+      'Semanário de Atividades',
+      'Planejamento Semanal de Atividades',
       filterDetails,
       'portrait'
     );
@@ -3203,8 +3203,8 @@ export function generateSemanarioPDFReport(
           doc.addPage();
           drawOfficialHeader(
             doc,
-            'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
-            'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+            'Semanário de Atividades',
+            'Planejamento Semanal de Atividades',
             filterDetails,
             'portrait'
           );
@@ -3287,8 +3287,8 @@ export function generateSemanarioPDFReport(
       doc.addPage();
       drawOfficialHeader(
         doc,
-        'SEMANÁRIO PEDAGÓGICO • PROGRAMA INTEGRAL',
-        'Planejamento Semanal de Atividades & Registro de Execução Pedagógica',
+        'Semanário de Atividades',
+        'Planejamento Semanal de Atividades',
         filterDetails,
         'portrait'
       );

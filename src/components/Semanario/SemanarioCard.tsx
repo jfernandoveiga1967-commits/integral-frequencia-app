@@ -8,12 +8,14 @@ import {
   Copy,
   ChevronDown,
   Calendar,
+  BookMarked,
 } from 'lucide-react';
-import { SemanarioPlan, SemanarioStatus } from '../../types';
+import { SemanarioPlan, SemanarioStatus, Student } from '../../types';
 import { getCategoryBadgeStyle, getStatusStyle, isPlanContentFilled } from '../../utils/semanarioUtils';
 
 interface SemanarioCardProps {
   plan: SemanarioPlan;
+  reforcoStudents?: Student[];
   onEdit: (plan: SemanarioPlan) => void;
   onDelete: (planId: string) => void;
   onDuplicate: (plan: SemanarioPlan) => void;
@@ -32,6 +34,7 @@ const DAY_LABELS: Record<string, string> = {
 
 export const SemanarioCard: React.FC<SemanarioCardProps> = ({
   plan,
+  reforcoStudents = [],
   onEdit,
   onDelete,
   onDuplicate,
@@ -117,6 +120,35 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
             <p className="text-[11px] text-slate-500 font-medium">
               Proposta pedagógica ainda não registrada.
             </p>
+          </div>
+        )}
+
+        {/* Box de Observação Automática • Modalidade Paralela (Reforço vs. Lego/Oficinas) */}
+        {reforcoStudents && reforcoStudents.length > 0 && (
+          <div className="bg-amber-500/10 border-2 border-amber-500/50 rounded-xl p-2.5 space-y-1.5 shadow-2xs animate-in fade-in duration-150">
+            <div className="flex items-center justify-between gap-1.5">
+              <span className="inline-flex items-center space-x-1.5 text-[11px] font-black text-amber-950">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                <span>⚡ MODALIDADE PARALELA • REFORÇO ({reforcoStudents.length})</span>
+              </span>
+              <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
+                Reforço vs. Lego
+              </span>
+            </div>
+            <p className="text-[10px] text-amber-900 font-semibold leading-tight">
+              Alunos convocados para a sala de Reforço Escolar neste horário:
+            </p>
+            <div className="flex flex-wrap gap-1 items-center pt-0.5">
+              {reforcoStudents.map((st) => (
+                <span
+                  key={st.id}
+                  className="bg-white border border-amber-300 text-amber-950 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-2xs flex items-center space-x-1"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  <span>{st.name}</span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

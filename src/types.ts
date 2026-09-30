@@ -28,6 +28,8 @@ export interface Student {
   name: string;
   turma: TurmaType;
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
+  modalidadesEspeciais?: string[]; // Modalidades paralelas especiais (ex: ['Reforço'])
+  specialties?: string[]; // Modalidades paralelas especiais (alias de compatibilidade)
   tipoContrato?: ContractType; // 'regular' | 'avulso' (padrão: 'regular')
   dataInicioContrato?: string; // Data de início do contrato avulso/temporário (YYYY-MM-DD)
   dataTerminoContrato?: string; // Data de término do contrato avulso/temporário (YYYY-MM-DD)

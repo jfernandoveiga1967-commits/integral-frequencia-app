@@ -53,6 +53,7 @@ import {
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
+import { normalizeAttendanceStatus } from './utils/frequenciaUtils';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -343,7 +344,7 @@ export function subscribeRecords(
           year: Number(data.year) || 2026,
           activity: data.activity || '',
           turma: data.turma || '',
-          status: (data.status === 'saude' ? 'falta' : (data.status || 'presente')) as AttendanceStatus,
+          status: normalizeAttendanceStatus(data.status),
           exitTime: data.exitTime || undefined,
           equipmentMissingDetails: data.equipmentMissingDetails || undefined,
           observation: data.observation || undefined,
@@ -1179,6 +1180,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       name: normalized.name,
       turma: normalized.turma,
       activities: normalized.activities,
+      modalidadesEspeciais: normalized.modalidadesEspeciais || [],
       tipoContrato: normalized.tipoContrato || 'regular',
       dataInicioContrato: normalized.dataInicioContrato || '',
       dataTerminoContrato: normalized.dataTerminoContrato || '',
@@ -2996,7 +2998,7 @@ export async function fetchRecordsDirectFromServer(
         year: Number(data.year) || 2026,
         activity: data.activity || '',
         turma: data.turma || '',
-        status: (data.status === 'saude' ? 'falta' : (data.status || 'presente')) as AttendanceStatus,
+        status: normalizeAttendanceStatus(data.status),
         exitTime: data.exitTime || undefined,
         equipmentMissingDetails: data.equipmentMissingDetails || undefined,
         observation: data.observation || undefined,

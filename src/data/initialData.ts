@@ -9,6 +9,7 @@ export const OFFICIAL_ROLL_CALL_MODALITIES: ActivityType[] = [
   'Ginástica',
   'Judô',
   'Natação',
+  'Reforço',
 ];
 
 export const REMOVED_CATEGORY_NAMES = new Set<string>([
@@ -35,9 +36,11 @@ export const ACTIVITIES_LIST: ActivityItem[] = [
   { id: 'Futebol', name: 'Futebol', icon: 'Trophy', description: 'Esporte coletivo no campo/quadra', defaultEquipment: 'Uniforme, Chuteira/Tênis e Meião', requiresRollCall: true },
   { id: 'Ginástica', name: 'Ginástica', icon: 'Activity', description: 'Ginástica artística e rítmica', defaultEquipment: 'Uniforme de Ginástica', requiresRollCall: true },
   { id: 'Judô', name: 'Judô', icon: 'Award', description: 'Arte marcial e disciplina física', defaultEquipment: 'Kimono e Faixa', requiresRollCall: true },
+  { id: 'Lego', name: 'Lego', icon: 'Blocks', description: 'Oficina de Lego, montagem e criatividade espacial', defaultEquipment: 'Kits pedagógicos Lego', requiresRollCall: false },
   { id: 'Musicalização', name: 'Musicalização', icon: 'Music', description: 'Educação musical, percussão e ritmo', defaultEquipment: 'Instrumentos musicais', requiresRollCall: false },
   { id: 'Natação', name: 'Natação', icon: 'Waves', description: 'Atividade aquática na piscina do Integral', defaultEquipment: 'Maiô/Sunga, Touca e Óculos', requiresRollCall: true },
   { id: 'Projeto', name: 'Projeto', icon: 'Sparkles', description: 'Projetos investigativos temáticos (3º ao 6º Ano)', defaultEquipment: 'Diário de bordo e material de pesquisa', requiresRollCall: false },
+  { id: 'Reforço', name: 'Reforço', icon: 'BookMarked', description: 'Reforço escolar e acompanhamento pedagógico paralelo', defaultEquipment: 'Material didático e caderno de reforço', requiresRollCall: true },
   { id: 'Robótica', name: 'Robótica', icon: 'Cpu', description: 'Robótica educacional, lógica e pensamento computacional', defaultEquipment: 'Kit de robótica / Tablets', requiresRollCall: false },
   { id: 'Rotina', name: 'Rotina', icon: 'Clock', description: 'Rotina diária e acompanhamento geral de todos os alunos do Integral', defaultEquipment: 'Agenda escolar / Material de uso diário', requiresRollCall: true },
 ];

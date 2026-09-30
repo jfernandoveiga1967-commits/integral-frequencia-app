@@ -1,8 +1,8 @@
-import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, WeekInfo } from '../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, Student, WeekInfo } from '../types';
 import { getTurmaPedagogicalWeight } from './turmaUtils';
 import { loadActivities, loadSchedules } from './storageUtils';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
-import { getISOWeekNumber, getWeekInfo, getWeekDays } from './dateUtils';
+import { getISOWeekNumber, getWeekInfo, getWeekDays, isStudentScheduledForDay } from './dateUtils';
 import { OFFICIAL_SCHEDULE_TEMPLATES, getDefaultScheduleBlocks } from './scheduleDefaults';
 
 export const CATEGORIA_PROJETO = 'Projeto';
@@ -858,5 +858,62 @@ export function getStartMinutes(item: any): number {
   }
 
   return 9999;
+}
+
+/**
+ * Identifica se uma proposta pedagógica do Semanário corresponde a atividades paralelas (Lego, Robótica, Oficinas, Reforço).
+ */
+export function isLegoOrReforcoPlan(plan: SemanarioPlan | null | undefined): boolean {
+  if (!plan) return false;
+  const target = `${plan.category || ''} ${plan.title || ''} ${plan.weekTheme || (plan as any).theme || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return (
+    target.includes('lego') ||
+    target.includes('reforco') ||
+    target.includes('oficina') ||
+    target.includes('robot') ||
+    target.includes('paralel')
+  );
+}
+
+/**
+ * Identifica se o aluno frequenta a modalidade 'Reforço' (via modalidadesEspeciais, specialties ou activities).
+ */
+export function isStudentInReforco(student: Student | null | undefined): boolean {
+  if (!student) return false;
+  const status = student.status || student.statusMatricula || 'ativo';
+  if (status !== 'ativo') return false;
+  const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const mods = Array.isArray(student.modalidadesEspeciais) ? student.modalidadesEspeciais : [];
+  const specs = Array.isArray(student.specialties) ? student.specialties : [];
+  const acts = Array.isArray(student.activities) ? student.activities : [];
+  return (
+    mods.some((m: string) => norm(m).includes('reforco')) ||
+    specs.some((s: string) => norm(s).includes('reforco')) ||
+    acts.some((a: string) => norm(a).includes('reforco'))
+  );
+}
+
+/**
+ * Retorna os alunos de uma turma específica convocados para o Reforço no dia da semana fornecido.
+ */
+export function getReforcoStudentsForTurmaAndDay(
+  students: Student[],
+  turma: string,
+  dayOfWeek: DayOfWeek
+): Student[] {
+  if (!Array.isArray(students) || students.length === 0 || !turma) return [];
+  const normTurma = (t: string) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const targetTurmaNorm = normTurma(turma);
+
+  return students
+    .filter((s) => {
+      if (normTurma(s.turma) !== targetTurmaNorm) return false;
+      if (!isStudentInReforco(s)) return false;
+      return isStudentScheduledForDay(s, dayOfWeek);
+    })
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
 }
 

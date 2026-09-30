@@ -462,7 +462,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormMotivoDesligamento(user.motivoDesligamento || '');
     setFormPin(user.pin || '1234');
 
-    const cleanActs = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
+    const acts = Array.isArray(user.assignedActivities)
+      ? user.assignedActivities
+      : (Array.isArray(activitiesList) ? activitiesList.map((a) => a.id) : []);
+    const cleanActs = acts.filter(
       (a) => !REMOVED_CATEGORY_NAMES.has(a)
     );
     setFormActivities(cleanActs);
@@ -2255,7 +2258,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               </div>
             ) : (
               filteredActivities.map((act) => {
-                const assignedProfs = users.filter((u) => u.assignedActivities?.includes(act.id));
+                const assignedProfs = users.filter((u) => Array.isArray(u.assignedActivities) && u.assignedActivities.includes(act.id));
                 const isExpanded = expandedActivityIds.includes(act.id);
                 const requiresRoll = act.requiresRollCall !== false;
 

@@ -107,7 +107,7 @@ export const Footer: React.FC<FooterProps> = ({
         <div className="flex flex-wrap items-center gap-2 text-center md:text-left justify-center md:justify-start">
           <span className="font-bold text-white whitespace-nowrap">Programa do Integral</span>
           <span className="text-slate-500">•</span>
-          <span className="text-slate-400 font-medium">v1.2</span>
+          <span className="text-slate-400 font-medium">v1.3</span>
           {firebaseConnected && (
             <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/90 text-emerald-400 border border-emerald-800/80">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

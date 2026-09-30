@@ -88,14 +88,29 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   onDeleteTurma,
 }) => {
   const isCoordenador = currentUser?.role === 'coordenador';
-  const userAssignedTurmas = useMemo(
-    () => currentUser?.allowedClassIds || currentUser?.assignedTurmas || [],
-    [currentUser]
-  );
-  const userAssignedActivities = useMemo(
-    () => currentUser?.assignedActivities || [],
-    [currentUser]
-  );
+  const userAssignedTurmas = useMemo(() => {
+    if (!currentUser) return [];
+    if (Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0) {
+      return currentUser.allowedClassIds;
+    }
+    if (Array.isArray(currentUser.assignedTurmas) && currentUser.assignedTurmas.length > 0) {
+      return currentUser.assignedTurmas;
+    }
+    return [];
+  }, [currentUser]);
+
+  const userAssignedActivities = useMemo(() => {
+    if (!currentUser) return [];
+    if (Array.isArray(currentUser.assignedActivities)) {
+      return currentUser.assignedActivities;
+    }
+    if (currentUser.specialtyActivity) {
+      return Array.isArray(currentUser.specialtyActivity)
+        ? currentUser.specialtyActivity
+        : [currentUser.specialtyActivity];
+    }
+    return [];
+  }, [currentUser]);
 
   const turmasList = useMemo(() => {
     const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;

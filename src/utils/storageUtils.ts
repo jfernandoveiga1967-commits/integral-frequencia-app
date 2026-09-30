@@ -1,6 +1,7 @@
 import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, ContractType, UserProfile } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
+import { normalizeAttendanceStatus } from './frequenciaUtils';
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
@@ -232,6 +233,19 @@ export function normalizeStudent(
     diasFrequencia = [...diasContratados];
   }
 
+  // Preservação de Modalidades Especiais / Paralelas (ex: ['Reforço'])
+  let modalidadesEspeciais: string[] = [];
+  if (Array.isArray(s.modalidadesEspeciais)) {
+    modalidadesEspeciais = s.modalidadesEspeciais;
+  } else if (Array.isArray(s.specialties)) {
+    modalidadesEspeciais = s.specialties;
+  } else if (Array.isArray(existingStudent?.modalidadesEspeciais)) {
+    modalidadesEspeciais = existingStudent.modalidadesEspeciais;
+  }
+  modalidadesEspeciais = Array.from(
+    new Set(modalidadesEspeciais.map((m: any) => String(m).trim()).filter(Boolean))
+  );
+
   // Se o aluno é ativo, inactivationDate e inactivationReason DEVEM ser estritamente limpos como string vazia ''
   // para garantir que a gravação no Firestore com ignoreUndefinedProperties e merge: true realmente sobrescreva os valores antigos.
   const inactivationDate = status === 'ativo' ? '' : (s.inactivationDate || existingStudent?.inactivationDate || '');
@@ -243,6 +257,7 @@ export function normalizeStudent(
     name,
     turma,
     activities,
+    modalidadesEspeciais,
     tipoContrato,
     dataInicioContrato,
     dataTerminoContrato,
@@ -799,12 +814,12 @@ export function loadAttendanceRecords(): AttendanceRecord[] {
     if (data) {
       let parsed: AttendanceRecord[] = JSON.parse(data);
       if (Array.isArray(parsed)) {
-        parsed = parsed.map((r) => {
-          if ((r as any).status === 'saude') {
-            return { ...r, status: 'falta' as AttendanceStatus };
-          }
-          return r;
-        });
+        parsed = parsed
+          .filter((r) => r && typeof r === 'object')
+          .map((r) => {
+            const status = normalizeAttendanceStatus((r as any).status);
+            return { ...r, status };
+          });
       }
       // Check if records are the initial 82 seed records (generated automatically)
       const isInitialSeed = parsed.some((r) => r.id.startsWith('st-1_') || r.id.startsWith('st-2_') || r.id.startsWith('st-3_'));

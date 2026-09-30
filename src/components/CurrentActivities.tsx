@@ -136,9 +136,11 @@ function getEnrolledStudentsForActivity(
   selectedDate?: string,
   activityMap?: Map<string, ActivityItem>
 ): Student[] {
-  const normTurma = turmaName.trim();
-  const turmaActiveStudents = students.filter((s) => {
-    if (s.turma?.trim() !== normTurma) return false;
+  const safeStudents = Array.isArray(students) ? students : [];
+  const normTurma = (turmaName || '').trim();
+  const turmaActiveStudents = safeStudents.filter((s) => {
+    if (!s || typeof s !== 'object') return false;
+    if ((s.turma || '').trim() !== normTurma) return false;
     const st = s.status || s.statusMatricula || 'ativo';
     if (st !== 'ativo') return false;
     if (selectedDate) {
@@ -157,9 +159,27 @@ function getEnrolledStudentsForActivity(
     return turmaActiveStudents;
   }
 
-  const specificEnrolled = turmaActiveStudents.filter((s) =>
-    (s.activities || []).includes(activityId)
-  );
+  const isReforco = (activityId || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .includes('reforco');
+
+  const specificEnrolled = turmaActiveStudents.filter((s) => {
+    const acts = Array.isArray(s.activities) ? s.activities : [];
+    if (acts.includes(activityId)) return true;
+    if (isReforco) {
+      const mods = Array.isArray(s.modalidadesEspeciais) ? s.modalidadesEspeciais : [];
+      const specs = Array.isArray(s.specialties) ? s.specialties : [];
+      if (
+        mods.some((m) => String(m).toLowerCase().includes('reforco')) ||
+        specs.some((sp) => String(sp).toLowerCase().includes('reforco'))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   if (specificEnrolled.length > 0) {
     return specificEnrolled;
@@ -439,20 +459,33 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     effectiveCurrentTime,
   ]);
 
-  // Modalidades atribuídas ao perfil do usuário logado
+  // Modalidades atribuídas ao perfil do usuário logado (Runtime Safety: Array.isArray defensive checks)
   const userAssignedActivities = useMemo(() => {
     if (isCoord || !currentUser) return [];
-    const list = currentUser.assignedActivities || [];
+    let list: string[] = [];
+    if (Array.isArray(currentUser.assignedActivities)) {
+      list = currentUser.assignedActivities.filter((a) => typeof a === 'string' && a.trim().length > 0);
+    }
     if (list.length === 0 && currentUser.specialtyActivity) {
-      return [currentUser.specialtyActivity];
+      if (Array.isArray(currentUser.specialtyActivity)) {
+        list = (currentUser.specialtyActivity as any[]).filter((a) => typeof a === 'string' && a.trim().length > 0);
+      } else if (typeof currentUser.specialtyActivity === 'string' && currentUser.specialtyActivity.trim()) {
+        list = [currentUser.specialtyActivity.trim()];
+      }
     }
     return list;
   }, [currentUser, isCoord]);
 
-  // Turmas atribuídas ao perfil do usuário logado
+  // Turmas atribuídas ao perfil do usuário logado (Runtime Safety: Array.isArray defensive checks)
   const userAssignedTurmasList = useMemo(() => {
     if (isCoord || !currentUser) return [];
-    return currentUser.allowedClassIds || currentUser.assignedTurmas || [];
+    if (Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0) {
+      return currentUser.allowedClassIds.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    }
+    if (Array.isArray(currentUser.assignedTurmas) && currentUser.assignedTurmas.length > 0) {
+      return currentUser.assignedTurmas.filter((t) => typeof t === 'string' && t.trim().length > 0);
+    }
+    return [];
   }, [currentUser, isCoord]);
 
   const userAssignedTurmasSet = useMemo(() => {
@@ -479,13 +512,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // b) A modalidade da atividade está inclusa na lista 'modalidades' do perfil do usuário.
   // c) A turma está inclusa na lista 'turmas' do perfil do usuário.
   const userTodayScheduleBlocks = useMemo(() => {
+    const safeSchedules = Array.isArray(schedules) ? schedules : [];
     if (isCoord || !currentUser) {
-      return schedules.filter((s) => s.dayOfWeek === effectiveDayOfWeek);
+      return safeSchedules.filter((s) => s && s.dayOfWeek === effectiveDayOfWeek);
     }
-    return schedules.filter((s) => {
+    return safeSchedules.filter((s) => {
+      if (!s) return false;
       const matchesDay = s.dayOfWeek === effectiveDayOfWeek;
       const matchesActivity =
-        userAssignedActivities.includes(s.activityId) ||
+        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
         userAssignedActivitiesSet.has(normalizeStr(s.activityId));
       const matchesTurma =
         userAssignedTurmasSet.has(s.turma) ||
@@ -505,10 +540,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
   // Outros dias da semana em que este professor possui aulas na Grade Horária
   const userOtherDaysWithClasses = useMemo(() => {
+    const safeSchedules = Array.isArray(schedules) ? schedules : [];
     if (isCoord || !currentUser) return [];
-    const otherBlocks = schedules.filter((s) => {
+    const otherBlocks = safeSchedules.filter((s) => {
+      if (!s) return false;
       const matchesActivity =
-        userAssignedActivities.includes(s.activityId) ||
+        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
         userAssignedActivitiesSet.has(normalizeStr(s.activityId));
       const matchesTurma =
         userAssignedTurmasSet.has(s.turma) ||
@@ -516,7 +553,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       return matchesActivity && matchesTurma;
     });
     const daysOrder: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
-    const distinctDays = Array.from(new Set(otherBlocks.map((b) => b.dayOfWeek)));
+    const distinctDays = Array.from(new Set(otherBlocks.map((b) => b.dayOfWeek).filter(Boolean)));
     return daysOrder.filter((d) => distinctDays.includes(d));
   }, [
     schedules,
@@ -531,9 +568,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Map of activity ID -> ActivityItem
   const activityMap = useMemo(() => {
     const map = new Map<string, ActivityItem>();
-    activitiesList.forEach((act) => {
-      map.set(act.id, act);
-      map.set(act.name, act);
+    const safeActivities = Array.isArray(activitiesList) ? activitiesList : [];
+    safeActivities.forEach((act) => {
+      if (!act) return;
+      if (act.id) map.set(act.id, act);
+      if (act.name) map.set(act.name, act);
     });
     return map;
   }, [activitiesList]);
@@ -542,11 +581,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Para coordenador: todas as turmas cadastradas na escola.
   // Para Monitor / Professor (não-admin/coordenação): SOMENTE as turmas que possuem aulas agendadas hoje que cumpram os critérios (a, b, c).
   const allowedTurmas = useMemo(() => {
+    const safeTurmas = Array.isArray(turmas) ? turmas : [];
     if (isCoord || !currentUser) {
-      return sortTurmasPedagogical(turmas);
+      return sortTurmasPedagogical(safeTurmas);
     }
     const turmasWithClassToday = Array.from(
-      new Set(userTodayScheduleBlocks.map((s) => s.turma))
+      new Set(userTodayScheduleBlocks.map((s) => s.turma).filter(Boolean))
     );
     return sortTurmasPedagogical(turmasWithClassToday);
   }, [turmas, isCoord, currentUser, userTodayScheduleBlocks]);
@@ -860,10 +900,10 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     });
   }, [turmaStatuses, searchTerm, selectedActivityFilter, statusFilter]);
 
-  // Quick Roll Call Student helpers
+  // Quick Roll Call Student helpers (Alunos de Reforço no TOPO da lista)
   const quickModalStudents = useMemo(() => {
     if (!quickRollCallModal) return [];
-    return getEnrolledStudentsForActivity(
+    const baseList = getEnrolledStudentsForActivity(
       students,
       quickRollCallModal.turma,
       quickRollCallModal.activityId,
@@ -871,6 +911,21 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       selectedDate,
       activityMap
     );
+    return [...baseList].sort((a, b) => {
+      const aIsReforco = Boolean(
+        (Array.isArray(a.modalidadesEspeciais) && a.modalidadesEspeciais.includes('Reforço')) ||
+        (Array.isArray(a.specialties) && a.specialties.includes('Reforço')) ||
+        (Array.isArray(a.activities) && a.activities.includes('Reforço'))
+      );
+      const bIsReforco = Boolean(
+        (Array.isArray(b.modalidadesEspeciais) && b.modalidadesEspeciais.includes('Reforço')) ||
+        (Array.isArray(b.specialties) && b.specialties.includes('Reforço')) ||
+        (Array.isArray(b.activities) && b.activities.includes('Reforço'))
+      );
+      if (aIsReforco && !bIsReforco) return -1;
+      if (!aIsReforco && bIsReforco) return 1;
+      return (a.name || '').localeCompare(b.name || '', 'pt-BR');
+    });
   }, [quickRollCallModal, students, effectiveDayOfWeek, selectedDate, activityMap]);
 
   const quickModalRecordsMap = useMemo(() => {
@@ -1129,8 +1184,10 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                 {isCoord ? 'Todas as Atividades' : 'Todas Minhas Atividades'}
               </option>
               {(isCoord
-                ? activitiesList
-                : activitiesList.filter((act) => userAssignedActivities.includes(act.id))
+                ? (Array.isArray(activitiesList) ? activitiesList : [])
+                : (Array.isArray(activitiesList) ? activitiesList : []).filter((act) =>
+                    Array.isArray(userAssignedActivities) && userAssignedActivities.includes(act.id)
+                  )
               ).map((act) => (
                 <option key={act.id} value={act.id}>
                   {act.name} {act.requiresRollCall !== false ? '(Chamada)' : '(Grade)'}
@@ -1443,6 +1500,45 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           </div>
                         )}
                       </div>
+
+                      {/* Alerta de Atividade Paralela • Reforço vs Lego */}
+                      {(() => {
+                        const safeStudents = Array.isArray(students) ? students : [];
+                        const reforcoStudentsInTurma = safeStudents.filter(
+                          (s) =>
+                            s &&
+                            s.turma === turmaName &&
+                            (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
+                            Boolean(
+                              (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.includes('Reforço')) ||
+                              (Array.isArray(s.specialties) && s.specialties.includes('Reforço')) ||
+                              (Array.isArray(s.activities) && s.activities.includes('Reforço'))
+                            ) &&
+                            isStudentScheduledForDate(s, selectedDate)
+                        );
+                        if (reforcoStudentsInTurma.length === 0) return null;
+                        return (
+                          <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="inline-flex items-center space-x-1.5 text-[11px] font-black text-amber-950">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                                <span>⚡ ENVIAR PARA O REFORÇO ({reforcoStudentsInTurma.length})</span>
+                              </span>
+                              <span className="text-[9px] font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
+                                Modalidade Paralela
+                              </span>
+                            </div>
+                            <div className="text-[10.5px] text-amber-950 flex flex-wrap gap-1 items-center">
+                              <span className="font-semibold text-amber-900">Alunos:</span>
+                              {reforcoStudentsInTurma.map((st) => (
+                                <span key={st.id} className="bg-white border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-950 shadow-2xs">
+                                  {st.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Bloco Pedagógico do Semanário (Planejamento para este horário) */}
                       <div className="rounded-xl border p-2.5 transition-all space-y-2 bg-gradient-to-br from-indigo-50/60 via-white to-purple-50/30 border-indigo-100/90 shadow-2xs">
@@ -2040,13 +2136,25 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                 <div className="space-y-2">
                   {quickModalStudents.map((student) => {
                     const currentRec = quickModalRecordsMap.get(student.id);
-                    const currentStatus = currentRec?.status;
+                    const rawStatus = currentRec?.status;
+                    const currentStatus = (rawStatus as any) === 'saude' ? 'falta' : rawStatus;
+                    const isReforcoStudent = Boolean(
+                      (Array.isArray(student.modalidadesEspeciais) && student.modalidadesEspeciais.includes('Reforço')) ||
+                      (Array.isArray(student.specialties) && student.specialties.includes('Reforço')) ||
+                      (Array.isArray(student.activities) && student.activities.includes('Reforço'))
+                    );
+                    const isEncaminhadoReforco = Boolean(
+                      currentRec?.observation?.includes('Reforço') ||
+                      currentRec?.observation?.includes('Encaminhado')
+                    );
 
                     return (
                       <div
                         key={student.id}
                         className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-                          currentStatus === 'presente'
+                          isReforcoStudent
+                            ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/40 shadow-xs'
+                            : currentStatus === 'presente'
                             ? 'bg-emerald-50/50 border-emerald-200'
                             : currentStatus === 'falta'
                             ? 'bg-rose-50/50 border-rose-200'
@@ -2057,17 +2165,62 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             : 'bg-white border-slate-200'
                         }`}
                       >
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">
-                            {student.name}
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-900 truncate">
+                              {student.name}
+                            </span>
+                            {isReforcoStudent && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white shadow-xs animate-pulse">
+                                <span>⚡ ENVIAR PARA O REFORÇO</span>
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[10px] text-slate-500 font-semibold">
-                            Turma: {student.turma}
+                          <div className="text-[10px] text-slate-500 font-semibold flex items-center space-x-2">
+                            <span>Turma: {student.turma}</span>
+                            {isEncaminhadoReforco && (
+                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded">
+                                ✓ Encaminhado à Sala de Reforço
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Status buttons */}
+                        {/* Status buttons & Reforço Shortcut */}
                         <div className="flex flex-wrap items-center gap-1 shrink-0">
+                          {isReforcoStudent && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setQuickModalSaveError(null);
+                                try {
+                                  await onSaveRecord({
+                                    studentId: student.id,
+                                    activity: quickRollCallModal.activityId as ActivityType,
+                                    turma: student.turma,
+                                    date: selectedDate,
+                                    weekNumber: currentWeek.weekNumber,
+                                    year: currentWeek.year,
+                                    status: 'presente',
+                                    observation: 'Encaminhado para a sala de Reforço',
+                                  });
+                                } catch (err: any) {
+                                  console.error('Erro ao confirmar envio ao reforço:', err);
+                                  setQuickModalSaveError({
+                                    message: err?.message || 'Falha ao registrar envio ao reforço.',
+                                  });
+                                }
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition-all cursor-pointer flex items-center space-x-1 shadow-2xs mr-1 ${
+                                isEncaminhadoReforco
+                                  ? 'bg-amber-600 text-white border-amber-700'
+                                  : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                              }`}
+                              title="Confirmar envio do aluno para a sala de reforço"
+                            >
+                              <span>{isEncaminhadoReforco ? '✅ Encaminhado ao Reforço' : '👉 Confirmar Envio ao Reforço'}</span>
+                            </button>
+                          )}
                           {[
                             {
                               id: 'presente' as AttendanceStatus,

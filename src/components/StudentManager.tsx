@@ -7,7 +7,7 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida } from '../utils/dateUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked } from 'lucide-react';
 
 interface StudentManagerProps {
   students?: Student[];
@@ -112,6 +112,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+  const [newHasReforco, setNewHasReforco] = useState(false);
   const [newTipoContrato, setNewTipoContrato] = useState<ContractType>('regular');
   const [newDataInicio, setNewDataInicio] = useState<string>(toISODateString(new Date()));
   const [newDataTermino, setNewDataTermino] = useState<string>(toISODateString(new Date()));
@@ -395,8 +396,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
         const studentActs = Array.isArray(student.activities) ? student.activities : [];
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
+        const isReforco = selectedActivity === 'Reforço';
         const matchesActivity =
-          selectedActivity === 'TODAS' || studentActs.includes(selectedActivity);
+          selectedActivity === 'TODAS'
+            ? true
+            : isReforco
+            ? ((student.modalidadesEspeciais || []).includes('Reforço') || studentActs.includes('Reforço'))
+            : studentActs.includes(selectedActivity);
         const matchesSearch =
           searchTerm.trim() === '' ||
           (student.name || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -501,6 +507,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           name: trimmedName,
           turma: newTurma,
           activities: finalActivities,
+          modalidadesEspeciais: newHasReforco ? ['Reforço'] : [],
           tipoContrato: newTipoContrato,
           dataInicioContrato: newTipoContrato === 'avulso' ? newDataInicio : undefined,
           dataTerminoContrato: newTipoContrato === 'avulso' ? newDataTermino : undefined,
@@ -511,6 +518,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         })
       );
       setNewName('');
+      setNewHasReforco(false);
       setNewTipoContrato('regular');
       setNewDataInicio(toISODateString(new Date()));
       setNewDataTermino(toISODateString(new Date()));
@@ -1022,6 +1030,34 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 );
               })}
             </div>
+          </div>
+
+          {/* Modalidade Paralela Especial: Reforço Escolar */}
+          <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                <span className="text-xs font-bold text-amber-950">Modalidade Paralela • Reforço Escolar:</span>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                Reforço vs. Lego/Oficinas
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-900 leading-snug">
+              Marque se este aluno frequenta a sala de <strong>Reforço Escolar</strong> no contraturno em horários paralelos (ex: Lego / Oficinas).
+            </p>
+            <label className="flex items-center space-x-2.5 bg-white p-2.5 rounded-xl border border-amber-300 cursor-pointer hover:bg-amber-100/50 transition-colors">
+              <input
+                type="checkbox"
+                checked={newHasReforco}
+                onChange={(e) => setNewHasReforco(e.target.checked)}
+                className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 border-amber-300 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <BookMarked className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Aluno frequenta a modalidade 'Reforço' (destaque automático nas Atividades do Momento e Chamada de Frequência)</span>
+              </span>
+            </label>
           </div>
 
           {/* Dias de Frequência no Programa Integral */}
@@ -1808,6 +1844,40 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </div>
               </div>
 
+              {/* Modalidade Paralela Especial: Reforço Escolar */}
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="text-xs font-bold text-amber-950">Modalidade Paralela • Reforço Escolar:</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                    Reforço vs. Lego/Oficinas
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900 leading-snug">
+                  Marque se este aluno frequenta a sala de <strong>Reforço Escolar</strong> no contraturno em horários paralelos (ex: Lego / Oficinas).
+                </p>
+                <label className="flex items-center space-x-2.5 bg-white p-2.5 rounded-xl border border-amber-300 cursor-pointer hover:bg-amber-100/50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={(editingStudent.modalidadesEspeciais || editingStudent.specialties || []).includes('Reforço')}
+                    onChange={(e) => {
+                      const current = editingStudent.modalidadesEspeciais || editingStudent.specialties || [];
+                      const next = e.target.checked
+                        ? Array.from(new Set([...current, 'Reforço']))
+                        : current.filter((m) => m !== 'Reforço');
+                      setEditingStudent({ ...editingStudent, modalidadesEspeciais: next, specialties: next });
+                    }}
+                    className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 border-amber-300 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <BookMarked className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Aluno frequenta a modalidade 'Reforço' (destaque automático nas Atividades do Momento e Chamada de Frequência)</span>
+                  </span>
+                </label>
+              </div>
+
               {/* Dias de Frequência in Edit Modal */}
               <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3.5 space-y-2.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
@@ -2109,7 +2179,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <option value="TODOS">Todas as Atividades ({totalAtivosCount} alunos)</option>
               {extracurricularRollCallActivities.map((a) => {
                 const count = students.filter(
-                  (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && (s.activities || []).includes(a.id)
+                  (s) =>
+                    (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
+                    ((s.activities || []).includes(a.id) ||
+                      (a.id === 'Reforço' && (s.modalidadesEspeciais || []).includes('Reforço')))
                 ).length;
                 return (
                   <option key={a.id} value={a.id}>
@@ -2199,6 +2272,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       ) : (
                         <span className="text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                           Regular
+                        </span>
+                      )}
+
+                      {/* Modalidade Paralela Reforço Badge */}
+                      {(student.modalidadesEspeciais || student.specialties || []).includes('Reforço') && (
+                        <span
+                          className="text-[10.5px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                          title="Aluno matriculado na modalidade paralela de Reforço Escolar"
+                        >
+                          <BookMarked className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>Reforço Escolar</span>
                         </span>
                       )}
                       

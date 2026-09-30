@@ -26,7 +26,7 @@ import {
   CalendarDays,
   Zap,
 } from 'lucide-react';
-import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, TurmaAtribuicao, TurmaType, UserProfile, WeekInfo } from '../../types';
+import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, Student, TurmaAtribuicao, TurmaType, UserProfile, WeekInfo } from '../../types';
 import { SemanarioCard } from './SemanarioCard';
 import { SemanarioModal } from './SemanarioModal';
 import {
@@ -40,6 +40,8 @@ import {
   isPlanContentFilled,
   getStartMinutes,
   parseTimeToMinutes,
+  isLegoOrReforcoPlan,
+  getReforcoStudentsForTurmaAndDay,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
@@ -67,9 +69,10 @@ function extractStartTime(timeSlot?: string): string {
   return timeSlot.trim();
 }
 
-interface SemanarioMainProps {
+export interface SemanarioMainProps {
   plans: SemanarioPlan[];
   turmas: TurmaType[];
+  students?: Student[];
   users: UserProfile[];
   currentUser: UserProfile | null;
   currentWeek: WeekInfo;
@@ -123,6 +126,7 @@ function getTurmaStageInfo(turmaName: string): { label: string; color: string; b
 export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   plans,
   turmas,
+  students = [],
   users,
   currentUser,
   currentWeek,
@@ -759,7 +763,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       blobUrl: result.blobUrl,
       dataUrl: result.dataUrl || result.dataUri,
       filename: result.filename,
-      title: `Semanário Pedagógico • Semana ${currentWeek.weekNumber} (${isAll ? 'Todas as Turmas' : targetTurma}${dayText})`,
+      title: `Semanário de Atividades • Semana ${currentWeek.weekNumber} (${isAll ? 'Todas as Turmas' : targetTurma}${dayText})`,
       onDownload: result.download,
     });
   };
@@ -867,7 +871,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Direct Print immediately via CSS @media print and same window
   const handlePrint = () => {
-    safeWindowPrint('semanario-printable-area', `Semanário Pedagógico — ${currentWeek.label} (${activeTurma || 'Geral'})`);
+    safeWindowPrint('semanario-printable-area', `Semanário de Atividades — ${currentWeek.label} (${activeTurma || 'Geral'})`);
   };
 
   // All active categories list for filter dropdown (sorted alphabetically)
@@ -1089,7 +1093,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
             INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
           </h1>
           <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-            SEMANÁRIO PEDAGÓGICO — {currentWeek.label}
+            SEMANÁRIO DE ATIVIDADES — {currentWeek.label}
           </h2>
           <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300">
             <span>Período: {currentWeek.startDate} até {currentWeek.endDate}</span>
@@ -1332,7 +1336,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                       INSTITUTO EDUCACIONAL CRESCER • COLÉGIO CRESCER
                     </h1>
                     <h2 className="text-xs font-bold uppercase text-slate-700">
-                      SEMANÁRIO PEDAGÓGICO — SEMANA {currentWeek.weekNumber}
+                      SEMANÁRIO DE ATIVIDADES — SEMANA {currentWeek.weekNumber}
                     </h2>
                     <div className="flex justify-between text-[10px] font-semibold text-slate-600 pt-1 border-t border-slate-300 mt-1">
                       <span>Turma: <strong className="text-slate-900">{turma}</strong></span>
