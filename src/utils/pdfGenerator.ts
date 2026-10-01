@@ -20,7 +20,7 @@ import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
-import { parseTimeToMinutes, getStartMinutes } from './semanarioUtils';
+import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStudentsForCard } from './semanarioUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
 import {
@@ -3069,7 +3069,9 @@ export function generateSemanarioPDFReport(
   selectedDay: string = 'all',
   currentUser?: UserProfile | null,
   saveImmediately: boolean = false,
-  availableTurmas?: string[]
+  availableTurmas?: string[],
+  students?: Student[],
+  schedules?: ScheduleBlock[]
 ): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -3233,8 +3235,19 @@ export function generateSemanarioPDFReport(
             statusStr = p.substitutionReason ? `Substituída (${p.substitutionReason})` : 'Substituída';
           }
 
+          // Injeção Estrita de Alunos de Reforço: Apenas no bloco de 'Reforço e Lego' no dia e horário corretos
+          let reforcoNote = '';
+          if (Array.isArray(students) && students.length > 0 && isReforcoActivity(p)) {
+            const reforcoList = getReforcoStudentsForCard(p, students, schedules);
+            if (reforcoList.length > 0) {
+              const studentNames = reforcoList.map((s) => s.name).join(', ');
+              reforcoNote = `[MODALIDADE PARALELA • REFORÇO ESCOLAR]\nAlunos convocados para a sala de Reforço (${reforcoList.length}): ${studentNames}`;
+            }
+          }
+
           const detailsText = [
             `Horário: ${p.timeSlot || 'Integral'} • Responsável: ${p.teacherName || p.monitors || p.adiResponsible || 'Monitora'}`,
+            reforcoNote,
             p.objectives ? `Proposta / Intenção: ${p.objectives}` : '',
             p.development ? `${p.development}` : '',
             p.materials ? `Materiais: ${p.materials}` : '',

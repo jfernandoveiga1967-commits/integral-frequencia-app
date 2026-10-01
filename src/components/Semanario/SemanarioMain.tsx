@@ -25,8 +25,13 @@ import {
   FolderTree,
   CalendarDays,
   Zap,
+  Trash2,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus, Student, TurmaAtribuicao, TurmaType, UserProfile, WeekInfo } from '../../types';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db, deleteSemanarioPlanFromFirestore } from '../../firebase';
 import { SemanarioCard } from './SemanarioCard';
 import { SemanarioModal } from './SemanarioModal';
 import {
@@ -41,7 +46,9 @@ import {
   getStartMinutes,
   parseTimeToMinutes,
   isLegoOrReforcoPlan,
+  isReforcoActivity,
   getReforcoStudentsForTurmaAndDay,
+  getReforcoStudentsForCard,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
@@ -165,6 +172,20 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [overviewSearchTerm, setOverviewSearchTerm] = useState<string>('');
 
+  // Estado local de atividades sincronizado com o Firestore (com atualização reativa imediata via setActivities)
+  const [activities, setActivities] = useState<SemanarioPlan[]>(plans);
+  useEffect(() => {
+    setActivities(plans);
+  }, [plans]);
+
+  // Rastreamento estrito de IDs únicos excluídos para evitar regeneração indevida de placeholders
+  const [deletedActivityIds, setDeletedActivityIds] = useState<Set<string>>(() => new Set<string>());
+
+  // Estados do Modal de Confirmação de Exclusão e Feedback Visual
+  const [activityToDelete, setActivityToDelete] = useState<SemanarioPlan | null>(null);
+  const [isDeletingActivity, setIsDeletingActivity] = useState<boolean>(false);
+  const [deleteFeedbackMessage, setDeleteFeedbackMessage] = useState<string | null>(null);
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingPlan, setEditingPlan] = useState<Partial<SemanarioPlan> | null>(null);
@@ -270,11 +291,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Filtered Plans for Current Week (Sanitized against official schedule)
   const weekPlans = useMemo(() => {
-    const raw = plans.filter(
+    const raw = activities.filter(
       (p) => p.weekNumber === currentWeek.weekNumber && p.year === currentWeek.year
     );
     return cleanupInvalidTurmaPlans(raw, schedules);
-  }, [plans, currentWeek, schedules]);
+  }, [activities, currentWeek, schedules]);
 
   // General KPI Metrics for Current Week (Apenas atividades com conteúdo salvo)
   const metrics = useMemo(() => {
@@ -291,8 +312,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   // Plans of the selected Turma (when in detailed view)
   const activeTurmaPlans = useMemo(() => {
     if (!activeTurma) return [];
-    return weekPlans.filter((p) => p.turma === activeTurma);
-  }, [weekPlans, activeTurma]);
+    return weekPlans.filter((p) => p.turma === activeTurma && !deletedActivityIds.has(p.id));
+  }, [weekPlans, activeTurma, deletedActivityIds]);
 
   // Vínculo Estrito com a Grade Horária Oficial da Turma no Dia Selecionado:
   // Carrega todas as atividades previstas na matriz curricular da turma para o dia ativo (do acolhimento à saída),
@@ -309,68 +330,85 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
     const usedExistingPlanIds = new Set<string>();
 
-    const officialMappedPlans = officialBlocks.map((block) => {
-      const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
-      const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
-      const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
-      const safeTime = (block.startTime || '').replace(':', '');
+    const officialMappedPlans = officialBlocks
+      .filter((block) => !deletedActivityIds.has(block.id))
+      .map((block) => {
+        const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
+        const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
+        const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
+        const safeTime = (block.startTime || '').replace(':', '');
+        const generatedId = `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`;
 
-      // Procura plano já salvo que coincida com o horário, id gerado ou categoria
-      const existingPlan = activeTurmaPlans.find((p) => {
-        if (p.dayOfWeek !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
-        if (p.timeSlot && p.timeSlot.trim() === officialTimeSlot.trim()) return true;
-        if (p.id && (p.id.includes(block.id) || (p.id.includes(safeCatId) && p.id.includes(safeTime)))) return true;
-        return (p.category || '').toLowerCase().trim() === (block.activityId || '').toLowerCase().trim();
-      });
+        // Se o plano gerado foi excluído pelo usuário, não re-cria o card
+        if (deletedActivityIds.has(generatedId)) {
+          return null;
+        }
 
-      if (existingPlan) {
-        usedExistingPlanIds.add(existingPlan.id);
-        return {
-          ...existingPlan,
-          timeSlot: existingPlan.timeSlot || officialTimeSlot,
-          status: existingPlan.status || 'pendente',
+        // Procura plano já salvo que coincida rigorosamente por ID ou horário específico
+        const existingPlan = activeTurmaPlans.find((p) => {
+          if (p.dayOfWeek !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
+          if (deletedActivityIds.has(p.id)) return false;
+          if (p.id === generatedId || p.id === block.id) return true;
+          if (p.id && (p.id.includes(block.id) || (p.id.includes(safeCatId) && p.id.includes(safeTime)))) return true;
+          if (
+            p.timeSlot &&
+            p.timeSlot.trim() === officialTimeSlot.trim() &&
+            (p.category || '').toLowerCase().trim() === (block.activityId || '').toLowerCase().trim()
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+        if (existingPlan) {
+          usedExistingPlanIds.add(existingPlan.id);
+          return {
+            ...existingPlan,
+            timeSlot: existingPlan.timeSlot || officialTimeSlot,
+            status: existingPlan.status || 'pendente',
+          };
+        }
+
+        // Bloco padrão da grade horária oficial aguardando preenchimento pedagógico
+        const newPlan: SemanarioPlan = {
+          id: generatedId,
+          turma: activeTurma as TurmaType,
+          weekNumber: currentWeek.weekNumber,
+          year: currentWeek.year,
+          date: dayDate,
+          dayOfWeek: selectedDay,
+          timeSlot: officialTimeSlot,
+          category: block.activityId,
+          title: '',
+          objectives: '',
+          development: '',
+          materials: '',
+          teacherName: 'Aguardando preenchimento',
+          status: 'pendente',
+          photos: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          ...({
+            descricao: '',
+            conteudo: '',
+            proposta: '',
+            isSavedByUser: false,
+            hasSavedContent: false,
+            isPlaceholder: true,
+          } as any),
         };
-      }
 
-      // Bloco padrão da grade horária oficial aguardando preenchimento pedagógico
-      const newPlan: SemanarioPlan = {
-        id: `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`,
-        turma: activeTurma as TurmaType,
-        weekNumber: currentWeek.weekNumber,
-        year: currentWeek.year,
-        date: dayDate,
-        dayOfWeek: selectedDay,
-        timeSlot: officialTimeSlot,
-        category: block.activityId,
-        title: '',
-        objectives: '',
-        development: '',
-        materials: '',
-        teacherName: 'Aguardando preenchimento',
-        status: 'pendente',
-        photos: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        ...({
-          descricao: '',
-          conteudo: '',
-          proposta: '',
-          isSavedByUser: false,
-          hasSavedContent: false,
-          isPlaceholder: true,
-        } as any),
-      };
-
-      return newPlan;
-    });
+        return newPlan;
+      })
+      .filter((p): p is SemanarioPlan => p !== null);
 
     // Planos adicionais cadastrados pelo usuário para o dia que não coincidem com os blocos oficiais
     const extraPlans = activeTurmaPlans.filter(
-      (p) => p.dayOfWeek === selectedDay && !usedExistingPlanIds.has(p.id)
+      (p) => p.dayOfWeek === selectedDay && !usedExistingPlanIds.has(p.id) && !deletedActivityIds.has(p.id)
     );
 
     return [...officialMappedPlans, ...extraPlans];
-  }, [activeTurma, selectedDay, schedules, activeTurmaPlans, currentWeek]);
+  }, [activeTurma, selectedDay, schedules, activeTurmaPlans, currentWeek, deletedActivityIds]);
 
   // Filtered and Chronologically Sorted Plans inside selected Turma and selected Day
   const filteredActiveTurmaPlans = useMemo(() => {
@@ -465,6 +503,71 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       updatedAt: new Date().toISOString(),
     };
     onSavePlan(duplicated);
+  };
+
+  // Tratamento do clique de exclusão com interceptação e modal de confirmação
+  const handleRequestDeleteActivity = (activityId: string, plan?: SemanarioPlan) => {
+    const target = plan || activities.find((a) => a.id === activityId) || plans.find((p) => p.id === activityId);
+    if (target) {
+      setActivityToDelete(target);
+    } else {
+      setActivityToDelete({
+        id: activityId,
+        turma: (activeTurma || '') as TurmaType,
+        title: 'Atividade',
+        category: 'Atividade',
+      } as SemanarioPlan);
+    }
+  };
+
+  // Exclusão estrita por ID único no Firestore e atualização imediata do estado local (setActivities)
+  const handleDeleteActivity = async (activityId: string) => {
+    if (!activityId) return;
+    try {
+      setIsDeletingActivity(true);
+
+      // 1. Exclusão estrita por ID único do registro no Firestore via deleteDoc
+      try {
+        const docRef = doc(db, 'semanarioPlans', activityId);
+        await deleteDoc(docRef);
+      } catch (fsErr) {
+        console.warn('Tentando fallback de exclusão Firestore:', fsErr);
+        await deleteSemanarioPlanFromFirestore(activityId);
+      }
+
+      // 2. Atualiza imediatamente o estado local (setActivities)
+      setActivities((prev) => prev.filter((act) => act.id !== activityId));
+      setDeletedActivityIds((prev) => new Set([...prev, activityId]));
+
+      // 3. Notifica o handler de sincronização global (App.tsx)
+      if (onDeletePlan) {
+        onDeletePlan(activityId);
+      }
+
+      // 4. Feedback visual 'Atividade removida com sucesso'
+      setDeleteFeedbackMessage('Atividade removida com sucesso');
+      setTimeout(() => {
+        setDeleteFeedbackMessage(null);
+      }, 4000);
+
+      // Fecha o modal de confirmação
+      setActivityToDelete(null);
+    } catch (error) {
+      console.error('Erro ao excluir atividade do semanário:', error);
+      // Fallback: garante atualização reativa local e feedback visual
+      setActivities((prev) => prev.filter((act) => act.id !== activityId));
+      setDeletedActivityIds((prev) => new Set([...prev, activityId]));
+      if (onDeletePlan) {
+        onDeletePlan(activityId);
+      }
+      setDeleteFeedbackMessage('Atividade removida com sucesso');
+      setTimeout(() => {
+        setDeleteFeedbackMessage(null);
+      }, 4000);
+      setActivityToDelete(null);
+    } finally {
+      setIsDeletingActivity(false);
+    }
   };
 
   const handleStatusChange = (planId: string, newStatus: SemanarioStatus, reason?: string) => {
@@ -744,7 +847,9 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       targetDay,
       currentUser,
       false,
-      sortedTurmas
+      sortedTurmas,
+      students,
+      schedules
     );
 
     const isAll = targetTurma === 'all';
@@ -1651,11 +1756,13 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   <SemanarioCard
                     key={plan.id}
                     plan={plan}
+                    reforcoStudents={getReforcoStudentsForCard(plan, students, schedules)}
                     onEdit={handleEditPlan}
-                    onDelete={onDeletePlan}
+                    onDelete={handleRequestDeleteActivity}
                     onDuplicate={handleDuplicatePlan}
                     onStatusChange={handleStatusChange}
                     onRegenerateWithAI={handleRegenerateWithAI}
+                    isCoordinator={isCoordenador(currentUser) || !currentUser || currentUser?.role === 'coordenador' || currentUser?.role === 'professor'}
                   />
                 ))}
               </div>
@@ -1796,6 +1903,116 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         onClose={() => setIsAiBatchModalOpen(false)}
         onRetryFailed={handleRetryFailedBatchPlans}
       />
+
+      {/* Modal de Confirmação de Exclusão de Atividade */}
+      {activityToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isDeletingActivity) setActivityToDelete(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header com ícone da lixeira em destaque */}
+            <div className="p-6 pb-4 flex items-start space-x-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center shrink-0 text-rose-600 shadow-inner">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-black text-slate-900 leading-tight">
+                  Excluir Atividade do Semanário
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  Confirmação de remoção cadastral da grade horária
+                </p>
+              </div>
+            </div>
+
+            {/* Mensagem explícita requerida: "Deseja realmente excluir a atividade [Nome] da [Turma]?" */}
+            <div className="px-6 py-4 bg-slate-50/70 border-y border-slate-100">
+              <p className="text-sm font-semibold text-slate-800 leading-relaxed">
+                Deseja realmente excluir a atividade{' '}
+                <span className="font-extrabold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                  {activityToDelete.title?.trim() || activityToDelete.category || 'Atividade'}
+                </span>{' '}
+                da{' '}
+                <span className="font-extrabold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                  {activityToDelete.turma}
+                </span>
+                ?
+              </p>
+              {activityToDelete.timeSlot && (
+                <div className="text-[11px] text-slate-500 font-medium mt-2 flex items-center space-x-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Horário: <strong>{activityToDelete.timeSlot}</strong></span>
+                  {activityToDelete.dayOfWeek && (
+                    <span>• {DAYS_OF_WEEK_CONFIG.find((d) => d.id === activityToDelete.dayOfWeek)?.label || activityToDelete.dayOfWeek}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Ações do Modal */}
+            <div className="p-6 pt-4 flex items-center justify-end space-x-3 bg-white">
+              <button
+                type="button"
+                disabled={isDeletingActivity}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActivityToDelete(null);
+                }}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingActivity}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteActivity(activityToDelete.id);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-98 text-white text-xs font-extrabold transition-all shadow-md hover:shadow-rose-500/20 flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingActivity ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Excluindo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Sim, Excluir Atividade</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast de Feedback Visual: Atividade removida com sucesso */}
+      {deleteFeedbackMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-3 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-emerald-500 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-xs font-black tracking-wide">
+            {deleteFeedbackMessage}
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeleteFeedbackMessage(null)}
+            className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer text-white/80 hover:text-white ml-2"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -68,6 +68,7 @@ import {
 import { DepartureAlertBanner } from './DepartureAlertBanner';
 import { DepartureAlertModal } from './DepartureAlertModal';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
+import { isReforcoActivity, isStudentInReforco } from '../utils/semanarioUtils';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
@@ -911,19 +912,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       selectedDate,
       activityMap
     );
+    const isModalReforco = isReforcoActivity(quickRollCallModal.activityId);
     return [...baseList].sort((a, b) => {
-      const aIsReforco = Boolean(
-        (Array.isArray(a.modalidadesEspeciais) && a.modalidadesEspeciais.includes('Reforço')) ||
-        (Array.isArray(a.specialties) && a.specialties.includes('Reforço')) ||
-        (Array.isArray(a.activities) && a.activities.includes('Reforço'))
-      );
-      const bIsReforco = Boolean(
-        (Array.isArray(b.modalidadesEspeciais) && b.modalidadesEspeciais.includes('Reforço')) ||
-        (Array.isArray(b.specialties) && b.specialties.includes('Reforço')) ||
-        (Array.isArray(b.activities) && b.activities.includes('Reforço'))
-      );
-      if (aIsReforco && !bIsReforco) return -1;
-      if (!aIsReforco && bIsReforco) return 1;
+      if (isModalReforco) {
+        const aIsReforco = isStudentInReforco(a);
+        const bIsReforco = isStudentInReforco(b);
+        if (aIsReforco && !bIsReforco) return -1;
+        if (!aIsReforco && bIsReforco) return 1;
+      }
       return (a.name || '').localeCompare(b.name || '', 'pt-BR');
     });
   }, [quickRollCallModal, students, effectiveDayOfWeek, selectedDate, activityMap]);
@@ -1501,19 +1497,24 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                         )}
                       </div>
 
-                      {/* Alerta de Atividade Paralela • Reforço vs Lego */}
+                      {/* Alerta de Atividade Paralela • Reforço vs Lego (Exclusivo para Reforço e Lego) */}
                       {(() => {
+                        // Guarda Dupla: Valida se a atividade atual do bloco ou do plano é estritamente Reforço
+                        const isCurrentReforco =
+                          isReforcoActivity(activeBlock?.activityId) ||
+                          isReforcoActivity(activePlan);
+
+                        // Bloqueio categórico: se for Flauta, Judô, Natação, Psicomotricidade, Artes, Lanche, etc.,
+                        // NÃO calcula nem renderiza alunos de Reforço neste card.
+                        if (!isCurrentReforco) return null;
+
                         const safeStudents = Array.isArray(students) ? students : [];
                         const reforcoStudentsInTurma = safeStudents.filter(
                           (s) =>
                             s &&
                             s.turma === turmaName &&
                             (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
-                            Boolean(
-                              (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.includes('Reforço')) ||
-                              (Array.isArray(s.specialties) && s.specialties.includes('Reforço')) ||
-                              (Array.isArray(s.activities) && s.activities.includes('Reforço'))
-                            ) &&
+                            isStudentInReforco(s) &&
                             isStudentScheduledForDate(s, selectedDate)
                         );
                         if (reforcoStudentsInTurma.length === 0) return null;
@@ -1525,7 +1526,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                 <span>⚡ ENVIAR PARA O REFORÇO ({reforcoStudentsInTurma.length})</span>
                               </span>
                               <span className="text-[9px] font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
-                                Modalidade Paralela
+                                Reforço e Lego
                               </span>
                             </div>
                             <div className="text-[10.5px] text-amber-950 flex flex-wrap gap-1 items-center">
@@ -2138,10 +2139,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                     const currentRec = quickModalRecordsMap.get(student.id);
                     const rawStatus = currentRec?.status;
                     const currentStatus = (rawStatus as any) === 'saude' ? 'falta' : rawStatus;
+                    const isModalReforcoActivity = isReforcoActivity(quickRollCallModal.activityId);
                     const isReforcoStudent = Boolean(
-                      (Array.isArray(student.modalidadesEspeciais) && student.modalidadesEspeciais.includes('Reforço')) ||
-                      (Array.isArray(student.specialties) && student.specialties.includes('Reforço')) ||
-                      (Array.isArray(student.activities) && student.activities.includes('Reforço'))
+                      isModalReforcoActivity && isStudentInReforco(student)
                     );
                     const isEncaminhadoReforco = Boolean(
                       currentRec?.observation?.includes('Reforço') ||

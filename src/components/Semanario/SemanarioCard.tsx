@@ -11,13 +11,13 @@ import {
   BookMarked,
 } from 'lucide-react';
 import { SemanarioPlan, SemanarioStatus, Student } from '../../types';
-import { getCategoryBadgeStyle, getStatusStyle, isPlanContentFilled } from '../../utils/semanarioUtils';
+import { getCategoryBadgeStyle, getStatusStyle, isPlanContentFilled, isReforcoActivity } from '../../utils/semanarioUtils';
 
 interface SemanarioCardProps {
   plan: SemanarioPlan;
   reforcoStudents?: Student[];
   onEdit: (plan: SemanarioPlan) => void;
-  onDelete: (planId: string) => void;
+  onDelete: (planId: string, plan?: SemanarioPlan) => void;
   onDuplicate: (plan: SemanarioPlan) => void;
   onStatusChange: (planId: string, newStatus: SemanarioStatus, reason?: string) => void;
   onRegenerateWithAI?: (plan: SemanarioPlan) => void;
@@ -123,8 +123,8 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
           </div>
         )}
 
-        {/* Box de Observação Automática • Modalidade Paralela (Reforço vs. Lego/Oficinas) */}
-        {reforcoStudents && reforcoStudents.length > 0 && (
+        {/* Box de Observação Automática • Modalidade Paralela (Exibido EXCLUSIVAMENTE em Reforço e Lego) */}
+        {isReforcoActivity(plan) && reforcoStudents && reforcoStudents.length > 0 && (
           <div className="bg-amber-500/10 border-2 border-amber-500/50 rounded-xl p-2.5 space-y-1.5 shadow-2xs animate-in fade-in duration-150">
             <div className="flex items-center justify-between gap-1.5">
               <span className="inline-flex items-center space-x-1.5 text-[11px] font-black text-amber-950">
@@ -132,7 +132,7 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
                 <span>⚡ MODALIDADE PARALELA • REFORÇO ({reforcoStudents.length})</span>
               </span>
               <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
-                Reforço vs. Lego
+                Reforço e Lego
               </span>
             </div>
             <p className="text-[10px] text-amber-900 font-semibold leading-tight">
@@ -248,15 +248,15 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
           {isCoordinator && (
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm(`Excluir a atividade de "${plan.category}" (${plan.timeSlot})?`)) {
-                  onDelete(plan.id);
-                }
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete(plan.id, plan);
               }}
               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-              title="Excluir Atividade"
+              title={`Excluir atividade "${plan.title || plan.category || 'Atividade'}" da turma ${plan.turma}`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3.5 h-3.5 pointer-events-none" />
             </button>
           )}
         </div>

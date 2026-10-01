@@ -861,21 +861,101 @@ export function getStartMinutes(item: any): number {
 }
 
 /**
- * Identifica se uma proposta pedagógica do Semanário corresponde a atividades paralelas (Lego, Robótica, Oficinas, Reforço).
+ * Verifica se a atividade corresponde estritamente à modalidade 'Reforço e Lego' ou 'Reforço'.
+ * Bloqueia categoricamente modalidades regulares como Flauta, Judô, Natação, Psicomotricidade, Acolhimento, Almoço, Higienização, Artes, Culinária, Lanche, Saída, etc.
+ */
+export function isReforcoActivity(
+  activityOrPlan:
+    | SemanarioPlan
+    | ScheduleBlock
+    | { category?: string; title?: string; activityId?: string; modalidade?: string; name?: string }
+    | string
+    | null
+    | undefined
+): boolean {
+  if (!activityOrPlan) return false;
+  const norm = (s?: string) =>
+    (s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+
+  let cat = '';
+  let title = '';
+
+  if (typeof activityOrPlan === 'string') {
+    cat = norm(activityOrPlan);
+  } else {
+    cat = norm(
+      (activityOrPlan as any).category ||
+      (activityOrPlan as any).activityId ||
+      (activityOrPlan as any).modalidade ||
+      (activityOrPlan as any).name ||
+      ''
+    );
+    title = norm((activityOrPlan as any).title || '');
+  }
+
+  // Lista explícita de modalidades regulares que NUNCA devem exibir o badge/alunos de Reforço
+  const FORBIDDEN_REGULAR_ACTIVITIES = [
+    'flauta',
+    'judo',
+    'natacao',
+    'psicomotricidade',
+    'acolhimento',
+    'almoco',
+    'higienizacao',
+    'artes',
+    'culinaria',
+    'lanche',
+    'saida',
+    'recreacao',
+    'descanso',
+    'sono',
+    'parque',
+    'patio',
+    'leitura',
+    'devocional',
+    'musicalizacao',
+    'musica',
+    'ballet',
+    'bale',
+    'capoeira',
+    'futebol',
+    'ingles',
+    'rotina',
+  ];
+
+  // Se a categoria for estritamente uma rotina regular e não contiver 'reforco', bloqueia imediatamente
+  const isForbiddenCategory = FORBIDDEN_REGULAR_ACTIVITIES.some((forbidden) => {
+    return (
+      cat === forbidden ||
+      cat.startsWith(`${forbidden} `) ||
+      cat.endsWith(` ${forbidden}`) ||
+      title === forbidden
+    ) && !cat.includes('reforco') && !title.includes('reforco');
+  });
+
+  if (isForbiddenCategory) {
+    return false;
+  }
+
+  // Condição (a): A modalidade/categoria deve ser estritamente 'Reforço e Lego' (ou contiver 'Reforço' na categoria/título)
+  const isStrictReforco =
+    cat === 'reforco e lego' ||
+    cat === 'lego e reforco' ||
+    cat.includes('reforco') ||
+    title.includes('reforco');
+
+  return isStrictReforco;
+}
+
+/**
+ * Identifica se uma proposta pedagógica do Semanário corresponde a atividades paralelas (Reforço e Lego).
  */
 export function isLegoOrReforcoPlan(plan: SemanarioPlan | null | undefined): boolean {
-  if (!plan) return false;
-  const target = `${plan.category || ''} ${plan.title || ''} ${plan.weekTheme || (plan as any).theme || ''}`
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  return (
-    target.includes('lego') ||
-    target.includes('reforco') ||
-    target.includes('oficina') ||
-    target.includes('robot') ||
-    target.includes('paralel')
-  );
+  return isReforcoActivity(plan);
 }
 
 /**
@@ -916,4 +996,74 @@ export function getReforcoStudentsForTurmaAndDay(
     })
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
 }
+
+/**
+ * Injeção estrita dos alunos de Reforço para um card do Semanário.
+ * Atende simultaneamente às 3 condições mandatadas:
+ *   a) Categoria/modalidade estritamente 'Reforço e Lego' ou contendo 'Reforço';
+ *   b) Dia da semana contratado/agendado para o aluno;
+ *   c) Horário do bloco coincidente com o horário de execução do Reforço.
+ * Impede categoricamente a exibição em cards de Acolhimento, Almoço, Higienização, Artes, Culinária, Lanche, Saída, etc.
+ */
+export function getReforcoStudentsForCard(
+  plan: SemanarioPlan | null | undefined,
+  students: Student[] | null | undefined,
+  schedules?: ScheduleBlock[] | null
+): Student[] {
+  if (!plan || !Array.isArray(students) || students.length === 0) return [];
+
+  // Condição a: Modalidade/categoria estritamente 'Reforço e Lego' ou contendo 'Reforço'
+  // E bloqueio de modalidades regulares
+  if (!isReforcoActivity(plan)) {
+    return [];
+  }
+
+  // Condição c: Horário do bloco coincidente com a execução do Reforço
+  // Se existirem blocos oficiais na grade (schedules) para esta turma e dia, valida se há um bloco de Reforço
+  if (Array.isArray(schedules) && schedules.length > 0 && plan.turma && plan.dayOfWeek && plan.timeSlot) {
+    const norm = (s?: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const safeTurma = norm(plan.turma);
+
+    const reforcoBlocks = schedules.filter((b) => {
+      if (norm(b.turma) !== safeTurma) return false;
+      if (b.dayOfWeek !== plan.dayOfWeek) return false;
+      const actNorm = norm(b.activityId);
+      return actNorm === 'reforco e lego' || actNorm === 'lego e reforco' || actNorm.includes('reforco');
+    });
+
+    if (reforcoBlocks.length > 0) {
+      const planTime = (plan.timeSlot || '').replace(/\s+/g, '');
+      const matchesScheduleTime = reforcoBlocks.some((b) => {
+        const blockTime = `${b.startTime}-${b.endTime}`.replace(/\s+/g, '');
+        return planTime.includes(blockTime) || blockTime.includes(planTime) || planTime.includes(b.startTime);
+      });
+      if (!matchesScheduleTime) {
+        return [];
+      }
+    }
+  }
+
+  // Condição b: Aluno matriculado no Reforço e com dia da semana agendado/contratado
+  const normTurma = (t: string) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const targetTurmaNorm = normTurma(plan.turma);
+
+  return students
+    .filter((s) => {
+      if (!s) return false;
+      const status = s.status || s.statusMatricula || 'ativo';
+      if (status !== 'ativo') return false;
+
+      // Turma do aluno
+      if (normTurma(s.turma) !== targetTurmaNorm) return false;
+
+      // Aluno matriculado/inscrito em Reforço
+      if (!isStudentInReforco(s)) return false;
+
+      // Dia da semana contratado/agendado de frequência
+      return isStudentScheduledForDay(s, plan.dayOfWeek);
+    })
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+}
+
+export const getSpecialtyStudentsForActivity = getReforcoStudentsForCard;
 
