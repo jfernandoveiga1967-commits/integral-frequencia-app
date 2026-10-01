@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Student,
   AttendanceRecord,
@@ -113,10 +113,15 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   const [financialRole, setFinancialRole] = useState<string>('Conferência & Prestação de Contas');
   const [generalNotes, setGeneralNotes] = useState<string>('');
 
-  // Overrides em memória: { "2026-08-01": { manualCount: 20, unitPrice: 15, notes: "", isManualOverride: true } }
+  // Overrides em memória: { "2026-08-01": { manualCount: 20, unitPrice: 15, notes: "", isManualOverride: true, lastCalculatedMealsCount?: number, isReopenedCall?: boolean } }
   const [customEntries, setCustomEntries] = useState<
-    Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>
+    Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
   >({});
+
+  // Auto-salvamento debounced de 500ms
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingConfigRef = useRef<MealReportConfig | null>(null);
 
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null);
 
@@ -172,10 +177,10 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         212;
 
       const sanitizeLoadedEntries = (
-        rawEntries?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>
+        rawEntries?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
       ) => {
         if (!rawEntries) return {};
-        const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {};
+        const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
         Object.entries(rawEntries).forEach(([dateKey, val]) => {
           if (!val) return;
           const isExplicitOverride = Boolean(val.isManualOverride && val.manualCount !== undefined);
@@ -184,6 +189,8 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
             ...val,
             manualCount: isExplicitOverride ? val.manualCount : undefined,
             isManualOverride: isExplicitOverride,
+            lastCalculatedMealsCount: val.lastCalculatedMealsCount,
+            isReopenedCall: val.isReopenedCall,
           };
         });
         return sanitized;
@@ -367,39 +374,147 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     setEndDate(`${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`);
   };
 
+  // Funções de Construção de Configuração e Auto-Salvamento Instantâneo (Debounce de 500ms)
+  const buildConfigToSave = (
+    entriesOverride?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+  ): MealReportConfig => {
+    const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
+    const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
+    const sourceEntries = entriesOverride || customEntries || {};
+
+    const entriesToSave: Record<string, any> = {
+      ...sourceEntries,
+    };
+
+    activeEntries.forEach((entry) => {
+      const isManual = Boolean(entry.isManualOverride);
+      const isFutureOrNoCall =
+        entry.date > todayStr ||
+        !entry.isSchoolDay ||
+        (entry.systemCount === 0 && (entry.pendentes || 0) > 0 && !entry.isReopenedCall);
+
+      entriesToSave[entry.date] = {
+        ...(entriesToSave[entry.date] || {}),
+        unitPrice: sourceEntries[entry.date]?.unitPrice !== undefined ? sourceEntries[entry.date]?.unitPrice : entry.unitPrice,
+        notes: sourceEntries[entry.date]?.notes !== undefined ? sourceEntries[entry.date]?.notes : (entry.notes || ''),
+        isManualOverride: isManual,
+        manualCount: isManual
+          ? (sourceEntries[entry.date]?.manualCount !== undefined ? sourceEntries[entry.date]?.manualCount : entry.manualCount)
+          : (isFutureOrNoCall ? undefined : entry.systemCount),
+        lastCalculatedMealsCount: entry.lastCalculatedMealsCount,
+        isReopenedCall: entry.isReopenedCall,
+      };
+    });
+
+    return {
+      id: monthKey,
+      monthKey,
+      year: selectedYear,
+      month: selectedMonth,
+      startDate,
+      endDate,
+      defaultUnitPrice: cleanUnitPrice,
+      entries: entriesToSave,
+      contractCompany: cleanCompany,
+      providerName: cleanCompany,
+      responsibleCoordinator,
+      coordinatorRole,
+      responsibleFinancial,
+      financialRole,
+      generalNotes,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Coordenação',
+    };
+  };
+
+  // Auto-salvamento debounced de 500ms para edições manuais
+  const scheduleDebouncedAutoSave = (
+    updatedEntries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+  ) => {
+    const config = buildConfigToSave(updatedEntries);
+    pendingConfigRef.current = config;
+
+    // 1. Gravação imediata no LocalStorage para blindar contra fechamento ou perda em 1ms
+    saveMealConfig(config);
+
+    // 2. Debounce de 500ms no Firestore
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    setAutoSaveStatus('saving');
+
+    debounceTimerRef.current = setTimeout(async () => {
+      if (pendingConfigRef.current) {
+        try {
+          await saveMealReportToFirestore(pendingConfigRef.current);
+          setAutoSaveStatus('saved');
+          setTimeout(() => {
+            setAutoSaveStatus('idle');
+          }, 2500);
+        } catch (err) {
+          console.warn('Erro durante auto-salvamento no Firestore:', err);
+          setAutoSaveStatus('idle');
+        }
+      }
+    }, 500);
+  };
+
+  const handleSafeClose = () => {
+    if (debounceTimerRef.current && pendingConfigRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      saveMealReportToFirestore(pendingConfigRef.current).catch((err) => console.warn('Aviso no salvamento ao fechar:', err));
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current && pendingConfigRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        saveMealReportToFirestore(pendingConfigRef.current).catch(() => {});
+      }
+    };
+  }, []);
+
   // Handlers de Edição Diária
   const handleUpdateDayCount = (dateStr: string, val: string) => {
     const num = val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0);
-    setCustomEntries((prev) => ({
-      ...prev,
+    const updated = {
+      ...customEntries,
       [dateStr]: {
-        ...prev[dateStr],
+        ...customEntries[dateStr],
         manualCount: num,
         isManualOverride: true,
       },
-    }));
+    };
+    setCustomEntries(updated);
+    scheduleDebouncedAutoSave(updated);
   };
 
   const handleUpdateDayPrice = (dateStr: string, val: string) => {
     const clean = val.replace(',', '.');
     const num = clean === '' ? 0 : Math.max(0, parseFloat(clean) || 0);
-    setCustomEntries((prev) => ({
-      ...prev,
+    const updated = {
+      ...customEntries,
       [dateStr]: {
-        ...prev[dateStr],
+        ...customEntries[dateStr],
         unitPrice: num,
       },
-    }));
+    };
+    setCustomEntries(updated);
+    scheduleDebouncedAutoSave(updated);
   };
 
   const handleUpdateDayNotes = (dateStr: string, val: string) => {
-    setCustomEntries((prev) => ({
-      ...prev,
+    const updated = {
+      ...customEntries,
       [dateStr]: {
-        ...prev[dateStr],
+        ...customEntries[dateStr],
         notes: val,
       },
-    }));
+    };
+    setCustomEntries(updated);
+    scheduleDebouncedAutoSave(updated);
   };
 
   // Manipulador para alteração do valor unitário padrão com recálculo dinâmico
@@ -429,7 +544,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   // Aplicar preço padrão a todos os dias do período (Recálculo instantâneo geral)
   const handleApplyPriceToAll = (priceOverride?: number) => {
     const priceToApply = priceOverride !== undefined ? priceOverride : defaultUnitPrice;
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = { ...customEntries };
+    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = { ...customEntries };
     activeEntries.forEach((e) => {
       updated[e.date] = {
         ...updated[e.date],
@@ -437,9 +552,12 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         unitPrice: priceToApply,
         notes: e.notes || '',
         isManualOverride: e.isManualOverride,
+        lastCalculatedMealsCount: e.lastCalculatedMealsCount,
+        isReopenedCall: e.isReopenedCall,
       };
     });
     setCustomEntries(updated);
+    scheduleDebouncedAutoSave(updated);
     showNotice(`Preço unitário R$ ${priceToApply.toFixed(2).replace('.', ',')} aplicado a todas as linhas do período.`);
   };
 
@@ -448,7 +566,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     if (!window.confirm('Deseja restaurar as quantidades de alunos conforme os registros originais da chamada do sistema?')) {
       return;
     }
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {};
+    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
     activeEntries.forEach((e) => {
       if (e.isSchoolDay) {
         updated[e.date] = {
@@ -456,6 +574,8 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
           unitPrice: defaultUnitPrice,
           notes: e.holidayName || '',
           isManualOverride: false,
+          lastCalculatedMealsCount: e.lastCalculatedMealsCount,
+          isReopenedCall: e.isReopenedCall,
         };
       } else {
         updated[e.date] = {
@@ -467,6 +587,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       }
     });
     setCustomEntries(updated);
+    scheduleDebouncedAutoSave(updated);
     showNotice('Quantidades restauradas conforme a chamada do sistema.');
   };
 
@@ -479,51 +600,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   const handleSave = async () => {
     const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
     const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
-
-    // Constrói entries para salvar:
-    // Dias futuros ou sem chamada concluída NÃO devem receber um manualCount pré-preenchido com total de matrículas.
-    // Devem ficar sem valor definido (undefined) até que a chamada real exista, ou usar o systemCount real se já ocorrido.
-    const entriesToSave: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }> = {
-      ...(customEntries || {}),
-    };
-
-    activeEntries.forEach((entry) => {
-      const isManual = Boolean(entry.isManualOverride);
-      const isFutureOrNoCall =
-        entry.date > todayStr ||
-        !entry.isSchoolDay ||
-        (entry.systemCount === 0 && (entry.pendentes || 0) > 0);
-
-      entriesToSave[entry.date] = {
-        ...(entriesToSave[entry.date] || {}),
-        unitPrice: entry.unitPrice,
-        notes: entry.notes || '',
-        isManualOverride: isManual,
-        manualCount: isManual
-          ? entry.manualCount
-          : (isFutureOrNoCall ? undefined : entry.systemCount),
-      };
-    });
-
-    const configToSave: MealReportConfig = {
-      id: monthKey,
-      monthKey,
-      year: selectedYear,
-      month: selectedMonth,
-      startDate,
-      endDate,
-      defaultUnitPrice: cleanUnitPrice,
-      entries: entriesToSave,
-      contractCompany: cleanCompany,
-      providerName: cleanCompany,
-      responsibleCoordinator,
-      coordinatorRole,
-      responsibleFinancial,
-      financialRole,
-      generalNotes,
-      updatedAt: new Date().toISOString(),
-      updatedBy: currentUser?.name || 'Coordenação',
-    };
+    const configToSave = buildConfigToSave();
 
     await saveAction.execute(
       async () => {
@@ -665,6 +742,16 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>Sincronizando Nuvem...</span>
                   </span>
+                ) : autoSaveStatus === 'saving' ? (
+                  <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/30 text-amber-200 border border-amber-400/40 animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-300" />
+                    <span>Auto-salvando...</span>
+                  </span>
+                ) : autoSaveStatus === 'saved' ? (
+                  <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/40">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-300" />
+                    <span>Salvo automaticamente</span>
+                  </span>
                 ) : (
                   <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30" title="Conectado ao Firestore">
                     <Cloud className="w-3 h-3" />
@@ -680,7 +767,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={onClose}
+              onClick={handleSafeClose}
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
               title="Fechar"
             >
@@ -1024,7 +1111,16 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                               >
                                 {e.systemCount} al
                               </span>
-                              {e.pendentes !== undefined && e.pendentes > 0 && e.date <= todayStr && (
+                              {e.isReopenedCall && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-black bg-amber-100 text-amber-900 border border-amber-300 cursor-help text-center max-w-[140px] leading-tight shadow-2xs"
+                                  title="A chamada desta data foi reaberta ou está pendente; o número de refeições do dia foi preservado com base no último snapshot consolidado."
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+                                  <span>[Chamada Reaberta - Mantido Último Registro]</span>
+                                </span>
+                              )}
+                              {e.pendentes !== undefined && e.pendentes > 0 && e.date <= todayStr && !e.isReopenedCall && (
                                 <span
                                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
                                   title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data; a contagem de refeições pode estar subestimada até a chamada ser concluída.`}
@@ -1041,19 +1137,26 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
                         {/* Alunos Presentes (Editável) */}
                         <td className="py-2 px-3 text-center">
-                          <div className="inline-flex items-center justify-center space-x-1">
-                            <input
-                              type="number"
-                              min="0"
-                              value={e.manualCount}
-                              onChange={(ev) => handleUpdateDayCount(e.date, ev.target.value)}
-                              className={`w-18 px-2 py-1 text-center font-black rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
-                                e.manualCount !== e.systemCount && e.isSchoolDay
-                                  ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                  : 'bg-white border-slate-200 text-slate-900'
-                              }`}
-                            />
-                            <span className="text-[10px] text-slate-400 font-bold">un</span>
+                          <div className="inline-flex flex-col items-center justify-center">
+                            <div className="inline-flex items-center justify-center space-x-1">
+                              <input
+                                type="number"
+                                min="0"
+                                value={e.manualCount}
+                                onChange={(ev) => handleUpdateDayCount(e.date, ev.target.value)}
+                                className={`w-18 px-2 py-1 text-center font-black rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
+                                  e.manualCount !== e.systemCount && e.isSchoolDay
+                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                    : 'bg-white border-slate-200 text-slate-900'
+                                }`}
+                              />
+                              <span className="text-[10px] text-slate-400 font-bold">un</span>
+                            </div>
+                            {e.isReopenedCall && !e.isManualOverride && (
+                              <span className="text-[9px] text-amber-700 font-bold mt-0.5 block">
+                                Snapshot mantido
+                              </span>
+                            )}
                           </div>
                         </td>
 
@@ -1225,9 +1328,23 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
               )}
             </button>
 
-            <span className="text-[11px] text-slate-500 hidden sm:inline">
-              Edições e valores padrão persistidos na nuvem (Firestore)
-            </span>
+            {autoSaveStatus === 'saving' && (
+              <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-xl animate-pulse shadow-2xs">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                <span>Auto-salvando alterações (500ms)...</span>
+              </span>
+            )}
+            {autoSaveStatus === 'saved' && (
+              <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-3 py-1.5 rounded-xl shadow-2xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Salvo automaticamente no Firestore</span>
+              </span>
+            )}
+            {autoSaveStatus === 'idle' && (
+              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                Edições manuais salvas automaticamente com debounce de 500ms
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

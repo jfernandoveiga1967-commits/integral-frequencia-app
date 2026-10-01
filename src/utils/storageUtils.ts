@@ -4,6 +4,7 @@ import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './d
 import { normalizeAttendanceStatus } from './frequenciaUtils';
 import { getInitialSamplePlans } from './semanarioUtils';
 import { getDefaultScheduleBlocks } from './scheduleDefaults';
+import { syncMealSnapshotsFromRecords } from './mealFinanceUtils';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
 import { repairOverlappedPontoRecords } from './pontoUtils';
 
@@ -845,6 +846,12 @@ export function loadAttendanceRecords(): AttendanceRecord[] {
 export function saveAttendanceRecords(records: AttendanceRecord[]): void {
   try {
     localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
+    // Sincroniza snapshots de refeições calculados a partir de chamadas de rotina
+    try {
+      syncMealSnapshotsFromRecords(records);
+    } catch (syncErr) {
+      console.warn('Aviso ao sincronizar snapshots de refeições:', syncErr);
+    }
   } catch (e) {
     console.error('Erro ao salvar registros:', e);
   }

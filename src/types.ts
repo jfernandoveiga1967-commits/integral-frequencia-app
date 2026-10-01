@@ -287,6 +287,8 @@ export interface MealDailyEntry {
   systemCount: number; // Alunos presentes calculados automaticamente pela chamada
   manualCount: number; // Quantidade de alunos (editável pelo financeiro)
   isManualOverride?: boolean; // Se o valor foi alterado manualmente pelo usuário
+  lastCalculatedMealsCount?: number; // Último snapshot de refeições calculado da chamada concluída
+  isReopenedCall?: boolean; // Se a chamada de um dia passado foi reaberta ou está pendente (preserva último snapshot)
   unitPrice: number; // Valor unitário da refeição (editável, ex: 9.00)
   total: number; // manualCount * unitPrice
   notes?: string;
@@ -312,7 +314,18 @@ export interface MealReportConfig {
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   defaultUnitPrice: number; // ex: 9.00
-  entries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean }>;
+  entries: Record<
+    string,
+    {
+      manualCount?: number;
+      unitPrice?: number;
+      notes?: string;
+      isManualOverride?: boolean;
+      lastCalculatedMealsCount?: number;
+      isReopenedCall?: boolean;
+      updatedAt?: string;
+    }
+  >;
   contractCompany?: string; // ex: "Cantina & Nutrição Escolar"
   providerName?: string; // ex: "Cantina & Nutrição Escolar"
   responsibleCoordinator?: string;

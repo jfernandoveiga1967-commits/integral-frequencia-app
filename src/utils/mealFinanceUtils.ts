@@ -65,6 +65,65 @@ export function saveMealConfig(config: MealReportConfig): void {
 }
 
 /**
+ * Salva ou atualiza o snapshot de refeições para uma data específica no LocalStorage.
+ * 'lastCalculatedMealsCount' preserva a contagem de refeições da chamada de rotina.
+ */
+export function recordMealSnapshotForDate(
+  dateStr: string,
+  mealsCount: number
+): void {
+  if (!dateStr || mealsCount <= 0) return;
+  const monthKey = dateStr.slice(0, 7); // "YYYY-MM"
+  try {
+    const existing = loadMealConfig(monthKey) || {
+      id: monthKey,
+      monthKey,
+      year: parseInt(dateStr.slice(0, 4), 10),
+      month: parseInt(dateStr.slice(5, 7), 10),
+      defaultUnitPrice: 9.0,
+      entries: {},
+    };
+
+    const currentEntry = existing.entries[dateStr] || {};
+    if (currentEntry.lastCalculatedMealsCount === mealsCount) return;
+
+    existing.entries[dateStr] = {
+      ...currentEntry,
+      lastCalculatedMealsCount: mealsCount,
+      updatedAt: new Date().toISOString(),
+    };
+
+    saveMealConfig(existing);
+  } catch (err) {
+    console.warn('Erro ao registrar snapshot de refeições:', err);
+  }
+}
+
+/**
+ * Sincroniza snapshots de refeições calculados a partir dos registros de frequência de Rotina
+ */
+export function syncMealSnapshotsFromRecords(records: AttendanceRecord[]): void {
+  if (!Array.isArray(records) || records.length === 0) return;
+  const countsByDate = new Map<string, number>();
+  records.forEach((r) => {
+    if (!r || !r.date) return;
+    const act = (r.activity || '').trim().toLowerCase();
+    if (act === 'rotina') {
+      const st = r.status;
+      if (st === 'presente' || st === 'saida_antecipada' || st === 'sem_equipamento') {
+        countsByDate.set(r.date, (countsByDate.get(r.date) || 0) + 1);
+      }
+    }
+  });
+
+  countsByDate.forEach((count, dateStr) => {
+    if (count > 0) {
+      recordMealSnapshotForDate(dateStr, count);
+    }
+  });
+}
+
+/**
  * Constrói a lista detalhada de dias para um período específico (Data Inicial a Data Final)
  * Mantém a regra de desconsiderar sábados, domingos e feriados cadastrados nos cálculos padrão.
  */
@@ -172,6 +231,29 @@ export function buildMealEntriesForDateRange(
     // a menos que isManualOverride: true esteja explicitamente marcado pela coordenação para aquele dia específico.
     const isExplicitManualOverride = Boolean(savedDay?.isManualOverride && savedDay?.manualCount !== undefined);
 
+    // Snapshot e Fallback de Histórico (Fallback de Chamada Reaberta)
+    let lastCalculatedMealsCount = savedDay?.lastCalculatedMealsCount;
+    let isReopenedCall = false;
+    let effectiveSystemCount = systemCount;
+
+    if (dayPresentes > 0) {
+      // Chamada ativa de rotina com presenças: atualiza o snapshot com a contagem real
+      lastCalculatedMealsCount = dayPresentes;
+      effectiveSystemCount = dayPresentes;
+      isReopenedCall = false;
+    } else if (
+      isSchoolDay &&
+      dayPresentes === 0 &&
+      lastCalculatedMealsCount !== undefined &&
+      lastCalculatedMealsCount > 0
+    ) {
+      // Chamada de rotina de um dia letivo que foi reaberta / zerada / pendente:
+      // O Relatório Financeiro NÃO deve zerar o número de refeições do dia:
+      // Mantém o último snapshot registrado e marca o aviso de chamada reaberta.
+      isReopenedCall = true;
+      effectiveSystemCount = lastCalculatedMealsCount;
+    }
+
     let manualCount = 0;
     let isManualOverride = false;
 
@@ -179,8 +261,11 @@ export function buildMealEntriesForDateRange(
       if (isExplicitManualOverride && savedDay?.manualCount !== undefined) {
         manualCount = savedDay.manualCount;
         isManualOverride = true;
+      } else if (isReopenedCall && lastCalculatedMealsCount !== undefined && lastCalculatedMealsCount > 0) {
+        manualCount = lastCalculatedMealsCount;
+        isManualOverride = false;
       } else {
-        manualCount = systemCount;
+        manualCount = effectiveSystemCount;
         isManualOverride = false;
       }
     } else {
@@ -199,13 +284,15 @@ export function buildMealEntriesForDateRange(
       isSchoolDay,
       holidayName: isHoliday ? holidayMatch?.name : undefined,
       totalEsperados: dayTotalEsperados,
-      presentes: dayPresentes,
+      presentes: isReopenedCall && dayPresentes === 0 ? (lastCalculatedMealsCount || 0) : dayPresentes,
       faltas: dayFaltas,
       atestados: dayAtestados,
-      pendentes: dayPendentes,
-      systemCount: isSchoolDay ? systemCount : 0,
+      pendentes: isReopenedCall ? 0 : dayPendentes,
+      systemCount: isSchoolDay ? effectiveSystemCount : 0,
       manualCount,
       isManualOverride,
+      lastCalculatedMealsCount,
+      isReopenedCall,
       unitPrice,
       total: manualCount * unitPrice,
       notes,
