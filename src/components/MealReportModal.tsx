@@ -1027,8 +1027,8 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                 <tr className="bg-slate-900 text-white font-bold text-[11px] uppercase tracking-wider">
                   <th className="py-3 px-3 w-28 text-center">Data</th>
                   <th className="py-3 px-3 w-32">Dia da Semana</th>
-                  <th className="py-3 px-3 w-36 text-center" title="Total Esperados = Presenças + Faltas + Atestados + Pendentes">
-                    Total Esperados (Ativos)
+                  <th className="py-3 px-3 w-36 text-center" title="Total de Alunos Esperados no Dia (conforme escala/contrato de frequência)">
+                    Total Esperados (Dia)
                   </th>
                   <th className="py-3 px-3 w-28 text-center" title="Presentes apurados automaticamente na chamada de rotina do dia">
                     Chamada (Auto)
@@ -1080,15 +1080,15 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                           {e.dayLabel}
                         </td>
 
-                        {/* Total Esperados (Ativos) */}
+                        {/* Total Esperados (Dia) */}
                         <td className="py-2 px-3 text-center">
                           {e.isSchoolDay ? (
                             <div className="inline-flex flex-col items-center">
                               <span
                                 className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-800 border border-slate-200"
-                                title={`Total de Alunos Matriculados Ativos: ${e.totalEsperados && e.totalEsperados > 0 ? e.totalEsperados : (students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || 212)}`}
+                                title={`Alunos Esperados no Dia: ${e.totalEsperados ?? 0} (conforme escala de frequência semanal)`}
                               >
-                                {e.totalEsperados && e.totalEsperados > 0 ? e.totalEsperados : (students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || 212)}
+                                {e.totalEsperados ?? 0}
                               </span>
                               {(e.faltas || e.atestados) ? (
                                 <span className="text-[9px] text-slate-400 mt-0.5 font-medium">
@@ -1123,7 +1123,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                               {e.pendentes !== undefined && e.pendentes > 0 && e.date <= todayStr && !e.isReopenedCall && (
                                 <span
                                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
-                                  title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data; a contagem de refeições pode estar subestimada até a chamada ser concluída.`}
+                                  title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data (${e.totalEsperados ?? 0} esperados no dia).`}
                                 >
                                   <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
                                   <span>{e.pendentes} pendentes</span>

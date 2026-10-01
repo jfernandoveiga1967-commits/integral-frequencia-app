@@ -7,7 +7,7 @@ import {
   MealDailyEntry,
   MealReportConfig,
 } from '../types';
-import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, isHolidayOrRecess } from './dateUtils';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, isHolidayOrRecess, isStudentScheduledForDate } from './dateUtils';
 
 export const MEAL_STORAGE_KEY_PREFIX = 'crescer_meal_config_';
 
@@ -172,20 +172,20 @@ export function buildMealEntriesForDateRange(
     const isHoliday = !!holidayMatch;
     const isSchoolDay = !isWeekend && !isHoliday;
 
-    // 1. Coluna TOTAL ESPERADOS (ATIVOS):
-    // Deve ser preenchida em todos os dias letivos com o total de alunos matriculados ativos (ex: 211/212 alunos).
-    // NUNCA deve vir zerada (0) nos dias futuros ou que ainda não tiveram chamada consolidada.
-    const activeEnrolledCount =
-      students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length ||
-      students.length ||
-      212;
-
-    let dayTotalEsperados = 0;
+    // 1. Coluna TOTAL ESPERADOS (Alunos Efetivamente Esperados no Dia):
+    // Substitui o total geral de matriculados pelo número de alunos com contrato/escala
+    // agendados para este dia específico da semana (isStudentScheduledForDate).
+    let expectedStudentsCount = 0;
     if (isSchoolDay) {
-      dayTotalEsperados = activeEnrolledCount;
-    } else {
-      dayTotalEsperados = 0;
+      const scheduledStudents = students.filter((s) => {
+        const status = s.status || s.statusMatricula || 'ativo';
+        if (status === 'inativo' || status === 'cancelado') return false;
+        return isStudentScheduledForDate(s, dateStr);
+      });
+      expectedStudentsCount = scheduledStudents.length;
     }
+
+    const dayTotalEsperados = isSchoolDay ? expectedStudentsCount : 0;
 
     // Calcular quantidade de alunos presentes segundo a chamada do sistema
     let systemCount = 0;
@@ -211,7 +211,8 @@ export function buildMealEntriesForDateRange(
         ).length;
         dayFaltas = dayRoutineRecords.filter((r) => r.status === 'falta').length;
         dayAtestados = 0;
-        dayPendentes = Math.max(0, activeEnrolledCount - (dayPresentes + dayFaltas));
+        // pendentesDoDia = expectedStudentsCount - (presencasMarcadas + faltasMarcadas)
+        dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas));
         systemCount = dayPresentes;
       } else {
         // Sem chamada de Rotina realizada no dia (dias pendentes ou futuros):
@@ -221,7 +222,8 @@ export function buildMealEntriesForDateRange(
         dayPresentes = 0;
         dayFaltas = 0;
         dayAtestados = 0;
-        dayPendentes = activeEnrolledCount;
+        // pendentesDoDia = expectedStudentsCount - (0 + 0) = expectedStudentsCount
+        dayPendentes = expectedStudentsCount;
       }
     }
 
