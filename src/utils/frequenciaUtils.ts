@@ -1,5 +1,6 @@
 import { Student, AttendanceRecord, HolidayItem, AttendanceStatus } from '../types';
 import { isStudentScheduledForDate, isStudentActiveOnDate, getEffectiveSchoolDays, formatDateBR, getDayOfWeekLabel, getDayOfWeekFromDate } from './dateUtils';
+export { isStudentInReforcoVigency, isStudentInReforco } from './semanarioUtils';
 
 /**
  * Status Categorization for Attendance Calculations

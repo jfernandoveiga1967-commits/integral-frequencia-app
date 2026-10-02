@@ -124,32 +124,40 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
         )}
 
         {/* Box de Observação Automática • Modalidade Paralela (Exibido EXCLUSIVAMENTE em Reforço e Lego) */}
-        {isReforcoActivity(plan) && reforcoStudents && reforcoStudents.length > 0 && (
-          <div className="bg-amber-500/10 border-2 border-amber-500/50 rounded-xl p-2.5 space-y-1.5 shadow-2xs animate-in fade-in duration-150">
-            <div className="flex items-center justify-between gap-1.5">
-              <span className="inline-flex items-center space-x-1.5 text-[11px] font-black text-amber-950">
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                <span>⚡ MODALIDADE PARALELA • REFORÇO ({reforcoStudents.length})</span>
-              </span>
-              <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
-                Reforço e Lego
-              </span>
-            </div>
-            <p className="text-[10px] text-amber-900 font-semibold leading-tight">
-              Alunos convocados para a sala de Reforço Escolar neste horário:
-            </p>
-            <div className="flex flex-wrap gap-1 items-center pt-0.5">
-              {reforcoStudents.map((st) => (
-                <span
-                  key={st.id}
-                  className="bg-white border border-amber-300 text-amber-950 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-2xs flex items-center space-x-1"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  <span>{st.name}</span>
+        {isReforcoActivity(plan) && (
+          reforcoStudents && reforcoStudents.length > 0 ? (
+            <div className="bg-amber-500/10 border-2 border-amber-500/50 rounded-xl p-2.5 space-y-1.5 shadow-2xs animate-in fade-in duration-150">
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="inline-flex items-center space-x-1.5 text-[11px] font-black text-amber-950">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                  <span>⚡ MODALIDADE PARALELA • REFORÇO ({reforcoStudents.length})</span>
                 </span>
-              ))}
+                <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
+                  Reforço e Lego
+                </span>
+              </div>
+              <p className="text-[10px] text-amber-900 font-semibold leading-tight">
+                Alunos convocados para a sala de Reforço Escolar neste horário:
+              </p>
+              <div className="flex flex-wrap gap-1 items-center pt-0.5">
+                {reforcoStudents.map((st) => (
+                  <span
+                    key={st.id}
+                    className="bg-white border border-amber-300 text-amber-950 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-2xs flex items-center space-x-1"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span>{st.name}</span>
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 shadow-2xs animate-in fade-in duration-150 text-amber-900">
+              <div className="flex items-center space-x-1.5 text-[11px] font-bold">
+                <span>ℹ️ Sem Aula de Reforço (Período Finalizado / Sem Alunos Ativos nesta Data)</span>
+              </div>
+            </div>
+          )
         )}
       </div>
 

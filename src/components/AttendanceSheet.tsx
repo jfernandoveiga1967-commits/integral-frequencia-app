@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
 import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
+import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
@@ -437,8 +438,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
           selectedActivity === 'Rotina'
             ? true
             : isReforco
-            ? (student.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
-               studentActs.some((act) => normalizeStr(act) === normalizeStr('Reforço')))
+            ? isStudentInReforcoVigency(student, selectedDate)
             : studentActs.some(
                 (act) => normalizeStr(act) === normalizeStr(selectedActivity)
               );
@@ -455,15 +455,9 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         return matchesActivity && matchesTurma && matchesSearch;
       })
       .sort((a, b) => {
-        // Alunos de Reforço no TOPO da lista
-        const aIsReforco = Boolean(
-          a.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
-          a.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
-        );
-        const bIsReforco = Boolean(
-          b.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
-          b.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
-        );
+        // Alunos de Reforço com vigência ativa no TOPO da lista
+        const aIsReforco = isStudentInReforcoVigency(a, selectedDate);
+        const bIsReforco = isStudentInReforcoVigency(b, selectedDate);
         if (aIsReforco && !bIsReforco) return -1;
         if (!aIsReforco && bIsReforco) return 1;
 
@@ -1322,10 +1316,7 @@ function getCurrentHHMM(): string {
 
           <div className="divide-y divide-slate-100">
             {filteredStudents.map((student) => {
-              const isReforcoStudent = Boolean(
-                student.modalidadesEspeciais?.some((m) => normalizeStr(m) === normalizeStr('Reforço')) ||
-                student.activities?.some((act) => normalizeStr(act) === normalizeStr('Reforço'))
-              );
+              const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
 
               // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
               const studentAllActs = [

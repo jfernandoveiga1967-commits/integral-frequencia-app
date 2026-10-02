@@ -2,7 +2,7 @@ import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus,
 import { getTurmaPedagogicalWeight } from './turmaUtils';
 import { loadActivities, loadSchedules } from './storageUtils';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
-import { getISOWeekNumber, getWeekInfo, getWeekDays, isStudentScheduledForDay } from './dateUtils';
+import { getISOWeekNumber, getWeekInfo, getWeekDays, isStudentScheduledForDay, isStudentScheduledForDate, isStudentActiveOnDate, toISODateString } from './dateUtils';
 import { OFFICIAL_SCHEDULE_TEMPLATES, getDefaultScheduleBlocks } from './scheduleDefaults';
 
 export const CATEGORIA_PROJETO = 'Projeto';
@@ -977,12 +977,43 @@ export function isStudentInReforco(student: Student | null | undefined): boolean
 }
 
 /**
- * Retorna os alunos de uma turma específica convocados para o Reforço no dia da semana fornecido.
+ * Validação de Vigência do Reforço Escolar:
+ * Verifica se a data do evento/dia atual está estritamente entre 'reforcoStartDate' e 'reforcoEndDate'.
+ * O aluno deve ser incluído nos cards e chamadas APENAS dentro desse intervalo de vigência.
+ * Se a data atual for anterior à data de início ou posterior à data final, o aluno NÃO deve ser listado.
+ */
+export function isStudentInReforcoVigency(
+  student: Student | null | undefined,
+  dateStr?: string | null
+): boolean {
+  if (!student) return false;
+  if (!isStudentInReforco(student)) return false;
+
+  const targetDate = (dateStr || '').trim() || toISODateString(new Date());
+
+  if (student.reforcoStartDate && student.reforcoStartDate.trim()) {
+    if (targetDate < student.reforcoStartDate.trim()) {
+      return false;
+    }
+  }
+  if (student.reforcoEndDate && student.reforcoEndDate.trim()) {
+    if (targetDate > student.reforcoEndDate.trim()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Retorna os alunos de uma turma específica convocados para o Reforço no dia da semana fornecido,
+ * respeitando o período de vigência para a data informada.
  */
 export function getReforcoStudentsForTurmaAndDay(
   students: Student[],
   turma: string,
-  dayOfWeek: DayOfWeek
+  dayOfWeek: DayOfWeek,
+  targetDate?: string
 ): Student[] {
   if (!Array.isArray(students) || students.length === 0 || !turma) return [];
   const normTurma = (t: string) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -991,24 +1022,32 @@ export function getReforcoStudentsForTurmaAndDay(
   return students
     .filter((s) => {
       if (normTurma(s.turma) !== targetTurmaNorm) return false;
-      if (!isStudentInReforco(s)) return false;
-      return isStudentScheduledForDay(s, dayOfWeek);
+      if (!isStudentInReforcoVigency(s, targetDate)) return false;
+      if (targetDate) {
+        if (!isStudentActiveOnDate(s, targetDate)) return false;
+        if (!isStudentScheduledForDate(s, targetDate)) return false;
+      } else {
+        if (!isStudentScheduledForDay(s, dayOfWeek)) return false;
+      }
+      return true;
     })
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
 }
 
 /**
  * Injeção estrita dos alunos de Reforço para um card do Semanário.
- * Atende simultaneamente às 3 condições mandatadas:
+ * Atende simultaneamente às condições mandatadas:
  *   a) Categoria/modalidade estritamente 'Reforço e Lego' ou contendo 'Reforço';
  *   b) Dia da semana contratado/agendado para o aluno;
- *   c) Horário do bloco coincidente com o horário de execução do Reforço.
+ *   c) Horário do bloco coincidente com o horário de execução do Reforço;
+ *   d) Vigência com Data Inicial/Final (reforcoStartDate e reforcoEndDate).
  * Impede categoricamente a exibição em cards de Acolhimento, Almoço, Higienização, Artes, Culinária, Lanche, Saída, etc.
  */
 export function getReforcoStudentsForCard(
   plan: SemanarioPlan | null | undefined,
   students: Student[] | null | undefined,
-  schedules?: ScheduleBlock[] | null
+  schedules?: ScheduleBlock[] | null,
+  targetDate?: string
 ): Student[] {
   if (!plan || !Array.isArray(students) || students.length === 0) return [];
 
@@ -1043,9 +1082,10 @@ export function getReforcoStudentsForCard(
     }
   }
 
-  // Condição b: Aluno matriculado no Reforço e com dia da semana agendado/contratado
+  // Condição b e d: Aluno matriculado no Reforço com vigência ativa e agendado para o dia/data
   const normTurma = (t: string) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const targetTurmaNorm = normTurma(plan.turma);
+  const effectiveDate = targetDate || plan.date;
 
   return students
     .filter((s) => {
@@ -1056,11 +1096,19 @@ export function getReforcoStudentsForCard(
       // Turma do aluno
       if (normTurma(s.turma) !== targetTurmaNorm) return false;
 
-      // Aluno matriculado/inscrito em Reforço
-      if (!isStudentInReforco(s)) return false;
+      // Aluno matriculado/inscrito em Reforço dentro do intervalo de vigência estrito
+      if (!isStudentInReforcoVigency(s, effectiveDate)) return false;
 
-      // Dia da semana contratado/agendado de frequência
-      return isStudentScheduledForDay(s, plan.dayOfWeek);
+      // Validação de calendário escolar e dias contratados/frequência
+      if (effectiveDate) {
+        if (!isStudentActiveOnDate(s, effectiveDate)) return false;
+        if (!isStudentScheduledForDate(s, effectiveDate)) return false;
+      } else {
+        // Dia da semana contratado/agendado de frequência
+        if (!isStudentScheduledForDay(s, plan.dayOfWeek)) return false;
+      }
+
+      return true;
     })
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
 }

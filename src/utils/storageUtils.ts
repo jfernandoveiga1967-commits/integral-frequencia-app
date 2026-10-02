@@ -252,6 +252,8 @@ export function normalizeStudent(
   const inactivationDate = status === 'ativo' ? '' : (s.inactivationDate || existingStudent?.inactivationDate || '');
   const inactivationReason = status === 'ativo' ? '' : (s.inactivationReason || existingStudent?.inactivationReason || '');
   const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
+  const reforcoStartDate = s.reforcoStartDate !== undefined ? s.reforcoStartDate : (existingStudent?.reforcoStartDate || undefined);
+  const reforcoEndDate = s.reforcoEndDate !== undefined ? s.reforcoEndDate : (existingStudent?.reforcoEndDate || undefined);
 
   return {
     id,
@@ -259,6 +261,9 @@ export function normalizeStudent(
     turma,
     activities,
     modalidadesEspeciais,
+    specialties: modalidadesEspeciais,
+    reforcoStartDate,
+    reforcoEndDate,
     tipoContrato,
     dataInicioContrato,
     dataTerminoContrato,
@@ -347,6 +352,10 @@ export function mergeStudentData(
     name: incomingStudent.name !== undefined ? incomingStudent.name : existingStudent.name,
     turma: incomingStudent.turma !== undefined ? incomingStudent.turma : existingStudent.turma,
     activities: mergedActivities,
+    modalidadesEspeciais: incomingStudent.modalidadesEspeciais !== undefined ? incomingStudent.modalidadesEspeciais : existingStudent.modalidadesEspeciais,
+    specialties: incomingStudent.specialties !== undefined ? incomingStudent.specialties : existingStudent.specialties,
+    reforcoStartDate: incomingStudent.reforcoStartDate !== undefined ? incomingStudent.reforcoStartDate : existingStudent.reforcoStartDate,
+    reforcoEndDate: incomingStudent.reforcoEndDate !== undefined ? incomingStudent.reforcoEndDate : existingStudent.reforcoEndDate,
     tipoContrato,
     dataInicioContrato,
     dataTerminoContrato,

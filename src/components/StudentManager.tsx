@@ -113,6 +113,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
   const [newHasReforco, setNewHasReforco] = useState(false);
+  const [newReforcoStartDate, setNewReforcoStartDate] = useState<string>('');
+  const [newReforcoEndDate, setNewReforcoEndDate] = useState<string>('');
   const [newTipoContrato, setNewTipoContrato] = useState<ContractType>('regular');
   const [newDataInicio, setNewDataInicio] = useState<string>(toISODateString(new Date()));
   const [newDataTermino, setNewDataTermino] = useState<string>(toISODateString(new Date()));
@@ -584,6 +586,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       }
     }
 
+    if (newHasReforco) {
+      if (newReforcoStartDate && newReforcoEndDate && newReforcoStartDate > newReforcoEndDate) {
+        setSingleFormError('A Data de Início do Reforço não pode ser posterior à Data Final.');
+        return;
+      }
+    }
+
     setIsSavingSingle(true);
     try {
       const finalActivities = newActivities.includes('Rotina')
@@ -602,6 +611,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           turma: newTurma,
           activities: finalActivities,
           modalidadesEspeciais: newHasReforco ? ['Reforço'] : [],
+          specialties: newHasReforco ? ['Reforço'] : [],
+          reforcoStartDate: newHasReforco && newReforcoStartDate ? newReforcoStartDate : undefined,
+          reforcoEndDate: newHasReforco && newReforcoEndDate ? newReforcoEndDate : undefined,
           tipoContrato: newTipoContrato,
           dataInicioContrato: newTipoContrato === 'avulso' ? newDataInicio : undefined,
           dataTerminoContrato: newTipoContrato === 'avulso' ? newDataTermino : undefined,
@@ -613,6 +625,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       );
       setNewName('');
       setNewHasReforco(false);
+      setNewReforcoStartDate('');
+      setNewReforcoEndDate('');
       setNewTipoContrato('regular');
       setNewDataInicio(toISODateString(new Date()));
       setNewDataTermino(toISODateString(new Date()));
@@ -699,6 +713,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       }
     }
 
+    const hasReforco = (editingStudent.modalidadesEspeciais || editingStudent.specialties || []).includes('Reforço');
+    if (hasReforco) {
+      if (editingStudent.reforcoStartDate && editingStudent.reforcoEndDate && editingStudent.reforcoStartDate > editingStudent.reforcoEndDate) {
+        setEditFormError('A Data de Início do Reforço não pode ser posterior à Data Final.');
+        return;
+      }
+    }
+
     setIsSavingEdit(true);
     try {
       const currentActs = Array.isArray(editingStudent.activities) ? editingStudent.activities : [];
@@ -734,6 +756,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         name: trimmedName,
         turma: editingStudent.turma,
         activities: finalActivities,
+        modalidadesEspeciais: hasReforco ? ['Reforço'] : [],
+        specialties: hasReforco ? ['Reforço'] : [],
+        reforcoStartDate: hasReforco && editingStudent.reforcoStartDate ? editingStudent.reforcoStartDate : undefined,
+        reforcoEndDate: hasReforco && editingStudent.reforcoEndDate ? editingStudent.reforcoEndDate : undefined,
         tipoContrato: finalTipoContrato,
         dataInicioContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataInicioContrato : undefined,
         dataTerminoContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataTerminoContrato : undefined,
@@ -1162,6 +1188,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 <span>Aluno frequenta a modalidade 'Reforço' (destaque automático nas Atividades do Momento e Chamada de Frequência)</span>
               </span>
             </label>
+            {newHasReforco && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-in fade-in duration-150">
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                    Data de Início do Reforço:
+                  </label>
+                  <input
+                    type="date"
+                    value={newReforcoStartDate}
+                    onChange={(e) => setNewReforcoStartDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-medium bg-white border border-amber-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                    Data Final do Reforço:
+                  </label>
+                  <input
+                    type="date"
+                    value={newReforcoEndDate}
+                    onChange={(e) => setNewReforcoEndDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-medium bg-white border border-amber-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Dias de Frequência no Programa Integral */}
@@ -1971,7 +2023,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       const next = e.target.checked
                         ? Array.from(new Set([...current, 'Reforço']))
                         : current.filter((m) => m !== 'Reforço');
-                      setEditingStudent({ ...editingStudent, modalidadesEspeciais: next, specialties: next });
+                      setEditingStudent({
+                        ...editingStudent,
+                        modalidadesEspeciais: next,
+                        specialties: next,
+                        reforcoStartDate: e.target.checked ? editingStudent.reforcoStartDate : '',
+                        reforcoEndDate: e.target.checked ? editingStudent.reforcoEndDate : '',
+                      });
                     }}
                     className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 border-amber-300 cursor-pointer"
                   />
@@ -1980,6 +2038,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     <span>Aluno frequenta a modalidade 'Reforço' (destaque automático nas Atividades do Momento e Chamada de Frequência)</span>
                   </span>
                 </label>
+                {(editingStudent.modalidadesEspeciais || editingStudent.specialties || []).includes('Reforço') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-in fade-in duration-150">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                        Data de Início do Reforço:
+                      </label>
+                      <input
+                        type="date"
+                        value={editingStudent.reforcoStartDate || ''}
+                        onChange={(e) => setEditingStudent({ ...editingStudent, reforcoStartDate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs font-medium bg-white border border-amber-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                        Data Final do Reforço:
+                      </label>
+                      <input
+                        type="date"
+                        value={editingStudent.reforcoEndDate || ''}
+                        onChange={(e) => setEditingStudent({ ...editingStudent, reforcoEndDate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs font-medium bg-white border border-amber-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dias de Frequência in Edit Modal */}
@@ -2407,6 +2491,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         >
                           <BookMarked className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                           <span>Reforço Escolar</span>
+                          {(student.reforcoStartDate || student.reforcoEndDate) && (
+                            <span className="text-[9.5px] font-semibold text-amber-800 ml-1">
+                              ({student.reforcoStartDate ? formatDateBR(student.reforcoStartDate) : '...'} a {student.reforcoEndDate ? formatDateBR(student.reforcoEndDate) : '...'})
+                            </span>
+                          )}
                         </span>
                       )}
                       

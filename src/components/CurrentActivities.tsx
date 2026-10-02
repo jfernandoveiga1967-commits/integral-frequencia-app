@@ -68,7 +68,7 @@ import {
 import { DepartureAlertBanner } from './DepartureAlertBanner';
 import { DepartureAlertModal } from './DepartureAlertModal';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
-import { isReforcoActivity, isStudentInReforco } from '../utils/semanarioUtils';
+import { isReforcoActivity, isStudentInReforco, isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
@@ -168,22 +168,18 @@ function getEnrolledStudentsForActivity(
 
   const specificEnrolled = turmaActiveStudents.filter((s) => {
     const acts = Array.isArray(s.activities) ? s.activities : [];
-    if (acts.includes(activityId)) return true;
     if (isReforco) {
-      const mods = Array.isArray(s.modalidadesEspeciais) ? s.modalidadesEspeciais : [];
-      const specs = Array.isArray(s.specialties) ? s.specialties : [];
-      if (
-        mods.some((m) => String(m).toLowerCase().includes('reforco')) ||
-        specs.some((sp) => String(sp).toLowerCase().includes('reforco'))
-      ) {
-        return true;
-      }
+      return isStudentInReforcoVigency(s, selectedDate);
     }
+    if (acts.includes(activityId)) return true;
     return false;
   });
 
   if (specificEnrolled.length > 0) {
     return specificEnrolled;
+  }
+  if (isReforco) {
+    return [];
   }
   return turmaActiveStudents;
 }
@@ -463,30 +459,27 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   // Modalidades atribuídas ao perfil do usuário logado (Runtime Safety: Array.isArray defensive checks)
   const userAssignedActivities = useMemo(() => {
     if (isCoord || !currentUser) return [];
-    let list: string[] = [];
-    if (Array.isArray(currentUser.assignedActivities)) {
-      list = currentUser.assignedActivities.filter((a) => typeof a === 'string' && a.trim().length > 0);
-    }
-    if (list.length === 0 && currentUser.specialtyActivity) {
-      if (Array.isArray(currentUser.specialtyActivity)) {
-        list = (currentUser.specialtyActivity as any[]).filter((a) => typeof a === 'string' && a.trim().length > 0);
-      } else if (typeof currentUser.specialtyActivity === 'string' && currentUser.specialtyActivity.trim()) {
-        list = [currentUser.specialtyActivity.trim()];
-      }
-    }
-    return list;
+    const rawList: any[] = [
+      ...(Array.isArray(currentUser.assignedActivities) ? currentUser.assignedActivities : []),
+      ...(Array.isArray((currentUser as any).modalidades) ? (currentUser as any).modalidades : []),
+      ...(currentUser.specialtyActivity
+        ? Array.isArray(currentUser.specialtyActivity)
+          ? currentUser.specialtyActivity
+          : [currentUser.specialtyActivity]
+        : []),
+    ];
+    return Array.from(new Set(rawList.filter((a) => typeof a === 'string' && a.trim().length > 0)));
   }, [currentUser, isCoord]);
 
   // Turmas atribuídas ao perfil do usuário logado (Runtime Safety: Array.isArray defensive checks)
   const userAssignedTurmasList = useMemo(() => {
     if (isCoord || !currentUser) return [];
-    if (Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0) {
-      return currentUser.allowedClassIds.filter((t) => typeof t === 'string' && t.trim().length > 0);
-    }
-    if (Array.isArray(currentUser.assignedTurmas) && currentUser.assignedTurmas.length > 0) {
-      return currentUser.assignedTurmas.filter((t) => typeof t === 'string' && t.trim().length > 0);
-    }
-    return [];
+    const rawTurmas: any[] = [
+      ...(Array.isArray(currentUser.allowedClassIds) ? currentUser.allowedClassIds : []),
+      ...(Array.isArray(currentUser.assignedTurmas) ? currentUser.assignedTurmas : []),
+      ...(Array.isArray((currentUser as any).turmas) ? (currentUser as any).turmas : []),
+    ];
+    return Array.from(new Set(rawTurmas.filter((t) => typeof t === 'string' && t.trim().length > 0)));
   }, [currentUser, isCoord]);
 
   const userAssignedTurmasSet = useMemo(() => {
@@ -508,9 +501,32 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     return new Set(userAssignedTurmasList.map((t) => normalizeStr(t)));
   }, [userAssignedTurmasList]);
 
+  // 1. Regra de Herança de Modalidades da Turma para o Perfil 'Rotina':
+  // Se o usuário logado/focado possuir a modalidade 'Rotina' atribuída em seu perfil (user.modalidades / assignedActivities)
+  // E possuir vínculos de turma em 'assignedTurmas' / 'allowedClassIds' (ou perfil monitora/auxiliar vinculado):
+  // a) O sistema permite a visualização de TODAS as atividades da grade horária dessas turmas
+  // (Lanche, Acolhimento, Parquinho, Higienização, Lição de Casa, etc.), sem exigir que cada
+  // modalidade da rotina regular esteja marcada individualmente no cadastro do usuário.
+  // b) A restrição estrita por modalidade continua valendo apenas para professores especialistas
+  // de extracurriculares (ex: Judô, Balé, Natação, Flauta).
+  const isRotinaProfile = useMemo(() => {
+    if (isCoord || !currentUser) return false;
+    const hasAssignedTurmas = userAssignedTurmasList.length > 0;
+    if (!hasAssignedTurmas) return false;
+
+    const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const hasRotinaAct = userAssignedActivities.some((act) => norm(act) === 'rotina');
+    const isAuxiliarRole =
+      currentUser.role === 'auxiliar' ||
+      norm(currentUser.cargoLabel).includes('monitor') ||
+      norm(currentUser.cargoLabel).includes('auxiliar');
+
+    return hasRotinaAct || isAuxiliarRole;
+  }, [currentUser, isCoord, userAssignedTurmasList, userAssignedActivities]);
+
   // Blocos da Grade Horária que atendem rigorosamente a:
   // a) O dia da semana da atividade na Grade Horária corresponde ao dia atual (effectiveDayOfWeek).
-  // b) A modalidade da atividade está inclusa na lista 'modalidades' do perfil do usuário.
+  // b) Herança total de atividades para perfil 'Rotina' vinculada à turma OU modalidade específica para especialistas.
   // c) A turma está inclusa na lista 'turmas' do perfil do usuário.
   const userTodayScheduleBlocks = useMemo(() => {
     const safeSchedules = Array.isArray(schedules) ? schedules : [];
@@ -520,38 +536,56 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     return safeSchedules.filter((s) => {
       if (!s) return false;
       const matchesDay = s.dayOfWeek === effectiveDayOfWeek;
-      const matchesActivity =
-        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
-        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
       const matchesTurma =
         userAssignedTurmasSet.has(s.turma) ||
         userAssignedTurmasNormalizedSet.has(normalizeStr(s.turma));
-      return matchesDay && matchesActivity && matchesTurma;
+
+      if (!matchesDay || !matchesTurma) return false;
+
+      // Se for perfil Rotina com vínculo de turma, visualiza TODAS as atividades da grade horária dessas turmas
+      if (isRotinaProfile) {
+        return true;
+      }
+
+      // Restrição estrita por modalidade apenas para professores especialistas de extracurriculares:
+      const matchesActivity =
+        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
+        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
+
+      return matchesActivity;
     });
   }, [
     schedules,
     effectiveDayOfWeek,
     isCoord,
     currentUser,
+    isRotinaProfile,
     userAssignedActivities,
     userAssignedActivitiesSet,
     userAssignedTurmasSet,
     userAssignedTurmasNormalizedSet,
   ]);
 
-  // Outros dias da semana em que este professor possui aulas na Grade Horária
+  // Outros dias da semana em que este professor/monitor possui atividades na Grade Horária
   const userOtherDaysWithClasses = useMemo(() => {
     const safeSchedules = Array.isArray(schedules) ? schedules : [];
     if (isCoord || !currentUser) return [];
     const otherBlocks = safeSchedules.filter((s) => {
       if (!s) return false;
-      const matchesActivity =
-        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
-        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
       const matchesTurma =
         userAssignedTurmasSet.has(s.turma) ||
         userAssignedTurmasNormalizedSet.has(normalizeStr(s.turma));
-      return matchesActivity && matchesTurma;
+
+      if (!matchesTurma) return false;
+
+      if (isRotinaProfile) {
+        return true;
+      }
+
+      const matchesActivity =
+        (Array.isArray(userAssignedActivities) && userAssignedActivities.includes(s.activityId)) ||
+        userAssignedActivitiesSet.has(normalizeStr(s.activityId));
+      return matchesActivity;
     });
     const daysOrder: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
     const distinctDays = Array.from(new Set(otherBlocks.map((b) => b.dayOfWeek).filter(Boolean)));
@@ -560,6 +594,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     schedules,
     isCoord,
     currentUser,
+    isRotinaProfile,
     userAssignedActivities,
     userAssignedActivitiesSet,
     userAssignedTurmasSet,
@@ -580,7 +615,8 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
   // Allowed turmas for user sorted pedagogically:
   // Para coordenador: todas as turmas cadastradas na escola.
-  // Para Monitor / Professor (não-admin/coordenação): SOMENTE as turmas que possuem aulas agendadas hoje que cumpram os critérios (a, b, c).
+  // Para Monitor com perfil 'Rotina': todas as turmas vinculadas que possuem grade hoje (ou todas as atribuídas).
+  // Para Professor Especialista: apenas turmas com sua modalidade agendada hoje.
   const allowedTurmas = useMemo(() => {
     const safeTurmas = Array.isArray(turmas) ? turmas : [];
     if (isCoord || !currentUser) {
@@ -589,8 +625,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     const turmasWithClassToday = Array.from(
       new Set(userTodayScheduleBlocks.map((s) => s.turma).filter(Boolean))
     );
+    if (isRotinaProfile) {
+      const baseTurmas = turmasWithClassToday.length > 0 ? turmasWithClassToday : userAssignedTurmasList;
+      return sortTurmasPedagogical(baseTurmas);
+    }
     return sortTurmasPedagogical(turmasWithClassToday);
-  }, [turmas, isCoord, currentUser, userTodayScheduleBlocks]);
+  }, [turmas, isCoord, currentUser, userTodayScheduleBlocks, isRotinaProfile, userAssignedTurmasList]);
 
   // Compute activity state per turma
   const turmaStatuses = useMemo(() => {
@@ -602,8 +642,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
     return allowedTurmas.map((turmaName) => {
       // All blocks for this turma on this day
-      // Para Monitor/Professor: exibe rigorosamente apenas as atividades que correspondem às suas modalidades atribuídas
-      const turmaBlocks = isCoord || !currentUser
+      // Para Coordenador e Monitora com perfil 'Rotina': exibe TODAS as atividades da grade da turma
+      // Para Professor Especialista: exibe apenas as atividades correspondentes às suas modalidades atribuídas
+      const turmaBlocks = isCoord || !currentUser || isRotinaProfile
         ? schedules
             .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
             .sort((a, b) => a.startTime.localeCompare(b.startTime))
@@ -915,8 +956,8 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     const isModalReforco = isReforcoActivity(quickRollCallModal.activityId);
     return [...baseList].sort((a, b) => {
       if (isModalReforco) {
-        const aIsReforco = isStudentInReforco(a);
-        const bIsReforco = isStudentInReforco(b);
+        const aIsReforco = isStudentInReforcoVigency(a, selectedDate);
+        const bIsReforco = isStudentInReforcoVigency(b, selectedDate);
         if (aIsReforco && !bIsReforco) return -1;
         if (!aIsReforco && bIsReforco) return 1;
       }
@@ -1159,7 +1200,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             <div className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-extrabold flex items-center space-x-1.5 shrink-0 shadow-2xs">
               <Users className="w-3.5 h-3.5 text-indigo-600" />
               <span>
-                {userAssignedActivities.length > 0
+                {isRotinaProfile
+                  ? 'Rotina Integral (Todas as Atividades da Turma)'
+                  : userAssignedActivities.length > 0
                   ? userAssignedActivities.join(', ')
                   : 'Sua Modalidade'}
               </span>
@@ -1177,9 +1220,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
               <option value="TODAS">
-                {isCoord ? 'Todas as Atividades' : 'Todas Minhas Atividades'}
+                {isCoord ? 'Todas as Atividades' : isRotinaProfile ? 'Todas as Atividades da Turma' : 'Todas Minhas Atividades'}
               </option>
-              {(isCoord
+              {(isCoord || isRotinaProfile
                 ? (Array.isArray(activitiesList) ? activitiesList : [])
                 : (Array.isArray(activitiesList) ? activitiesList : []).filter((act) =>
                     Array.isArray(userAssignedActivities) && userAssignedActivities.includes(act.id)
@@ -1288,7 +1331,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
             <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
               Não foram encontradas aulas de{' '}
               <strong className="text-slate-800 font-extrabold">
-                {userAssignedActivities.length > 0
+                {isRotinaProfile
+                  ? 'suas turmas atribuídas'
+                  : userAssignedActivities.length > 0
                   ? userAssignedActivities.join(', ')
                   : 'suas modalidades'}
               </strong>{' '}
@@ -1514,10 +1559,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             s &&
                             s.turma === turmaName &&
                             (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
-                            isStudentInReforco(s) &&
+                            isStudentInReforcoVigency(s, selectedDate) &&
                             isStudentScheduledForDate(s, selectedDate)
                         );
-                        if (reforcoStudentsInTurma.length === 0) return null;
+                        if (reforcoStudentsInTurma.length === 0) {
+                          return (
+                            <div className="bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 shadow-2xs animate-in fade-in duration-150 text-amber-900">
+                              <div className="flex items-center space-x-1.5 text-[11px] font-bold">
+                                <span>ℹ️ Sem Aula de Reforço (Período Finalizado / Sem Alunos Ativos nesta Data)</span>
+                              </div>
+                            </div>
+                          );
+                        }
                         return (
                           <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
                             <div className="flex items-center justify-between">
@@ -2141,7 +2194,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                     const currentStatus = (rawStatus as any) === 'saude' ? 'falta' : rawStatus;
                     const isModalReforcoActivity = isReforcoActivity(quickRollCallModal.activityId);
                     const isReforcoStudent = Boolean(
-                      isModalReforcoActivity && isStudentInReforco(student)
+                      isModalReforcoActivity && isStudentInReforcoVigency(student, selectedDate)
                     );
                     const isEncaminhadoReforco = Boolean(
                       currentRec?.observation?.includes('Reforço') ||
