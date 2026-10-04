@@ -18,28 +18,34 @@ export const EditDayModal: React.FC<EditDayModalProps> = ({
 }) => {
   if (!isOpen || !day) return null;
 
-  const [isHoliday, setIsHoliday] = useState<boolean>(!!day.isHoliday);
-  const [holidayDesc, setHolidayDesc] = useState<string>(day.holidayDescription || 'FERIADO');
   const [baseRice, setBaseRice] = useState<string>(day.base?.[0] || 'Arroz Branco');
   const [baseBeans, setBaseBeans] = useState<string>(day.base?.[1] || 'Feijão');
+  const [base3, setBase3] = useState<string>(day.base3 || day.base?.[2] || '');
   const [protein, setProtein] = useState<string>(day.protein || '');
   const [garnish, setGarnish] = useState<string>(day.garnish || '');
   const [salad, setSalad] = useState<string>(day.salad || 'Salada');
   const [dessert, setDessert] = useState<string>(day.dessert || 'Fruta');
-  const [specialNotes, setSpecialNotes] = useState<string>(day.specialNotes || '');
+  const [specialNotes, setSpecialNotes] = useState<string>(day.observations || day.specialNotes || '');
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    const clean = (val?: string) => (val ? val.replace(/\*/g, '').trim() : '');
+    const cleanBase3 = clean(base3);
+    const baseList = [clean(baseRice), clean(baseBeans)].filter(Boolean);
+    if (cleanBase3) {
+      baseList.push(cleanBase3);
+    }
+    const cleanObs = clean(specialNotes);
     const updated: MenuItemDay = {
       ...day,
-      isHoliday,
-      holidayDescription: isHoliday ? holidayDesc : undefined,
-      base: isHoliday ? [] : [baseRice.trim(), baseBeans.trim()].filter(Boolean),
-      protein: isHoliday ? (holidayDesc || 'FERIADO') : protein.trim(),
-      garnish: isHoliday ? '' : garnish.trim(),
-      salad: isHoliday ? '' : salad.trim(),
-      dessert: isHoliday ? '' : dessert.trim(),
-      specialNotes: specialNotes.trim() || undefined,
+      base: baseList,
+      base3: cleanBase3 || undefined,
+      protein: clean(protein),
+      garnish: clean(garnish),
+      salad: clean(salad),
+      dessert: clean(dessert),
+      specialNotes: cleanObs || undefined,
+      observations: cleanObs || undefined,
     };
     onSave(updated);
     onClose();
@@ -73,135 +79,116 @@ export const EditDayModal: React.FC<EditDayModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSave} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-          {/* Feriado Toggle */}
-          <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700 flex items-center justify-between">
-            <div>
-              <label className="text-sm font-semibold text-white block">Marcar como Feriado / Recesso</label>
-              <span className="text-xs text-slate-400">Não haverá almoço escolar neste dia</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={isHoliday}
-              onChange={(e) => setIsHoliday(e.target.checked)}
-              className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
-            />
-          </div>
-
-          {isHoliday ? (
+          {/* Base 1, Base 2, Base 3 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-1">
-                Descrição do Feriado / Recesso
+                Base 1 (Ex: Arroz)
               </label>
               <input
                 type="text"
-                value={holidayDesc}
-                onChange={(e) => setHolidayDesc(e.target.value)}
-                placeholder="Ex: FERIADO (Independência do Brasil)"
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+                value={baseRice}
+                onChange={(e) => setBaseRice(e.target.value)}
+                placeholder="Arroz Branco"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
               />
             </div>
-          ) : (
-            <>
-              {/* Arroz e Feijão */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Base 1 (Ex: Arroz)
-                  </label>
-                  <input
-                    type="text"
-                    value={baseRice}
-                    onChange={(e) => setBaseRice(e.target.value)}
-                    placeholder="Arroz Branco"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Base 2 (Ex: Feijão)
-                  </label>
-                  <input
-                    type="text"
-                    value={baseBeans}
-                    onChange={(e) => setBaseBeans(e.target.value)}
-                    placeholder="Feijão Carioca"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">
+                Base 2 (Ex: Feijão)
+              </label>
+              <input
+                type="text"
+                value={baseBeans}
+                onChange={(e) => setBaseBeans(e.target.value)}
+                placeholder="Feijão Carioca"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">
+                Base 3 (Ex: Macarrão)
+              </label>
+              <input
+                type="text"
+                value={base3}
+                onChange={(e) => setBase3(e.target.value)}
+                placeholder="Macarrão ao sugo"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
 
-              {/* Prato Principal / Proteína */}
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Prato Principal / Proteína *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={protein}
-                  onChange={(e) => setProtein(e.target.value)}
-                  placeholder="Ex: Frango em tiras, Carne de panela, Iscas de pernil, etc."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                />
-              </div>
+          {/* Prato Principal / Proteína */}
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              Prato Principal / Proteína *
+            </label>
+            <input
+              type="text"
+              required
+              value={protein}
+              onChange={(e) => setProtein(e.target.value)}
+              placeholder="Ex: Frango em tiras, Carne de panela, Iscas de pernil, etc."
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+            />
+          </div>
 
-              {/* Guarnição */}
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Guarnição / Acompanhamento
-                </label>
-                <input
-                  type="text"
-                  value={garnish}
-                  onChange={(e) => setGarnish(e.target.value)}
-                  placeholder="Ex: Creme de milho, Purê de batata, Farofa caseira, etc."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                />
-              </div>
+          {/* Guarnição */}
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              Guarnição / Acompanhamento
+            </label>
+            <input
+              type="text"
+              value={garnish}
+              onChange={(e) => setGarnish(e.target.value)}
+              placeholder="Ex: Creme de milho, Purê de batata, Farofa caseira, etc."
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+            />
+          </div>
 
-              {/* Salada e Sobremesa */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Salada
-                  </label>
-                  <input
-                    type="text"
-                    value={salad}
-                    onChange={(e) => setSalad(e.target.value)}
-                    placeholder="Salada / Vinagrete"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Sobremesa
-                  </label>
-                  <input
-                    type="text"
-                    value={dessert}
-                    onChange={(e) => setDessert(e.target.value)}
-                    placeholder="Fruta"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
+          {/* Salada e Sobremesa */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">
+                Salada
+              </label>
+              <input
+                type="text"
+                value={salad}
+                onChange={(e) => setSalad(e.target.value)}
+                placeholder="Salada / Vinagrete"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">
+                Sobremesa
+              </label>
+              <input
+                type="text"
+                value={dessert}
+                onChange={(e) => setDessert(e.target.value)}
+                placeholder="Fruta"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
 
-              {/* Observação / Alérgicos */}
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Observações / Substituição para Alérgicos (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={specialNotes}
-                  onChange={(e) => setSpecialNotes(e.target.value)}
-                  placeholder="Ex: Opção sem lactose disponível sob aviso prévio"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </>
-          )}
+          {/* Observação / Alérgicos */}
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              Observações / Substituição para Alérgicos (Opcional)
+            </label>
+            <input
+              type="text"
+              value={specialNotes}
+              onChange={(e) => setSpecialNotes(e.target.value)}
+              placeholder="Ex: Opção sem lactose disponível sob aviso prévio"
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-emerald-500"
+            />
+          </div>
 
           {/* Buttons */}
           <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">

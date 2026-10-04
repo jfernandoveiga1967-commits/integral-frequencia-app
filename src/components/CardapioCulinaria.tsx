@@ -24,7 +24,7 @@ import {
   Carrot,
   Save,
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, HolidayItem } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay, DayOfWeekMenu } from '../types/cardapio';
 import {
   loadMonthlyMenu,
@@ -40,19 +40,25 @@ import { generateCardapioMensalPDF, generateReceitasCulinariaPDF, PDFGenerationR
 import { PdfViewerModal } from './PdfViewerModal';
 import { EditDayModal } from './CardapioCulinaria/EditDayModal';
 import { EditRecipeModal } from './CardapioCulinaria/EditRecipeModal';
-import { formatDateBR } from '../utils/dateUtils';
+import { formatDateBR, isHolidayOrRecess } from '../utils/dateUtils';
+import { loadHolidays } from '../utils/storageUtils';
 
 interface CardapioCulinariaProps {
   currentUser: UserProfile | null;
+  holidays?: HolidayItem[];
 }
 
-export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUser }) => {
+export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUser, holidays }) => {
+  // Institutional holidays/recesses list
+  const holidaysList = useMemo(() => {
+    return holidays && holidays.length > 0 ? holidays : loadHolidays();
+  }, [holidays]);
   // Navigation subtabs
   const [activeSubTab, setActiveSubTab] = useState<'almoco' | 'culinaria' | 'nutricionista'>('almoco');
 
-  // Month selection (defaults to September 2026 as officialized by the school)
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedMonth, setSelectedMonth] = useState<number>(9);
+  // Month selection (defaults to current month)
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
   const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
   // Menu data
@@ -162,12 +168,88 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     }
   };
 
-  // Save updated Day
-  const handleSaveDay = async (updatedDay: MenuItemDay) => {
-    const updatedMenu: MonthlyMenu = {
+  // Sincronização em tempo real do cardápio com feriados e recessos escolares do calendário
+  const synchronizedMenu = useMemo<MonthlyMenu>(() => {
+    if (!monthlyMenu || !monthlyMenu.days) return monthlyMenu;
+
+    let hasChanges = false;
+    const syncedDays: Record<string, MenuItemDay> = {};
+
+    Object.entries(monthlyMenu.days).forEach(([dateStr, day]) => {
+      const holidayHit = isHolidayOrRecess(dateStr, holidaysList);
+      if (holidayHit) {
+        const isFeriado = holidayHit.type === 'feriado';
+        const formattedDesc = isFeriado
+          ? `FERIADO (${holidayHit.name})`
+          : `RECESSO ESCOLAR (${holidayHit.name})`;
+
+        if (
+          !day.isHoliday ||
+          day.holidayDescription !== formattedDesc ||
+          (day.base && day.base.length > 0)
+        ) {
+          hasChanges = true;
+          syncedDays[dateStr] = {
+            ...day,
+            isHoliday: true,
+            holidayDescription: formattedDesc,
+            protein: formattedDesc,
+            base: [],
+            garnish: '',
+            salad: '',
+            dessert: '',
+          };
+          return;
+        }
+      } else if (dateStr.endsWith('-09-07')) {
+        if (!day.isHoliday) {
+          hasChanges = true;
+          syncedDays[dateStr] = {
+            ...day,
+            isHoliday: true,
+            holidayDescription: 'FERIADO (Independência do Brasil)',
+            protein: 'FERIADO',
+            base: [],
+            garnish: '',
+            salad: '',
+            dessert: '',
+          };
+          return;
+        }
+      }
+      syncedDays[dateStr] = day;
+    });
+
+    if (!hasChanges) return monthlyMenu;
+
+    return {
       ...monthlyMenu,
+      days: syncedDays,
+    };
+  }, [monthlyMenu, holidaysList]);
+
+  // Trava de Edição: impede abertura do modal para feriado ou recesso
+  const handleEditDay = (day: MenuItemDay) => {
+    const holidayHit = isHolidayOrRecess(day.date, holidaysList);
+    if (day.isHoliday || holidayHit) {
+      showToast('Dias marcados como feriado ou recesso escolar não permitem alteração de cardápio.');
+      return;
+    }
+    setEditingDay(day);
+  };
+
+  // Trava de Edição: impede salvar dados em datas de feriado ou recesso
+  const handleSaveDay = async (updatedDay: MenuItemDay) => {
+    const holidayHit = isHolidayOrRecess(updatedDay.date, holidaysList);
+    if (updatedDay.isHoliday || holidayHit) {
+      showToast('Dias marcados como feriado ou recesso escolar não permitem alteração de cardápio.');
+      return;
+    }
+
+    const updatedMenu: MonthlyMenu = {
+      ...synchronizedMenu,
       days: {
-        ...monthlyMenu.days,
+        ...synchronizedMenu.days,
         [updatedDay.date]: updatedDay,
       },
       updatedAt: new Date().toISOString(),
@@ -218,11 +300,11 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
   // Generate Menu PDF
   const handlePrintMenuPDF = () => {
     try {
-      const pdfRes = generateCardapioMensalPDF(monthlyMenu, false);
+      const pdfRes = generateCardapioMensalPDF(synchronizedMenu, false);
       setPdfPreview({
         isOpen: true,
         result: pdfRes,
-        title: `Cardápio Mensal - ${monthlyMenu.monthName} ${monthlyMenu.year}`,
+        title: `Cardápio Mensal - ${synchronizedMenu.monthName} ${synchronizedMenu.year}`,
       });
     } catch (e) {
       console.error('Erro ao gerar PDF do cardápio:', e);
@@ -235,17 +317,17 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     try {
       const pdfRes = generateReceitasCulinariaPDF(
         monthKey,
-        monthlyMenu.monthName,
+        synchronizedMenu.monthName,
         selectedYear,
         recipes,
         false,
-        monthlyMenu.nutritionistName,
-        monthlyMenu.crn
+        synchronizedMenu.nutritionistName,
+        synchronizedMenu.crn
       );
       setPdfPreview({
         isOpen: true,
         result: pdfRes,
-        title: `Caderno de Receitas - ${monthlyMenu.monthName} ${selectedYear}`,
+        title: `Caderno de Receitas - ${synchronizedMenu.monthName} ${selectedYear}`,
       });
     } catch (e) {
       console.error('Erro ao gerar PDF das receitas:', e);
@@ -260,8 +342,8 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
   }, []);
 
   const todayItem = useMemo(() => {
-    return monthlyMenu.days[todayStr] || null;
-  }, [monthlyMenu, todayStr]);
+    return synchronizedMenu.days[todayStr] || null;
+  }, [synchronizedMenu, todayStr]);
 
   // Group days by week (1 to 5)
   const weeksGrouped = useMemo(() => {
@@ -274,7 +356,7 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
       sexta: 4,
     };
 
-    Object.values(monthlyMenu.days).forEach((d) => {
+    Object.values(synchronizedMenu.days).forEach((d) => {
       if (d.weekIndex >= 1 && d.weekIndex <= 5) {
         map[d.weekIndex].push(d);
       }
@@ -286,7 +368,7 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
     }
 
     return map;
-  }, [monthlyMenu]);
+  }, [synchronizedMenu]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">
@@ -444,16 +526,21 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                           </span>
                         )}
                         <span className="text-xs text-slate-500 dark:text-slate-400">
-                          (Base: {todayItem.base?.join(' e ') || 'Arroz e Feijão'} • {todayItem.salad || 'Salada'} • {todayItem.dessert || 'Fruta'})
+                          (Base: {(() => {
+                            const b = (todayItem.base || []).map((x) => x.replace(/\*/g, '').trim()).filter(Boolean);
+                            const ex = (todayItem.base3 || '').replace(/\*/g, '').trim();
+                            if (ex && !b.includes(ex)) b.push(ex);
+                            return b.length > 2 ? b.join(' • ') : (b.join(' e ') || 'Arroz e Feijão');
+                          })()} • {todayItem.salad?.replace(/\*/g, '') || 'Salada'} • {todayItem.dessert?.replace(/\*/g, '') || 'Fruta'})
                         </span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {hasEditPermission && (
+                {hasEditPermission && !todayItem.isHoliday && (
                   <button
-                    onClick={() => setEditingDay(todayItem)}
+                    onClick={() => handleEditDay(todayItem)}
                     className="flex items-center space-x-1.5 px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
@@ -544,9 +631,9 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                                 </span>
                               </div>
 
-                              {hasEditPermission && (
+                              {hasEditPermission && !day.isHoliday && (
                                 <button
-                                  onClick={() => setEditingDay(day)}
+                                  onClick={() => handleEditDay(day)}
                                   className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 rounded transition-opacity cursor-pointer"
                                   title="Editar cardápio deste dia"
                                 >
@@ -569,29 +656,38 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                               <div className="space-y-1.5 text-xs">
                                 {/* Base */}
                                 <div className="text-slate-500 dark:text-slate-400 font-medium text-[11px]">
-                                  *{day.base?.join(' e *') || 'Arroz Branco e Feijão'}
+                                  {(() => {
+                                    const b = (day.base || []).map((x) => x.replace(/\*/g, '').trim()).filter(Boolean);
+                                    const ex = (day.base3 || '').replace(/\*/g, '').trim();
+                                    if (ex && !b.includes(ex)) b.push(ex);
+                                    if (b.length === 0) return 'Arroz Branco e Feijão';
+                                    if (b.length === 1) return b[0];
+                                    if (b.length === 2) return `${b[0]} e ${b[1]}`;
+                                    return b.join(' • ');
+                                  })()}
                                 </div>
 
                                 {/* Proteína (Destaque) */}
                                 <div className="font-bold text-slate-900 dark:text-white leading-tight">
-                                  {day.protein || 'Cardápio Regular'}
+                                  {day.protein?.replace(/\*/g, '').trim() || 'Cardápio Regular'}
                                 </div>
 
                                 {/* Guarnição */}
                                 {day.garnish && (
                                   <div className="text-emerald-700 dark:text-emerald-400 font-medium text-[11.5px]">
-                                    + {day.garnish}
+                                    + {day.garnish.replace(/\*/g, '').trim()}
                                   </div>
                                 )}
 
-                                {/* Salada e Fruta */}
-                                <div className="text-slate-600 dark:text-slate-400 text-[11px] pt-1 border-t border-slate-100 dark:border-slate-800/80">
-                                  {day.salad || 'Salada'} • {day.dessert || 'Fruta'}
+                                {/* Salada e Fruta em Linhas Independentes */}
+                                <div className="pt-1 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 text-[11px] text-slate-600 dark:text-slate-400">
+                                  <div>{day.salad?.replace(/\*/g, '').trim() || 'Salada'}</div>
+                                  <div>{day.dessert?.replace(/\*/g, '').trim() || 'Fruta'}</div>
                                 </div>
 
-                                {day.specialNotes && (
+                                {(day.observations || day.specialNotes) && (
                                   <div className="text-[10px] text-amber-600 dark:text-amber-400 italic">
-                                    Obs: {day.specialNotes}
+                                    Obs: {(day.observations || day.specialNotes)?.replace(/\*/g, '').trim()}
                                   </div>
                                 )}
                               </div>

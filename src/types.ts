@@ -141,7 +141,8 @@ export type PontoStatus =
   | 'recesso'
   | 'compensado'
   | 'sabado'
-  | 'domingo';
+  | 'domingo'
+  | 'nao_admitido';
 
 export interface PontoRecord {
   id: string; // e.g. "userId_YYYY-MM-DD"
@@ -193,6 +194,7 @@ export interface PontoMonthClosing {
   companyName: string; // default "GADAL - Gestão e Apoio"
   institutionName: string; // default "Instituto Educacional Crescer"
   pixKey?: string;
+  dataAdmissao?: string; // Data de admissão / início de contrato (YYYY-MM-DD)
   unjustifiedAbsencesCount: number;
   unjustifiedAbsencesDiscount: number;
   missingMinutesTotal?: number;
@@ -242,6 +244,7 @@ export interface UserProfile {
   birthDate?: string; // YYYY-MM-DD or DD/MM/YYYY
   pin?: string;
   status?: UserStatus; // 'ATIVO' | 'INATIVO' | 'DESLIGADO' (padrão: 'ATIVO')
+  dataAdmissao?: string; // Data de admissão / início de contrato (YYYY-MM-DD)
   dataDesligamento?: string; // Data do desligamento/inativação (YYYY-MM-DD)
   motivoDesligamento?: string; // Motivo opcional do desligamento/inativação
   assignedActivities?: ActivityType[]; // Extracurricular activities assigned to this user

@@ -286,6 +286,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
         status: raw.status || existing.status || ('ATIVO' as UserStatus),
+        dataAdmissao: raw.dataAdmissao || existing.dataAdmissao || undefined,
         assignedActivities: Array.isArray(raw.assignedActivities)
           ? raw.assignedActivities
           : (existing.assignedActivities || []),

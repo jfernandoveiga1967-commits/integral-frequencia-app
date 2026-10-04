@@ -9,6 +9,8 @@ import {
   saveCookingRecipesToFirestore,
   getCookingRecipesFromFirestore,
 } from '../firebase';
+import { loadHolidays } from './storageUtils';
+import { isHolidayOrRecess } from './dateUtils';
 
 const MENU_STORAGE_KEY_PREFIX = 'crescer_cardapio_monthly_';
 const RECIPES_STORAGE_KEY_PREFIX = 'crescer_culinaria_recipes_';
@@ -56,6 +58,8 @@ export function generateBlankMonthMenu(
   const currentDate = new Date(startDate);
   const dayNames: DayOfWeekMenu[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
+  const holidays = loadHolidays();
+
   for (let week = 1; week <= 5; week++) {
     for (let d = 0; d < 5; d++) {
       const curYear = currentDate.getFullYear();
@@ -63,8 +67,13 @@ export function generateBlankMonthMenu(
       const curDay = currentDate.getDate();
       const dateStr = `${curYear}-${String(curMonth).padStart(2, '0')}-${String(curDay).padStart(2, '0')}`;
 
-      // Feriado de 07 de Setembro padrão caso seja Setembro
+      // Feriado ou Recesso Escolar cadastrado no calendário institucional
+      const holidayHit = isHolidayOrRecess(dateStr, holidays);
       const isSept7 = curMonth === 9 && curDay === 7;
+      const isHoliday = Boolean(holidayHit || isSept7);
+      const holidayDescription = holidayHit
+        ? (holidayHit.type === 'feriado' ? `FERIADO (${holidayHit.name})` : `RECESSO ESCOLAR (${holidayHit.name})`)
+        : (isSept7 ? 'FERIADO (Independência do Brasil)' : undefined);
 
       days[dateStr] = {
         date: dateStr,
@@ -73,13 +82,13 @@ export function generateBlankMonthMenu(
         year: curYear,
         dayOfWeek: dayNames[d],
         weekIndex: week as 1 | 2 | 3 | 4 | 5,
-        isHoliday: isSept7,
-        holidayDescription: isSept7 ? 'FERIADO' : undefined,
-        base: isSept7 ? [] : ['Arroz Branco', 'Feijão'],
-        protein: isSept7 ? 'FERIADO' : '',
+        isHoliday,
+        holidayDescription,
+        base: isHoliday ? [] : ['Arroz Branco', 'Feijão'],
+        protein: isHoliday ? (holidayDescription || 'FERIADO') : '',
         garnish: '',
-        salad: isSept7 ? '' : 'Salada',
-        dessert: isSept7 ? '' : 'Fruta',
+        salad: isHoliday ? '' : 'Salada',
+        dessert: isHoliday ? '' : 'Fruta',
       };
 
       currentDate.setDate(currentDate.getDate() + 1);
@@ -111,6 +120,27 @@ export function loadMonthlyMenu(monthKey: string): MonthlyMenu {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.days && Object.keys(parsed.days).length > 0) {
+        // Sincroniza dias com os feriados/recessos institucionais do calendário oficial
+        const holidays = loadHolidays();
+        let changed = false;
+        Object.entries(parsed.days as Record<string, MenuItemDay>).forEach(([dateStr, day]) => {
+          const hol = isHolidayOrRecess(dateStr, holidays);
+          if (hol && !day.isHoliday) {
+            day.isHoliday = true;
+            day.holidayDescription = hol.type === 'feriado'
+              ? `FERIADO (${hol.name})`
+              : `RECESSO ESCOLAR (${hol.name})`;
+            day.protein = day.holidayDescription;
+            day.base = [];
+            day.garnish = '';
+            day.salad = '';
+            day.dessert = '';
+            changed = true;
+          }
+        });
+        if (changed) {
+          saveMonthlyMenuLocally(parsed);
+        }
         return parsed;
       }
     }

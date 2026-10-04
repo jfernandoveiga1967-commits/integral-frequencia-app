@@ -14,6 +14,7 @@ export interface User {
   birthDate?: string;
   pin?: string;
   status?: UserStatus;
+  dataAdmissao?: string;
   dataDesligamento?: string;
   motivoDesligamento?: string;
   assignedActivities?: ActivityType[];

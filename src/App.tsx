@@ -2069,7 +2069,7 @@ export default function App() {
 
         {/* Tab 9: Cardápio e Culinária */}
         {activeTab === 'cardapio' && isTabAllowed('cardapio', currentUser) && (
-          <CardapioCulinaria currentUser={currentUser} />
+          <CardapioCulinaria currentUser={currentUser} holidays={holidays} />
         )}
       </main>
 

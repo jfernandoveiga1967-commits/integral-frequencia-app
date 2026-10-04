@@ -108,12 +108,12 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Push Event - Handle incoming Web Push Notifications
+// Push Event - Handle incoming Web Push Notifications even when app is closed
 self.addEventListener('push', (event) => {
   let data = {
-    title: '🔔 Integral: Notificação de Chamada',
-    body: 'Verifique as atividades e chamadas do Programa Integral.',
-    tag: 'integral_push_notification',
+    title: '🔔 Colégio Crescer: Notificação',
+    body: 'Acompanhe as chamadas e atividades do Programa Integral.',
+    tag: 'crescer_push_notification',
     url: '/',
   };
 
@@ -128,19 +128,21 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: data.icon || '/pwa-192.png',
+    icon: data.icon || '/pwa-192.png', // Ícone institucional do Colégio Crescer
     badge: data.badge || '/icon.svg',
-    tag: data.tag || 'integral_notification',
+    tag: data.tag || 'crescer_notification',
     renotify: true,
-    vibrate: [200, 100, 200, 100, 300],
+    vibrate: [200, 100, 200, 100, 300], // Padrão de vibração nativo
     data: {
       url: data.url || '/',
+      timestamp: Date.now(),
       activityId: data.activityId,
       turma: data.turma,
       date: data.date,
+      ...data.data,
     },
-    actions: [
-      { action: 'open_attendance', title: '📋 Abrir Chamada' },
+    actions: data.actions || [
+      { action: 'open_attendance', title: '📋 Abrir Aplicativo' },
       { action: 'dismiss', title: 'Dispensar' },
     ],
   };
@@ -156,11 +158,16 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
+  const targetUrl = event.notification.data?.url || '/';
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // If a tab is already open, focus it and post a message
       for (const client of clientList) {
         if (client.url && 'focus' in client) {
+          if ('navigate' in client && targetUrl !== '/') {
+            client.navigate(targetUrl);
+          }
           if (event.notification.data) {
             client.postMessage({
               type: 'NOTIFICATION_CLICKED',
@@ -172,7 +179,6 @@ self.addEventListener('notificationclick', (event) => {
       }
       // Otherwise open a new window
       if (self.clients.openWindow) {
-        const targetUrl = event.notification.data?.url || '/';
         return self.clients.openWindow(targetUrl);
       }
     })

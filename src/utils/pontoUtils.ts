@@ -396,6 +396,7 @@ export function getDayPontoStatus({
   holidayName,
   referenceDateStr,
   isDiaDescanso: explicitIsDiaDescanso,
+  dataAdmissao,
 }: {
   record?: Partial<PontoRecord> | null;
   defaultStatus?: string;
@@ -405,11 +406,27 @@ export function getDayPontoStatus({
   holidayName?: string;
   referenceDateStr?: string;
   isDiaDescanso?: boolean;
+  dataAdmissao?: string;
 }): DayPontoStatusResult {
   const todayStr = referenceDateStr || toISODateString(new Date());
   const isToday = dateStr === todayStr;
   const isPast = dateStr < todayStr;
   const status = record?.status || defaultStatus;
+
+  // 0. Proporcionalidade de Admissão: Período anterior à data de admissão do colaborador
+  if ((dataAdmissao && dateStr < dataAdmissao) || status === 'nao_admitido') {
+    return {
+      statusKey: 'nao_admitido',
+      label: 'NÃO ADMITIDO / FORA DO CONTRATO',
+      badgeBg: 'bg-slate-100 border border-slate-200',
+      badgeText: 'text-slate-500 font-medium',
+      isShiftComplete: true,
+      hasPunches: false,
+      isToday,
+      isPast,
+      tooltip: 'Período anterior à admissão do colaborador (fora de vigência contratual)',
+    };
+  }
 
   const e1 = (record?.entry1 || '').trim();
   const s1 = (record?.exit1 || '').trim();
@@ -1198,6 +1215,7 @@ export function calculateMonthlyPontoFinancials({
   extraHoursRateMultiplier = FATOR_HORA_EXTRA_50,
   manualAddition = 0,
   manualDiscount = 0,
+  dataAdmissao,
 }: {
   records: PontoRecord[];
   holidays: HolidayItem[];
@@ -1218,6 +1236,7 @@ export function calculateMonthlyPontoFinancials({
   extraHoursRateMultiplier?: number;
   manualAddition?: number;
   manualDiscount?: number;
+  dataAdmissao?: string;
 }): {
   regimeTrabalho: RegimeTrabalho;
   valorHoraAula?: number;
@@ -1325,6 +1344,11 @@ export function calculateMonthlyPontoFinancials({
     if (!rec || !rec.date || !rec.date.startsWith(monthKey)) return;
 
     const recStatus = rec.status || 'normal';
+
+    // Se o dia for anterior à data de admissão do colaborador, não gera falta nem descontos
+    if ((dataAdmissao && rec.date < dataAdmissao) || recStatus === 'nao_admitido') {
+      return;
+    }
     const isDiaDescanso = checkIsDiaDescanso(rec.date, recStatus, holidays);
     const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, safeMinutes, isDiaDescanso, holidays);
 

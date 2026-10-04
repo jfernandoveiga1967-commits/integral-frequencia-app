@@ -12,11 +12,13 @@ export interface MenuItemDay {
 
   // Refeição completa do almoço
   base: string[]; // e.g. ["Arroz Branco", "Feijão"]
+  base3?: string; // e.g. "Macarrão ao sugo", "Farofa de legumes", acompanhamento extra
   protein: string; // e.g. "Frango em tiras", "Iscas de pernil", "Ovo mexido"
   garnish: string; // e.g. "Creme de milho", "Farofa caseira", "Purê de batata"
   salad: string; // e.g. "Salada", "Vinagrete", "Brócolis no vapor"
   dessert: string; // e.g. "Fruta"
   specialNotes?: string; // e.g. Dica ou aviso nutricional
+  observations?: string; // Campo de observações adicionais / substituição para alérgicos
 }
 
 export interface MonthlyMenu {

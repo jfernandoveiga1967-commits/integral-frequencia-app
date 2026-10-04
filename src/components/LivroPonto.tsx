@@ -90,7 +90,7 @@ import {
   isDayShiftComplete,
   checkIsDiaDescanso,
 } from '../utils/pontoUtils';
-import { generateLivroPontoPDFReport, generateReciboBolsaPDF } from '../utils/pdfGenerator';
+import { generateLivroPontoPDFReport, generateReciboBolsaPDF, generateAllTimecardsPDF } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
 import { loadPontoRecords } from '../utils/storageUtils';
 import { playPontoSuccessSound } from '../utils/notificationUtils';
@@ -383,6 +383,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   // User contract editing state (inside Livro Ponto)
   const [userEditName, setUserEditName] = useState('');
   const [userEditCargo, setUserEditCargo] = useState('');
+  const [userEditDataAdmissao, setUserEditDataAdmissao] = useState('');
   const [userEditPhone, setUserEditPhone] = useState('');
   const [userEditPixKey, setUserEditPixKey] = useState('');
   const [userEditWorkShiftType, setUserEditWorkShiftType] = useState<'continua_6h' | 'padrao_8h' | 'personalizada'>('continua_6h');
@@ -427,6 +428,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     if (targetUser) {
       setUserEditName(targetUser.name || '');
       setUserEditCargo(targetUser.cargoLabel || 'Estagiária / Monitora');
+      setUserEditDataAdmissao(targetUser.dataAdmissao || '');
       setUserEditPhone(targetUser.phone || '');
       setUserEditPixKey(targetUser.pixKey || targetUser.phone || '');
       const shift = targetUser.workShiftType || (isContinuousShift(targetUser, targetUser.contractSchedule) ? 'continua_6h' : 'padrao_8h');
@@ -490,6 +492,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       ...targetUser,
       name: userEditName.trim() || targetUser.name,
       cargoLabel: userEditCargo.trim() || targetUser.cargoLabel,
+      dataAdmissao: userEditDataAdmissao.trim() || undefined,
       phone: userEditPhone.trim() || undefined,
       pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
       regimeTrabalho: userEditRegimeTrabalho,
@@ -565,6 +568,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       defaultStatus: PontoStatus;
     }[] = [];
 
+    const userAdmissionDate = targetUser?.dataAdmissao ? targetUser.dataAdmissao.trim() : '';
+
     for (let day = 1; day <= daysInMonth; day++) {
       const dayPad = String(day).padStart(2, '0');
       const dateStr = `${monthKey}-${dayPad}`;
@@ -573,11 +578,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       const isSun = isSunday(dateStr);
       const isWk = isSat || isSun;
       const holidayItem = isHolidayOrRecess(dateStr, holidays);
+      const isBeforeAdmission = Boolean(userAdmissionDate && dateStr < userAdmissionDate);
 
       let defaultStatus: PontoStatus = 'normal';
-      if (isSun) defaultStatus = 'domingo';
-      else if (isSat) defaultStatus = 'sabado';
-      else if (holidayItem) {
+      if (isBeforeAdmission) {
+        defaultStatus = 'nao_admitido';
+      } else if (isSun) {
+        defaultStatus = 'domingo';
+      } else if (isSat) {
+        defaultStatus = 'sabado';
+      } else if (holidayItem) {
         defaultStatus = holidayItem.type === 'feriado' ? 'feriado' : 'recesso';
       }
 
@@ -593,11 +603,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         isSun,
         holidayItem,
         record: existingRecord,
-        defaultStatus: existingRecord?.status || defaultStatus,
+        defaultStatus: isBeforeAdmission ? 'nao_admitido' : (existingRecord?.status || defaultStatus),
       });
     }
     return list;
-  }, [selectedYear, selectedMonth, monthKey, daysInMonth, holidays, monthUserRecords]);
+  }, [selectedYear, selectedMonth, monthKey, daysInMonth, holidays, monthUserRecords, targetUser?.dataAdmissao]);
 
   // Financial Calculations
   const financials = useMemo(() => {
@@ -619,6 +629,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       contractSchedule,
       manualAddition,
       manualDiscount,
+      dataAdmissao: targetUser?.dataAdmissao,
     });
   }, [
     monthUserRecords,
@@ -637,6 +648,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     contractSchedule,
     manualAddition,
     manualDiscount,
+    targetUser?.dataAdmissao,
   ]);
 
   // Handle Quick Punch (Registrar Batida Agora)
@@ -908,6 +920,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       companyName,
       institutionName,
       pixKey,
+      dataAdmissao: targetUser?.dataAdmissao || undefined,
       unjustifiedAbsencesCount: financials.unjustifiedAbsencesCount,
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
       missingMinutesTotal: financials.totalMissingMinutes,
@@ -995,6 +1008,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       companyName,
       institutionName,
       pixKey,
+      dataAdmissao: targetUser?.dataAdmissao || undefined,
       unjustifiedAbsencesCount: financials.unjustifiedAbsencesCount,
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
       missingMinutesTotal: financials.totalMissingMinutes,
@@ -1070,6 +1084,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       companyName,
       institutionName,
       pixKey,
+      dataAdmissao: targetUser?.dataAdmissao || undefined,
       unjustifiedAbsencesCount: financials.unjustifiedAbsencesCount,
       unjustifiedAbsencesDiscount: financials.unjustifiedAbsencesDiscount,
       extraMinutesTotal: financials.totalExtraMinutes,
@@ -1207,7 +1222,157 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     setTimeout(() => setPunchFeedback(null), 3500);
   };
 
-  // Generate Official PDF Report for Timesheet & Financial Summary
+  const [isGeneratingAllPDF, setIsGeneratingAllPDF] = useState(false);
+
+  // Generate All Timecards PDF in Batch (Consolidated Single PDF)
+  const handleGenerateAllPontoPDF = async (saveImmediately = false) => {
+    setIsGeneratingAllPDF(true);
+    try {
+      // Coleta todos os colaboradores com relevância para a competência selecionada
+      const targetUsersList = availableUsers.filter((u) => {
+        if (isUserActive(u)) return true;
+        return pontoRecords.some((r) => r.userId === u.id && r.date && r.date.startsWith(monthKey));
+      });
+
+      if (targetUsersList.length === 0) {
+        setPunchFeedback({
+          text: 'Nenhum colaborador ativo encontrado para a competência selecionada.',
+          type: 'error',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+        return;
+      }
+
+      const optionsList = targetUsersList.map((usr) => {
+        const userRecords = pontoRecords.filter(
+          (r) => r.userId === usr.id && r.date && r.date.startsWith(monthKey)
+        );
+        const closing = pontoClosings.find((c) => c.userId === usr.id && c.monthKey === monthKey);
+        const userAdmission = usr.dataAdmissao ? usr.dataAdmissao.trim() : '';
+
+        // Monta o grid dos dias para este usuário
+        const userGrid = [];
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dayPad = String(day).padStart(2, '0');
+          const dateStr = `${monthKey}-${dayPad}`;
+          const d = new Date(selectedYear, selectedMonth - 1, day);
+          const isSat = isSaturday(dateStr);
+          const isSun = isSunday(dateStr);
+          const isWk = isSat || isSun;
+          const holidayItem = isHolidayOrRecess(dateStr, holidays);
+          const isBeforeAdmission = Boolean(userAdmission && dateStr < userAdmission);
+
+          let defaultStatus: PontoStatus = 'normal';
+          if (isBeforeAdmission) {
+            defaultStatus = 'nao_admitido';
+          } else if (isSun) {
+            defaultStatus = 'domingo';
+          } else if (isSat) {
+            defaultStatus = 'sabado';
+          } else if (holidayItem) {
+            defaultStatus = holidayItem.type === 'feriado' ? 'feriado' : 'recesso';
+          }
+
+          const existingRecord = userRecords.find((r) => r.date === dateStr);
+
+          userGrid.push({
+            dayNumber: day,
+            dateStr,
+            dayOfWeekName: getDayNameFull(d),
+            dayOfWeekShort: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][d.getDay()],
+            isWk,
+            isSat,
+            isSun,
+            holidayItem,
+            record: existingRecord,
+            defaultStatus: isBeforeAdmission ? 'nao_admitido' : (existingRecord?.status || defaultStatus),
+          });
+        }
+
+        const usrSchedule = closing?.contractSchedule || usr.contractSchedule || '11:40 - 17:40';
+        const usrHoursFmt = closing?.contractDailyHoursFormatted || usr.contractDailyHoursFormatted || '6h 00min';
+        const usrSalary = closing?.baseSalary !== undefined && closing.baseSalary !== null
+          ? closing.baseSalary
+          : (usr.baseSalary !== undefined && usr.baseSalary !== null ? usr.baseSalary : 1200);
+        const usrRegime = closing?.regimeTrabalho || usr.regimeTrabalho || 'mensalista';
+        const usrDivisor = closing?.divisorHours || usr.contractDivisorHours || DIVISOR_MENSAL_PADRAO;
+        const usrAjuda = closing?.ajudaDeCusto !== undefined && closing.ajudaDeCusto !== null
+          ? Number(closing.ajudaDeCusto)
+          : (Number(usr.ajudaDeCusto) || 0);
+
+        const usrFinancials = calculateMonthlyPontoFinancials({
+          records: userRecords,
+          holidays,
+          year: selectedYear,
+          month: selectedMonth,
+          baseSalary: usrSalary,
+          regimeTrabalho: usrRegime,
+          valorHoraAula: usr.valorHoraAula,
+          duracaoAulaMinutos: usr.duracaoAulaMinutos || DURACAO_AULA_PADRAO_MINUTOS,
+          divisorHours: usrDivisor,
+          divisorDays: 30,
+          ajudaDeCusto: usrAjuda,
+          contractDailyHours: usr.contractDailyHours,
+          contractDailyMinutes: usr.contractDailyMinutes,
+          contractDailyHoursFormatted: usrHoursFmt,
+          contractSchedule: usrSchedule,
+          manualAddition: closing?.manualAddition || 0,
+          manualDiscount: closing?.manualDiscount || 0,
+          dataAdmissao: usr.dataAdmissao,
+        });
+
+        return {
+          user: {
+            ...usr,
+            dataAdmissao: userAdmission || undefined,
+          },
+          month: selectedMonth,
+          year: selectedYear,
+          monthDaysGrid: userGrid,
+          financials: usrFinancials,
+          closingRecord: closing ? { ...closing, dataAdmissao: userAdmission || closing.dataAdmissao } : closing,
+          companyName: usr.company || 'GADAL - Gestão e Apoio',
+          institutionName: 'Instituto Educacional Crescer',
+          pixKey: usr.pixKey || usr.phone || 'Pendente',
+          contractSchedule: usrSchedule,
+          contractDailyHoursFormatted: usrHoursFmt,
+          saveImmediately: false,
+        };
+      });
+
+      const monthName = getMonthNameBR(selectedMonth);
+      const filename = `Espelhos_Ponto_TODOS_${monthName}_${selectedYear}.pdf`;
+      const result = generateAllTimecardsPDF(optionsList, filename);
+
+      if (saveImmediately) {
+        result.download();
+        setPunchFeedback({
+          text: `Arquivo "${filename}" com ${targetUsersList.length} espelhos gerado e baixado!`,
+          type: 'success',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+      } else {
+        setPdfPreviewState({
+          isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `Espelhos de Ponto em Lote - ${monthName}/${selectedYear} (${targetUsersList.length} Colaboradores)`,
+          onDownload: result.download,
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao gerar espelhos de ponto em lote:', err);
+      setPunchFeedback({
+        text: 'Erro ao gerar espelhos de ponto consolidados. Tente novamente.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
+    } finally {
+      setIsGeneratingAllPDF(false);
+    }
+  };
   const handleGeneratePontoPDF = (saveImmediately = false) => {
     try {
       const result = generateLivroPontoPDFReport({
@@ -1802,6 +1967,22 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <FileText className="w-3.5 h-3.5" />
               <span>Salvar PDF / DP</span>
             </button>
+
+            {/* Botão Global de Download em Lote de Todos os Espelhos */}
+            <button
+              type="button"
+              onClick={() => handleGenerateAllPontoPDF(true)}
+              disabled={isGeneratingAllPDF}
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer shadow-emerald-900/20 active:scale-95"
+              title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
+            >
+              {isGeneratingAllPDF ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>Baixar Todos os Espelhos (PDF Único)</span>
+            </button>
           </div>
         </div>
 
@@ -1841,6 +2022,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 if (isToday) rowBg = 'bg-indigo-50/50 hover:bg-indigo-50 font-medium';
                 else if (item.isSun) rowBg = 'bg-slate-50 text-slate-400';
                 else if (item.isSat) rowBg = 'bg-slate-50/70 text-slate-400';
+                else if (status === 'nao_admitido' || (targetUser?.dataAdmissao && item.dateStr < targetUser.dataAdmissao)) rowBg = 'bg-slate-50/60 text-slate-400';
                 else if (status === 'feriado' || status === 'recesso') rowBg = 'bg-emerald-50/40 text-emerald-900';
                 else if (status === 'falta_injustificada') rowBg = 'bg-rose-50/60 text-rose-950';
 
@@ -1863,7 +2045,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     </td>
 
                     {/* Time Punches & Worked Hours */}
-                    {status === 'sabado' || status === 'domingo' ? (
+                    {status === 'nao_admitido' || (targetUser?.dataAdmissao && item.dateStr < targetUser.dataAdmissao) ? (
+                      <>
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-50/70">
+                          NÃO ADMITIDO / FORA DO CONTRATO
+                        </td>
+                        <td className="py-2 px-3 text-center text-slate-400 font-mono font-medium">
+                          —
+                        </td>
+                      </>
+                    ) : status === 'sabado' || status === 'domingo' ? (
                       <>
                         <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center text-slate-400 font-semibold italic bg-slate-100/40">
                           {status === 'sabado' ? 'SÁBADO — DESCANSO SEMANAL' : 'DOMINGO — REPOUSO REMUNERADO'}
@@ -1993,6 +2184,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           isWeekend: item.isWk,
                           holidayName: item.holidayItem?.name,
                           isDiaDescanso,
+                          dataAdmissao: targetUser?.dataAdmissao,
                         });
 
                         let icon = null;
@@ -2876,11 +3068,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       const status = rec?.status || item.defaultStatus;
                       const hasPunches = Boolean(rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2);
                       const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
+                      const isBeforeAdmission = Boolean(targetUser?.dataAdmissao && item.dateStr < targetUser.dataAdmissao) || status === 'nao_admitido';
                       return (
-                        <tr key={item.dateStr} className={item.isWk ? 'bg-slate-50 text-slate-400' : ''}>
+                        <tr key={item.dateStr} className={item.isWk || isBeforeAdmission ? 'bg-slate-50 text-slate-400' : ''}>
                           <td className="p-1 text-center font-bold font-mono">{item.dayNumber}</td>
                           <td className="p-1 text-center">{item.dayOfWeekShort}</td>
-                          {!hasPunches && item.isWk ? (
+                          {!hasPunches && isBeforeAdmission ? (
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-slate-500 bg-slate-100/70 italic">
+                              NÃO ADMITIDO / FORA DO CONTRATO
+                            </td>
+                          ) : !hasPunches && item.isWk ? (
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center italic font-semibold">
                               {item.isSat ? 'SÁBADO' : 'DOMINGO'}
                             </td>
@@ -3613,15 +3810,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">Empresa Conveniada</label>
+                  <label className="text-slate-300 font-semibold block mb-1">Data de Admissão</label>
                   <input
-                    type="text"
-                    value={userEditCompany}
-                    onChange={(e) => setUserEditCompany(e.target.value)}
-                    placeholder="Ex: GADAL - Gestão e Apoio"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
+                    type="date"
+                    value={userEditDataAdmissao}
+                    onChange={(e) => setUserEditDataAdmissao(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none cursor-pointer"
                   />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Dias anteriores não geram faltas</span>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Empresa Conveniada</label>
+                <input
+                  type="text"
+                  value={userEditCompany}
+                  onChange={(e) => setUserEditCompany(e.target.value)}
+                  placeholder="Ex: GADAL - Gestão e Apoio"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:border-indigo-500 focus:outline-none"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

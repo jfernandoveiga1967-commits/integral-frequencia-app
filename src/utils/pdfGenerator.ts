@@ -211,10 +211,11 @@ function drawCompactOfficialHeader(
   title: string,
   subtitle: string,
   filterDetails: string[],
-  orientation: 'portrait' | 'landscape' = 'portrait'
+  orientation: 'portrait' | 'landscape' = 'portrait',
+  customMarginX: number = 14
 ) {
   const pageWidth = orientation === 'landscape' ? 297 : 210;
-  const rightMarginX = pageWidth - 14;
+  const rightMarginX = pageWidth - customMarginX;
 
   // Header Banner Background (Height 21mm)
   doc.setFillColor(15, 23, 42); // slate-900
@@ -230,31 +231,32 @@ function drawCompactOfficialHeader(
   if (logoData) {
     try {
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(12, 4, 28, 14, 1.5, 1.5, 'F');
-      doc.addImage(logoData, 'PNG', 13, 4.8, 26, 12);
+      const logoX = customMarginX <= 8 ? 8 : 12;
+      doc.roundedRect(logoX, 4, 28, 14, 1.5, 1.5, 'F');
+      doc.addImage(logoData, 'PNG', logoX + 1, 4.8, 26, 12);
       logoDrawn = true;
     } catch {
       logoDrawn = false;
     }
   }
 
-  const textStartX = logoDrawn ? 43 : 14;
+  const textStartX = logoDrawn ? (customMarginX <= 8 ? 39 : 43) : customMarginX;
   const availableWidth = rightMarginX - textStartX;
 
   // Tier 1 (Y = 7mm): Brand and Timestamp
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
+  doc.setFontSize(7.5);
   doc.setTextColor(244, 63, 94);
   doc.text('INSTITUTO EDUCACIONAL CRESCER • PROGRAMA INTEGRAL', textStartX, 7);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.2);
+  doc.setFontSize(6.5);
   doc.setTextColor(203, 213, 225);
   doc.text(`Emissão: ${getCurrentDateTimeString()}`, rightMarginX, 7, { align: 'right' });
 
   // Tier 2 (Y = 12mm): Dedicated row for Title
   doc.setFont('helvetica', 'bold');
-  let titleFontSize = 10;
+  let titleFontSize = 10.5;
   doc.setFontSize(titleFontSize);
   const rawTitle = title.toUpperCase();
   while (titleFontSize > 7.5 && doc.getTextWidth(rawTitle) > availableWidth) {
@@ -271,7 +273,7 @@ function drawCompactOfficialHeader(
 
   if (detailText.trim().length > 0) {
     doc.setFont('helvetica', 'bold');
-    let detailFontSize = 6.8;
+    let detailFontSize = 7.2;
     doc.setFontSize(detailFontSize);
     const maxDetailWidth = availableWidth - 45;
     let cleanDetail = detailText.trim();
@@ -290,7 +292,7 @@ function drawCompactOfficialHeader(
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.8);
+  doc.setFontSize(6.2);
   doc.setTextColor(148, 163, 184);
   doc.text('Documento Oficial de Registro Escolar', rightMarginX, 17, { align: 'right' });
 }
@@ -298,7 +300,11 @@ function drawCompactOfficialHeader(
 /**
  * Common Footer & Page Numbers
  */
-function applyPageNumbersAndFooters(doc: jsPDF, orientation: 'portrait' | 'landscape' = 'portrait') {
+function applyPageNumbersAndFooters(
+  doc: jsPDF,
+  orientation: 'portrait' | 'landscape' = 'portrait',
+  customMarginX: number = 14
+) {
   const pageCount = (doc as any).internal.getNumberOfPages();
   const pageWidth = orientation === 'landscape' ? 297 : 210;
   const pageHeight = orientation === 'landscape' ? 210 : 297;
@@ -308,7 +314,7 @@ function applyPageNumbersAndFooters(doc: jsPDF, orientation: 'portrait' | 'lands
 
     // Footer divider line
     doc.setDrawColor(226, 232, 240);
-    doc.line(14, pageHeight - 11, pageWidth - 14, pageHeight - 11);
+    doc.line(customMarginX, pageHeight - 11, pageWidth - customMarginX, pageHeight - 11);
 
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
@@ -316,13 +322,13 @@ function applyPageNumbersAndFooters(doc: jsPDF, orientation: 'portrait' | 'lands
 
     doc.text(
       'Instituto Educacional Crescer - Sistema de Gestão do Programa Integral',
-      14,
+      customMarginX,
       pageHeight - 6
     );
 
     doc.text(
       `Página ${i} de ${pageCount}`,
-      pageWidth - 14,
+      pageWidth - customMarginX,
       pageHeight - 6,
       { align: 'right' }
     );
@@ -1722,46 +1728,44 @@ export interface GenerateLivroPontoPDFOptions {
   saveImmediately?: boolean;
 }
 
-export function generateLivroPontoPDFReport({
-  user,
-  month,
-  year,
-  monthDaysGrid,
-  financials,
-  closingRecord,
-  companyName: companyNameProp,
-  institutionName = 'Instituto Educacional Crescer',
-  pixKey = 'Pendente',
-  contractSchedule = '11:40 - 17:40',
-  contractDailyHoursFormatted = '6h 00min',
-  saveImmediately = false,
-}: GenerateLivroPontoPDFOptions): PDFGenerationResult {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
+export function drawSingleTimecardPage(
+  doc: jsPDF,
+  options: GenerateLivroPontoPDFOptions
+) {
+  const {
+    user,
+    month,
+    year,
+    monthDaysGrid,
+    financials,
+    closingRecord,
+    companyName: companyNameProp,
+    pixKey = 'Pendente',
+    contractSchedule = '11:40 - 17:40',
+    contractDailyHoursFormatted = '6h 00min',
+  } = options;
 
   const monthName = getMonthNameBR(month);
   const userName = user?.name || closingRecord?.userName || 'Colaborador';
   const userCargo = user?.cargoLabel || closingRecord?.userCargo || 'Estagiária / Monitora';
   const companyName = user?.company || closingRecord?.companyName || companyNameProp || 'GADAL - Gestão e Apoio';
 
-  // 1. Compact Header (Height: 20mm) - Guarantee 1 single page
+  // 1. Compact Header (8mm margin) - Height: 21mm
   drawCompactOfficialHeader(
     doc,
     'ESPELHO DE PONTO',
     '',
     [`Colaborador(a): ${userName}`, `Competência: ${monthName}/${year}`],
-    'portrait'
+    'portrait',
+    8
   );
 
   let startY = 22.5;
 
-  // 2. Collaborator & Contract Details Card (Height: 10mm)
+  // 2. Collaborator & Contract Details Card (Height: 11.8mm, Width: 194mm with 8mm margins)
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(14, startY, 182, 10, 1.5, 1.5, 'FD');
+  doc.roundedRect(8, startY, 194, 11.8, 1.5, 1.5, 'FD');
 
   const statusSuffix = user?.status === 'DESLIGADO'
     ? ` [DESLIGADO(A)${user?.dataDesligamento ? ` EM ${formatDateBR(user.dataDesligamento)}` : ''}]`
@@ -1770,24 +1774,25 @@ export function generateLivroPontoPDFReport({
     : '';
 
   doc.setTextColor(15, 23, 42);
-  doc.setFontSize(7.6);
+  doc.setFontSize(9.2);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})${statusSuffix}   |   Competência: ${monthName}/${year}`, 17, startY + 4.0);
+  doc.text(`Colaborador(a): ${userName.toUpperCase()} (${userCargo})${statusSuffix}   |   Competência: ${monthName}/${year}`, 11, startY + 4.6);
 
-  doc.setFontSize(6.3);
+  doc.setFontSize(7.6);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
+  const admissaoStr = user?.dataAdmissao ? `Admissão: ${formatDateBR(user.dataAdmissao)}   |   ` : '';
   doc.text(
-    `Empresa: ${companyName}   |   Jornada: ${contractSchedule} (${contractDailyHoursFormatted})   |   PIX: ${pixKey}   |   Status: ${
+    `Empresa: ${companyName}   |   ${admissaoStr}Jornada: ${contractSchedule} (${contractDailyHoursFormatted})   |   PIX: ${pixKey}   |   Status: ${
       closingRecord?.isClosed ? 'FECHADO / PAGO' : 'ABERTO'
     }`,
-    17,
-    startY + 8.0
+    11,
+    startY + 9.2
   );
 
-  startY += 12;
+  startY += 13.2;
 
-  // 3. Financial & Performance Summary Metrics (Height: 10mm, 6 cards fitting 182mm width)
+  // 3. Financial & Performance Summary Metrics (Height: 10.2mm, 6 cards fitting 194mm width)
   const metrics = [
     { label: 'Bolsa Base', value: formatCurrencyBR(financials.baseSalary), color: [15, 23, 42] as [number, number, number] },
     {
@@ -1816,10 +1821,9 @@ export function generateLivroPontoPDFReport({
       color: [16, 185, 129] as [number, number, number],
     },
   ];
-  drawMetricBoxes(doc, 14, startY, 28, 10, 2.8, metrics);
+  drawMetricBoxes(doc, 8, startY, 29.8, 10.2, 2.8, metrics);
 
-  // Clear vertical margin between metric cards and table header
-  startY += 13.5;
+  startY += 12.0;
 
   // Check if target user has a continuous 6h shift
   const isContinuous = isContinuousShift(
@@ -1827,13 +1831,14 @@ export function generateLivroPontoPDFReport({
     contractSchedule
   );
 
-  // 4. Timesheet Table Data (Compact cell padding to ensure 100% single page)
+  // 4. Timesheet Table Data (Expanded row height for full A4 page presence)
   const tableData = monthDaysGrid.map((item) => {
     const rec = item.record;
     const status = rec?.status || item.defaultStatus || 'normal';
     const holidayName = item.holidayItem?.name || item.holidayRecessName || '';
     const hasPunches = Boolean(rec?.entry1 || rec?.entry2 || rec?.exit1 || rec?.exit2);
     const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || status === 'sabado' || status === 'domingo' || status === 'feriado' || status === 'recesso';
+    const isBeforeAdmission = Boolean(user?.dataAdmissao && item.dateStr < user.dataAdmissao) || status === 'nao_admitido';
     const dayCalc = calculateDayWorkedMinutes(rec, contractSchedule, 5, undefined, isDiaDescanso);
 
     const statusResult = getDayPontoStatus({
@@ -1844,11 +1849,14 @@ export function generateLivroPontoPDFReport({
       isWeekend: item.isWk,
       holidayName,
       isDiaDescanso,
+      dataAdmissao: user?.dataAdmissao,
     });
     const statusText = statusResult.label;
 
     let workedHoursStr = '-';
-    if (hasPunches) {
+    if (isBeforeAdmission) {
+      workedHoursStr = '-';
+    } else if (hasPunches) {
       workedHoursStr = formatMinutesToHoursAndMinutes(dayCalc.workedMinutes);
     } else if (isDiaDescanso) {
       workedHoursStr = (status === 'feriado' || status === 'recesso') ? contractDailyHoursFormatted : '-';
@@ -1859,6 +1867,31 @@ export function generateLivroPontoPDFReport({
     const dayStr = String(item.dayNumber).padStart(2, '0');
     const dayLabel = item.dayOfWeekLabel || item.dayOfWeekName || item.dayOfWeekShort || '';
     const dayName = dayLabel.split('-')[0];
+
+    if (isBeforeAdmission && !hasPunches) {
+      if (isContinuous) {
+        return [
+          dayStr,
+          dayName,
+          '—',
+          '—',
+          '—',
+          'NÃO ADMITIDO / FORA DO CONTRATO',
+          rec?.note || '-',
+        ];
+      }
+      return [
+        dayStr,
+        dayName,
+        '—',
+        '—',
+        '—',
+        '—',
+        '—',
+        'NÃO ADMITIDO / FORA DO CONTRATO',
+        rec?.note || '-',
+      ];
+    }
 
     if (isContinuous) {
       return [
@@ -1889,27 +1922,32 @@ export function generateLivroPontoPDFReport({
     ? [['Dia', 'Sem.', 'Entrada', 'Saída', 'Horas', 'Status / Ocorrência', 'Observações']]
     : [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']];
 
+  // Column styles fitting exactly 194mm (8mm margins on A4 portrait)
   const columnStyles = isContinuous
     ? {
-        0: { cellWidth: 9, halign: 'center' as const, fontStyle: 'bold' as const },
-        1: { cellWidth: 15, halign: 'center' as const },
-        2: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const },
-        3: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const },
-        4: { cellWidth: 18, halign: 'center' as const, fontStyle: 'bold' as const },
-        5: { cellWidth: 44, halign: 'left' as const },
-        6: { cellWidth: 'auto' as const, halign: 'left' as const },
+        0: { cellWidth: 10, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        1: { cellWidth: 16, halign: 'center' as const, fontSize: 7.6 },
+        2: { cellWidth: 22, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.2 },
+        3: { cellWidth: 22, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.2 },
+        4: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.2 },
+        5: { cellWidth: 54, halign: 'left' as const, fontSize: 7.4 },
+        6: { cellWidth: 50, halign: 'left' as const, fontSize: 7.2 },
       }
     : {
-        0: { cellWidth: 9, halign: 'center' as const, fontStyle: 'bold' as const },
-        1: { cellWidth: 15, halign: 'center' as const },
-        2: { cellWidth: 15, halign: 'center' as const },
-        3: { cellWidth: 15, halign: 'center' as const },
-        4: { cellWidth: 15, halign: 'center' as const },
-        5: { cellWidth: 15, halign: 'center' as const },
-        6: { cellWidth: 17, halign: 'center' as const, fontStyle: 'bold' as const },
-        7: { cellWidth: 38, halign: 'left' as const },
-        8: { cellWidth: 'auto' as const, halign: 'left' as const },
+        0: { cellWidth: 10, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        1: { cellWidth: 15, halign: 'center' as const, fontSize: 7.6 },
+        2: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        3: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        4: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        5: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        6: { cellWidth: 18, halign: 'center' as const, fontStyle: 'bold' as const, fontSize: 8.0 },
+        7: { cellWidth: 50, halign: 'left' as const, fontSize: 7.4 },
+        8: { cellWidth: 37, halign: 'left' as const, fontSize: 7.2 },
       };
+
+  // Altura das linhas da tabela de registros diários ajustada para 1.55mm (libera respiro no terço inferior)
+  const daysCount = monthDaysGrid.length;
+  const verticalPadding = daysCount <= 28 ? 1.65 : (daysCount <= 29 ? 1.60 : 1.55);
 
   autoTable(doc, {
     startY: startY,
@@ -1917,22 +1955,22 @@ export function generateLivroPontoPDFReport({
     body: tableData,
     theme: 'grid',
     pageBreak: 'avoid',
-    margin: { left: 14, right: 14 },
+    margin: { left: 8, right: 8 },
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 6.8,
-      cellPadding: { top: 1.4, bottom: 1.4, left: 1.2, right: 1.2 },
+      fontSize: 8.0,
+      cellPadding: { top: 2.2, bottom: 2.2, left: 1.2, right: 1.2 },
       halign: 'center',
       valign: 'middle',
       lineWidth: 0.15,
       lineColor: [203, 213, 225],
     },
     bodyStyles: {
-      fontSize: 5.8,
+      fontSize: 7.4,
       textColor: [51, 65, 85],
-      cellPadding: { top: 0.9, bottom: 0.9, left: 1.2, right: 1.2 },
+      cellPadding: { top: verticalPadding, bottom: verticalPadding, left: 1.2, right: 1.2 },
       valign: 'middle',
       lineWidth: 0.12,
       lineColor: [226, 232, 240],
@@ -1946,7 +1984,12 @@ export function generateLivroPontoPDFReport({
         const rawRow = monthDaysGrid[data.row.index];
         if (rawRow) {
           const status = rawRow.record?.status || rawRow.defaultStatus;
-          if (status === 'falta_injustificada') {
+          const isBeforeAdmissao = (user?.dataAdmissao && rawRow.dateStr < user.dataAdmissao) || status === 'nao_admitido';
+
+          if (isBeforeAdmissao) {
+            data.cell.styles.fillColor = [241, 245, 249]; // light slate neutro
+            data.cell.styles.textColor = [100, 116, 139]; // slate-500
+          } else if (status === 'falta_injustificada') {
             data.cell.styles.fillColor = [254, 226, 226]; // light red
             data.cell.styles.textColor = [153, 27, 27];
             data.cell.styles.fontStyle = 'bold';
@@ -1962,54 +2005,68 @@ export function generateLivroPontoPDFReport({
     },
   });
 
-  // 5. Signatures Section on the SAME Page
-  const finalY = (doc as any).lastAutoTable?.finalY || 165;
-  const sigY = finalY + 4;
+  // 5. Seção de Assinaturas com folga elegante (fixada com segurança em y = 262mm)
+  const finalY = (doc as any).lastAutoTable?.finalY || 232;
+  const lineY = Math.max(finalY + (closingRecord?.signedDigitally ? 14 : 10), 262);
 
   // Digital Signature banner if present
   if (closingRecord?.signedDigitally) {
+    const bannerY = lineY - 10.5;
     doc.setFillColor(236, 253, 245);
     doc.setDrawColor(167, 243, 208);
-    doc.roundedRect(14, sigY, 182, 6, 1, 1, 'FD');
+    doc.roundedRect(8, bannerY, 194, 6.0, 1, 1, 'FD');
 
-    doc.setFontSize(6);
+    doc.setFontSize(7.0);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(6, 95, 70);
     doc.text(
       `✓ ASSINADO DIGITALMENTE: ${closingRecord.signedBy?.toUpperCase()} em ${new Date(
         closingRecord.signedAt || ''
       ).toLocaleString('pt-BR')}  |  Hash: ${closingRecord.digitalSignatureHash || 'AUTÊNTICO'}`,
-      17,
-      sigY + 4
+      11,
+      bannerY + 4.0
     );
   }
 
-  // Signature lines
-  const lineY = sigY + (closingRecord?.signedDigitally ? 16 : 12);
+  // Linhas de assinatura ancoradas em y = 262mm (respiro elegante acima do rodapé em 285mm)
   doc.setDrawColor(148, 163, 184);
-  doc.setLineWidth(0.3);
-  doc.line(20, lineY, 90, lineY);
-  doc.line(120, lineY, 190, lineY);
+  doc.setLineWidth(0.35);
+  doc.line(16, lineY, 96, lineY);
+  doc.line(114, lineY, 194, lineY);
 
-  doc.setFontSize(7);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text(userName, 56, lineY + 3.8, { align: 'center' });
+  doc.setFontSize(7.2);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(51, 65, 85);
-  doc.text(userName, 55, lineY + 4, { align: 'center' });
-  doc.setFontSize(5.8);
   doc.setTextColor(100, 116, 139);
-  doc.text(`Colaborador(a) / ${userCargo}`, 55, lineY + 7.5, { align: 'center' });
+  doc.text(`Colaborador(a) / ${userCargo}`, 56, lineY + 7.5, { align: 'center' });
 
-  doc.setFontSize(7);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(51, 65, 85);
-  doc.text(companyName, 155, lineY + 4, { align: 'center' });
-  doc.setFontSize(5.8);
+  doc.text(companyName, 154, lineY + 3.8, { align: 'center' });
+  doc.setFontSize(7.2);
+  doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  // Dynamic signature label reflecting companyName or institution
   const companyShort = companyName.replace(/ - Gestão e Apoio/i, '').trim();
-  doc.text(`Coordenação do Integral / DP ${companyShort || companyName}`, 155, lineY + 7.5, { align: 'center' });
+  doc.text(`Coordenação do Integral / DP ${companyShort || companyName}`, 154, lineY + 7.5, { align: 'center' });
+}
 
-  applyPageNumbersAndFooters(doc, 'portrait');
-  const filename = `Espelho_Ponto_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
+export function generateLivroPontoPDFReport(options: GenerateLivroPontoPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  drawSingleTimecardPage(doc, options);
+  applyPageNumbersAndFooters(doc, 'portrait', 8);
+
+  const monthName = getMonthNameBR(options.month);
+  const userName = options.user?.name || options.closingRecord?.userName || 'Colaborador';
+  const filename = `Espelho_Ponto_${userName.replace(/[\/\s]+/g, '_')}_${String(options.month).padStart(2, '0')}_${options.year}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
@@ -2017,9 +2074,46 @@ export function generateLivroPontoPDFReport({
   const dataUrl = dataUri;
   const download = () => doc.save(filename);
 
-  if (saveImmediately) {
+  if (options.saveImmediately) {
     doc.save(filename);
   }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Consolidates all active employees' timecards into a SINGLE unified PDF document
+ * with a page break (doc.addPage) between each employee.
+ */
+export function generateAllTimecardsPDF(
+  optionsList: GenerateLivroPontoPDFOptions[],
+  customFilename?: string
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  optionsList.forEach((opts, index) => {
+    if (index > 0) {
+      doc.addPage('a4', 'portrait');
+    }
+    drawSingleTimecardPage(doc, opts);
+  });
+
+  applyPageNumbersAndFooters(doc, 'portrait', 8);
+
+  const first = optionsList[0];
+  const monthName = first ? getMonthNameBR(first.month) : 'Competencia';
+  const year = first ? first.year : new Date().getFullYear();
+  const filename = customFilename || `Espelhos_Ponto_TODOS_${monthName}_${year}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
@@ -3427,6 +3521,11 @@ export function generateCardapioMensalPDF(
     }
   });
 
+  const cleanMenuText = (str?: string): string => {
+    if (!str) return '';
+    return str.replace(/\*/g, '').trim();
+  };
+
   const weekHeaders = ['SEMANA', 'SEGUNDA-FEIRA', 'TERÇA-FEIRA', 'QUARTA-FEIRA', 'QUINTA-FEIRA', 'SEXTA-FEIRA'];
 
   const tableBody: string[][] = [];
@@ -3441,15 +3540,24 @@ export function generateCardapioMensalPDF(
       if (!item) {
         row.push('-');
       } else if (item.isHoliday) {
-        row.push(`DIA ${item.dayNumber} -\n\n${item.holidayDescription || 'FERIADO'}`);
+        row.push(`DIA ${item.dayNumber}\n\n${cleanMenuText(item.holidayDescription || 'FERIADO')}`);
       } else {
         const parts: string[] = [];
-        parts.push(`DIA ${item.dayNumber} - *${item.base?.[0] || 'Arroz Branco'}`);
-        if (item.base?.[1]) parts.push(`*${item.base[1]}`);
-        if (item.protein) parts.push(item.protein);
-        if (item.garnish) parts.push(item.garnish);
-        if (item.salad) parts.push(item.salad);
-        if (item.dessert) parts.push(item.dessert);
+        const rice = cleanMenuText(item.base?.[0] || 'Arroz Branco');
+        parts.push(`DIA ${item.dayNumber} - ${rice}`);
+        if (item.base?.[1]) parts.push(cleanMenuText(item.base[1]));
+        const extraBase = cleanMenuText(item.base3 || item.base?.[2]);
+        if (extraBase) parts.push(extraBase);
+        if (item.protein) parts.push(cleanMenuText(item.protein));
+        if (item.garnish) parts.push(cleanMenuText(item.garnish));
+        const salad = cleanMenuText(item.salad || '');
+        if (salad) parts.push(salad);
+        const dessert = cleanMenuText(item.dessert || '');
+        if (dessert) parts.push(dessert);
+        const obs = cleanMenuText(item.observations || item.specialNotes);
+        if (obs) {
+          parts.push(obs.toLowerCase().startsWith('obs:') ? obs : `Obs: ${obs}`);
+        }
         row.push(parts.join('\n'));
       }
     });
@@ -3464,42 +3572,160 @@ export function generateCardapioMensalPDF(
     theme: 'grid',
     margin: { left: 10, right: 10 },
     styles: {
-      fontSize: 8.5,
+      fontSize: 8.0,
       cellPadding: 2.2,
       lineColor: [30, 41, 59],
       lineWidth: 0.25,
       textColor: [15, 23, 42],
       valign: 'middle',
+      halign: 'center',
     },
     headStyles: {
       fillColor: [22, 101, 52], // Deep Green
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'center',
-      fontSize: 9,
+      fontSize: 8.8,
+      cellPadding: 2.5,
     },
     columnStyles: {
       0: {
-        cellWidth: 16,
+        cellWidth: 24,
         fillColor: [22, 101, 52],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         halign: 'center',
         valign: 'middle',
+        fontSize: 8.0,
       },
-      1: { cellWidth: 52.2 },
-      2: { cellWidth: 52.2 },
-      3: { cellWidth: 52.2 },
-      4: { cellWidth: 52.2 },
-      5: { cellWidth: 52.2 },
+      1: { cellWidth: 50.6, halign: 'center' },
+      2: { cellWidth: 50.6, halign: 'center' },
+      3: { cellWidth: 50.6, halign: 'center' },
+      4: { cellWidth: 50.6, halign: 'center' },
+      5: { cellWidth: 50.6, halign: 'center' },
     },
     didParseCell: (data) => {
-      // Destaque em amarelo para dias de feriado
-      if (typeof data.cell.raw === 'string' && data.cell.raw.includes('FERIADO')) {
+      // Destaque em amarelo para dias de feriado ou recesso
+      if (typeof data.cell.raw === 'string' && (data.cell.raw.includes('FERIADO') || data.cell.raw.includes('RECESSO'))) {
         data.cell.styles.fillColor = [254, 240, 138];
         data.cell.styles.textColor = [161, 98, 7];
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.halign = 'center';
+      }
+    },
+    willDrawCell: (data) => {
+      // Para células do cardápio (colunas 1 a 5), esvazia text padrão para renderizar customizado no didDrawCell
+      if (data.section === 'body' && data.column.index > 0) {
+        data.cell.text = [];
+      }
+    },
+    didDrawCell: (data) => {
+      if (data.section !== 'body' || data.column.index === 0) return;
+
+      const weekNum = data.row.index + 1;
+      const order = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      const dayName = order[data.column.index - 1];
+      const daysInWeek = daysByWeek[weekNum] || [];
+      const item = daysInWeek.find((d) => d.dayOfWeek === dayName);
+
+      const cell = data.cell;
+      const centerX = cell.x + cell.width / 2;
+
+      if (!item) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text('-', centerX, cell.y + cell.height / 2, { align: 'center', baseline: 'middle' });
+        return;
+      }
+
+      if (item.isHoliday) {
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(161, 98, 7);
+        const holY = cell.y + cell.height / 2 - 2.5;
+        doc.text(`DIA ${item.dayNumber}`, centerX, holY, { align: 'center' });
+
+        doc.setFontSize(8.0);
+        doc.text(cleanMenuText(item.holidayDescription || 'FERIADO'), centerX, holY + 4.8, {
+          align: 'center',
+          maxWidth: cell.width - 4,
+        });
+        return;
+      }
+
+      // Cardápio normal do dia
+      const dayPart = `DIA ${item.dayNumber}`;
+      const riceText = cleanMenuText(item.base?.[0] || 'Arroz Branco');
+      const ricePart = ` - ${riceText}`;
+
+      const remainingLines: string[] = [];
+      if (item.base?.[1]) {
+        remainingLines.push(cleanMenuText(item.base[1]));
+      }
+      const extraBase = cleanMenuText(item.base3 || item.base?.[2]);
+      if (extraBase) {
+        remainingLines.push(extraBase);
+      }
+      if (item.protein) {
+        remainingLines.push(cleanMenuText(item.protein));
+      }
+      if (item.garnish) {
+        remainingLines.push(cleanMenuText(item.garnish));
+      }
+      const salad = cleanMenuText(item.salad || '');
+      if (salad) {
+        remainingLines.push(salad);
+      }
+      const dessert = cleanMenuText(item.dessert || '');
+      if (dessert) {
+        remainingLines.push(dessert);
+      }
+
+      const obsRaw = cleanMenuText(item.observations || item.specialNotes);
+      const obsText = obsRaw
+        ? (obsRaw.toLowerCase().startsWith('obs:') ? obsRaw : `Obs: ${obsRaw}`)
+        : '';
+
+      const totalLinesCount = 1 + remainingLines.length + (obsText ? 1 : 0);
+      const lineHeight = totalLinesCount >= 7 ? 3.2 : 3.4;
+      const totalBlockHeight = totalLinesCount * lineHeight;
+      let curY = cell.y + (cell.height - totalBlockHeight) / 2 + (totalLinesCount >= 7 ? 2.2 : 2.5);
+
+      // Linha 1: "DIA X" em NEGRITO e " - Arroz Branco" em NORMAL
+      doc.setFontSize(totalLinesCount >= 7 ? 7.6 : 8.0);
+      doc.setFont('helvetica', 'bold');
+      const dayW = doc.getTextWidth(dayPart);
+      doc.setFont('helvetica', 'normal');
+      const riceW = doc.getTextWidth(ricePart);
+      const line1W = dayW + riceW;
+      const line1X = cell.x + (cell.width - line1W) / 2;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text(dayPart, line1X, curY);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85); // slate-700
+      doc.text(ricePart, line1X + dayW, curY);
+
+      // Demais itens centralizados harmonicamente no corpo da célula
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(totalLinesCount >= 7 ? 7.2 : 7.6);
+      doc.setTextColor(51, 65, 85);
+
+      remainingLines.forEach((line) => {
+        curY += lineHeight;
+        doc.text(line, centerX, curY, { align: 'center', maxWidth: cell.width - 4 });
+      });
+
+      // Linha de Observações / Alergênicos na parte inferior da célula em itálico
+      if (obsText) {
+        curY += lineHeight + 0.15;
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(totalLinesCount >= 7 ? 6.7 : 7.0);
+        doc.setTextColor(180, 83, 9);
+        doc.text(obsText, centerX, curY, { align: 'center', maxWidth: cell.width - 4 });
       }
     },
   });
@@ -3572,16 +3798,18 @@ export function generateReceitasCulinariaPDF(
     }
   }
 
-  // Header Titles
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(22, 101, 52);
-  doc.text(`OFICINA DE CULINÁRIA / Receitas - ${monthName} de ${year}`, 50, 15);
+  // Header Titles (Centralizados)
+  const centerX = pageWidth / 2;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(22, 101, 52);
+  doc.text('OFICINAS DE CULINÁRIA', centerX, 14, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
   doc.setTextColor(71, 85, 105);
-  doc.text('Instituto Educacional Crescer • Modalidade Culinária', 50, 23);
+  doc.text(`RECEITAS - ${monthName.toUpperCase()} DE ${year}`, centerX, 22.5, { align: 'center' });
 
   let currentY = 38;
 
@@ -3618,7 +3846,7 @@ export function generateReceitasCulinariaPDF(
     const totalCardHeight = topBarHeight + titleHeight + columnsHeight + footerMetaHeight + 4;
 
     // Page overflow check
-    if (currentY + totalCardHeight > pageHeight - 16) {
+    if (currentY + totalCardHeight > pageHeight - 18) {
       doc.addPage();
       currentY = 16;
     }
@@ -3701,11 +3929,6 @@ export function generateReceitasCulinariaPDF(
     currentY += totalCardHeight + 5;
   });
 
-  const footerY = pageHeight - 10;
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.5);
-  doc.line(12, footerY - 3, pageWidth - 12, footerY - 3);
-
   const formatPdfCrn = (rawCrn?: string) => {
     if (!rawCrn || !rawCrn.trim()) return 'CRN: 84367';
     const trimmed = rawCrn.trim();
@@ -3714,11 +3937,20 @@ export function generateReceitasCulinariaPDF(
   const nutriName = nutritionistName || 'Thaís Grisoni Baroni';
   const crnLabel = formatPdfCrn(crn);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`Nutricionista Responsável: ${nutriName} - ${crnLabel}`, 14, footerY);
-  doc.text('Instituto Educacional Crescer', pageWidth - 14, footerY, { align: 'right' });
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    const footerY = pageHeight - 10;
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.5);
+    doc.line(12, footerY - 3, pageWidth - 12, footerY - 3);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Nutricionista Responsável: ${nutriName} - ${crnLabel}`, 14, footerY);
+    doc.text('Instituto Educacional Crescer • Modalidade Culinária', pageWidth - 14, footerY, { align: 'right' });
+  }
 
   const filename = `Oficina_Culinaria_Receitas_${monthName}_${year}.pdf`;
   const blob = doc.output('blob');
