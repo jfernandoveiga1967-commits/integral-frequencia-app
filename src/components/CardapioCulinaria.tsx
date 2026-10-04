@@ -719,10 +719,10 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
               </div>
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Oficina de Culinária Infantil & Desenvolvimento Pedagógico
+                  Oficina de Culinária
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
-                  Aulas práticas ministradas às <span className="font-semibold text-amber-600 dark:text-amber-400">Quintas e Sextas-feiras</span> com foco no contato com alimentos saudáveis, noções matemáticas (medidas), trabalho em equipe e autonomia das crianças.
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Receitas semanais das aulas práticas.
                 </p>
               </div>
             </div>
