@@ -34,6 +34,7 @@ import {
   saveCookingRecipes,
   syncCookingRecipesFromFirestore,
   generateBlankMonthMenu,
+  calculateCookingWorkshopDates,
 } from '../utils/cardapioStorage';
 import { canManageCardapio, isNutricionista } from '../utils/authUtils';
 import { generateCardapioMensalPDF, generateReceitasCulinariaPDF, PDFGenerationResult } from '../utils/pdfGenerator';
@@ -322,7 +323,8 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
         recipes,
         false,
         synchronizedMenu.nutritionistName,
-        synchronizedMenu.crn
+        synchronizedMenu.crn,
+        holidaysList
       );
       setPdfPreview({
         isOpen: true,
@@ -751,7 +753,14 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
 
           {/* Cards de Receitas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {recipes.map((recipe, index) => (
+            {recipes.map((recipe, index) => {
+              const weekCalc = calculateCookingWorkshopDates(
+                selectedYear,
+                selectedMonth,
+                recipe.weekNumber || ((index + 1) as 1 | 2 | 3 | 4 | 5),
+                holidaysList
+              );
+              return (
               <div
                 key={recipe.id}
                 className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
@@ -760,13 +769,22 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                   {/* Card Header */}
                   <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex items-start justify-between">
                     <div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="px-2.5 py-1 bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] font-extrabold rounded-lg uppercase tracking-wider border border-amber-500/30">
                           {recipe.weekLabel}
                         </span>
                         <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                           {recipe.datesLabel}
                         </span>
+                        {weekCalc.hasHolidayInCookingDays && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-800"
+                            title={weekCalc.holidayWarning || 'Data ajustada pelo calendário escolar'}
+                          >
+                            <AlertCircle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                            Ajuste de Feriado
+                          </span>
+                        )}
                       </div>
                       <h3 className="text-xl font-black text-slate-900 dark:text-white mt-2">
                         {recipe.title}
@@ -878,7 +896,8 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                   <span className="font-semibold text-emerald-600 dark:text-emerald-400">Nutrição Infantil</span>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
       )}
@@ -945,24 +964,31 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
       )}
 
       {/* Modal: Editar Dia do Cardápio */}
-      <EditDayModal
-        isOpen={!!editingDay}
-        day={editingDay}
-        onClose={() => setEditingDay(null)}
-        onSave={handleSaveDay}
-      />
+      {editingDay && (
+        <EditDayModal
+          key={editingDay.date}
+          isOpen={!!editingDay}
+          day={editingDay}
+          onClose={() => setEditingDay(null)}
+          onSave={handleSaveDay}
+        />
+      )}
 
       {/* Modal: Adicionar/Editar Receita da Oficina */}
-      <EditRecipeModal
-        isOpen={isNewRecipeModalOpen}
-        recipe={editingRecipe}
-        monthKey={monthKey}
-        onClose={() => {
-          setIsNewRecipeModalOpen(false);
-          setEditingRecipe(null);
-        }}
-        onSave={handleSaveRecipe}
-      />
+      {isNewRecipeModalOpen && (
+        <EditRecipeModal
+          key={editingRecipe?.id || 'new_recipe'}
+          isOpen={isNewRecipeModalOpen}
+          recipe={editingRecipe}
+          monthKey={monthKey}
+          holidays={holidaysList}
+          onClose={() => {
+            setIsNewRecipeModalOpen(false);
+            setEditingRecipe(null);
+          }}
+          onSave={handleSaveRecipe}
+        />
+      )}
 
       {/* Modal: Visualizador de PDF */}
       {pdfPreview.isOpen && pdfPreview.result && (

@@ -1,4 +1,5 @@
 import { MonthlyMenu, CookingRecipe, MenuItemDay, DayOfWeekMenu } from '../types/cardapio';
+import { HolidayItem } from '../types';
 import {
   DEFAULT_SEPTEMBER_2026_MENU,
   DEFAULT_CULINARY_RECIPES_SEPTEMBER_2026,
@@ -264,4 +265,149 @@ export async function syncCookingRecipesFromFirestore(monthKey: string): Promise
     console.warn('Erro ao sincronizar receitas do Firestore:', err);
   }
   return null;
+}
+
+export interface CookingWeekCalculation {
+  weekNumber: 1 | 2 | 3 | 4 | 5;
+  weekLabel: string;
+  datesLabel: string;
+  activeDates: string[];
+  holidaysInWeek: { date: string; dayName: string; name: string; type: string }[];
+  thursday: { date: string; dayNumber: number; isHoliday: boolean; holidayName?: string };
+  friday: { date: string; dayNumber: number; isHoliday: boolean; holidayName?: string };
+  hasHolidayInCookingDays: boolean;
+  holidayWarning: string | null;
+}
+
+/**
+ * Calcula automaticamente os dias letivos da Oficina de Culinária (Quintas e Sextas)
+ * para uma dada semana e mês, cruzando com o calendário de feriados e recessos escolares.
+ */
+export function calculateCookingWorkshopDates(
+  year: number,
+  month: number,
+  weekNumber: 1 | 2 | 3 | 4 | 5,
+  holidaysList?: HolidayItem[]
+): CookingWeekCalculation {
+  const holidays = holidaysList && holidaysList.length > 0 ? holidaysList : loadHolidays();
+  const weekLabels: Record<number, string> = {
+    1: 'PRIMEIRA SEMANA',
+    2: 'SEGUNDA SEMANA',
+    3: 'TERCEIRA SEMANA',
+    4: 'QUARTA SEMANA',
+    5: 'QUINTA SEMANA',
+  };
+
+  const firstDayOfMonth = new Date(year, month - 1, 1);
+  const dayOfWeekFirst = firstDayOfMonth.getDay(); // 0 = Domingo, 1 = Segunda...
+
+  // Retrocede para a segunda-feira correspondente à semana 1
+  const startDate = new Date(firstDayOfMonth);
+  if (dayOfWeekFirst === 0) {
+    startDate.setDate(startDate.getDate() - 6);
+  } else if (dayOfWeekFirst > 1) {
+    startDate.setDate(startDate.getDate() - (dayOfWeekFirst - 1));
+  }
+
+  // Segunda-feira da semana solicitada
+  const mondayOfWeek = new Date(startDate);
+  mondayOfWeek.setDate(mondayOfWeek.getDate() + (weekNumber - 1) * 7);
+
+  const dayNames = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'];
+  const weekDays = [0, 1, 2, 3, 4].map((offset) => {
+    const d = new Date(mondayOfWeek);
+    d.setDate(d.getDate() + offset);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const dayNum = d.getDate();
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    const holidayHit = isHolidayOrRecess(dateStr, holidays);
+    return {
+      date: dateStr,
+      dateObj: d,
+      dayNumber: dayNum,
+      month: m,
+      year: y,
+      dayName: dayNames[offset],
+      isHoliday: Boolean(holidayHit),
+      holidayItem: holidayHit,
+    };
+  });
+
+  const thursday = {
+    date: weekDays[3].date,
+    dayNumber: weekDays[3].dayNumber,
+    isHoliday: weekDays[3].isHoliday,
+    holidayName: weekDays[3].holidayItem?.name,
+  };
+
+  const friday = {
+    date: weekDays[4].date,
+    dayNumber: weekDays[4].dayNumber,
+    isHoliday: weekDays[4].isHoliday,
+    holidayName: weekDays[4].holidayItem?.name,
+  };
+
+  const holidaysInWeek = weekDays
+    .filter((d) => d.isHoliday)
+    .map((d) => ({
+      date: d.date,
+      dayName: d.dayName,
+      name: d.holidayItem?.name || 'Feriado/Recesso',
+      type: d.holidayItem?.type === 'feriado' ? 'Feriado' : 'Recesso Escolar',
+    }));
+
+  const hasHolidayInCookingDays = thursday.isHoliday || friday.isHoliday;
+
+  // Dias letivos ativos de culinária (normalmente Quinta e Sexta)
+  const activeCookingDays = [weekDays[3], weekDays[4]].filter((d) => !d.isHoliday);
+
+  const monthNameUpper = MONTH_NAMES_BR[month - 1] || 'MÊS';
+  let datesLabel = '';
+
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+
+  if (activeCookingDays.length === 2) {
+    const d1 = activeCookingDays[0];
+    const d2 = activeCookingDays[1];
+    if (d1.month === d2.month) {
+      const mName = MONTH_NAMES_BR[d1.month - 1] || monthNameUpper;
+      datesLabel = `${pad2(d1.dayNumber)} E ${pad2(d2.dayNumber)} DE ${mName}`;
+    } else {
+      const mName1 = MONTH_NAMES_BR[d1.month - 1];
+      const mName2 = MONTH_NAMES_BR[d2.month - 1];
+      datesLabel = `${pad2(d1.dayNumber)} DE ${mName1} E ${pad2(d2.dayNumber)} DE ${mName2}`;
+    }
+  } else if (activeCookingDays.length === 1) {
+    const dOnly = activeCookingDays[0];
+    const mName = MONTH_NAMES_BR[dOnly.month - 1] || monthNameUpper;
+    datesLabel = `${pad2(dOnly.dayNumber)} DE ${mName}`;
+  } else {
+    // Ambos são feriados
+    datesLabel = `SEM AULAS (FERIADO/RECESSO)`;
+  }
+
+  let holidayWarning: string | null = null;
+  if (thursday.isHoliday && friday.isHoliday) {
+    holidayWarning = `Quinta (${pad2(thursday.dayNumber)}) e Sexta-feira (${pad2(friday.dayNumber)}) são feriados/recessos escolares. Não haverá oficina prática nesta semana.`;
+  } else if (thursday.isHoliday) {
+    holidayWarning = `Quinta-feira (${pad2(thursday.dayNumber)}/${pad2(month)}) é ${thursday.holidayName || 'Feriado/Recesso'}. Oficina realizada exclusivamente na Sexta-feira (${pad2(friday.dayNumber)}/${pad2(month)}).`;
+  } else if (friday.isHoliday) {
+    holidayWarning = `Sexta-feira (${pad2(friday.dayNumber)}/${pad2(month)}) é ${friday.holidayName || 'Feriado/Recesso'}. Oficina realizada exclusivamente na Quinta-feira (${pad2(thursday.dayNumber)}/${pad2(month)}).`;
+  } else if (holidaysInWeek.length > 0) {
+    const hDesc = holidaysInWeek.map((h) => `${h.dayName} (${h.name})`).join(', ');
+    holidayWarning = `Atenção: A semana possui feriado/recesso letivo (${hDesc}), mas as aulas de culinária (Quinta e Sexta) ocorrem normalmente.`;
+  }
+
+  return {
+    weekNumber,
+    weekLabel: weekLabels[weekNumber] || `SEMANA ${weekNumber}`,
+    datesLabel,
+    activeDates: activeCookingDays.map((d) => d.date),
+    holidaysInWeek,
+    thursday,
+    friday,
+    hasHolidayInCookingDays,
+    holidayWarning,
+  };
 }

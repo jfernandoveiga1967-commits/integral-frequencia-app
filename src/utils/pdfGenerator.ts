@@ -34,6 +34,8 @@ import {
   getDayPontoStatus,
 } from './pontoUtils';
 import { getDefaultHorarioTurnoForTurma } from './atribuicoesStorage';
+import { calculateCookingWorkshopDates } from './cardapioStorage';
+import { loadHolidays } from './storageUtils';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -2135,24 +2137,22 @@ export interface GenerateReciboBolsaPDFOptions {
   saveImmediately?: boolean;
 }
 
-export function generateReciboBolsaPDF({
-  user,
-  month,
-  year,
-  financials,
-  closingRecord,
-  companyName: companyNameProp,
-  institutionName = 'Instituto Educacional Crescer',
-  pixKey = 'Pendente',
-  contractSchedule = '11:40 - 17:40',
-  contractDailyHoursFormatted = '6h 00min',
-  saveImmediately = false,
-}: GenerateReciboBolsaPDFOptions): PDFGenerationResult {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
+export function drawSingleReceiptPage(
+  doc: jsPDF,
+  options: GenerateReciboBolsaPDFOptions
+): void {
+  const {
+    user,
+    month,
+    year,
+    financials,
+    closingRecord,
+    companyName: companyNameProp,
+    institutionName = 'Instituto Educacional Crescer',
+    pixKey = 'Pendente',
+    contractSchedule = '11:40 - 17:40',
+    contractDailyHoursFormatted = '6h 00min',
+  } = options;
 
   const monthName = getMonthNameBR(month);
   const userName = user?.name || closingRecord?.userName || 'Colaborador';
@@ -2465,9 +2465,20 @@ export function generateReciboBolsaPDF({
   doc.setFontSize(6);
   doc.setTextColor(100, 116, 139);
   doc.text(`Coordenação Pedagógica / ${companyName}`, 155, lineY + 7.5, { align: 'center' });
+}
 
+export function generateReciboBolsaPDF(options: GenerateReciboBolsaPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  drawSingleReceiptPage(doc, options);
   applyPageNumbersAndFooters(doc, 'portrait');
-  const filename = `Recibo_Bolsa_${userName.replace(/[\/\s]+/g, '_')}_${String(month).padStart(2, '0')}_${year}.pdf`;
+
+  const userName = options.user?.name || options.closingRecord?.userName || 'Colaborador';
+  const filename = `Recibo_Bolsa_${userName.replace(/[\/\s]+/g, '_')}_${String(options.month).padStart(2, '0')}_${options.year}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
@@ -2475,9 +2486,46 @@ export function generateReciboBolsaPDF({
   const dataUrl = dataUri;
   const download = () => doc.save(filename);
 
-  if (saveImmediately) {
+  if (options.saveImmediately) {
     doc.save(filename);
   }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Consolidates all employees' receipts into a SINGLE unified PDF document
+ * with a page break (doc.addPage) between each employee.
+ */
+export function generateAllReceiptsPDF(
+  optionsList: GenerateReciboBolsaPDFOptions[],
+  customFilename?: string
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  optionsList.forEach((opts, index) => {
+    if (index > 0) {
+      doc.addPage('a4', 'portrait');
+    }
+    drawSingleReceiptPage(doc, opts);
+  });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const first = optionsList[0];
+  const monthName = first ? getMonthNameBR(first.month) : 'Competencia';
+  const year = first ? first.year : new Date().getFullYear();
+  const filename = customFilename || `Recibos_Pagamento_LOTE_${monthName}_${year}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
@@ -3770,7 +3818,8 @@ export function generateReceitasCulinariaPDF(
   recipes: CookingRecipe[],
   saveImmediately = false,
   nutritionistName?: string,
-  crn?: string
+  crn?: string,
+  holidays?: HolidayItem[]
 ): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -3780,6 +3829,10 @@ export function generateReceitasCulinariaPDF(
 
   const pageWidth = 210;
   const pageHeight = 297;
+
+  // Resolução do calendário escolar institucional de feriados e recessos
+  const activeHolidays = holidays && holidays.length > 0 ? holidays : loadHolidays();
+  const monthNum = parseInt(monthKey.split('-')[1], 10) || 9;
 
   // Header Banner
   doc.setFillColor(240, 253, 244);
@@ -3813,7 +3866,13 @@ export function generateReceitasCulinariaPDF(
 
   let currentY = 38;
 
-  recipes.forEach((recipe) => {
+  recipes.forEach((recipe, idx) => {
+    // Sincronização e validação das datas com o calendário escolar
+    const weekNum = (recipe.weekNumber || (idx + 1)) as 1 | 2 | 3 | 4 | 5;
+    const weekCalc = calculateCookingWorkshopDates(year, monthNum, weekNum, activeHolidays);
+    const displayDatesLabel = recipe.datesLabel || weekCalc.datesLabel;
+    const displayWeekLabel = recipe.weekLabel || weekCalc.weekLabel;
+
     // 1. Pre-calculate text wrapping and height
     let totalIngLines = 0;
     recipe.ingredients.forEach((ing) => {
@@ -3865,7 +3924,15 @@ export function generateReceitasCulinariaPDF(
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(30, 41, 59);
-    doc.text(`${recipe.weekLabel} • ${recipe.datesLabel}`, 16, currentY + 6.2);
+    doc.text(`${displayWeekLabel} • ${displayDatesLabel}`, 16, currentY + 6.2);
+
+    // Indicador visual de ajuste de datas decorrente do calendário escolar
+    if (weekCalc.hasHolidayInCookingDays) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(180, 83, 9);
+      doc.text('(Data validada pelo Calendário Escolar)', pageWidth - 16, currentY + 6.2, { align: 'right' });
+    }
 
     // Recipe Title (sem rendimento abaixo)
     doc.setFontSize(11.5);

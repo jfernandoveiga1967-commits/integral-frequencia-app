@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Save, Check, Calendar, AlertCircle } from 'lucide-react';
 import { MenuItemDay } from '../../types/cardapio';
 import { formatDateBR } from '../../utils/dateUtils';
@@ -16,16 +16,29 @@ export const EditDayModal: React.FC<EditDayModalProps> = ({
   onClose,
   onSave,
 }) => {
-  if (!isOpen || !day) return null;
+  const [baseRice, setBaseRice] = useState<string>('Arroz Branco');
+  const [baseBeans, setBaseBeans] = useState<string>('Feijão');
+  const [base3, setBase3] = useState<string>('');
+  const [protein, setProtein] = useState<string>('');
+  const [garnish, setGarnish] = useState<string>('');
+  const [salad, setSalad] = useState<string>('Salada');
+  const [dessert, setDessert] = useState<string>('Fruta');
+  const [specialNotes, setSpecialNotes] = useState<string>('');
 
-  const [baseRice, setBaseRice] = useState<string>(day.base?.[0] || 'Arroz Branco');
-  const [baseBeans, setBaseBeans] = useState<string>(day.base?.[1] || 'Feijão');
-  const [base3, setBase3] = useState<string>(day.base3 || day.base?.[2] || '');
-  const [protein, setProtein] = useState<string>(day.protein || '');
-  const [garnish, setGarnish] = useState<string>(day.garnish || '');
-  const [salad, setSalad] = useState<string>(day.salad || 'Salada');
-  const [dessert, setDessert] = useState<string>(day.dessert || 'Fruta');
-  const [specialNotes, setSpecialNotes] = useState<string>(day.observations || day.specialNotes || '');
+  useEffect(() => {
+    if (day) {
+      setBaseRice(day.base?.[0] || 'Arroz Branco');
+      setBaseBeans(day.base?.[1] || 'Feijão');
+      setBase3(day.base3 || day.base?.[2] || '');
+      setProtein(day.protein || '');
+      setGarnish(day.garnish || '');
+      setSalad(day.salad || 'Salada');
+      setDessert(day.dessert || 'Fruta');
+      setSpecialNotes(day.observations || day.specialNotes || '');
+    }
+  }, [day, isOpen]);
+
+  if (!isOpen || !day) return null;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();

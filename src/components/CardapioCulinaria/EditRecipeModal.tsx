@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
-import { X, Save, Plus, Trash2, ChefHat, Sparkles } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { X, Save, Plus, Trash2, ChefHat, Sparkles, Calendar, AlertCircle, Info, RotateCcw } from 'lucide-react';
 import { CookingRecipe } from '../../types/cardapio';
+import { HolidayItem } from '../../types';
+import { calculateCookingWorkshopDates } from '../../utils/cardapioStorage';
 
 interface EditRecipeModalProps {
   isOpen: boolean;
   recipe: CookingRecipe | null;
   monthKey?: string;
+  holidays?: HolidayItem[];
   onClose: () => void;
   onSave: (recipe: CookingRecipe) => void;
 }
@@ -14,32 +17,76 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
   isOpen,
   recipe,
   monthKey = '2026-09',
+  holidays,
   onClose,
   onSave,
 }) => {
-  if (!isOpen) return null;
+  const [yearStr, monthStr] = (recipe?.monthKey || monthKey || '2026-09').split('-');
+  const year = parseInt(yearStr, 10) || 2026;
+  const month = parseInt(monthStr, 10) || 9;
 
-  const [title, setTitle] = useState<string>(recipe?.title || '');
-  const [weekLabel, setWeekLabel] = useState<string>(recipe?.weekLabel || 'PRIMEIRA SEMANA');
-  const [weekNumber, setWeekNumber] = useState<1 | 2 | 3 | 4 | 5>(recipe?.weekNumber || 1);
-  const [datesLabel, setDatesLabel] = useState<string>(recipe?.datesLabel || '03 E 04 DE SETEMBRO');
-  const [category, setCategory] = useState<'doce' | 'salgado' | 'bebida' | 'lanche'>(
-    recipe?.category || 'salgado'
-  );
-  const [prepTime, setPrepTime] = useState<string>(recipe?.prepTime || '40 minutos');
-  const [servings, setServings] = useState<string>(recipe?.servings || '15 porções');
-  const [ingredientsText, setIngredientsText] = useState<string>(
-    recipe ? recipe.ingredients.join('\n') : ''
-  );
-  const [instructionsText, setInstructionsText] = useState<string>(
-    recipe ? recipe.instructions.join('\n') : ''
-  );
-  const [nutritionalNotes, setNutritionalNotes] = useState<string>(
-    recipe?.nutritionalNotes || ''
-  );
-  const [allergensText, setAllergensText] = useState<string>(
-    recipe?.allergens ? recipe.allergens.join(', ') : ''
-  );
+  const [title, setTitle] = useState<string>('');
+  const [weekNumber, setWeekNumber] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [weekLabel, setWeekLabel] = useState<string>('PRIMEIRA SEMANA');
+  const [datesLabel, setDatesLabel] = useState<string>('03 E 04 DE SETEMBRO');
+  const [category, setCategory] = useState<'doce' | 'salgado' | 'bebida' | 'lanche'>('salgado');
+  const [prepTime, setPrepTime] = useState<string>('40 minutos');
+  const [servings, setServings] = useState<string>('15 porções');
+  const [ingredientsText, setIngredientsText] = useState<string>('');
+  const [instructionsText, setInstructionsText] = useState<string>('');
+  const [nutritionalNotes, setNutritionalNotes] = useState<string>('');
+  const [allergensText, setAllergensText] = useState<string>('');
+
+  // Cálculo reativo dos dias da oficina integrados ao calendário de feriados/recessos
+  const calculation = useMemo(() => {
+    return calculateCookingWorkshopDates(year, month, weekNumber, holidays);
+  }, [year, month, weekNumber, holidays]);
+
+  // Sincroniza campos quando o modal abre ou a receita selecionada muda
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (recipe) {
+      setTitle(recipe.title || '');
+      setWeekNumber(recipe.weekNumber || 1);
+      setWeekLabel(recipe.weekLabel || 'PRIMEIRA SEMANA');
+      setDatesLabel(recipe.datesLabel || '03 E 04 DE SETEMBRO');
+      setCategory(recipe.category || 'salgado');
+      setPrepTime(recipe.prepTime || '40 minutos');
+      setServings(recipe.servings || '15 porções');
+      setIngredientsText(recipe.ingredients ? recipe.ingredients.join('\n') : '');
+      setInstructionsText(recipe.instructions ? recipe.instructions.join('\n') : '');
+      setNutritionalNotes(recipe.nutritionalNotes || '');
+      setAllergensText(recipe.allergens ? recipe.allergens.join(', ') : '');
+    } else {
+      setTitle('');
+      setWeekNumber(1);
+      const initialCalc = calculateCookingWorkshopDates(year, month, 1, holidays);
+      setWeekLabel(initialCalc.weekLabel);
+      setDatesLabel(initialCalc.datesLabel);
+      setCategory('salgado');
+      setPrepTime('40 minutos');
+      setServings('15 porções');
+      setIngredientsText('');
+      setInstructionsText('');
+      setNutritionalNotes('');
+      setAllergensText('');
+    }
+  }, [recipe, isOpen, year, month, holidays]);
+
+  // Troca de semana letiva recalcula automaticamente datas e descarta feriados
+  const handleWeekChange = (newWeek: 1 | 2 | 3 | 4 | 5) => {
+    setWeekNumber(newWeek);
+    const calc = calculateCookingWorkshopDates(year, month, newWeek, holidays);
+    setWeekLabel(calc.weekLabel);
+    setDatesLabel(calc.datesLabel);
+  };
+
+  // Re-sincronizar manualmente com o calendário escolar
+  const handleSyncWithCalendar = () => {
+    setWeekLabel(calculation.weekLabel);
+    setDatesLabel(calculation.datesLabel);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +127,8 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
     onSave(newRecipe);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -141,34 +190,100 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
             </div>
           </div>
 
-          {/* Semana e Datas */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                Semana Letiva *
-              </label>
-              <input
-                type="text"
-                required
-                value={weekLabel}
-                onChange={(e) => setWeekLabel(e.target.value)}
-                placeholder="Ex: PRIMEIRA SEMANA"
-                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500"
-              />
+          {/* Semana Letiva e Dias de Aplicação com Sincronização do Calendário Escolar */}
+          <div className="space-y-3 p-4 bg-slate-800/40 rounded-2xl border border-slate-700/60">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Calendar className="w-3.5 h-3.5" />
+                Cronograma Escolar da Oficina
+              </span>
+              <button
+                type="button"
+                onClick={handleSyncWithCalendar}
+                className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 hover:underline cursor-pointer"
+                title="Recalcular datas automaticamente descartando feriados do calendário"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Auto-calcular do Calendário</span>
+              </button>
             </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                Dias de Aplicação (Quintas e Sextas) *
-              </label>
-              <input
-                type="text"
-                required
-                value={datesLabel}
-                onChange={(e) => setDatesLabel(e.target.value)}
-                placeholder="Ex: 03 E 04 DE SETEMBRO"
-                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500"
-              />
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Semana do Mês *
+                </label>
+                <select
+                  value={weekNumber}
+                  onChange={(e) => handleWeekChange(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500 font-medium"
+                >
+                  <option value={1}>1ª Semana do Mês</option>
+                  <option value={2}>2ª Semana do Mês</option>
+                  <option value={3}>3ª Semana do Mês</option>
+                  <option value={4}>4ª Semana do Mês</option>
+                  <option value={5}>5ª Semana do Mês</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Identificação da Semana *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={weekLabel}
+                  onChange={(e) => setWeekLabel(e.target.value)}
+                  placeholder="Ex: PRIMEIRA SEMANA"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Dias de Aplicação (Quintas e Sextas) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={datesLabel}
+                  onChange={(e) => setDatesLabel(e.target.value)}
+                  placeholder="Ex: 03 E 04 DE SETEMBRO"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
             </div>
+
+            {/* Aviso visual/alerta caso a semana contenha um feriado/recesso registrado */}
+            {calculation.holidayWarning && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-start space-x-2.5 transition-all ${
+                  calculation.hasHolidayInCookingDays
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                    : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                }`}
+              >
+                {calculation.hasHolidayInCookingDays ? (
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                ) : (
+                  <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-0.5">
+                  <div className="font-bold">
+                    {calculation.hasHolidayInCookingDays
+                      ? '⚠️ Ajuste no Cronograma da Oficina (Feriado/Recesso):'
+                      : 'ℹ️ Observação do Calendário Escolar na Semana:'}
+                  </div>
+                  <p className="text-slate-300 leading-relaxed">{calculation.holidayWarning}</p>
+                  {calculation.hasHolidayInCookingDays && (
+                    <p className="text-[11px] text-amber-400 font-semibold">
+                      ✓ As datas de aplicação foram recalculadas descartando o dia de feriado/recesso.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Tempo de Preparo e Rendimento */}

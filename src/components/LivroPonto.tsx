@@ -90,7 +90,12 @@ import {
   isDayShiftComplete,
   checkIsDiaDescanso,
 } from '../utils/pontoUtils';
-import { generateLivroPontoPDFReport, generateReciboBolsaPDF, generateAllTimecardsPDF } from '../utils/pdfGenerator';
+import {
+  generateLivroPontoPDFReport,
+  generateReciboBolsaPDF,
+  generateAllTimecardsPDF,
+  generateAllReceiptsPDF,
+} from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
 import { loadPontoRecords } from '../utils/storageUtils';
 import { playPontoSuccessSound } from '../utils/notificationUtils';
@@ -1373,6 +1378,117 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       setIsGeneratingAllPDF(false);
     }
   };
+
+  const [isGeneratingAllReceipts, setIsGeneratingAllReceipts] = useState(false);
+
+  // Generate All Payment Receipts PDF in Batch (Consolidated Single PDF)
+  const handleGenerateAllReceiptsPDF = async (saveImmediately = false) => {
+    setIsGeneratingAllReceipts(true);
+    try {
+      const targetUsersList = availableUsers.filter((u) => {
+        if (isUserActive(u)) return true;
+        return pontoRecords.some((r) => r.userId === u.id && r.date && r.date.startsWith(monthKey));
+      });
+
+      if (targetUsersList.length === 0) {
+        setPunchFeedback({
+          text: 'Nenhum colaborador ativo encontrado para a competência selecionada.',
+          type: 'error',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+        return;
+      }
+
+      const receiptsOptionsList = targetUsersList.map((usr) => {
+        const userRecords = pontoRecords.filter(
+          (r) => r.userId === usr.id && r.date && r.date.startsWith(monthKey)
+        );
+        const closing = pontoClosings.find((c) => c.userId === usr.id && c.monthKey === monthKey);
+        const userAdmission = usr.dataAdmissao ? usr.dataAdmissao.trim() : '';
+
+        const usrSchedule = closing?.contractSchedule || usr.contractSchedule || '11:40 - 17:40';
+        const usrHoursFmt = closing?.contractDailyHoursFormatted || usr.contractDailyHoursFormatted || '6h 00min';
+        const usrSalary = closing?.baseSalary !== undefined && closing.baseSalary !== null
+          ? closing.baseSalary
+          : (usr.baseSalary !== undefined && usr.baseSalary !== null ? usr.baseSalary : 1200);
+        const usrRegime = closing?.regimeTrabalho || usr.regimeTrabalho || 'mensalista';
+        const usrDivisor = closing?.divisorHours || usr.contractDivisorHours || DIVISOR_MENSAL_PADRAO;
+        const usrAjuda = closing?.ajudaDeCusto !== undefined && closing.ajudaDeCusto !== null
+          ? Number(closing.ajudaDeCusto)
+          : (Number(usr.ajudaDeCusto) || 0);
+
+        const usrFinancials = calculateMonthlyPontoFinancials({
+          records: userRecords,
+          holidays,
+          year: selectedYear,
+          month: selectedMonth,
+          baseSalary: usrSalary,
+          regimeTrabalho: usrRegime,
+          valorHoraAula: usr.valorHoraAula,
+          duracaoAulaMinutos: usr.duracaoAulaMinutos || DURACAO_AULA_PADRAO_MINUTOS,
+          divisorHours: usrDivisor,
+          divisorDays: 30,
+          ajudaDeCusto: usrAjuda,
+          contractDailyHours: usr.contractDailyHours,
+          contractDailyMinutes: usr.contractDailyMinutes,
+          contractDailyHoursFormatted: usrHoursFmt,
+          contractSchedule: usrSchedule,
+          manualAddition: closing?.manualAddition || 0,
+          manualDiscount: closing?.manualDiscount || 0,
+          dataAdmissao: usr.dataAdmissao,
+        });
+
+        return {
+          user: {
+            ...usr,
+            dataAdmissao: userAdmission || undefined,
+          },
+          month: selectedMonth,
+          year: selectedYear,
+          financials: usrFinancials,
+          closingRecord: closing ? { ...closing, dataAdmissao: userAdmission || closing.dataAdmissao } : closing,
+          companyName: usr.company || 'GADAL - Gestão e Apoio',
+          institutionName: 'Instituto Educacional Crescer',
+          pixKey: usr.pixKey || usr.phone || 'Pendente',
+          contractSchedule: usrSchedule,
+          contractDailyHoursFormatted: usrHoursFmt,
+          saveImmediately: false,
+        };
+      });
+
+      const monthName = getMonthNameBR(selectedMonth);
+      const filename = `Recibos_Pagamento_LOTE_${monthName}_${selectedYear}.pdf`;
+      const result = generateAllReceiptsPDF(receiptsOptionsList, filename);
+
+      if (saveImmediately) {
+        result.download();
+        setPunchFeedback({
+          text: `Arquivo "${filename}" com ${targetUsersList.length} recibos gerado e baixado!`,
+          type: 'success',
+        });
+        setTimeout(() => setPunchFeedback(null), 3500);
+      } else {
+        setPdfPreviewState({
+          isOpen: true,
+          doc: result.doc,
+          dataUrl: result.dataUrl || result.dataUri,
+          blobUrl: result.blobUrl,
+          filename: result.filename,
+          title: `Recibos de Pagamento em Lote - ${monthName}/${selectedYear} (${targetUsersList.length} Colaboradores)`,
+          onDownload: result.download,
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao gerar recibos de pagamento em lote:', err);
+      setPunchFeedback({
+        text: 'Erro ao gerar recibos de pagamento em lote. Tente novamente.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
+    } finally {
+      setIsGeneratingAllReceipts(false);
+    }
+  };
   const handleGeneratePontoPDF = (saveImmediately = false) => {
     try {
       const result = generateLivroPontoPDFReport({
@@ -1566,24 +1682,36 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               )}
             </button>
 
-            {/* Print/View Receipt */}
+            {/* Batch Download All Timecards PDF */}
             <button
-              onClick={() => setShowReceiptModal(true)}
-              className="flex items-center space-x-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-semibold transition cursor-pointer"
-              title="Visualizar e Imprimir Recibo de Pagamento (Padrão A4)"
+              type="button"
+              onClick={() => handleGenerateAllPontoPDF(true)}
+              disabled={isGeneratingAllPDF}
+              className="flex items-center space-x-2 px-3.5 py-2.5 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white border border-emerald-400/40 rounded-xl text-sm font-bold transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
+              title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
             >
-              <FileCheck2 className="w-4 h-4 text-indigo-400" />
-              <span>Recibo de Pagamento</span>
+              {isGeneratingAllPDF ? (
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
+              ) : (
+                <Download className="w-4 h-4 text-emerald-200" />
+              )}
+              <span>Baixar Todos os Espelhos (PDF Único)</span>
             </button>
 
-            {/* Print Timesheet */}
+            {/* Batch Download All Receipts PDF */}
             <button
-              onClick={() => setShowTimesheetPrintModal(true)}
-              className="flex items-center space-x-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-semibold transition cursor-pointer"
-              title="Exportar Espelho de Ponto Mensal Formatado"
+              type="button"
+              onClick={() => handleGenerateAllReceiptsPDF(true)}
+              disabled={isGeneratingAllReceipts}
+              className="flex items-center space-x-2 px-3.5 py-2.5 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-400/40 rounded-xl text-sm font-bold transition shadow-sm cursor-pointer shadow-indigo-900/30 active:scale-95"
+              title="Baixar em um único PDF consolidado os recibos de pagamento de todos os colaboradores ativos do mês de competência"
             >
-              <Printer className="w-4 h-4 text-emerald-400" />
-              <span>Espelho de Ponto</span>
+              {isGeneratingAllReceipts ? (
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-200" />
+              ) : (
+                <FileCheck2 className="w-4 h-4 text-indigo-200" />
+              )}
+              <span>Baixar Todos os Recibos (Lote)</span>
             </button>
 
             {/* Holiday / Recess Manager */}
@@ -1817,6 +1945,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <span>Editar Dados Contratuais</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowReceiptModal(true)}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 transition text-xs shadow-sm cursor-pointer active:scale-95"
+              title={`Visualizar e imprimir recibo individual de ${targetUser?.name || 'colaborador(a)'}`}
+            >
+              <Printer className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Imprimir Recibo Individual</span>
+            </button>
           </div>
         </div>
 
@@ -1889,8 +2026,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
             {(!isAdmin || currentUser?.id === selectedUserId) && (
               <button
+                type="button"
                 onClick={handleSignReceiptDigitally}
-                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-sm transition text-xs flex items-center space-x-1"
+                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-sm transition text-xs flex items-center space-x-1 cursor-pointer active:scale-95"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Assinar Recibo Digitalmente</span>
@@ -1966,22 +2104,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             >
               <FileText className="w-3.5 h-3.5" />
               <span>Salvar PDF / DP</span>
-            </button>
-
-            {/* Botão Global de Download em Lote de Todos os Espelhos */}
-            <button
-              type="button"
-              onClick={() => handleGenerateAllPontoPDF(true)}
-              disabled={isGeneratingAllPDF}
-              className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition shadow-sm cursor-pointer shadow-emerald-900/20 active:scale-95"
-              title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
-            >
-              {isGeneratingAllPDF ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5" />
-              )}
-              <span>Baixar Todos os Espelhos (PDF Único)</span>
             </button>
           </div>
         </div>
@@ -2650,13 +2772,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <span>Salvar PDF / Enviar DP</span>
               </button>
             </div>
-            <button
-              onClick={() => setShowReceiptModal(true)}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-md shadow-indigo-900/30 cursor-pointer"
-            >
-              <FileCheck2 className="w-4 h-4" />
-              <span>Gerar Recibo Oficial com Quitação</span>
-            </button>
           </div>
         </div>
       </div>
