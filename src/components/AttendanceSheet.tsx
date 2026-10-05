@@ -28,6 +28,8 @@ interface AttendanceSheetProps {
   selectedDate: string; // YYYY-MM-DD
   currentUser?: UserProfile | null;
   isLoadingStudents?: boolean;
+  selectedTurma?: string;
+  onSelectTurma?: (turma: TurmaType | 'TODAS') => void;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
@@ -44,6 +46,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   selectedDate,
   currentUser = null,
   isLoadingStudents = false,
+  selectedTurma: externalSelectedTurma,
+  onSelectTurma,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
@@ -222,8 +226,26 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     }
     return 'Rotina';
   });
-  const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
+  const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>(() => {
+    if (externalSelectedTurma) {
+      return externalSelectedTurma as TurmaType | 'TODAS';
+    }
+    return 'TODAS';
+  });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Mantém sincronizado caso o valor externo mude
+  useEffect(() => {
+    if (externalSelectedTurma && externalSelectedTurma !== selectedTurma) {
+      setSelectedTurma(externalSelectedTurma as TurmaType | 'TODAS');
+    }
+  }, [externalSelectedTurma]);
+
+  const handleTurmaChange = (newTurma: TurmaType | 'TODAS') => {
+    setSelectedTurma(newTurma);
+    onSelectTurma?.(newTurma);
+    window.dispatchEvent(new CustomEvent('app_turma_filter_change', { detail: { turma: newTurma } }));
+  };
 
   // Sincroniza a modalidade selecionada conforme permissões do usuário
   useEffect(() => {
@@ -383,7 +405,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
           setSelectedActivity(e.detail.activity);
         }
         if (e.detail.turma) {
-          setSelectedTurma(e.detail.turma);
+          handleTurmaChange(e.detail.turma);
         }
       }
     };
@@ -890,7 +912,7 @@ function getCurrentHHMM(): string {
             </label>
             <select
               value={selectedTurma}
-              onChange={(e) => setSelectedTurma(e.target.value as TurmaType | 'TODAS')}
+              onChange={(e) => handleTurmaChange(e.target.value as TurmaType | 'TODAS')}
               className="w-full px-3 py-2 text-xs md:text-sm border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
             >
               {(isCoordenador || turmasList.length > 1) && (

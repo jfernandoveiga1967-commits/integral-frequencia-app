@@ -22,6 +22,7 @@ import {
   unlockAudioContextAndPlayTest,
   isAudioContextReady,
 } from '../utils/notificationUtils';
+import { HeaderStats } from './HeaderStats';
 
 export type { TabType };
 
@@ -35,6 +36,8 @@ interface HeaderProps {
   faltasHoje?: number;
   justificadosHoje?: number;
   pendentesHoje?: number;
+  selectedTurma?: string;
+  onClearTurmaFilter?: () => void;
   onNavigateToPending?: () => void;
   currentUser?: UserProfile | null;
   onLogout?: () => void;
@@ -52,6 +55,8 @@ export const Header: React.FC<HeaderProps> = ({
   faltasHoje = 0,
   justificadosHoje = 0,
   pendentesHoje = 0,
+  selectedTurma,
+  onClearTurmaFilter,
   onNavigateToPending,
   currentUser = null,
   connectionState,
@@ -155,96 +160,21 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Live Real-Time Attendance Counters (Baseado na Rotina de Hoje) */}
-          <div className="flex flex-wrap items-center justify-start md:justify-end gap-2 sm:gap-2.5 text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm select-none">
-            {/* 1. Esperados Hoje (Alunos com frequência prevista/agendada para hoje) */}
-            <div className="flex items-center space-x-1.5" title="Alunos ativos com frequência agendada para o dia de hoje (conforme dias de frequência cadastrados)">
-              <span className="text-slate-400 font-medium">Esperados Hoje:</span>
-              <span className="font-extrabold text-indigo-300">
-                {totalAtivosHoje !== undefined ? totalAtivosHoje : totalStudents}
-              </span>
-            </div>
-
-            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-
-            {/* 2. Total Geral Matriculados */}
-            <div className="flex items-center space-x-1.5" title="Total geral de alunos matriculados na escola">
-              <span className="text-slate-400 font-medium">Total Matriculados:</span>
-              <span className="font-bold text-slate-300">
-                {totalMatriculados !== undefined ? totalMatriculados : totalStudents}
-              </span>
-            </div>
-
-            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-
-            {/* 3. Presentes */}
-            <div
-              className="flex items-center space-x-1.5"
-              title={
-                isOffline
-                  ? 'Modo Offline: exibindo presenças salvas localmente no dispositivo (sem conexão ativa)'
-                  : isSyncing
-                  ? 'Sincronizando presenças em tempo real com o servidor...'
-                  : 'Alunos presentes hoje no Integral (100% sincronizado em tempo real)'
-              }
-            >
-              <span
-                className={`inline-block w-2 h-2 rounded-full shrink-0 transition-colors ${
-                  isOffline
-                    ? 'bg-slate-500'
-                    : isSyncing
-                    ? 'bg-amber-400 animate-ping'
-                    : 'bg-emerald-400 animate-pulse'
-                }`}
-              />
-              <span className="text-slate-400 font-medium">Presentes:</span>
-              <span className={`font-extrabold ${isOffline ? 'text-emerald-500/80' : 'text-emerald-400'}`}>
-                {presentesHoje}
-              </span>
-            </div>
-
-            <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-
-            {/* 4. Faltas */}
-            <div className="flex items-center space-x-1.5" title="Faltas não justificadas hoje no Integral">
-              <span className="text-slate-400 font-medium">Faltas:</span>
-              <span className={`font-extrabold ${faltasHoje > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
-                {faltasHoje}
-              </span>
-            </div>
-
-            {/* 5. Atestados / Justificados */}
-            {justificadosHoje > 0 && (
-              <>
-                <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-                <div className="flex items-center space-x-1.5" title="Ausências justificadas hoje">
-                  <span className="text-slate-400 font-medium">Atestados:</span>
-                  <span className="font-extrabold text-amber-400">{justificadosHoje}</span>
-                </div>
-              </>
-            )}
-
-            {/* 6. Pendentes (Apenas alunos esperados hoje sem chamada de rotina) */}
-            {pendentesHoje > 0 && (
-              <>
-                <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-                <button
-                  type="button"
-                  onClick={onNavigateToPending}
-                  title="Alunos esperados hoje que ainda não receberam marcação de presença/falta na chamada de rotina. Clique para conferir."
-                  className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
-                >
-                  <span
-                    className={`inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 ${
-                      isOffline ? '' : 'animate-ping'
-                    }`}
-                  />
-                  <span className="font-medium text-[11px]">Pendentes:</span>
-                  <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
-                </button>
-              </>
-            )}
-          </div>
+          {/* Live Real-Time Attendance Counters (Baseado na Rotina de Hoje / Contextual por Turma) */}
+          <HeaderStats
+            totalStudents={totalStudents}
+            totalAtivosHoje={totalAtivosHoje}
+            totalMatriculados={totalMatriculados}
+            presentesHoje={presentesHoje}
+            faltasHoje={faltasHoje}
+            justificadosHoje={justificadosHoje}
+            pendentesHoje={pendentesHoje}
+            selectedTurma={selectedTurma}
+            onClearTurmaFilter={onClearTurmaFilter}
+            onNavigateToPending={onNavigateToPending}
+            isOffline={isOffline}
+            isSyncing={isSyncing}
+          />
         </div>
 
         {/* Navigation Tabs */}

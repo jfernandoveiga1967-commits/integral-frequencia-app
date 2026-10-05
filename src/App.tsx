@@ -1737,6 +1737,9 @@ export default function App() {
 
   // Navigate from Atividades do Momento directly to attendance sheet with filters
   const handleNavigateToAttendance = (activity?: ActivityType, turma?: TurmaType, date?: string) => {
+    if (turma) {
+      setSelectedClass(turma);
+    }
     if (date) {
       setSelectedDate(date);
     }
@@ -1755,10 +1758,71 @@ export default function App() {
   const [pendingFilterTurma, setPendingFilterTurma] = useState<string>('all');
   const [pendingSearchTerm, setPendingSearchTerm] = useState<string>('');
 
+  // Contexto de Turma selecionada para o HeaderStats e painel das monitoras
+  const [selectedClass, setSelectedClass] = useState<string>(() => {
+    if (currentUser?.role !== 'coordenador') {
+      const allowed = Array.isArray(currentUser?.allowedClassIds) && currentUser.allowedClassIds.length > 0
+        ? currentUser.allowedClassIds
+        : currentUser?.assignedTurmas;
+      if (allowed && allowed.length === 1) {
+        return allowed[0];
+      }
+    }
+    return 'TODAS';
+  });
+
+  // Atualiza turma inicial quando o usuário ativo mudar
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'coordenador') {
+      const allowed = Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0
+        ? currentUser.allowedClassIds
+        : currentUser.assignedTurmas;
+      if (allowed && allowed.length === 1) {
+        setSelectedClass(allowed[0]);
+      } else if (allowed && allowed.length > 1) {
+        if (selectedClass !== 'TODAS' && !allowed.includes(selectedClass)) {
+          setSelectedClass(allowed[0]);
+        }
+      }
+    }
+  }, [currentUser]);
+
+  // Escuta alterações de filtro de turma emitidas pelos componentes
+  useEffect(() => {
+    const handleTurmaFilterChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ turma?: string }>;
+      if (customEvent.detail?.turma !== undefined) {
+        setSelectedClass(customEvent.detail.turma);
+      }
+    };
+    const handleAttendanceFilter = (e: Event) => {
+      const customEvent = e as CustomEvent<{ turma?: string }>;
+      if (customEvent.detail?.turma) {
+        setSelectedClass(customEvent.detail.turma);
+      }
+    };
+
+    window.addEventListener('app_turma_filter_change', handleTurmaFilterChange);
+    window.addEventListener('app_select_attendance_filter', handleAttendanceFilter);
+    return () => {
+      window.removeEventListener('app_turma_filter_change', handleTurmaFilterChange);
+      window.removeEventListener('app_select_attendance_filter', handleAttendanceFilter);
+    };
+  }, []);
+
+  // Filtro de turma ativo para o cabeçalho (undefined caso TODAS)
+  const activeHeaderTurma = useMemo(() => {
+    if (!selectedClass || selectedClass === 'TODAS' || selectedClass === 'all' || selectedClass === 'Todas as Turmas') {
+      return undefined;
+    }
+    return selectedClass;
+  }, [selectedClass]);
+
   // Contadores em tempo real baseados estritamente na Chamada de Rotina de hoje (Fonte Única da Verdade)
+  // Reflete dinamicamente a turma selecionada (se houver) ou o consolidado geral
   const todayConsolidated = useMemo(() => {
-    return getDailyConsolidatedMetrics(todayStr, students, records);
-  }, [todayStr, students, records]);
+    return getDailyConsolidatedMetrics(todayStr, students, records, activeHeaderTurma);
+  }, [todayStr, students, records, activeHeaderTurma]);
 
   // Web Push Notifications & Background Audio Alerts Engine
   useWebPushNotifications({
@@ -1821,14 +1885,21 @@ export default function App() {
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        totalStudents={students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || students.length}
-        totalMatriculados={students.filter((s) => s.status !== 'inativo' && s.status !== 'cancelado').length || students.length}
+        totalStudents={todayConsolidated.totalMatriculados}
+        totalMatriculados={todayConsolidated.totalMatriculados}
         totalAtivosHoje={todayConsolidated.totalAtivos}
         presentesHoje={todayConsolidated.presentes}
         faltasHoje={todayConsolidated.faltas}
         justificadosHoje={todayConsolidated.justificados}
         pendentesHoje={todayConsolidated.pendentes}
-        onNavigateToPending={() => setShowPendingAuditModal(true)}
+        selectedTurma={activeHeaderTurma}
+        onClearTurmaFilter={() => setSelectedClass('TODAS')}
+        onNavigateToPending={() => {
+          if (activeHeaderTurma) {
+            setPendingFilterTurma(activeHeaderTurma);
+          }
+          setShowPendingAuditModal(true);
+        }}
         currentUser={currentUser}
         onLogout={handleLogout}
         connectionState={connectionState}
@@ -1931,6 +2002,10 @@ export default function App() {
             currentWeek={currentWeek}
             selectedDate={selectedDate}
             currentUser={currentUser}
+            selectedTurma={selectedClass}
+            onSelectTurma={(newTurma) => {
+              setSelectedClass(newTurma);
+            }}
             isLoadingStudents={!isInitialStudentsLoaded && students.length === 0}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}
