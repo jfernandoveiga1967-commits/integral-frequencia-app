@@ -183,13 +183,15 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
         Object.entries(rawEntries).forEach(([dateKey, val]) => {
           if (!val) return;
-          const isExplicitOverride = Boolean(val.isManualOverride && val.manualCount !== undefined);
+          // Se houver registro salvo/manual para o dia no banco, priorize e NÃO resete para undefined/0
+          const hasCount = val.manualCount !== undefined && val.manualCount !== null;
+          const isExplicitOverride = Boolean(val.isManualOverride || hasCount);
 
           sanitized[dateKey] = {
             ...val,
-            manualCount: isExplicitOverride ? val.manualCount : undefined,
+            manualCount: hasCount ? Number(val.manualCount) : undefined,
             isManualOverride: isExplicitOverride,
-            lastCalculatedMealsCount: val.lastCalculatedMealsCount,
+            lastCalculatedMealsCount: val.lastCalculatedMealsCount !== undefined ? Number(val.lastCalculatedMealsCount) : (hasCount ? Number(val.manualCount) : undefined),
             isReopenedCall: val.isReopenedCall,
           };
         });
@@ -387,22 +389,29 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     };
 
     activeEntries.forEach((entry) => {
-      const isManual = Boolean(entry.isManualOverride);
-      const isFutureOrNoCall =
-        entry.date > todayStr ||
-        !entry.isSchoolDay ||
-        (entry.systemCount === 0 && (entry.pendentes || 0) > 0 && !entry.isReopenedCall);
+      const userEntry = sourceEntries[entry.date];
+      // Verifica se há contagem salva explicitamente pelo usuário ou vinda do banco
+      const hasExplicitManualCount = userEntry?.manualCount !== undefined && userEntry?.manualCount !== null;
+      const isManual = Boolean(userEntry?.isManualOverride || hasExplicitManualCount || entry.isManualOverride);
+
+      const effectiveManualCount = hasExplicitManualCount
+        ? Number(userEntry.manualCount)
+        : (entry.manualCount !== undefined && entry.manualCount !== null
+            ? Number(entry.manualCount)
+            : (entry.systemCount > 0 ? entry.systemCount : undefined));
+
+      const effectiveUnitPrice = userEntry?.unitPrice !== undefined ? Number(userEntry.unitPrice) : entry.unitPrice;
+      const effectiveNotes = userEntry?.notes !== undefined ? userEntry.notes : (entry.notes || '');
 
       entriesToSave[entry.date] = {
         ...(entriesToSave[entry.date] || {}),
-        unitPrice: sourceEntries[entry.date]?.unitPrice !== undefined ? sourceEntries[entry.date]?.unitPrice : entry.unitPrice,
-        notes: sourceEntries[entry.date]?.notes !== undefined ? sourceEntries[entry.date]?.notes : (entry.notes || ''),
+        unitPrice: effectiveUnitPrice,
+        notes: effectiveNotes,
         isManualOverride: isManual,
-        manualCount: isManual
-          ? (sourceEntries[entry.date]?.manualCount !== undefined ? sourceEntries[entry.date]?.manualCount : entry.manualCount)
-          : (isFutureOrNoCall ? undefined : entry.systemCount),
-        lastCalculatedMealsCount: entry.lastCalculatedMealsCount,
+        manualCount: effectiveManualCount,
+        lastCalculatedMealsCount: entry.lastCalculatedMealsCount || (effectiveManualCount && effectiveManualCount > 0 ? effectiveManualCount : undefined),
         isReopenedCall: entry.isReopenedCall,
+        updatedAt: new Date().toISOString(),
       };
     });
 
@@ -598,9 +607,13 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
   // Salvar no storage local e persistir definitivamente no Firestore com confirmação real
   const handleSave = async () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
     const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
     const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
     const configToSave = buildConfigToSave();
+    pendingConfigRef.current = configToSave;
 
     await saveAction.execute(
       async () => {
@@ -617,8 +630,10 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
             updatedBy: currentUser?.name || 'Coordenação',
           }),
         ]);
-        // Salva cópia local somente após a confirmação do servidor
+        // Salva cópia local após a confirmação do servidor
         saveMealConfig(configToSave);
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 3000);
       },
       {
         pendingMessage: 'Gravando fechamento de refeições e configurações no Firestore...',

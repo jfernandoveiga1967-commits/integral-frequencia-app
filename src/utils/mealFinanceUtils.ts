@@ -8,6 +8,7 @@ import {
   MealReportConfig,
 } from '../types';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, isHolidayOrRecess, isStudentScheduledForDate } from './dateUtils';
+import { isPresencaStatus, isFaltaStatus, isJustificadoStatus, isRoutineActivity } from './frequenciaUtils';
 
 export const MEAL_STORAGE_KEY_PREFIX = 'crescer_meal_config_';
 
@@ -107,10 +108,8 @@ export function syncMealSnapshotsFromRecords(records: AttendanceRecord[]): void 
   const countsByDate = new Map<string, number>();
   records.forEach((r) => {
     if (!r || !r.date) return;
-    const act = (r.activity || '').trim().toLowerCase();
-    if (act === 'rotina') {
-      const st = r.status;
-      if (st === 'presente' || st === 'saida_antecipada' || st === 'sem_equipamento') {
+    if (isRoutineActivity(r.activity) || !r.activity) {
+      if (isPresencaStatus(r.status)) {
         countsByDate.set(r.date, (countsByDate.get(r.date) || 0) + 1);
       }
     }
@@ -198,21 +197,18 @@ export function buildMealEntriesForDateRange(
     if (isSchoolDay) {
       // Filtrar registros de presença no dia:
       // Considera 'presente', 'saida_antecipada' ou 'sem_equipamento' exclusivamente na modalidade 'Rotina'
-      const dayRoutineRecords = records.filter(
-        (r) =>
-          r.date === dateStr &&
-          (r.activity === 'Rotina' || (r.activity && r.activity.trim().toLowerCase() === 'rotina'))
-      );
+      const dayRoutineRecords = records.filter((r) => {
+        if (!r || r.date !== dateStr) return false;
+        return isRoutineActivity(r.activity) || !r.activity;
+      });
 
       if (dayRoutineRecords.length > 0) {
         hasCallConcluded = true;
-        dayPresentes = dayRoutineRecords.filter(
-          (r) => r.status === 'presente' || r.status === 'saida_antecipada' || r.status === 'sem_equipamento'
-        ).length;
-        dayFaltas = dayRoutineRecords.filter((r) => r.status === 'falta').length;
-        dayAtestados = 0;
-        // pendentesDoDia = expectedStudentsCount - (presencasMarcadas + faltasMarcadas)
-        dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas));
+        dayPresentes = dayRoutineRecords.filter((r) => isPresencaStatus(r.status)).length;
+        dayFaltas = dayRoutineRecords.filter((r) => isFaltaStatus(r.status)).length;
+        dayAtestados = dayRoutineRecords.filter((r) => isJustificadoStatus(r.status)).length;
+        // pendentesDoDia = expectedStudentsCount - (presencas + faltas + atestados)
+        dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas + dayAtestados));
         systemCount = dayPresentes;
       } else {
         // Sem chamada de Rotina realizada no dia (dias pendentes ou futuros):
@@ -229,9 +225,10 @@ export function buildMealEntriesForDateRange(
 
     const savedDay = savedEntries[dateStr];
 
-    // O valor exibido/usado deve ser systemCount (calculado a partir de attendanceRecords filtrado por Rotina) por padrão,
-    // a menos que isManualOverride: true esteja explicitamente marcado pela coordenação para aquele dia específico.
-    const isExplicitManualOverride = Boolean(savedDay?.isManualOverride && savedDay?.manualCount !== undefined);
+    // PRIORIZAÇÃO ABSOLUTA DE DADOS SALVOS:
+    // Se existe registro manual ou valor salvo no banco/storage para a data, exiba estritamente o valor salvo!
+    const hasSavedManualCount = savedDay?.manualCount !== undefined && savedDay?.manualCount !== null;
+    const isExplicitManualOverride = Boolean(savedDay?.isManualOverride || hasSavedManualCount);
 
     // Snapshot e Fallback de Histórico (Fallback de Chamada Reaberta)
     let lastCalculatedMealsCount = savedDay?.lastCalculatedMealsCount;
@@ -260,8 +257,10 @@ export function buildMealEntriesForDateRange(
     let isManualOverride = false;
 
     if (isSchoolDay) {
-      if (isExplicitManualOverride && savedDay?.manualCount !== undefined) {
-        manualCount = savedDay.manualCount;
+      // DIRETRIZ SÊNIOR: Se houver registro salvo/manual para o dia, exiba estritamente o valor
+      // salvo no banco e NÃO resete para 0 (mesmo que a chamada automática indique pendência).
+      if (hasSavedManualCount) {
+        manualCount = Number(savedDay!.manualCount);
         isManualOverride = true;
       } else if (isReopenedCall && lastCalculatedMealsCount !== undefined && lastCalculatedMealsCount > 0) {
         manualCount = lastCalculatedMealsCount;
@@ -271,8 +270,8 @@ export function buildMealEntriesForDateRange(
         isManualOverride = false;
       }
     } else {
-      manualCount = 0;
-      isManualOverride = false;
+      manualCount = hasSavedManualCount ? Number(savedDay!.manualCount) : 0;
+      isManualOverride = hasSavedManualCount;
     }
 
     const unitPrice = savedDay?.unitPrice !== undefined ? savedDay.unitPrice : effectiveUnitPrice;

@@ -1087,19 +1087,6 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   <span>Nova Proposta</span>
                 </button>
 
-                {isCoordenador(currentUser) && (
-                  <button
-                    type="button"
-                    disabled={isGeneratingBatchAI}
-                    onClick={handlePopulateAllTurmasWeek}
-                    className="px-3.5 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
-                    title="Povoar grade oficial completa de todas as turmas"
-                  >
-                    <Zap className="w-4 h-4 text-amber-300" />
-                    <span>Povoar Todas Turmas</span>
-                  </button>
-                )}
-
                 {/* PDF Geral da Semana (Todas as Turmas) */}
                 <button
                   type="button"
