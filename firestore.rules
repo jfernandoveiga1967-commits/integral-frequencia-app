@@ -73,6 +73,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /manual_normas/{normaId} {
+      allow read, write: if true;
+    }
+
     match /test/{docId} {
       allow read, write: if true;
     }

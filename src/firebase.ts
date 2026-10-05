@@ -25,6 +25,7 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
+import { ManualNorma, INITIAL_MANUAL_NORMAS } from './types/manualNormas';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
@@ -2966,6 +2967,200 @@ export async function deleteTurmaAtribuicaoFromFirestore(turmaName: string): Pro
     console.warn('Erro ao excluir atribuição no Firestore:', error);
     handleFirestoreError(error, OperationType.DELETE, `quadroAtribuicoes/${safeId}`);
     throw error;
+  }
+}
+
+/**
+ * Inscreve-se nas atualizações em tempo real das Normas do Manual (manual_normas).
+ * Se a coleção estiver vazia no Firestore, inicializa automaticamente com o conteúdo padrão.
+ */
+export function subscribeManualNormas(
+  onData: (items: ManualNorma[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'manual_normas');
+  return onSnapshot(
+    colRef,
+    async (snap) => {
+      clearFirestoreQuotaExceeded();
+      if (snap.empty || snap.size < 25) {
+        try {
+          const seeded = await seedInitialManualNormasIfEmpty();
+          onData(seeded);
+          return;
+        } catch (e) {
+          console.warn('Erro ao inicializar manual_normas padrão:', e);
+          onData(INITIAL_MANUAL_NORMAS);
+          return;
+        }
+      }
+
+      const list: ManualNorma[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as ManualNorma;
+        list.push({
+          ...data,
+          id: d.id,
+        });
+      });
+
+      list.sort((a, b) => {
+        if (a.moduleId !== b.moduleId) {
+          const orderMap: Record<string, number> = {
+            normas_internas: 1,
+            academia_transporte: 2,
+            guia_sensivel: 3,
+          };
+          return (orderMap[a.moduleId] || 99) - (orderMap[b.moduleId] || 99);
+        }
+        return (a.order ?? 999) - (b.order ?? 999);
+      });
+
+      try {
+        localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(list));
+      } catch {}
+
+      onData(list);
+    },
+    (err) => {
+      console.warn('Erro na subscription de manual_normas:', err);
+      handleFirestoreError(err, OperationType.LIST, 'manual_normas');
+      onError?.(err);
+      try {
+        const cached = localStorage.getItem('crescer_manual_normas_cache');
+        if (cached) {
+          onData(JSON.parse(cached));
+        } else {
+          onData(INITIAL_MANUAL_NORMAS);
+        }
+      } catch {
+        onData(INITIAL_MANUAL_NORMAS);
+      }
+    }
+  );
+}
+
+/**
+ * Busca todas as normas salvas no Firestore. Se estiver vazio, realiza o seed padrão.
+ */
+export async function getManualNormasFromFirestore(): Promise<ManualNorma[]> {
+  try {
+    const colRef = collection(db, 'manual_normas');
+    const snap = await getDocs(colRef);
+    if (snap.empty) {
+      return await seedInitialManualNormasIfEmpty();
+    }
+    const list: ManualNorma[] = [];
+    snap.forEach((d) => {
+      list.push({
+        ...(d.data() as ManualNorma),
+        id: d.id,
+      });
+    });
+    list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    try {
+      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(list));
+    } catch {}
+    return list;
+  } catch (error) {
+    console.warn('Erro ao buscar manual_normas no Firestore, recorrendo ao cache:', error);
+    try {
+      const cached = localStorage.getItem('crescer_manual_normas_cache');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return INITIAL_MANUAL_NORMAS;
+  }
+}
+
+/**
+ * Salva ou atualiza uma norma no Firestore (manual_normas/{id})
+ */
+export async function saveManualNormaToFirestore(norma: ManualNorma): Promise<void> {
+  const normaId = norma.id || `norma_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  try {
+    const docRef = doc(db, 'manual_normas', normaId);
+    const payload: ManualNorma = {
+      ...norma,
+      id: normaId,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn(`Erro ao salvar manual_normas/${normaId}:`, error);
+    handleFirestoreError(error, OperationType.WRITE, `manual_normas/${normaId}`);
+    throw error;
+  }
+}
+
+/**
+ * Exclui uma norma do Firestore (manual_normas/{id})
+ */
+export async function deleteManualNormaFromFirestore(normaId: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'manual_normas', normaId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn(`Erro ao excluir manual_normas/${normaId}:`, error);
+    handleFirestoreError(error, OperationType.DELETE, `manual_normas/${normaId}`);
+    throw error;
+  }
+}
+
+/**
+ * Inicializa a coleção manual_normas com o conteúdo padrão do Colégio Crescer
+ */
+export async function seedInitialManualNormasIfEmpty(): Promise<ManualNorma[]> {
+  try {
+    const batch = writeBatch(db);
+    INITIAL_MANUAL_NORMAS.forEach((norma) => {
+      const docRef = doc(db, 'manual_normas', norma.id);
+      batch.set(
+        docRef,
+        {
+          ...norma,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+    try {
+      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(INITIAL_MANUAL_NORMAS));
+    } catch {}
+    return INITIAL_MANUAL_NORMAS;
+  } catch (err) {
+    console.warn('Erro ao popular initial manual_normas:', err);
+    return INITIAL_MANUAL_NORMAS;
+  }
+}
+
+/**
+ * Força a sincronização das 32 normas oficiais dos documentos do Colégio Crescer no Firestore.
+ */
+export async function syncOfficialManualNormasToFirestore(): Promise<ManualNorma[]> {
+  try {
+    const batch = writeBatch(db);
+    INITIAL_MANUAL_NORMAS.forEach((norma) => {
+      const docRef = doc(db, 'manual_normas', norma.id);
+      batch.set(
+        docRef,
+        {
+          ...norma,
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'Coordenação Fernando Veiga',
+        },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+    try {
+      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(INITIAL_MANUAL_NORMAS));
+    } catch {}
+    return INITIAL_MANUAL_NORMAS;
+  } catch (err) {
+    console.warn('Erro ao sincronizar manual_normas oficiais no Firestore:', err);
+    throw err;
   }
 }
 

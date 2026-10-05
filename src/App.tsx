@@ -48,6 +48,7 @@ import { UserManagement } from './components/UserManagement';
 import { LivroPonto } from './components/LivroPonto';
 import { SemanarioMain } from './components/Semanario/SemanarioMain';
 import { CardapioCulinaria } from './components/CardapioCulinaria';
+import { ManualOrientacoes } from './components/ManualOrientacoes';
 import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
@@ -2145,6 +2146,11 @@ export default function App() {
         {/* Tab 9: Cardápio e Culinária */}
         {activeTab === 'cardapio' && isTabAllowed('cardapio', currentUser) && (
           <CardapioCulinaria currentUser={currentUser} holidays={holidays} />
+        )}
+
+        {/* Tab 10: Manual de Orientações e Normas */}
+        {activeTab === 'manual' && isTabAllowed('manual', currentUser) && (
+          <ManualOrientacoes currentUser={currentUser} />
         )}
       </main>
 

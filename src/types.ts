@@ -95,7 +95,8 @@ export type TabType =
   | 'alunos'
   | 'relatorio'
   | 'biblioteca'
-  | 'usuarios';
+  | 'usuarios'
+  | 'manual';
 
 export interface AppTabOption {
   id: TabType;
@@ -113,6 +114,7 @@ export const AVAILABLE_APP_TABS: AppTabOption[] = [
   { id: 'relatorio', label: 'Relatório Semanal', description: 'Relatório analítico semanal de frequência' },
   { id: 'biblioteca', label: 'Biblioteca de Semanas', description: 'Histórico consolidado de semanas anteriores' },
   { id: 'usuarios', label: 'Gerenciamento de Usuários', description: 'Administração de colaboradores e permissões' },
+  { id: 'manual', label: 'Manual e Normas', description: 'Orientações, normas internas e guia de abordagem sensível' },
 ];
 
 export const ALL_APP_TAB_IDS: TabType[] = AVAILABLE_APP_TABS.map((t) => t.id);

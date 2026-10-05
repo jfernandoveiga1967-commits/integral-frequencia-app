@@ -98,6 +98,8 @@ export function isCoordenador(user?: UserProfile | null): boolean {
 export function isTabAllowed(tab: TabType, user?: UserProfile | null): boolean {
   if (!user) return false;
   if (isCoordenador(user)) return true;
+  // A aba 'manual' (Manual de Orientações e Normas) é pública para todas as monitoras, professores e equipe
+  if (tab === 'manual') return true;
   return Array.isArray(user.allowedTabs) && user.allowedTabs.includes(tab);
 }
 
@@ -107,7 +109,11 @@ export function isTabAllowed(tab: TabType, user?: UserProfile | null): boolean {
 export function getUserAllowedTabs(user?: UserProfile | null): TabType[] {
   if (!user) return [];
   if (isCoordenador(user)) return ALL_APP_TAB_IDS;
-  return Array.isArray(user.allowedTabs) ? user.allowedTabs : [];
+  const userTabs = Array.isArray(user.allowedTabs) ? [...user.allowedTabs] : [];
+  if (!userTabs.includes('manual')) {
+    userTabs.push('manual');
+  }
+  return userTabs;
 }
 
 export function isNutricionista(user?: UserProfile | null): boolean {

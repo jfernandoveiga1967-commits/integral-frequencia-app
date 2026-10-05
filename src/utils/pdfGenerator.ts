@@ -17,6 +17,7 @@ import {
   TurmaAtribuicao,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
+import { ManualNorma, MODULE_METADATA } from '../types/manualNormas';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -4413,6 +4414,201 @@ export function generateNominalListPDF({
   const cleanDay = (!isAllDays ? (dayShortMap[dayOfWeek] || dayOfWeek) : 'Semana').replace(/[\/\s]+/g, '_');
   const dateStr = new Date().toISOString().split('T')[0];
   const filename = `Relacao_Nominal_${cleanSpec}_${cleanTurma}_${cleanDay}_${dateStr}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o documento PDF oficial das Normas e Manual de Orientações com Timbre Institucional.
+ * Recebe a lista dinâmica e atualizada do Firestore.
+ */
+export function generateManualNormasPDF(
+  normas: ManualNorma[],
+  targetModuleId?: string,
+  saveImmediately = false
+): {
+  doc: jsPDF;
+  blob: Blob;
+  blobUrl: string;
+  dataUri: string;
+  dataUrl: string;
+  filename: string;
+  download: () => void;
+} {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const marginX = 14;
+  const contentWidth = pageWidth - marginX * 2;
+
+  // Filtrar normas pelo módulo alvo se especificado
+  const targetNormas = targetModuleId && targetModuleId !== 'all'
+    ? normas.filter((n) => n.moduleId === targetModuleId)
+    : normas;
+
+  const docTitle = targetModuleId && targetModuleId !== 'all' && MODULE_METADATA[targetModuleId as keyof typeof MODULE_METADATA]
+    ? MODULE_METADATA[targetModuleId as keyof typeof MODULE_METADATA].title
+    : 'MANUAL DE ORIENTAÇÕES, NORMAS INTERNAS E ABORDAGEM SENSÍVEL';
+
+  const subtitle = 'Colégio Crescer • Documento Oficial de Consulta e Capacitação Contínua da Equipe';
+  const filterDetails = [
+    `Total de Diretrizes: ${targetNormas.length}`,
+    `Módulo: ${targetModuleId && targetModuleId !== 'all' ? targetModuleId : 'Geral (Todos os Módulos)'}`,
+    `Emissão: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+  ];
+
+  drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
+
+  let currentY = 38;
+
+  // Intro Banner Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(marginX, currentY, contentWidth, 18, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('ORIENTAÇÃO INSTITUCIONAL DA COORDENAÇÃO PEDAGÓGICA', marginX + 4, currentY + 5.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  const intro =
+    'Este documento reúne as diretrizes fundamentais de segurança, ética e abordagem respeitosa que norteiam o atendimento aos alunos do Programa Integral. Sua leitura e aplicação diária são compulsórias para todas as monitoras e colaboradores.';
+  const splitIntro = doc.splitTextToSize(intro, contentWidth - 8);
+  doc.text(splitIntro, marginX + 4, currentY + 10.5);
+
+  currentY += 23;
+
+  // Group by module in pedagogical order
+  const modulesOrder = ['normas_internas', 'academia_transporte', 'guia_sensivel'];
+  const grouped = new Map<string, ManualNorma[]>();
+
+  modulesOrder.forEach((modId) => {
+    const items = targetNormas.filter((n) => n.moduleId === modId);
+    if (items.length > 0) {
+      grouped.set(modId, items);
+    }
+  });
+
+  // Any custom modules
+  targetNormas.forEach((n) => {
+    if (!modulesOrder.includes(n.moduleId)) {
+      const arr = grouped.get(n.moduleId) || [];
+      arr.push(n);
+      grouped.set(n.moduleId, arr);
+    }
+  });
+
+  grouped.forEach((normasList, modId) => {
+    const meta = MODULE_METADATA[modId as keyof typeof MODULE_METADATA];
+    const modTitle = meta ? meta.title : `Módulo: ${modId}`;
+
+    if (currentY > pageHeight - 35) {
+      doc.addPage();
+      currentY = 18;
+    }
+
+    // Module Header
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.roundedRect(marginX, currentY, contentWidth, 8, 1.5, 1.5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(255, 255, 255);
+    doc.text(modTitle.toUpperCase(), marginX + 4, currentY + 5.5);
+    currentY += 12;
+
+    normasList.forEach((norma) => {
+      if (currentY > pageHeight - 32) {
+        doc.addPage();
+        currentY = 18;
+      }
+
+      // Badge logic
+      let badgeR = 79, badgeG = 70, badgeB = 229; // indigo
+      let badgeLabel = 'DIRETRIZ INSTITUCIONAL';
+
+      if (norma.type === 'proibicao') {
+        badgeR = 225; badgeG = 29; badgeB = 72; // rose
+        badgeLabel = 'PROIBIÇÃO / INFRAÇÃO GRAVE';
+      } else if (norma.type === 'alerta') {
+        badgeR = 217; badgeG = 119; badgeB = 6; // amber
+        badgeLabel = 'ATENÇÃO & SEGURANÇA';
+      } else if (norma.type === 'recomendado') {
+        badgeR = 5; badgeG = 150; badgeB = 105; // emerald
+        badgeLabel = 'BOA PRÁTICA RECOMENDADA';
+      }
+
+      doc.setFillColor(badgeR, badgeG, badgeB);
+      doc.roundedRect(marginX, currentY, 34, 4.5, 1, 1, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.2);
+      doc.setTextColor(255, 255, 255);
+      doc.text(badgeLabel, marginX + 17, currentY + 3.2, { align: 'center' });
+
+      // Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+      const titleWithSec = norma.sectionNumber ? `${norma.sectionNumber} • ${norma.title}` : norma.title;
+      doc.text(titleWithSec, marginX + 37, currentY + 3.5);
+
+      currentY += 6.5;
+
+      // Summary
+      if (norma.summary) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        const splitSum = doc.splitTextToSize(norma.summary, contentWidth - 4);
+        doc.text(splitSum, marginX + 4, currentY);
+        currentY += splitSum.length * 3.8 + 2;
+      }
+
+      // Bullets
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(30, 41, 59);
+
+      if (Array.isArray(norma.details)) {
+        norma.details.forEach((det) => {
+          if (currentY > pageHeight - 18) {
+            doc.addPage();
+            currentY = 18;
+          }
+          const bulletText = '• ' + det;
+          const splitDet = doc.splitTextToSize(bulletText, contentWidth - 8);
+          doc.text(splitDet, marginX + 4, currentY);
+          currentY += splitDet.length * 3.6 + 1.2;
+        });
+      }
+
+      currentY += 4.5;
+    });
+
+    currentY += 4;
+  });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const filename = `Manual_Normas_Colegio_Crescer_${targetModuleId || 'Geral'}_${dateStr}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

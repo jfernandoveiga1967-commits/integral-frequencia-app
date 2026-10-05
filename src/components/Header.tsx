@@ -263,6 +263,21 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+          {/* 6. Manual de Orientações e Normas */}
+          {isTabAllowed('manual', currentUser) && (
+            <button
+              onClick={() => setActiveTab('manual')}
+              className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'manual'
+                  ? 'bg-slate-800 text-sky-400 border-sky-500'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+              }`}
+            >
+              <BookOpen className="w-4 h-4 text-sky-400" />
+              <span>Manual e Normas</span>
+            </button>
+          )}
+
           {/* 6. Alunos e Turmas */}
           {isTabAllowed('alunos', currentUser) && (
             <button

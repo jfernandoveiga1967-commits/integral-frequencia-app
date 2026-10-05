@@ -281,6 +281,28 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "turma", "monitoraName", "adiName"]
+    },
+    "ManualNorma": {
+      "title": "ManualNorma",
+      "description": "Orientation item, rule or sensitive approach guideline",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "moduleId": { "type": "string", "enum": ["normas_internas", "academia_transporte", "guia_sensivel"] },
+        "moduleTitle": { "type": "string", "maxLength": 128 },
+        "sectionNumber": { "type": "string", "maxLength": 32 },
+        "sectionTitle": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "type": { "type": "string", "enum": ["proibicao", "alerta", "recomendado", "diretriz"] },
+        "summary": { "type": "string", "maxLength": 500 },
+        "details": { "type": "array", "description": "List of rule details/bullets" },
+        "tags": { "type": "array", "description": "Keywords for real-time search" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "moduleId", "title", "type", "summary", "details"]
     }
   },
   "firestore": {
@@ -343,6 +365,10 @@
     "/quadroAtribuicoes/{turmaId}": {
       "schema": "TurmaAtribuicao",
       "description": "Collection of team assignments and Sua ADI by turma"
+    },
+    "/manual_normas/{normaId}": {
+      "schema": "ManualNorma",
+      "description": "Collection of guidelines, internal norms and sensitive approach items"
     }
   }
 }
