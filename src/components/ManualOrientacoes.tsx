@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   BookOpen,
   ShieldAlert,
@@ -12,14 +12,10 @@ import {
   AlertCircle,
   Ban,
   Search,
-  Download,
   Printer,
   ChevronDown,
   ChevronUp,
-  FileText,
   Sparkles,
-  UserCheck,
-  Eye,
   Heart,
   X,
   Layers,
@@ -30,8 +26,11 @@ import {
   RotateCcw,
   Loader2,
   Tag,
-  ListPlus,
   Check,
+  Radio,
+  Smartphone,
+  Eye,
+  Zap,
 } from 'lucide-react';
 import type { jsPDF } from 'jspdf';
 import { UserProfile } from '../types';
@@ -46,7 +45,6 @@ import {
   subscribeManualNormas,
   saveManualNormaToFirestore,
   deleteManualNormaFromFirestore,
-  seedInitialManualNormasIfEmpty,
   syncOfficialManualNormasToFirestore,
 } from '../firebase';
 import { generateManualNormasPDF } from '../utils/pdfGenerator';
@@ -55,6 +53,132 @@ import { PdfViewerModal } from './PdfViewerModal';
 
 export interface ManualOrientacoesProps {
   currentUser?: UserProfile | null;
+}
+
+// Tipos para Filtro Rápido por Alerta
+export type AlertFilterType = 'all' | 'proibicoes_alertas' | 'boas_praticas' | 'diretrizes';
+
+// Tipos para Categorias Temáticas Sanfonadas
+export type ThematicCategoryId =
+  | 'rotina_operacional'
+  | 'seguranca_cuidados'
+  | 'postura_fardamento'
+  | 'guia_socioemocional';
+
+export interface ThematicCategoryMeta {
+  id: ThematicCategoryId;
+  title: string;
+  subtitle: string;
+  badgeLabel: string;
+  theme: 'blue' | 'amber' | 'purple' | 'rose';
+  borderClass: string;
+  headerBgClass: string;
+  iconBgClass: string;
+}
+
+export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
+  {
+    id: 'rotina_operacional',
+    title: 'Categoria 1: Rotina Operacional do Integral',
+    subtitle: 'Ponto Eletrônico, Rádio Frequência 2, Refeitório, Caderno Vai e Volta, Acolhimento e Lições',
+    badgeLabel: 'Rotina & Fluxos',
+    theme: 'blue',
+    borderClass: 'border-blue-200/90 hover:border-blue-300',
+    headerBgClass: 'bg-gradient-to-r from-blue-900 to-slate-900 text-white',
+    iconBgClass: 'bg-blue-500/20 text-blue-300',
+  },
+  {
+    id: 'seguranca_cuidados',
+    title: 'Categoria 2: Segurança, Espaços e Cuidados',
+    subtitle: 'Parque/Parcão, Brinquedão, Banheiros, Troca de Fraldas e Luvas, Alergias, Culinária e Academia',
+    badgeLabel: 'Segurança & Cuidados',
+    theme: 'amber',
+    borderClass: 'border-amber-200/90 hover:border-amber-300',
+    headerBgClass: 'bg-gradient-to-r from-amber-900 to-slate-900 text-white',
+    iconBgClass: 'bg-amber-500/20 text-amber-300',
+  },
+  {
+    id: 'postura_fardamento',
+    title: 'Categoria 3: Postura, Fardamento e Proibições',
+    subtitle: 'Vestuário/Sem Bijuterias, Celular Proibido, Conversas Paralelas, Proibições Gerais e ECA',
+    badgeLabel: 'Conduta & Fardamento',
+    theme: 'purple',
+    borderClass: 'border-purple-200/90 hover:border-purple-300',
+    headerBgClass: 'bg-gradient-to-r from-purple-950 to-slate-900 text-white',
+    iconBgClass: 'bg-purple-500/20 text-purple-300',
+  },
+  {
+    id: 'guia_socioemocional',
+    title: 'Categoria 4: Guia Socioemocional e Abordagem Sensível',
+    subtitle: 'Não Gritar, Não Puxar, Não Pegar com Força, Paciência e Mediação de Conflitos em 3 Passos',
+    badgeLabel: 'Abordagem Sensível',
+    theme: 'rose',
+    borderClass: 'border-rose-200/90 hover:border-rose-300',
+    headerBgClass: 'bg-gradient-to-r from-rose-950 to-slate-900 text-white',
+    iconBgClass: 'bg-rose-500/20 text-rose-300',
+  },
+];
+
+// Helper para mapear norma para sua categoria temática
+export function getThematicCategory(norma: ManualNorma): ThematicCategoryId {
+  const normId = (norma.id || '').toLowerCase();
+  const title = (norma.title || '').toLowerCase();
+  const sec = (norma.sectionNumber || '').toLowerCase();
+
+  // 4. Guia Socioemocional
+  if (
+    norma.moduleId === 'guia_sensivel' ||
+    normId.includes('sensivel') ||
+    title.includes('gritar') ||
+    title.includes('puxar') ||
+    title.includes('força') ||
+    title.includes('aspereza') ||
+    title.includes('paciência') ||
+    title.includes('ameaçar') ||
+    title.includes('conflito') ||
+    sec.includes('7')
+  ) {
+    return 'guia_socioemocional';
+  }
+
+  // 3. Postura e Fardamento
+  if (
+    normId.includes('vestuario') ||
+    normId.includes('celular') ||
+    normId.includes('comunicacao_respeitosa') ||
+    normId.includes('proibicoes_gerais') ||
+    normId.includes('penalidades') ||
+    normId.includes('chinelos') ||
+    title.includes('vestuário') ||
+    title.includes('celular') ||
+    title.includes('conversas paralelas') ||
+    title.includes('penalidades') ||
+    title.includes('comentário inadequado') ||
+    title.includes('fardamento')
+  ) {
+    return 'postura_fardamento';
+  }
+
+  // 2. Segurança e Cuidados
+  if (
+    normId.includes('parque') ||
+    normId.includes('cuidados_bebes') ||
+    normId.includes('academia') ||
+    normId.includes('culinaria') ||
+    title.includes('parque') ||
+    title.includes('parcão') ||
+    title.includes('maternal') ||
+    title.includes('fralda') ||
+    title.includes('academia') ||
+    title.includes('culinária') ||
+    title.includes('banheiro') ||
+    title.includes('alimentos')
+  ) {
+    return 'seguranca_cuidados';
+  }
+
+  // 1. Rotina Operacional (Ponto, Rádio, Refeitório, Vai e Volta, Lições, Acolhimento)
+  return 'rotina_operacional';
 }
 
 // Modal para Criação e Edição de Norma
@@ -103,7 +227,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
       setTagsInput(Array.isArray(normaToEdit.tags) ? normaToEdit.tags.join(', ') : '');
       setOrder(normaToEdit.order ?? 99);
     } else {
-      // Default new norma values
       setModuleId('normas_internas');
       setSectionNumber('1.1');
       setSectionTitle('');
@@ -191,7 +314,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* Modal Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl">
@@ -215,7 +337,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
           {errorMessage && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center space-x-2">
@@ -224,7 +345,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             </div>
           )}
 
-          {/* Module Selection */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -258,7 +378,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             </div>
           </div>
 
-          {/* Section Number & Section Title */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -268,7 +387,7 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
                 type="text"
                 value={sectionNumber}
                 onChange={(e) => setSectionNumber(e.target.value)}
-                placeholder="Ex: 1.3, 2.1, 3.2"
+                placeholder="Ex: 1.3, 2.1, 8"
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -287,7 +406,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             </div>
           </div>
 
-          {/* Norma Title */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Título da Norma / Regra: *
@@ -302,7 +420,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             />
           </div>
 
-          {/* Summary */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Resumo / Justificativa Principal:
@@ -316,7 +433,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             />
           </div>
 
-          {/* Dynamic Rule Details / Bullets */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-bold text-slate-700">
@@ -358,7 +474,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             </div>
           </div>
 
-          {/* Tags and Order */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
             <div className="sm:col-span-2">
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -370,7 +485,7 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
                   type="text"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
-                  placeholder="celular, segurança, lgpd, uniforme, piscina"
+                  placeholder="celular, rádio, frequência 2, uniforme, parque"
                   className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -391,7 +506,6 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
             </div>
           </div>
 
-          {/* Modal Footer */}
           <div className="pt-4 border-t border-slate-200 flex items-center justify-end space-x-3">
             <button
               type="button"
@@ -439,8 +553,25 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
 
   const [isLoading, setIsLoading] = useState(true);
   const [selectedModule, setSelectedModule] = useState<ModuleCategory | 'all'>('all');
+  const [alertTypeFilter, setAlertTypeFilter] = useState<AlertFilterType>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  // Active Quick Pin State
+  const [activeQuickPin, setActiveQuickPin] = useState<string | null>(null);
+
+  // Targeted Card Highlight
+  const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
+
+  // Accordion state for Thematic Categories (all open by default for comprehensive overview)
+  const [expandedCategories, setExpandedCategories] = useState<Record<ThematicCategoryId, boolean>>({
+    rotina_operacional: true,
+    seguranca_cuidados: true,
+    postura_fardamento: true,
+    guia_socioemocional: true,
+  });
+
+  // Accordion state for individual Norma Cards
+  const [expandedNormas, setExpandedNormas] = useState<Record<string, boolean>>({});
 
   // Feedback Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -452,6 +583,9 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   // Delete Confirmation State
   const [normaDeleting, setNormaDeleting] = useState<ManualNorma | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Sincronização oficial
+  const [isSyncingOfficial, setIsSyncingOfficial] = useState(false);
 
   // PDF Preview State
   const [pdfPreviewState, setPdfPreviewState] = useState<{
@@ -495,45 +629,116 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     };
   }, []);
 
-  // Set initial expanded sections when normas load
-  useEffect(() => {
-    if (Object.keys(expandedSections).length === 0 && normas.length > 0) {
-      const init: Record<string, boolean> = {};
-      normas.slice(0, 3).forEach((n) => {
-        init[n.id] = true;
-      });
-      setExpandedSections(init);
-    }
-  }, [normas.length]);
-
-  const toggleSection = (id: string) => {
-    setExpandedSections((prev) => ({
+  // Category Toggle
+  const toggleCategory = (catId: ThematicCategoryId) => {
+    setExpandedCategories((prev) => ({
       ...prev,
-      [id]: !prev[id],
+      [catId]: !prev[catId],
     }));
   };
 
-  const handleExpandAll = () => {
-    const allExpanded: Record<string, boolean> = {};
-    normas.forEach((n) => {
-      allExpanded[n.id] = true;
+  const handleExpandAllCategories = () => {
+    setExpandedCategories({
+      rotina_operacional: true,
+      seguranca_cuidados: true,
+      postura_fardamento: true,
+      guia_socioemocional: true,
     });
-    setExpandedSections(allExpanded);
   };
 
-  const handleCollapseAll = () => {
-    setExpandedSections({});
+  const handleCollapseAllCategories = () => {
+    setExpandedCategories({
+      rotina_operacional: false,
+      seguranca_cuidados: false,
+      postura_fardamento: false,
+      guia_socioemocional: false,
+    });
   };
 
-  // Filtered Normas based on Module and Search Term
+  // Norma Card Toggle
+  const toggleNormaCard = (normaId: string) => {
+    setExpandedNormas((prev) => ({
+      ...prev,
+      [normaId]: !prev[normaId],
+    }));
+  };
+
+  const handleExpandAllNormas = () => {
+    const allExp: Record<string, boolean> = {};
+    normas.forEach((n) => {
+      allExp[n.id] = true;
+    });
+    setExpandedNormas(allExp);
+  };
+
+  const handleCollapseAllNormas = () => {
+    setExpandedNormas({});
+  };
+
+  // Quick Pins Navigation Handler
+  const handleQuickPinClick = (pinKey: string, targetNormaId: string, catId: ThematicCategoryId) => {
+    if (activeQuickPin === pinKey) {
+      // Toggle off
+      setActiveQuickPin(null);
+      setSearchTerm('');
+      setSelectedModule('all');
+      setAlertTypeFilter('all');
+      return;
+    }
+
+    setActiveQuickPin(pinKey);
+
+    // Reset module and alert filter so the target is visible
+    setSelectedModule('all');
+    setAlertTypeFilter('all');
+    setSearchTerm('');
+
+    // Ensure target category is open
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [catId]: true,
+    }));
+
+    // Ensure target norma card is expanded
+    setExpandedNormas((prev) => ({
+      ...prev,
+      [targetNormaId]: true,
+    }));
+
+    // Highlight and smooth scroll to card
+    setHighlightedCardId(targetNormaId);
+    setTimeout(() => {
+      const el = document.getElementById(`card-${targetNormaId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+
+    setTimeout(() => {
+      setHighlightedCardId(null);
+    }, 3200);
+  };
+
+  // Filtered Normas based on Module, Search Term and Alert Type Filter
   const filteredNormas = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return normas.filter((norma) => {
+      // 1. Module filter
       if (selectedModule !== 'all' && norma.moduleId !== selectedModule) {
         return false;
       }
 
+      // 2. Alert type filter
+      if (alertTypeFilter === 'proibicoes_alertas') {
+        if (norma.type !== 'proibicao' && norma.type !== 'alerta') return false;
+      } else if (alertTypeFilter === 'boas_praticas') {
+        if (norma.type !== 'recomendado') return false;
+      } else if (alertTypeFilter === 'diretrizes') {
+        if (norma.type !== 'diretriz') return false;
+      }
+
+      // 3. Search query
       if (!term) return true;
 
       const matchTitle = norma.title.toLowerCase().includes(term);
@@ -545,14 +750,32 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
 
       return matchTitle || matchSummary || matchSection || matchModule || matchDetails || matchTags;
     });
-  }, [normas, selectedModule, searchTerm]);
+  }, [normas, selectedModule, alertTypeFilter, searchTerm]);
+
+  // Group filtered normas into the 4 Thematic Categories
+  const groupedThematicNormas = useMemo(() => {
+    const map: Record<ThematicCategoryId, ManualNorma[]> = {
+      rotina_operacional: [],
+      seguranca_cuidados: [],
+      postura_fardamento: [],
+      guia_socioemocional: [],
+    };
+
+    filteredNormas.forEach((n) => {
+      const cat = getThematicCategory(n);
+      map[cat].push(n);
+    });
+
+    return map;
+  }, [filteredNormas]);
 
   // Statistics counters
   const totalCount = normas.length;
-  const countProibicoes = useMemo(() => normas.filter((n) => n.type === 'proibicao').length, [normas]);
+  const countProibicoes = useMemo(() => normas.filter((n) => n.type === 'proibicao' || n.type === 'alerta').length, [normas]);
   const countRecomendadas = useMemo(() => normas.filter((n) => n.type === 'recomendado').length, [normas]);
+  const countDiretrizes = useMemo(() => normas.filter((n) => n.type === 'diretriz').length, [normas]);
 
-  // Handle Save Norma (Create or Edit)
+  // Handle Save Norma
   const handleSaveNorma = async (norma: ManualNorma) => {
     await saveManualNormaToFirestore(norma);
     showToast(normaEditing ? 'Norma atualizada com sucesso no Firestore!' : 'Nova norma cadastrada no Firestore com sucesso!');
@@ -573,6 +796,22 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     }
   };
 
+  // Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer
+  const handleSyncOfficialDocuments = async () => {
+    if (!confirm('Deseja sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer no Firestore?')) {
+      return;
+    }
+    try {
+      setIsSyncingOfficial(true);
+      await syncOfficialManualNormasToFirestore();
+      showToast('32 normas oficiais do Colégio Crescer sincronizadas com sucesso no Firestore!');
+    } catch (e: any) {
+      alert(`Erro ao sincronizar: ${e?.message || 'Falha na conexão'}`);
+    } finally {
+      setIsSyncingOfficial(false);
+    }
+  };
+
   // Trigger Dynamic PDF Generation with Institutional Timbre
   const handleGeneratePDF = () => {
     const targetModule = selectedModule !== 'all' ? selectedModule : undefined;
@@ -589,42 +828,8 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     });
   };
 
-  const [isSyncingOfficial, setIsSyncingOfficial] = useState(false);
-
-  // Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer
-  const handleSyncOfficialDocuments = async () => {
-    if (!confirm('Deseja sincronizar as 32 normas reais extraídas dos documentos oficiais do Colégio Crescer no Firestore?')) {
-      return;
-    }
-    try {
-      setIsSyncingOfficial(true);
-      await syncOfficialManualNormasToFirestore();
-      showToast('32 normas oficiais do Colégio Crescer sincronizadas com sucesso no Firestore!');
-    } catch (e: any) {
-      alert(`Erro ao sincronizar: ${e?.message || 'Falha na conexão'}`);
-    } finally {
-      setIsSyncingOfficial(false);
-    }
-  };
-
-  // Seed default data if empty (Admin quick recovery button)
-  const handleRestoreDefaults = async () => {
-    if (!confirm('Deseja restaurar as 32 normas institucionais oficiais do Colégio Crescer no Firestore?')) {
-      return;
-    }
-    try {
-      setIsLoading(true);
-      await syncOfficialManualNormasToFirestore();
-      showToast('32 normas oficiais restauradas com sucesso no Firestore!');
-    } catch (e: any) {
-      alert(`Erro ao restaurar: ${e.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
-    <div className="space-y-5 animate-in fade-in duration-200">
+    <div className="space-y-4 animate-in fade-in duration-200">
       {/* Floating Action Feedback Toast */}
       {toastMessage && (
         <div className="fixed top-16 right-6 z-50 bg-slate-950/95 border border-indigo-500/40 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-3">
@@ -634,14 +839,14 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
       )}
 
       {/* Top Hero Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-7 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="space-y-2 max-w-2xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/25 text-indigo-300 border border-indigo-400/30">
                 <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                <span>Central Dinâmica de Normas</span>
+                <span>Manual & Normas do Integral</span>
               </span>
               {isAdmin && (
                 <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30">
@@ -662,7 +867,6 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {/* Admin Action: + Nova Norma */}
             {isAdmin && (
               <button
                 type="button"
@@ -678,7 +882,6 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
               </button>
             )}
 
-            {/* Admin Action: Sincronizar Normas Oficiais dos PDFs */}
             {isAdmin && (
               <button
                 type="button"
@@ -688,15 +891,14 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
                 title="Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer no Firestore"
               >
                 {isSyncingOfficial ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
                 ) : (
-                  <RotateCcw className="w-4 h-4 text-amber-400" />
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
                 )}
-                <span>Sincronizar Normas Oficiais</span>
+                <span>Sincronizar Oficiais</span>
               </button>
             )}
 
-            {/* Baixar PDF Oficial */}
             <button
               type="button"
               onClick={handleGeneratePDF}
@@ -706,51 +908,165 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
               <Printer className="w-4 h-4 text-amber-300" />
               <span>Baixar Manual em PDF</span>
             </button>
-
-            {/* Admin Emergency Recovery */}
-            {isAdmin && normas.length < 5 && (
-              <button
-                type="button"
-                onClick={handleRestoreDefaults}
-                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-2xl transition-colors cursor-pointer"
-                title="Restaurar normas padrão no Firestore"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-            )}
           </div>
         </div>
 
-        {/* Quick Highlights Counters */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-800/80">
+        {/* Counters */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-slate-800/80">
           <div className="bg-slate-800/60 p-3 rounded-2xl border border-slate-700/60">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total no Firestore</span>
-            <span className="text-lg font-black text-white">{totalCount} normas salvas</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Acervo Total</span>
+            <span className="text-base sm:text-lg font-black text-white">{totalCount} normas oficiais</span>
           </div>
           <div className="bg-rose-950/40 p-3 rounded-2xl border border-rose-800/40">
-            <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider block">Proibições / Graves</span>
-            <span className="text-lg font-black text-rose-400">{countProibicoes} regras</span>
+            <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider block">Proibições / Alertas</span>
+            <span className="text-base sm:text-lg font-black text-rose-400">{countProibicoes} regras</span>
           </div>
           <div className="bg-emerald-950/40 p-3 rounded-2xl border border-emerald-800/40">
             <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">Boas Práticas</span>
-            <span className="text-lg font-black text-emerald-400">{countRecomendadas} condutas</span>
+            <span className="text-base sm:text-lg font-black text-emerald-400">{countRecomendadas} condutas</span>
           </div>
           <div className="bg-indigo-950/40 p-3 rounded-2xl border border-indigo-800/40">
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">Diretrizes Sensíveis</span>
-            <span className="text-lg font-black text-indigo-300">Tolerância Zero a Gritos</span>
+            <span className="text-base sm:text-lg font-black text-indigo-300">{countDiretrizes} diretrizes</span>
           </div>
         </div>
       </div>
 
-      {/* Control Bar: Categories & Global Search */}
+      {/* 1. ATALHOS DE ACESSO RÁPIDO (Quick Pins / Badges Fixas) */}
+      <div className="bg-white p-3 sm:p-4 rounded-3xl border border-slate-200/90 shadow-sm space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <span className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+              Atalhos de Consulta Rápida:
+            </span>
+          </div>
+          {activeQuickPin && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveQuickPin(null);
+                setSearchTerm('');
+              }}
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+            >
+              Limpar atalho
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Pin 1: Rádio Frequência 2 */}
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickPinClick(
+                'radio',
+                'norma_fluxograma_ponto_radio',
+                'rotina_operacional'
+              )
+            }
+            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
+              activeQuickPin === 'radio'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-blue-500/20 ring-2 ring-blue-400/40'
+                : 'bg-blue-50/80 hover:bg-blue-100/90 text-blue-900 border-blue-200'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span>Rádio Frequência 2</span>
+          </button>
+
+          {/* Quick Pin 2: As 10 Regras da Academia */}
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickPinClick(
+                'academia_10_regras',
+                'norma_academia_10_regras_comportamento',
+                'seguranca_cuidados'
+              )
+            }
+            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
+              activeQuickPin === 'academia_10_regras'
+                ? 'bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-400/40'
+                : 'bg-amber-50/80 hover:bg-amber-100/90 text-amber-900 border-amber-200'
+            }`}
+          >
+            <Bus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>As 10 Regras da Academia</span>
+          </button>
+
+          {/* Quick Pin 3: Parque / Parcão */}
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickPinClick(
+                'parque',
+                'norma_regras_parque_parcao',
+                'seguranca_cuidados'
+              )
+            }
+            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
+              activeQuickPin === 'parque'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/20 ring-2 ring-emerald-400/40'
+                : 'bg-emerald-50/80 hover:bg-emerald-100/90 text-emerald-900 border-emerald-200'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>Parque / Parcão</span>
+          </button>
+
+          {/* Quick Pin 4: Mediação de Conflitos */}
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickPinClick(
+                'mediacao',
+                'norma_sensivel_mediacao_conflitos',
+                'guia_socioemocional'
+              )
+            }
+            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
+              activeQuickPin === 'mediacao'
+                ? 'bg-rose-600 text-white border-rose-600 shadow-rose-500/20 ring-2 ring-rose-400/40'
+                : 'bg-rose-50/80 hover:bg-rose-100/90 text-rose-900 border-rose-200'
+            }`}
+          >
+            <HeartHandshake className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span>Mediação de Conflitos</span>
+          </button>
+
+          {/* Quick Pin 5: Proibição de Celular e Bijuterias */}
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickPinClick(
+                'celular_bijuterias',
+                'norma_proibicao_celular_conversas',
+                'postura_fardamento'
+              )
+            }
+            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
+              activeQuickPin === 'celular_bijuterias'
+                ? 'bg-purple-600 text-white border-purple-600 shadow-purple-500/20 ring-2 ring-purple-400/40'
+                : 'bg-purple-50/80 hover:bg-purple-100/90 text-purple-900 border-purple-200'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+            <span>Proibição de Celular & Bijuterias</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. BARRA DE CONTROLE: Módulos, Busca e Filtros Rápidos de Alerta */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+        {/* Seletor por Módulos Oficiais */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Module Category Filters */}
           <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200">
             <button
               type="button"
               onClick={() => setSelectedModule('all')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedModule === 'all'
                   ? 'bg-slate-900 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -763,7 +1079,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             <button
               type="button"
               onClick={() => setSelectedModule('normas_internas')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedModule === 'normas_internas'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -776,7 +1092,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             <button
               type="button"
               onClick={() => setSelectedModule('academia_transporte')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedModule === 'academia_transporte'
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -789,7 +1105,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             <button
               type="button"
               onClick={() => setSelectedModule('guia_sensivel')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedModule === 'guia_sensivel'
                   ? 'bg-rose-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -800,21 +1116,28 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             </button>
           </div>
 
-          {/* Expand / Collapse All */}
-          <div className="flex items-center space-x-2 self-end md:self-auto">
+          {/* Controles Globais de Expansão */}
+          <div className="flex flex-wrap items-center gap-1.5 self-end md:self-auto">
             <button
               type="button"
-              onClick={handleExpandAll}
-              className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              onClick={handleExpandAllCategories}
+              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
             >
-              Expandir Todos
+              Expandir Categorias
             </button>
             <button
               type="button"
-              onClick={handleCollapseAll}
-              className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              onClick={handleCollapseAllCategories}
+              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
             >
-              Recolher Todos
+              Recolher Categorias
+            </button>
+            <button
+              type="button"
+              onClick={handleExpandAllNormas}
+              className="px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer"
+            >
+              Expandir Todas as Normas
             </button>
           </div>
         </div>
@@ -826,7 +1149,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por palavras-chave (ex: celular, gritar, banho, van, almoço, puxar, ponto, uniforme)..."
+            placeholder="Buscar por palavras-chave (ex: celular, rádio, frequência 2, brinquedão, banheiros, vai e volta, uniforme)..."
             className="w-full pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
           {searchTerm && (
@@ -841,8 +1164,66 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
           )}
         </div>
 
+        {/* 3. FILTROS RÁPIDOS POR TIPO DE ALERTA */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+            Filtro de Alerta:
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setAlertTypeFilter('all')}
+            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              alertTypeFilter === 'all'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            Todos ({filteredNormas.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAlertTypeFilter('proibicoes_alertas')}
+            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              alertTypeFilter === 'proibicoes_alertas'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500" />
+            <span>🔴 Proibições & Alertas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAlertTypeFilter('boas_praticas')}
+            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              alertTypeFilter === 'boas_praticas'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>🟢 Boas Práticas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAlertTypeFilter('diretrizes')}
+            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+              alertTypeFilter === 'diretrizes'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-indigo-500" />
+            <span>🟣 Diretrizes Sensíveis</span>
+          </button>
+        </div>
+
         {searchTerm && (
-          <div className="text-xs text-slate-500 px-1 flex items-center justify-between">
+          <div className="text-xs text-slate-500 pt-1 flex items-center justify-between">
             <span>
               Encontradas <strong>{filteredNormas.length} normas</strong> correspondentes à busca "{searchTerm}".
             </span>
@@ -851,19 +1232,19 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
               onClick={() => setSearchTerm('')}
               className="text-indigo-600 hover:underline font-semibold cursor-pointer"
             >
-              Ver todas as orientações
+              Limpar busca
             </button>
           </div>
         )}
       </div>
 
-      {/* Normas List */}
-      <div className="space-y-3.5">
+      {/* 4. VISUALIZAÇÃO AGRUPADA EM CATEGORIAS TEMÁTICAS SANFONADAS */}
+      <div className="space-y-4">
         {isLoading && normas.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm space-y-3">
             <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
             <p className="text-xs font-bold text-slate-500">
-              Carregando manual e normas do Firestore...
+              Carregando normas oficiais do Colégio Crescer...
             </p>
           </div>
         ) : filteredNormas.length === 0 ? (
@@ -873,13 +1254,14 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             </div>
             <h3 className="text-base font-bold text-slate-800">Nenhuma norma encontrada</h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Nenhuma norma corresponde ao termo pesquisado. Tente buscar por palavras como "grito", "celular", "uniforme" ou limpe o filtro.
+              Nenhuma diretriz corresponde aos filtros e buscas atuais. Tente limpar os filtros de módulo, alerta ou busca.
             </p>
             <button
               type="button"
               onClick={() => {
                 setSearchTerm('');
                 setSelectedModule('all');
+                setAlertTypeFilter('all');
               }}
               className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-colors cursor-pointer"
             >
@@ -887,184 +1269,252 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             </button>
           </div>
         ) : (
-          filteredNormas.map((norma) => {
-            const isExpanded = !!expandedSections[norma.id];
-            const isProibicao = norma.type === 'proibicao';
-            const isAlerta = norma.type === 'alerta';
-            const isRecomendado = norma.type === 'recomendado';
+          THEMATIC_CATEGORIES.map((categoryMeta) => {
+            const catNormas = groupedThematicNormas[categoryMeta.id] || [];
+            if (catNormas.length === 0) return null;
 
-            const cardBorder = isProibicao
-              ? 'border-rose-200 hover:border-rose-300 bg-white'
-              : isAlerta
-              ? 'border-amber-200 hover:border-amber-300 bg-white'
-              : isRecomendado
-              ? 'border-emerald-200 hover:border-emerald-300 bg-white'
-              : 'border-slate-200 hover:border-indigo-200 bg-white';
-
-            const badgeBg = isProibicao
-              ? 'bg-rose-600 text-white'
-              : isAlerta
-              ? 'bg-amber-500 text-white'
-              : isRecomendado
-              ? 'bg-emerald-600 text-white'
-              : 'bg-indigo-600 text-white';
-
-            const badgeIcon = isProibicao ? (
-              <Ban className="w-3 h-3 text-rose-200 shrink-0" />
-            ) : isAlerta ? (
-              <AlertTriangle className="w-3 h-3 text-amber-200 shrink-0" />
-            ) : isRecomendado ? (
-              <CheckCircle2 className="w-3 h-3 text-emerald-200 shrink-0" />
-            ) : (
-              <Sparkles className="w-3 h-3 text-indigo-200 shrink-0" />
-            );
-
-            const badgeLabel = isProibicao
-              ? 'PROIBIÇÃO / INFRAÇÃO GRAVE'
-              : isAlerta
-              ? 'ATENÇÃO & SEGURANÇA'
-              : isRecomendado
-              ? 'BOA PRÁTICA RECOMENDADA'
-              : 'DIRETRIZ INSTITUCIONAL';
-
-            const moduleMeta = MODULE_METADATA[norma.moduleId];
+            const isCategoryExpanded = Boolean(expandedCategories[categoryMeta.id]);
 
             return (
               <div
-                key={norma.id}
-                className={`rounded-3xl border ${cardBorder} shadow-xs overflow-hidden transition-all`}
+                key={categoryMeta.id}
+                className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden transition-all"
               >
-                {/* Accordion Card Header */}
-                <div className="p-4 sm:p-5 flex items-start sm:items-center justify-between gap-3 text-left">
-                  <div
-                    onClick={() => toggleSection(norma.id)}
-                    className="flex-1 flex items-start sm:items-center space-x-3.5 cursor-pointer"
-                  >
-                    <div className="p-2.5 rounded-2xl bg-slate-900 text-white shrink-0 mt-0.5 sm:mt-0 shadow-xs">
-                      {norma.moduleId === 'normas_internas' ? (
-                        <Award className="w-5 h-5 text-indigo-400" />
-                      ) : norma.moduleId === 'academia_transporte' ? (
-                        <Bus className="w-5 h-5 text-amber-400" />
+                {/* Header da Categoria Temática (Sanfona Principal) */}
+                <button
+                  type="button"
+                  onClick={() => toggleCategory(categoryMeta.id)}
+                  className={`w-full p-4 sm:p-5 flex items-start sm:items-center justify-between gap-4 text-left transition-colors cursor-pointer ${categoryMeta.headerBgClass}`}
+                >
+                  <div className="flex items-start sm:items-center space-x-3.5">
+                    <div className={`p-2.5 rounded-2xl shrink-0 mt-0.5 sm:mt-0 ${categoryMeta.iconBgClass}`}>
+                      {categoryMeta.id === 'rotina_operacional' ? (
+                        <Clock className="w-5 h-5 text-blue-300" />
+                      ) : categoryMeta.id === 'seguranca_cuidados' ? (
+                        <ShieldAlert className="w-5 h-5 text-amber-300" />
+                      ) : categoryMeta.id === 'postura_fardamento' ? (
+                        <Award className="w-5 h-5 text-purple-300" />
                       ) : (
-                        <HeartHandshake className="w-5 h-5 text-rose-400" />
+                        <HeartHandshake className="w-5 h-5 text-rose-300" />
                       )}
                     </div>
                     <div>
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                        <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${badgeBg}`}>
-                          {badgeIcon}
-                          <span>{badgeLabel}</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/20 text-white backdrop-blur-xs">
+                          {categoryMeta.badgeLabel}
                         </span>
-                        {norma.sectionNumber && (
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                            Seção {norma.sectionNumber}
-                          </span>
-                        )}
-                        <span className="text-[11px] font-bold text-slate-400">
-                          {moduleMeta ? moduleMeta.title : norma.moduleTitle}
+                        <span className="text-xs text-slate-300 font-semibold">
+                          {catNormas.length} {catNormas.length === 1 ? 'norma oficial' : 'normas oficiais'}
                         </span>
                       </div>
-
-                      <h3 className="text-base font-extrabold text-slate-900">
-                        {norma.title}
+                      <h3 className="text-base sm:text-lg font-black text-white mt-0.5">
+                        {categoryMeta.title}
                       </h3>
-                      {norma.summary && (
-                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
-                          {norma.summary}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions: Admin (Edit / Delete) + Toggle Chevron */}
-                  <div className="flex items-center space-x-2 shrink-0">
-                    {isAdmin && (
-                      <div className="flex items-center space-x-1 bg-slate-50 border border-slate-200 rounded-xl p-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setNormaEditing(norma);
-                            setIsEditModalOpen(true);
-                          }}
-                          className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
-                          title="Editar esta norma"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setNormaDeleting(norma);
-                          }}
-                          className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
-                          title="Excluir esta norma do banco"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => toggleSection(norma.id)}
-                      className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
-                      title={isExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
-                    >
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Expanded Card Details */}
-                {isExpanded && (
-                  <div className="px-5 pb-5 pt-1 space-y-3.5 border-t border-slate-100 bg-slate-50/50">
-                    {/* Summary highlight */}
-                    {norma.summary && (
-                      <p className="text-xs text-slate-700 font-semibold bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
-                        {norma.summary}
+                      <p className="text-xs text-slate-300 mt-0.5 line-clamp-1">
+                        {categoryMeta.subtitle}
                       </p>
-                    )}
-
-                    {/* Bullet Points Details */}
-                    <div>
-                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                        Diretrizes e Procedimentos:
-                      </span>
-                      <ul className="space-y-2">
-                        {norma.details.map((detail, dIdx) => (
-                          <li
-                            key={dIdx}
-                            className="text-xs text-slate-800 flex items-start space-x-2 leading-relaxed"
-                          >
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
-                            <span>{detail}</span>
-                          </li>
-                        ))}
-                      </ul>
                     </div>
+                  </div>
 
-                    {/* Tags & Footer metadata */}
-                    <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-1">
-                        {Array.isArray(norma.tags) &&
-                          norma.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="text-[9px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200"
-                            >
-                              #{tag}
-                            </span>
-                          ))}
-                      </div>
-
-                      {norma.updatedAt && (
-                        <span className="text-[10px] text-slate-400 font-medium">
-                          Atualizado em {new Date(norma.updatedAt).toLocaleDateString('pt-BR')} {norma.updatedBy ? `por ${norma.updatedBy}` : ''}
-                        </span>
+                  <div className="flex items-center space-x-2 shrink-0 text-white/80">
+                    <div className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 transition-colors">
+                      {isCategoryExpanded ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
                       )}
                     </div>
+                  </div>
+                </button>
+
+                {/* Conteúdo da Categoria: Lista de Normas */}
+                {isCategoryExpanded && (
+                  <div className="p-4 sm:p-5 space-y-3.5 bg-slate-50/60 border-t border-slate-100">
+                    {catNormas.map((norma) => {
+                      const isNormaExpanded = Boolean(expandedNormas[norma.id]);
+                      const isHighlighted = highlightedCardId === norma.id;
+
+                      const isProibicao = norma.type === 'proibicao';
+                      const isAlerta = norma.type === 'alerta';
+                      const isRecomendado = norma.type === 'recomendado';
+
+                      const cardBorder = isHighlighted
+                        ? 'border-indigo-500 ring-4 ring-indigo-400/30 bg-indigo-50/40 shadow-lg'
+                        : isProibicao
+                        ? 'border-rose-200 hover:border-rose-300 bg-white'
+                        : isAlerta
+                        ? 'border-amber-200 hover:border-amber-300 bg-white'
+                        : isRecomendado
+                        ? 'border-emerald-200 hover:border-emerald-300 bg-white'
+                        : 'border-slate-200 hover:border-indigo-200 bg-white';
+
+                      const badgeBg = isProibicao
+                        ? 'bg-rose-600 text-white'
+                        : isAlerta
+                        ? 'bg-amber-500 text-white'
+                        : isRecomendado
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-indigo-600 text-white';
+
+                      const badgeIcon = isProibicao ? (
+                        <Ban className="w-3 h-3 text-rose-200 shrink-0" />
+                      ) : isAlerta ? (
+                        <AlertTriangle className="w-3 h-3 text-amber-200 shrink-0" />
+                      ) : isRecomendado ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-200 shrink-0" />
+                      ) : (
+                        <Sparkles className="w-3 h-3 text-indigo-200 shrink-0" />
+                      );
+
+                      const badgeLabel = isProibicao
+                        ? 'PROIBIÇÃO / INFRAÇÃO GRAVE'
+                        : isAlerta
+                        ? 'ATENÇÃO & SEGURANÇA'
+                        : isRecomendado
+                        ? 'BOA PRÁTICA RECOMENDADA'
+                        : 'DIRETRIZ INSTITUCIONAL';
+
+                      const moduleMeta = MODULE_METADATA[norma.moduleId];
+
+                      return (
+                        <div
+                          key={norma.id}
+                          id={`card-${norma.id}`}
+                          className={`rounded-2xl border ${cardBorder} shadow-xs overflow-hidden transition-all duration-200`}
+                        >
+                          {/* Top Card Header */}
+                          <div className="p-4 sm:p-4.5 flex items-start sm:items-center justify-between gap-3 text-left">
+                            <div
+                              onClick={() => toggleNormaCard(norma.id)}
+                              className="flex-1 flex items-start sm:items-center space-x-3 cursor-pointer"
+                            >
+                              <div className="p-2 rounded-xl bg-slate-900 text-white shrink-0 mt-0.5 sm:mt-0 shadow-2xs">
+                                {norma.moduleId === 'normas_internas' ? (
+                                  <Award className="w-4 h-4 text-indigo-400" />
+                                ) : norma.moduleId === 'academia_transporte' ? (
+                                  <Bus className="w-4 h-4 text-amber-400" />
+                                ) : (
+                                  <HeartHandshake className="w-4 h-4 text-rose-400" />
+                                )}
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                                  <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${badgeBg}`}>
+                                    {badgeIcon}
+                                    <span>{badgeLabel}</span>
+                                  </span>
+                                  {norma.sectionNumber && (
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                                      Seção {norma.sectionNumber}
+                                    </span>
+                                  )}
+                                  <span className="text-[11px] font-bold text-slate-400">
+                                    {moduleMeta ? moduleMeta.title : norma.moduleTitle}
+                                  </span>
+                                </div>
+
+                                <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
+                                  {norma.title}
+                                </h4>
+                                {norma.summary && (
+                                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
+                                    {norma.summary}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Actions: Admin (Edit / Delete) + Toggle Chevron */}
+                            <div className="flex items-center space-x-1.5 shrink-0">
+                              {isAdmin && (
+                                <div className="flex items-center space-x-1 bg-slate-50 border border-slate-200 rounded-xl p-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNormaEditing(norma);
+                                      setIsEditModalOpen(true);
+                                    }}
+                                    className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
+                                    title="Editar esta norma"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNormaDeleting(norma);
+                                    }}
+                                    className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
+                                    title="Excluir esta norma do banco"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleNormaCard(norma.id)}
+                                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+                                title={isNormaExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
+                              >
+                                {isNormaExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Expanded Card Details */}
+                          {isNormaExpanded && (
+                            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 bg-slate-50/50">
+                              {norma.summary && (
+                                <p className="text-xs text-slate-700 font-semibold bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
+                                  {norma.summary}
+                                </p>
+                              )}
+
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                                  Diretrizes e Procedimentos Oficiais:
+                                </span>
+                                <ul className="space-y-1.5">
+                                  {norma.details.map((detail, dIdx) => (
+                                    <li
+                                      key={dIdx}
+                                      className="text-xs text-slate-800 flex items-start space-x-2 leading-relaxed"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
+                                      <span>{detail}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+
+                              <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {Array.isArray(norma.tags) &&
+                                    norma.tags.map((tag) => (
+                                      <span
+                                        key={tag}
+                                        className="text-[9px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200"
+                                      >
+                                        #{tag}
+                                      </span>
+                                    ))}
+                                </div>
+
+                                {norma.updatedAt && (
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    Atualizado em {new Date(norma.updatedAt).toLocaleDateString('pt-BR')} {norma.updatedBy ? `por ${norma.updatedBy}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
