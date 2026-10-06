@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings } from './types';
-import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
+import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import {
   loadStudents,
   saveStudents,
@@ -118,6 +118,7 @@ import {
   forceDirectServerSync,
   recalculateAndTriggerConsolidation,
   autoConsolidateAndClosePastPendingCalls,
+  deleteAttendanceRecordsForStudentsOnDate,
   deleteDoc,
   doc,
   db,
@@ -1171,11 +1172,16 @@ export default function App() {
   ) => {
     const studentIdSet = new Set(studentIds);
     const targetKeys = new Set<string>();
+    const clearAllActivities = activity === 'TODAS' || activity === 'Rotina';
 
+    // Gera chaves determinísticas de todos os alunos selecionados
     studentIds.forEach((studentId) => {
       const student = students.find((s) => s.id === studentId);
-      if (activity === 'TODAS') {
-        if (student) {
+      if (clearAllActivities) {
+        ['Rotina', 'Reforço', ...OFFICIAL_ROLL_CALL_MODALITIES].forEach((act) => {
+          targetKeys.add(`${studentId}_${act}_${date}`);
+        });
+        if (student?.activities) {
           student.activities.forEach((act) => {
             targetKeys.add(`${studentId}_${act}_${date}`);
           });
@@ -1188,10 +1194,11 @@ export default function App() {
     let updatedRecords: AttendanceRecord[] = [];
     setRecords((prev) => {
       const updated = prev.filter((r) => {
+        // Se pertencer à data e a um dos alunos selecionados
         if (r.date === date && studentIdSet.has(r.studentId)) {
-          if (activity === 'TODAS' || r.activity === activity) {
+          if (clearAllActivities || r.activity === activity) {
             targetKeys.add(r.id);
-            return false;
+            return false; // Remove completamente todas as marcações (presença, falta, saída ant., sem equip.)
           }
         }
         return !targetKeys.has(r.id);
@@ -1204,11 +1211,22 @@ export default function App() {
     // Notificação imediata para outras abas e dispositivos
     broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
 
-    try {
-      // Exclusão atômica em lote no Firestore
-      await batchDeleteAttendanceRecordsFromFirestore(Array.from(targetKeys));
+    // Dispara evento global para recálculo instantâneo de contadores no cabeçalho
+    window.dispatchEvent(
+      new CustomEvent('app_attendance_cleared', {
+        detail: { studentIds, date, activity, records: updatedRecords },
+      })
+    );
 
-      // Trigger de Recálculo Instantâneo: Marcação de Chamada Reaberta (preserva histórico de refeições)
+    try {
+      // Exclusão atômica no Firestore com varredura completa da coleção 'attendanceRecords'
+      await deleteAttendanceRecordsForStudentsOnDate(
+        studentIds,
+        date,
+        clearAllActivities ? 'TODAS' : activity
+      );
+
+      // Trigger de Recálculo Instantâneo da Consolidação e Refeições (reabre a chamada e atualiza contadores)
       recalculateAndTriggerConsolidation(date, students, updatedRecords, {
         currentUserEmail: currentUser?.email,
         isReopened: true,

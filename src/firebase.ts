@@ -52,7 +52,7 @@ import {
   saveLocalUsersList,
   PRESET_USERS,
 } from './utils/authUtils';
-import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
+import { INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
 import { normalizeAttendanceStatus, getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays } from './utils/dateUtils';
@@ -1445,6 +1445,57 @@ export async function batchDeleteAttendanceRecordsFromFirestore(recordIds: strin
     handleFirestoreError(error, OperationType.DELETE, 'attendanceRecords/batchDelete');
     throw error;
   }
+}
+
+/**
+ * Exclui do Firestore todas as marcações de frequência (presença, falta, saída antecipada e sem equipamento)
+ * dos alunos especificados em determinada data, retornando o status de cada aluno para 'Pendente'.
+ * Realiza varredura tanto de IDs determinísticos quanto de documentos gravados na coleção 'attendanceRecords'.
+ */
+export async function deleteAttendanceRecordsForStudentsOnDate(
+  studentIds: string[],
+  date: string,
+  activity?: string
+): Promise<string[]> {
+  if (!studentIds || studentIds.length === 0 || !date) return [];
+  const studentIdSet = new Set(studentIds);
+  const idsToDelete = new Set<string>();
+
+  // 1. Gera chaves determinísticas conhecidas para garantir limpeza instantânea
+  studentIds.forEach((sid) => {
+    if (!activity || activity === 'TODAS') {
+      ['Rotina', 'Reforço', ...OFFICIAL_ROLL_CALL_MODALITIES].forEach((act) => {
+        idsToDelete.add(`${sid}_${act}_${date}`);
+      });
+    } else {
+      idsToDelete.add(`${sid}_${activity}_${date}`);
+      if (activity === 'Rotina') {
+        idsToDelete.add(`${sid}_Rotina_${date}`);
+      }
+    }
+  });
+
+  // 2. Consulta Firestore na coleção attendanceRecords para capturar qualquer documento existente
+  try {
+    const colRef = collection(db, 'attendanceRecords');
+    const q = query(colRef, or(where('data', '==', date), where('date', '==', date)));
+    const snap = await getDocs(q);
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (studentIdSet.has(data.studentId)) {
+        if (!activity || activity === 'TODAS' || data.activity === activity) {
+          idsToDelete.add(d.id);
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('Aviso ao consultar attendanceRecords para exclusão no Firestore:', err);
+  }
+
+  // 3. Executa exclusão em lote atômica no Firestore
+  const idList = Array.from(idsToDelete);
+  await batchDeleteAttendanceRecordsFromFirestore(idList);
+  return idList;
 }
 
 let isNetworkDisabled = false;

@@ -722,26 +722,56 @@ function getCurrentHHMM(): string {
   };
 
   const handleClearSelected = async () => {
-    const studentIds = filteredStudents.map((s) => s.id);
+    // Identifica todos os alunos da turma selecionada (ou do filtro atual se TODAS)
+    const targetStudents =
+      searchTerm.trim() !== ''
+        ? filteredStudents
+        : selectedTurma === 'TODAS'
+        ? filteredStudents
+        : students.filter((s) => s.turma === selectedTurma);
+
+    const studentIds = Array.from(new Set(targetStudents.map((s) => s.id)));
     if (studentIds.length === 0) return;
-    if (window.confirm(`Tem certeza que deseja limpar as marcações de "${selectedActivity}" no dia selecionado?`)) {
+
+    const turmaLabel =
+      selectedTurma === 'TODAS'
+        ? 'todas as turmas'
+        : `turma "${selectedTurma}"`;
+
+    const confirmMsg = `Tem certeza que deseja limpar todas as marcações de frequência (presença, faltas, saídas antecipadas e sem equipamento) da ${turmaLabel} no dia ${formatDateBR(
+      selectedDate
+    )}?\n\nTodas as marcações da turma serão totalmente removidas e o status de cada aluno retornará para "Pendente".`;
+
+    if (window.confirm(confirmMsg)) {
       await batchAction.execute(
         async () => {
-          await onClearRecords(studentIds, selectedActivity, selectedDate);
+          // Limpa integralmente no estado e no Firestore todas as modalidades ('TODAS')
+          await onClearRecords(studentIds, 'TODAS', selectedDate);
         },
         {
-          pendingMessage: `Removendo marcações de presença no Firestore...`,
-          successMessage: `Marcações removidas e confirmadas no Firestore com sucesso!`,
+          pendingMessage: `Removendo todas as marcações da ${turmaLabel} no Firestore...`,
+          successMessage: `Todas as marcações removidas com sucesso! Alunos retornados para Pendente.`,
           errorMessage: 'Falha ao remover marcações no servidor.',
           onSuccess: () => {
-            // Clear local observation state for cleared records
+            // Limpa o estado local de observações dos registros removidos
             setObsMap((prev) => {
               const next = { ...prev };
               studentIds.forEach((sid) => {
-                delete next[`${sid}_${selectedActivity}_${selectedDate}`];
+                Object.keys(next).forEach((k) => {
+                  if (k.startsWith(`${sid}_`) && k.endsWith(`_${selectedDate}`)) {
+                    delete next[k];
+                  }
+                });
               });
               return next;
             });
+
+            // Dispara evento global para recálculo instantâneo dos contadores no cabeçalho
+            window.dispatchEvent(
+              new CustomEvent('app_attendance_cleared', {
+                detail: { studentIds, selectedDate, selectedTurma },
+              })
+            );
           },
         }
       );
@@ -1085,7 +1115,7 @@ function getCurrentHHMM(): string {
             </span>
             {stats.pendente > 0 && (
               <span className="px-2 py-1 rounded-md bg-slate-200 text-slate-700 border border-slate-300">
-                {stats.pendente} Não Registrados
+                {stats.pendente} Pendentes
               </span>
             )}
           </div>
@@ -1171,10 +1201,10 @@ function getCurrentHHMM(): string {
             <button
               onClick={handleClearSelected}
               disabled={filteredStudents.length === 0 || batchAction.isPending}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1"
-              title="Limpar marcações deste dia"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1 shadow-2xs hover:shadow-xs active:scale-95"
+              title="Limpar todas as marcações da turma e retornar alunos para Pendente"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               <span>Limpar</span>
             </button>
 
