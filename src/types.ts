@@ -406,4 +406,38 @@ export interface DepartureAlertSettings {
   updatedBy?: string;
 }
 
+/**
+ * Registro de Consolidação Diária de Frequência e Refeições
+ * Gravado na coleção Firestore 'relatoriosConsolidados/{date}'
+ */
+export interface RelatorioConsolidadoDia {
+  id: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD
+  status: 'finalizada' | 'pendente' | 'reaberta' | 'fechada_automaticamente';
+  dayOfWeek: string;
+  totalEsperados: number;
+  presentes: number;
+  faltas: number;
+  justificados: number;
+  saidasAntecipadas: number;
+  semEquipamento: number;
+  pendentes: number;
+  taxaPresenca: number;
+  isReopened?: boolean;
+  closedAutomatically?: boolean;
+  lastCalculatedMealsCount: number;
+  byTurma?: Record<
+    string,
+    {
+      presentes: number;
+      faltas: number;
+      justificados: number;
+      pendentes: number;
+      total: number;
+    }
+  >;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 

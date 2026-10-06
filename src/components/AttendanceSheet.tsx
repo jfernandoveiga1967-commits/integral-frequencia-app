@@ -33,6 +33,7 @@ interface AttendanceSheetProps {
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
+  onFinalizeCall?: (date: string) => Promise<void> | void;
 }
 
 export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
@@ -51,6 +52,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
+  onFinalizeCall,
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
   const userCanMarkAttendance = canMarkAttendance(currentUser);
@@ -746,6 +748,30 @@ function getCurrentHHMM(): string {
     }
   };
 
+  const [isFinalizingCall, setIsFinalizingCall] = useState(false);
+
+  const handleFinalizeCurrentCall = async () => {
+    if (!onFinalizeCall) return;
+    if (stats.pendente > 0) {
+      const confirmed = window.confirm(
+        `Existem ${stats.pendente} alunos com chamada pendente nesta data. Deseja encerrar a chamada agora, convertendo as pendências em Falta e consolidando os relatórios no Firestore?`
+      );
+      if (!confirmed) return;
+    }
+    setIsFinalizingCall(true);
+    await batchAction.execute(
+      async () => {
+        await onFinalizeCall(selectedDate);
+      },
+      {
+        pendingMessage: 'Encerrando e consolidando chamada no Firestore...',
+        successMessage: 'Chamada finalizada e relatório consolidado com sucesso no Firestore!',
+        errorMessage: 'Falha ao consolidar chamada no Firestore.',
+      }
+    );
+    setIsFinalizingCall(false);
+  };
+
   const handleExportDailyPDF = (saveImmediately = false) => {
     try {
       const result = generateAttendanceDailyPDFReport({
@@ -1151,6 +1177,37 @@ function getCurrentHHMM(): string {
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Limpar</span>
             </button>
+
+            {onFinalizeCall && userCanMarkAttendance && (
+              <button
+                type="button"
+                onClick={handleFinalizeCurrentCall}
+                disabled={filteredStudents.length === 0 || batchAction.isPending || isFinalizingCall}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs ${
+                  stats.pendente === 0 && stats.total > 0
+                    ? 'bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-600'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                title="Finalizar e consolidar chamada no Firestore e Relatórios Financeiros"
+              >
+                {isFinalizingCall ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Consolidando...</span>
+                  </>
+                ) : stats.pendente === 0 && stats.total > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
+                    <span>Chamada Consolidada</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Finalizar Chamada</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

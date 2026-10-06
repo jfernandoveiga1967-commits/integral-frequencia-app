@@ -23,9 +23,9 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
-import { ManualNorma, INITIAL_MANUAL_NORMAS } from './types/manualNormas';
+import { ManualNorma, INITIAL_MANUAL_NORMAS, NormaAceite } from './types/manualNormas';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
@@ -54,7 +54,8 @@ import {
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
-import { normalizeAttendanceStatus } from './utils/frequenciaUtils';
+import { normalizeAttendanceStatus, getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
+import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays } from './utils/dateUtils';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -2736,6 +2737,293 @@ export async function getMealReportFromFirestore(monthKey: string): Promise<Meal
 }
 
 /**
+ * Salva o registro consolidado diário na coleção 'relatoriosConsolidados/{date}'
+ */
+export async function saveRelatorioConsolidadoToFirestore(
+  consolidado: RelatorioConsolidadoDia
+): Promise<void> {
+  const docRef = doc(db, 'relatoriosConsolidados', consolidado.id);
+  try {
+    await setDoc(docRef, consolidado, { merge: true });
+  } catch (error) {
+    console.warn(`Erro ao salvar relatoriosConsolidados/${consolidado.id}:`, error);
+    handleFirestoreError(error, OperationType.WRITE, `relatoriosConsolidados/${consolidado.id}`);
+    throw error;
+  }
+}
+
+/**
+ * Recupera o registro consolidado diário do Firestore
+ */
+export async function getRelatorioConsolidadoFromFirestore(
+  date: string
+): Promise<RelatorioConsolidadoDia | null> {
+  try {
+    const docRef = doc(db, 'relatoriosConsolidados', date);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as RelatorioConsolidadoDia;
+    }
+  } catch (error) {
+    console.warn(`Erro ao ler relatoriosConsolidados/${date}:`, error);
+  }
+  return null;
+}
+
+/**
+ * Escutador em tempo real para a coleção 'relatoriosConsolidados'
+ */
+export function subscribeRelatoriosConsolidados(
+  onData: (data: Record<string, RelatorioConsolidadoDia>) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'relatoriosConsolidados');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const result: Record<string, RelatorioConsolidadoDia> = {};
+      snapshot.forEach((docSnap) => {
+        result[docSnap.id] = docSnap.data() as RelatorioConsolidadoDia;
+      });
+      onData(result);
+    },
+    (error) => {
+      console.warn('Erro ao escutar relatoriosConsolidados:', error);
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, 'relatoriosConsolidados');
+    }
+  );
+}
+
+/**
+ * Trigger de Recálculo Instantâneo:
+ * Sempre que uma chamada for reaberta ou novamente finalizada, recalcula e atualiza
+ * atomicamente o documento em 'relatoriosConsolidados/{date}' e sincroniza 'mealReports/{monthKey}'.
+ */
+export async function recalculateAndTriggerConsolidation(
+  date: string,
+  students: Student[],
+  records: AttendanceRecord[],
+  options?: {
+    currentUserEmail?: string;
+    isReopened?: boolean;
+    closedAutomatically?: boolean;
+    turmasList?: string[];
+  }
+): Promise<RelatorioConsolidadoDia> {
+  const metrics = getDailyConsolidatedMetrics(date, students, records, 'all', {
+    convertPastPendingToAbsence: false,
+  });
+
+  const turmas = options?.turmasList && options.turmasList.length > 0 ? options.turmasList : TURMAS_LIST;
+  const byTurma: Record<
+    string,
+    { presentes: number; faltas: number; justificados: number; pendentes: number; total: number }
+  > = {};
+
+  turmas.forEach((t) => {
+    const tMetrics = getDailyConsolidatedMetrics(date, students, records, t, {
+      convertPastPendingToAbsence: false,
+    });
+    byTurma[t] = {
+      presentes: tMetrics.presentes,
+      faltas: tMetrics.faltas,
+      justificados: tMetrics.justificados,
+      pendentes: tMetrics.pendentes,
+      total: tMetrics.totalEsperados,
+    };
+  });
+
+  const isCompleted = metrics.pendentes === 0 && metrics.totalEsperados > 0;
+  const status: RelatorioConsolidadoDia['status'] = options?.closedAutomatically
+    ? 'fechada_automaticamente'
+    : options?.isReopened
+    ? 'reaberta'
+    : isCompleted
+    ? 'finalizada'
+    : 'pendente';
+
+  const consolidadoRecord: RelatorioConsolidadoDia = {
+    id: date,
+    date,
+    status,
+    dayOfWeek: metrics.dayName ? metrics.dayName.toLowerCase() : '',
+    totalEsperados: metrics.totalEsperados,
+    presentes: metrics.presentes,
+    faltas: metrics.faltas,
+    justificados: metrics.justificados,
+    saidasAntecipadas: metrics.saidasAntecipadas,
+    semEquipamento: metrics.semEquipamento,
+    pendentes: metrics.pendentes,
+    taxaPresenca: metrics.taxaPresenca,
+    isReopened: Boolean(options?.isReopened),
+    closedAutomatically: Boolean(options?.closedAutomatically),
+    lastCalculatedMealsCount: metrics.presentes,
+    byTurma,
+    updatedAt: new Date().toISOString(),
+    updatedBy: options?.currentUserEmail || 'sistema_autosincro',
+  };
+
+  try {
+    await saveRelatorioConsolidadoToFirestore(consolidadoRecord);
+  } catch (err) {
+    console.warn(`Aviso ao gravar relatoriosConsolidados/${date}:`, err);
+  }
+
+  // Sincronização automática do Relatório Financeiro de Refeições
+  const monthKey = date.slice(0, 7); // "YYYY-MM"
+  try {
+    const existingMealReport = await getMealReportFromFirestore(monthKey);
+    const [yNum, mNum] = monthKey.split('-').map(Number);
+    const baseReport: MealReportConfig = existingMealReport || {
+      id: monthKey,
+      monthKey,
+      year: yNum,
+      month: mNum,
+      defaultUnitPrice: 9.0,
+      entries: {},
+    };
+
+    const currentEntry = baseReport.entries[date] || {};
+    const updatedEntry = {
+      ...currentEntry,
+      lastCalculatedMealsCount: metrics.presentes,
+      isReopenedCall: options?.isReopened ? true : false,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!currentEntry.isManualOverride) {
+      updatedEntry.manualCount = metrics.presentes;
+    }
+
+    baseReport.entries[date] = updatedEntry;
+    await saveMealReportToFirestore(baseReport);
+  } catch (err) {
+    console.warn(`Aviso ao sincronizar mealReports/${monthKey} no recálculo:`, err);
+  }
+
+  return consolidadoRecord;
+}
+
+/**
+ * Verificação diária automática:
+ * Localiza todas as chamadas do dia anterior (e dias letivos passados) que permaneceram
+ * 'Pendentes' ou 'Reabertas', fechando-as automaticamente no Firestore para que o
+ * Relatório Consolidado e o Relatório Financeiro de Refeições estejam sempre 100% atualizados.
+ */
+export async function autoConsolidateAndClosePastPendingCalls(
+  students: Student[],
+  records: AttendanceRecord[],
+  holidays: HolidayItem[],
+  options?: {
+    currentUserEmail?: string;
+    turmasList?: string[];
+  }
+): Promise<{
+  closedCount: number;
+  newRecords: AttendanceRecord[];
+  updatedDates: string[];
+}> {
+  if (!students || students.length === 0) {
+    return { closedCount: 0, newRecords: [], updatedDates: [] };
+  }
+
+  const today = new Date();
+  const todayStr = toISODateString(today);
+
+  // Escopo de busca: até 14 dias atrás
+  const pastLimitDate = new Date(today);
+  pastLimitDate.setDate(pastLimitDate.getDate() - 14);
+  const pastLimitStr = toISODateString(pastLimitDate);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = toISODateString(yesterday);
+
+  if (yesterdayStr < pastLimitStr) {
+    return { closedCount: 0, newRecords: [], updatedDates: [] };
+  }
+
+  const { effectiveDays } = getEffectiveSchoolDays(pastLimitStr, yesterdayStr, holidays);
+
+  const newRecordsToSave: AttendanceRecord[] = [];
+  const updatedDates: string[] = [];
+  let currentRecordsPool = [...records];
+
+  for (const day of effectiveDays) {
+    const dateStr = day.dateStr;
+    if (dateStr >= todayStr) continue;
+
+    const metrics = getDailyConsolidatedMetrics(
+      dateStr,
+      students,
+      currentRecordsPool,
+      'all',
+      { convertPastPendingToAbsence: false }
+    );
+
+    // Se houver alunos pendentes no dia letivo passado:
+    if (metrics.pendentes > 0 && metrics.pendingStudents && metrics.pendingStudents.length > 0) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 12, 0, 0);
+      const { weekNumber, year } = getISOWeekNumber(dt);
+
+      const dayNewRecords: AttendanceRecord[] = metrics.pendingStudents.map((st) => ({
+        id: `${st.id}_Rotina_${dateStr}`,
+        studentId: st.id,
+        activity: 'Rotina',
+        turma: st.turma,
+        date: dateStr,
+        weekNumber,
+        year,
+        status: 'falta' as AttendanceStatus,
+        observation: 'Fechamento automático de pendência / Sistema',
+        createdAt: new Date().toISOString(),
+      }));
+
+      newRecordsToSave.push(...dayNewRecords);
+      currentRecordsPool = [...dayNewRecords, ...currentRecordsPool];
+      updatedDates.push(dateStr);
+    }
+  }
+
+  // Grava novas faltas em lote no Firestore
+  if (newRecordsToSave.length > 0) {
+    try {
+      await batchSaveRecordsToFirestore(newRecordsToSave);
+      saveAttendanceRecords(currentRecordsPool);
+    } catch (err) {
+      console.warn('Erro ao salvar fechamento automático de chamadas no Firestore:', err);
+    }
+  }
+
+  // Dispara o recálculo e consolidação em 'relatoriosConsolidados' e 'mealReports' para cada data
+  for (const dateStr of updatedDates) {
+    try {
+      await recalculateAndTriggerConsolidation(
+        dateStr,
+        students,
+        currentRecordsPool,
+        {
+          currentUserEmail: options?.currentUserEmail || 'sistema_autosincro',
+          closedAutomatically: true,
+          isReopened: false,
+          turmasList: options?.turmasList,
+        }
+      );
+    } catch (err) {
+      console.warn(`Erro ao consolidar data ${dateStr}:`, err);
+    }
+  }
+
+  return {
+    closedCount: newRecordsToSave.length,
+    newRecords: newRecordsToSave,
+    updatedDates,
+  };
+}
+
+/**
  * Salva o Cardápio Mensal no Firestore (monthlyMenus/{monthKey})
  */
 export async function saveMonthlyMenuToFirestore(menu: MonthlyMenu): Promise<void> {
@@ -3161,6 +3449,95 @@ export async function syncOfficialManualNormasToFirestore(): Promise<ManualNorma
   } catch (err) {
     console.warn('Erro ao sincronizar manual_normas oficiais no Firestore:', err);
     throw err;
+  }
+}
+
+/**
+ * Salva o registro de aceite e ciência digital de um colaborador no Firestore (normas_aceites/{userId})
+ */
+export async function saveNormaAceiteToFirestore(aceite: NormaAceite): Promise<void> {
+  const docId = aceite.id || `aceite_${aceite.userId}`;
+  try {
+    const docRef = doc(db, 'normas_aceites', docId);
+    const payload: NormaAceite = {
+      ...aceite,
+      id: docId,
+      timestamp: aceite.timestamp || new Date().toISOString(),
+    };
+    await setDoc(docRef, payload, { merge: true });
+    try {
+      localStorage.setItem(`crescer_norma_aceite_${aceite.userId}`, JSON.stringify(payload));
+    } catch {}
+  } catch (error) {
+    console.warn(`Erro ao salvar normas_aceites/${docId}:`, error);
+    handleFirestoreError(error, OperationType.WRITE, `normas_aceites/${docId}`);
+    throw error;
+  }
+}
+
+/**
+ * Recupera o aceite de um usuário específico
+ */
+export async function getUserNormaAceite(userId: string): Promise<NormaAceite | null> {
+  try {
+    const docRef = doc(db, 'normas_aceites', `aceite_${userId}`);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as NormaAceite;
+    }
+  } catch (error) {
+    console.warn(`Erro ao buscar normas_aceites do usuário ${userId}:`, error);
+  }
+  try {
+    const cached = localStorage.getItem(`crescer_norma_aceite_${userId}`);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  return null;
+}
+
+/**
+ * Inscreve-se na lista de todos os aceites da equipe no Firestore (para auditoria do Admin)
+ */
+export function subscribeAllNormasAceites(
+  onData: (items: NormaAceite[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'normas_aceites');
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      const list: NormaAceite[] = [];
+      snap.forEach((d) => {
+        list.push(d.data() as NormaAceite);
+      });
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      onData(list);
+    },
+    (err) => {
+      console.warn('Erro ao escutar normas_aceites no Firestore:', err);
+      handleFirestoreError(err, OperationType.LIST, 'normas_aceites');
+      onError?.(err);
+      onData([]);
+    }
+  );
+}
+
+/**
+ * Busca todos os aceites do servidor Firestore
+ */
+export async function getAllNormasAceites(): Promise<NormaAceite[]> {
+  try {
+    const colRef = collection(db, 'normas_aceites');
+    const snap = await getDocs(colRef);
+    const list: NormaAceite[] = [];
+    snap.forEach((d) => {
+      list.push(d.data() as NormaAceite);
+    });
+    return list;
+  } catch (error) {
+    console.warn('Erro ao buscar todos os normas_aceites:', error);
+    return [];
   }
 }
 

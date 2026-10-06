@@ -116,6 +116,8 @@ import {
   testFirestoreConnection,
   getIsFirestoreQuotaExceeded,
   forceDirectServerSync,
+  recalculateAndTriggerConsolidation,
+  autoConsolidateAndClosePastPendingCalls,
   deleteDoc,
   doc,
   db,
@@ -908,6 +910,42 @@ export default function App() {
     };
   }, []);
 
+  // 12. Autosincro e Encerramento Automático de Chamadas do Dia Anterior / Pendentes / Reabertas
+  const hasAutoConsolidatedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLogged) return;
+    if (students.length === 0 || !isInitialStudentsLoaded) return;
+    if (hasAutoConsolidatedRef.current) return;
+
+    hasAutoConsolidatedRef.current = true;
+
+    // Executa verificação diária automática de pendências de dias anteriores
+    autoConsolidateAndClosePastPendingCalls(students, records, holidays, {
+      currentUserEmail: currentUser?.email,
+      turmasList: TURMAS_LIST,
+    })
+      .then(({ closedCount, newRecords, updatedDates }) => {
+        if (closedCount > 0 && newRecords.length > 0) {
+          console.info(
+            `[AutoSincro] ${closedCount} pendências de chamadas passadas (${updatedDates.join(', ')}) foram encerradas e consolidadas automaticamente no Firestore.`
+          );
+          setRecords((prev) => {
+            const mergedMap = new Map<string, AttendanceRecord>();
+            prev.forEach((r) => mergedMap.set(r.id, r));
+            newRecords.forEach((r) => mergedMap.set(r.id, r));
+            const updated = Array.from(mergedMap.values());
+            saveAttendanceRecords(updated);
+            return updated;
+          });
+          broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', newRecords);
+        }
+      })
+      .catch((err) => {
+        console.warn('Erro ao executar autoConsolidateAndClosePastPendingCalls:', err);
+      });
+  }, [isLogged, students, isInitialStudentsLoaded, holidays, currentUser?.email]);
+
   // Save student modifications
   const handleAddStudent = async (newStudentData: Omit<Student, 'id'>) => {
     const rawStudent: Student = {
@@ -1038,9 +1076,11 @@ export default function App() {
     };
     
     // Atualização local imediata e síncrona
+    let updatedRecords: AttendanceRecord[] = [];
     setRecords((prev) => {
       const filtered = prev.filter((r) => r.id !== recordId);
       const updated = [newRecord, ...filtered];
+      updatedRecords = updated;
       saveAttendanceRecords(updated);
       return updated;
     });
@@ -1055,6 +1095,15 @@ export default function App() {
       console.error('Erro ao salvar chamada no Firestore:', err);
       throw err;
     }
+
+    // Trigger de Recálculo Instantâneo da Consolidação e Refeições
+    try {
+      recalculateAndTriggerConsolidation(recordData.date, students, updatedRecords, {
+        currentUserEmail: currentUser?.email,
+        isReopened: false,
+        turmasList: TURMAS_LIST,
+      }).catch((e) => console.warn('Aviso no trigger de consolidação pós-saveRecord:', e));
+    } catch (err) {}
   };
 
   const handleBatchMarkPresent = async (
@@ -1102,6 +1151,13 @@ export default function App() {
     try {
       // Gravação atômica em batch no Firestore
       await batchSaveRecordsToFirestore(batchNewRecords);
+
+      // Trigger de Recálculo Instantâneo da Consolidação e Refeições
+      recalculateAndTriggerConsolidation(date, students, updatedRecords, {
+        currentUserEmail: currentUser?.email,
+        isReopened: false,
+        turmasList: TURMAS_LIST,
+      }).catch((e) => console.warn('Aviso no trigger de consolidação pós-batchMarkPresent:', e));
     } catch (err) {
       console.error('Erro ao salvar lote de presença no Firestore:', err);
       throw err;
@@ -1151,10 +1207,65 @@ export default function App() {
     try {
       // Exclusão atômica em lote no Firestore
       await batchDeleteAttendanceRecordsFromFirestore(Array.from(targetKeys));
+
+      // Trigger de Recálculo Instantâneo: Marcação de Chamada Reaberta (preserva histórico de refeições)
+      recalculateAndTriggerConsolidation(date, students, updatedRecords, {
+        currentUserEmail: currentUser?.email,
+        isReopened: true,
+        turmasList: TURMAS_LIST,
+      }).catch((e) => console.warn('Aviso no trigger de consolidação pós-clearRecords:', e));
     } catch (err) {
       console.error('Error clearing Firestore records:', err);
       throw err;
     }
+  };
+
+  // Encerramento Oficial de Chamada com Conversão de Pendências e Trigger de Consolidação
+  const handleFinalizeAttendanceCall = async (date: string) => {
+    const metrics = getDailyConsolidatedMetrics(date, students, records, 'all', {
+      convertPastPendingToAbsence: false,
+    });
+
+    let currentPool = [...records];
+    const newFaltas: AttendanceRecord[] = [];
+
+    if (metrics.pendentes > 0 && metrics.pendingStudents && metrics.pendingStudents.length > 0) {
+      const [y, m, d] = date.split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 12, 0, 0);
+      const { weekNumber, year } = getISOWeekNumber(dt);
+
+      metrics.pendingStudents.forEach((st) => {
+        const key = `${st.id}_Rotina_${date}`;
+        newFaltas.push({
+          id: key,
+          studentId: st.id,
+          activity: 'Rotina',
+          turma: st.turma,
+          date,
+          weekNumber,
+          year,
+          status: 'falta',
+          observation: 'Encerramento de chamada pela monitora/coordenação',
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      if (newFaltas.length > 0) {
+        await batchSaveRecordsToFirestore(newFaltas);
+        currentPool = [...newFaltas, ...currentPool];
+        setRecords(currentPool);
+        saveAttendanceRecords(currentPool);
+        broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', currentPool);
+      }
+    }
+
+    // Trigger de Recálculo Instantâneo no Firestore (marcação de finalizada)
+    await recalculateAndTriggerConsolidation(date, students, currentPool, {
+      currentUserEmail: currentUser?.email,
+      isReopened: false,
+      closedAutomatically: false,
+      turmasList: TURMAS_LIST,
+    });
   };
 
   // Turma management
@@ -2011,6 +2122,7 @@ export default function App() {
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}
             onClearRecords={handleClearRecords}
+            onFinalizeCall={handleFinalizeAttendanceCall}
           />
         )}
 
@@ -2312,6 +2424,23 @@ export default function App() {
                 Fórmula de Auditoria: <span className="font-mono text-slate-700 font-bold">{todayConsolidated.presentes} Pres. + {todayConsolidated.faltas} Falt. + {todayConsolidated.justificados} Atest. + {todayConsolidated.pendentes} Pend. = {todayConsolidated.totalAtivos} Total</span>
               </div>
               <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      window.confirm(
+                        `Deseja encerrar a chamada de hoje e lançar Falta para os ${todayConsolidated.pendentes} alunos pendentes, consolidando o relatório no Firestore?`
+                      )
+                    ) {
+                      await handleFinalizeAttendanceCall(todayStr);
+                      setShowPendingAuditModal(false);
+                    }
+                  }}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition-colors cursor-pointer flex items-center space-x-1"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Encerrar Pendências ({todayConsolidated.pendentes})</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {

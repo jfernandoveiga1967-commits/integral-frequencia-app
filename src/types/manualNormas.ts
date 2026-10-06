@@ -19,6 +19,19 @@ export interface ManualNorma {
   updatedBy?: string;
 }
 
+export interface NormaAceite {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole?: string;
+  timestamp: string;
+  appVersion: string;
+  manualHash: string;
+  userIp?: string;
+  userAgent?: string;
+}
+
 export const MODULE_METADATA: Record<
   ModuleCategory,
   {

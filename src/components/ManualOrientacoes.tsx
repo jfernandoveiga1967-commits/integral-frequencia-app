@@ -31,6 +31,10 @@ import {
   Smartphone,
   Eye,
   Zap,
+  ClipboardCheck,
+  FileCheck,
+  Send,
+  ShieldCheck,
 } from 'lucide-react';
 import type { jsPDF } from 'jspdf';
 import { UserProfile } from '../types';
@@ -38,6 +42,7 @@ import {
   ManualNorma,
   ModuleCategory,
   NormaType,
+  NormaAceite,
   MODULE_METADATA,
   INITIAL_MANUAL_NORMAS,
 } from '../types/manualNormas';
@@ -46,9 +51,15 @@ import {
   saveManualNormaToFirestore,
   deleteManualNormaFromFirestore,
   syncOfficialManualNormasToFirestore,
+  saveNormaAceiteToFirestore,
+  subscribeAllNormasAceites,
+  subscribeUsers,
 } from '../firebase';
-import { generateManualNormasPDF } from '../utils/pdfGenerator';
-import { isCoordenador } from '../utils/authUtils';
+import {
+  generateManualNormasPDF,
+  generateRelatorioConformidadeAceitesPDF,
+} from '../utils/pdfGenerator';
+import { isCoordenador, getLocalUsersList } from '../utils/authUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 
 export interface ManualOrientacoesProps {
@@ -539,6 +550,321 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
   );
 };
 
+// Modal de Status de Aceite e Auditoria da Equipe
+interface StatusAceiteModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  users: UserProfile[];
+  aceites: NormaAceite[];
+  onSendReminder: (userId: string, userName: string) => void;
+  reminderSentUsers: Record<string, boolean>;
+  onExportPDF: () => void;
+}
+
+const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
+  isOpen,
+  onClose,
+  users,
+  aceites,
+  onSendReminder,
+  reminderSentUsers,
+  onExportPDF,
+}) => {
+  const [filterStatus, setFilterStatus] = useState<'all' | 'cientes' | 'pendentes'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  if (!isOpen) return null;
+
+  // Mapear cada usuário para seu registro de aceite
+  const usersWithAceite = users
+    .filter((u) => u.status !== 'inativo' && u.name)
+    .map((user) => {
+      const userAceite = aceites.find(
+        (a) => a.userId === user.id || (user.email && a.userEmail?.toLowerCase() === user.email.toLowerCase())
+      );
+      return {
+        user,
+        aceite: userAceite || null,
+        isSigned: Boolean(userAceite),
+      };
+    })
+    .sort((a, b) => {
+      // Pendentes primeiro, depois ordem alfabética
+      if (a.isSigned !== b.isSigned) {
+        return a.isSigned ? 1 : -1;
+      }
+      return a.user.name.localeCompare(b.user.name);
+    });
+
+  const total = usersWithAceite.length;
+  const totalCientes = usersWithAceite.filter((u) => u.isSigned).length;
+  const totalPendentes = total - totalCientes;
+  const taxaConformidade = total > 0 ? Math.round((totalCientes / total) * 100) : 0;
+
+  const filteredList = usersWithAceite.filter((item) => {
+    if (filterStatus === 'cientes' && !item.isSigned) return false;
+    if (filterStatus === 'pendentes' && item.isSigned) return false;
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      const matchName = item.user.name.toLowerCase().includes(q);
+      const matchEmail = (item.user.email || '').toLowerCase().includes(q);
+      const matchRole = (item.user.cargoLabel || item.user.role || '').toLowerCase().includes(q);
+      return matchName || matchEmail || matchRole;
+    }
+    return true;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 bg-blue-500/20 text-blue-300 rounded-2xl">
+              <ClipboardCheck className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-white leading-tight">
+                Status de Aceite e Auditoria da Equipe
+              </h3>
+              <p className="text-xs text-slate-400">
+                Acompanhamento em tempo real de ciência e conformidade do Manual • Colégio Crescer
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={onExportPDF}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer"
+              title="Gerar Relatório Oficial de Conformidade em PDF"
+            >
+              <Printer className="w-3.5 h-3.5 text-amber-300" />
+              <span>Exportar Relatório PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total da Equipe</span>
+              <span className="text-xl font-black text-slate-900">{total}</span>
+              <span className="text-[11px] text-slate-500 block">Colaboradores ativos</span>
+            </div>
+            <div className="bg-emerald-50/80 p-3.5 rounded-2xl border border-emerald-200">
+              <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Cientes e Assinados</span>
+              <span className="text-xl font-black text-emerald-800">{totalCientes}</span>
+              <span className="text-[11px] text-emerald-600 font-semibold block">{taxaConformidade}% da equipe</span>
+            </div>
+            <div className="bg-rose-50/80 p-3.5 rounded-2xl border border-rose-200">
+              <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">Pendentes de Leitura</span>
+              <span className="text-xl font-black text-rose-800">{totalPendentes}</span>
+              <span className="text-[11px] text-rose-600 font-semibold block">Aguardando confirmação</span>
+            </div>
+            <div className="bg-indigo-50/80 p-3.5 rounded-2xl border border-indigo-200">
+              <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">Taxa de Conformidade</span>
+              <span className="text-xl font-black text-indigo-800">{taxaConformidade}%</span>
+              <span className="text-[11px] text-indigo-600 font-semibold block">Meta: 100%</span>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+            <div className="flex items-center space-x-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setFilterStatus('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  filterStatus === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Todos ({total})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus('cientes')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1 ${
+                  filterStatus === 'cientes'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-emerald-700 hover:text-emerald-900'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Cientes ({totalCientes})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus('pendentes')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1 ${
+                  filterStatus === 'pendentes'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'text-rose-700 hover:text-rose-900'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Pendentes ({totalPendentes})</span>
+              </button>
+            </div>
+
+            <div className="relative flex-1 max-w-xs">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por colaborador ou email..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium"
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-700 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Colaborador / Função</th>
+                    <th className="px-4 py-3">E-mail</th>
+                    <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-center">Data / Hora</th>
+                    <th className="px-4 py-3 text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                        Nenhum colaborador encontrado com os filtros selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredList.map((item) => {
+                      const isSigned = item.isSigned;
+                      const hasSentReminder = Boolean(reminderSentUsers[item.user.id]);
+                      const cargo = item.user.cargoLabel || (item.user.role === 'coordenador' ? 'Coordenação' : item.user.role === 'professor' ? 'Docente' : item.user.role === 'auxiliar' ? 'Monitora / Estagiária' : 'Colaborador');
+
+                      return (
+                        <tr key={item.user.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                {item.user.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <span className="font-extrabold text-slate-900 block leading-tight">
+                                  {item.user.name}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  {cargo}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600 font-medium">
+                            {item.user.email || '—'}
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            {isSigned ? (
+                              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>Ciente</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                                <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                                <span>Pendente</span>
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                            {isSigned && item.aceite?.timestamp ? (
+                              <span className="text-[11px]">
+                                {new Date(item.aceite.timestamp).toLocaleDateString('pt-BR')}{' '}
+                                <span className="text-slate-400 font-normal">
+                                  às {new Date(item.aceite.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">Aguardando</span>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            {isSigned ? (
+                              <span className="text-[11px] text-emerald-600 font-bold inline-flex items-center space-x-1">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                                <span>Concluído</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onSendReminder(item.user.id, item.user.name)}
+                                disabled={hasSentReminder}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center space-x-1 ml-auto cursor-pointer ${
+                                  hasSentReminder
+                                    ? 'bg-slate-100 text-slate-400 cursor-default'
+                                    : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                                }`}
+                              >
+                                {hasSentReminder ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-500" />
+                                    <span>Lembrete Enviado</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send className="w-3 h-3 text-indigo-600" />
+                                    <span>Enviar Lembrete</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+          <span>
+            Colégio Crescer • Registro Digital de Conformidade Trabalhista e Pedagógica
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold transition-colors cursor-pointer"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUser }) => {
   const isAdmin = isCoordenador(currentUser);
 
@@ -605,10 +931,36 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     title: '',
   });
 
+  // Estados para Gestão de Aceite Digital e Auditoria da Equipe
+  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => getLocalUsersList());
+  const [allAceites, setAllAceites] = useState<NormaAceite[]>([]);
+  const [isConfirmingAceite, setIsConfirmingAceite] = useState(false);
+  const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
+  const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
+  const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  // Subscribe to real-time users
+  useEffect(() => {
+    const unsub = subscribeUsers((users) => {
+      if (users && users.length > 0) {
+        setAllUsers(users);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to real-time normas_aceites
+  useEffect(() => {
+    const unsub = subscribeAllNormasAceites((items) => {
+      setAllAceites(items);
+    });
+    return () => unsub();
+  }, []);
 
   // Subscribe to real-time updates from Firestore collection 'manual_normas'
   useEffect(() => {
@@ -628,6 +980,97 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
       unsubscribe();
     };
   }, []);
+
+  // Aceite do usuário autenticado atual
+  const currentUserAceite = useMemo(() => {
+    if (!currentUser) return null;
+    return (
+      allAceites.find(
+        (a) =>
+          a.userId === currentUser.id ||
+          (currentUser.email && a.userEmail?.toLowerCase() === currentUser.email.toLowerCase())
+      ) || null
+    );
+  }, [allAceites, currentUser]);
+
+  // Colaboradores elegíveis para aceite
+  const eligibleUsers = useMemo(() => {
+    return allUsers.filter((u) => u.status !== 'inativo' && u.name);
+  }, [allUsers]);
+
+  // Total de cientes
+  const totalCientesCount = useMemo(() => {
+    return eligibleUsers.filter((u) =>
+      allAceites.some(
+        (a) => a.userId === u.id || (u.email && a.userEmail?.toLowerCase() === u.email.toLowerCase())
+      )
+    ).length;
+  }, [eligibleUsers, allAceites]);
+
+  // Confirmar leitura do Manual pelo usuário atual
+  const handleConfirmAceite = async () => {
+    if (!currentUser) {
+      alert('É necessário estar autenticado para registrar o termo de ciência.');
+      return;
+    }
+    if (!hasDeclaredCheckbox) {
+      alert('Por favor, marque a caixa confirmando que leu e está de acordo com as normas.');
+      return;
+    }
+
+    try {
+      setIsConfirmingAceite(true);
+      const payload: NormaAceite = {
+        id: `aceite_${currentUser.id}`,
+        userId: currentUser.id,
+        userName: currentUser.name || 'Colaborador',
+        userEmail: currentUser.email || '',
+        userRole: currentUser.cargoLabel || currentUser.role || 'auxiliar',
+        timestamp: new Date().toISOString(),
+        appVersion: '2026.1',
+        manualHash: 'crescer_manual_normas_2026_v1',
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      };
+
+      await saveNormaAceiteToFirestore(payload);
+      showToast('Termo de Ciência e Compromisso registrado com sucesso no Firestore!');
+    } catch (err: any) {
+      alert(`Erro ao registrar aceite: ${err?.message || 'Falha na conexão'}`);
+    } finally {
+      setIsConfirmingAceite(false);
+    }
+  };
+
+  // Enviar lembrete a colaborador pendente
+  const handleSendReminder = (userId: string, userName: string) => {
+    setReminderSentUsers((prev) => ({ ...prev, [userId]: true }));
+    showToast(`Lembrete de leitura enviado com sucesso para ${userName}!`);
+  };
+
+  // Exportar relatório de conformidade em PDF
+  const handleExportRelatorioConformidadePDF = () => {
+    const list = eligibleUsers.map((user) => {
+      const userAceite = allAceites.find(
+        (a) => a.userId === user.id || (user.email && a.userEmail?.toLowerCase() === user.email.toLowerCase())
+      );
+      return {
+        user,
+        aceite: userAceite || null,
+      };
+    });
+
+    const { doc, blobUrl, dataUrl, filename, download } = generateRelatorioConformidadeAceitesPDF(list);
+
+    setPdfPreviewState({
+      isOpen: true,
+      doc,
+      dataUrl,
+      blobUrl,
+      filename,
+      title: 'Relatório Oficial de Conformidade e Aceite Digital • Manual de Normas',
+      onDownload: download,
+    });
+  };
 
   // Category Toggle
   const toggleCategory = (catId: ThematicCategoryId) => {
@@ -896,6 +1339,19 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
                   <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
                 )}
                 <span>Sincronizar Oficiais</span>
+              </button>
+            )}
+
+            {/* Admin Action: Status de Aceite da Equipe */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsStatusAceiteModalOpen(true)}
+                className="px-3.5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-blue-700/30 transition-all flex items-center space-x-1.5 cursor-pointer"
+                title="Abrir painel de auditoria de aceite digital da equipe"
+              >
+                <ClipboardCheck className="w-4 h-4 text-emerald-300" />
+                <span>Status de Aceite ({totalCientesCount}/{eligibleUsers.length})</span>
               </button>
             )}
 
@@ -1522,6 +1978,143 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
           })
         )}
       </div>
+
+      {/* 5. TERMO DE CIÊNCIA E COMPROMISSO INSTITUCIONAL (RODAPÉ) */}
+      <div id="termo-de-aceite" className="mt-8 rounded-3xl overflow-hidden border shadow-sm transition-all duration-200">
+        {currentUserAceite ? (
+          // CARD QUANDO JÁ ASSINADO
+          <div className="bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 border-2 border-emerald-400 p-6 sm:p-7 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center space-x-3.5">
+                <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md shrink-0">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Termo de Ciência Assinado</span>
+                    </span>
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      Conformidade Verificada
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight">
+                    Declaração de Ciência e Compromisso Institucional
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Seu aceite digital está registrado e autenticado com segurança no banco de dados.
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-left sm:text-right sm:self-center shrink-0 bg-white/80 p-3 rounded-2xl border border-emerald-200/80 shadow-2xs">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Assinado em</span>
+                <span className="text-xs font-black text-emerald-700 block">
+                  {new Date(currentUserAceite.timestamp).toLocaleDateString('pt-BR')} às{' '}
+                  {new Date(currentUserAceite.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="text-[9px] text-slate-400 block font-mono">
+                  Hash: {currentUserAceite.manualHash}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white/90 p-4 rounded-2xl border border-emerald-100 text-xs text-slate-700 leading-relaxed space-y-1.5 shadow-2xs">
+              <p className="font-semibold text-slate-800">
+                "Eu, <strong className="text-emerald-900">{currentUser?.name || currentUserAceite.userName}</strong> ({currentUser?.email || currentUserAceite.userEmail}), confirmo que realizei a leitura atenta e tomei plena ciência de todas as diretrizes do Manual de Normas Internas, Rotina do Integral, Regras da Academia e Transporte, e do Guia de Abordagem Sensível do Colégio Crescer, assumindo o compromisso de aplicá-las com rigor e zelo profissional."
+              </p>
+              <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-400 pt-2 border-t border-slate-100">
+                <span>Colaborador(a): <strong>{currentUser?.name || currentUserAceite.userName}</strong></span>
+                <span>Função: <strong>{currentUser?.cargoLabel || currentUser?.role || currentUserAceite.userRole}</strong></span>
+                <span>Registro ID: <code className="font-mono text-emerald-600 font-bold">{currentUserAceite.id}</code></span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // CARD QUANDO PENDENTE
+          <div className="bg-gradient-to-br from-indigo-50/90 via-white to-amber-50/50 border-2 border-indigo-200 p-6 sm:p-7 space-y-4">
+            <div className="flex items-start space-x-3.5">
+              <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-md shrink-0">
+                <FileCheck className="w-6 h-6 text-amber-300" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white">
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>Aguardando Confirmação de Leitura</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Conformidade Funcional 2026/2027
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-slate-900">
+                  Termo de Ciência e Compromisso Institucional
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Conforme as disposições regimentais do Colégio Crescer, todas as monitoras, docentes e colaboradores do Programa Integral devem formalizar a ciência das normas e condutas após a leitura do manual.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 text-xs text-slate-700 leading-relaxed space-y-2 shadow-2xs">
+              <p className="font-medium">
+                <strong>Declaração de Ciência:</strong> "Declaro que li atentamente e compreendi todas as 32 normas, fluxos operacionais, diretrizes de vestuário, uso do rádio frequência 2, regras de segurança do parque e da academia, e os princípios de abordagem sensível e não violenta estabelecidos pela Coordenação do Programa Integral do Colégio Crescer, comprometendo-me a cumpri-las integralmente."
+              </p>
+
+              <label className="flex items-start space-x-2.5 pt-2 border-t border-slate-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasDeclaredCheckbox}
+                  onChange={(e) => setHasDeclaredCheckbox(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded-md border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-slate-800">
+                  Confirmo que li todo o manual e estou de acordo com todas as diretrizes institucionais.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              <p className="text-[11px] text-slate-500">
+                Seu aceite registrará data, hora e autenticação digital vinculada ao seu usuário ({currentUser?.name || 'Colaborador'}).
+              </p>
+
+              <button
+                type="button"
+                onClick={handleConfirmAceite}
+                disabled={isConfirmingAceite || !hasDeclaredCheckbox}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-700/30 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {isConfirmingAceite ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Registrando Aceite no Firestore...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                    <span>[ Confirmar Leitura e Ciente das Normas ]</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Admin Status de Aceite Modal */}
+      {isStatusAceiteModalOpen && (
+        <StatusAceiteModal
+          isOpen={isStatusAceiteModalOpen}
+          onClose={() => setIsStatusAceiteModalOpen(false)}
+          users={eligibleUsers}
+          aceites={allAceites}
+          onSendReminder={handleSendReminder}
+          reminderSentUsers={reminderSentUsers}
+          onExportPDF={handleExportRelatorioConformidadePDF}
+        />
+      )}
 
       {/* Admin Edit / Create Modal */}
       {isEditModalOpen && (

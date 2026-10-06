@@ -17,7 +17,7 @@ import {
   TurmaAtribuicao,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
-import { ManualNorma, MODULE_METADATA } from '../types/manualNormas';
+import { ManualNorma, MODULE_METADATA, NormaAceite } from '../types/manualNormas';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -3501,6 +3501,75 @@ export function generateSemanarioPDFReport(
 }
 
 /**
+ * Renderiza uma textura sutil com padrão de linhas diagonais a 45º para indicar
+ * visualmente que a célula pertence ao mês anterior ou posterior (#E2E8F0 sobre #F9FAFB).
+ */
+function drawOutOfMonthCellPattern(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+) {
+  const x0 = x + 0.2;
+  const y0 = y + 0.2;
+  const x1 = x + width - 0.2;
+  const y1 = y + height - 0.2;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return;
+
+  doc.setDrawColor(226, 232, 240); // #E2E8F0 (slate-200, padrão suave e discreto)
+  doc.setLineWidth(0.15);
+
+  const spacing = 5; // mm entre linhas diagonais
+  const minC = y0 - x1;
+  const maxC = y1 - x0;
+  const startC = Math.floor(minC / spacing) * spacing;
+
+  for (let c = startC; c <= maxC; c += spacing) {
+    const pts: { x: number; y: number }[] = [];
+
+    // Borda superior: y = y0 => x = y0 - c
+    const xTop = y0 - c;
+    if (xTop >= x0 && xTop <= x1) pts.push({ x: xTop, y: y0 });
+
+    // Borda inferior: y = y1 => x = y1 - c
+    const xBottom = y1 - c;
+    if (xBottom >= x0 && xBottom <= x1) pts.push({ x: xBottom, y: y1 });
+
+    // Borda esquerda: x = x0 => y = x0 + c
+    const yLeft = x0 + c;
+    if (yLeft > y0 && yLeft < y1) pts.push({ x: x0, y: yLeft });
+
+    // Borda direita: x = x1 => y = x1 + c
+    const yRight = x1 + c;
+    if (yRight > y0 && yRight < y1) pts.push({ x: x1, y: yRight });
+
+    if (pts.length >= 2) {
+      doc.line(pts[0].x, pts[0].y, pts[1].x, pts[1].y);
+    }
+  }
+}
+
+/**
+ * Renderiza um ícone discreto no centro da célula fora do mês vigente (célula limpa/neutra).
+ */
+function drawOutOfMonthDiscreteIcon(doc: jsPDF, cx: number, cy: number) {
+  // Selo circular branco discreto com borda suave
+  const radius = 3.2;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(203, 213, 225); // slate-300
+  doc.setLineWidth(0.2);
+  doc.circle(cx, cy, radius, 'FD');
+
+  // Traço minimalista discreto em slate-400
+  doc.setDrawColor(148, 163, 184); // slate-400
+  doc.setLineWidth(0.4);
+  doc.line(cx - 1.5, cy, cx + 1.5, cy);
+}
+
+/**
  * Gera o Cardápio Mensal em PDF formato A4 Paisagem (Horizontal), exatamente
  * como o modelo impresso da Nutricionista (5 semanas, Segunda a Sexta).
  */
@@ -3570,6 +3639,26 @@ export function generateCardapioMensalPDF(
     }
   });
 
+  // Resolução do mês e ano vigentes do cardápio para validação de dias fora do mês
+  const targetMonth = menu.month || (menu.monthKey ? parseInt(menu.monthKey.split('-')[1], 10) : 0);
+  const targetYear = menu.year || (menu.monthKey ? parseInt(menu.monthKey.split('-')[0], 10) : 0);
+
+  const isOutOfMonthDay = (item?: MenuItemDay): boolean => {
+    if (!item) return true;
+    if (item.month && targetMonth && item.month !== targetMonth) return true;
+    if (item.year && targetYear && item.year !== targetYear) return true;
+    if (item.date) {
+      const parts = item.date.split('-');
+      if (parts.length >= 2) {
+        const itemY = parseInt(parts[0], 10);
+        const itemM = parseInt(parts[1], 10);
+        if (targetMonth && itemM !== targetMonth) return true;
+        if (targetYear && itemY !== targetYear) return true;
+      }
+    }
+    return false;
+  };
+
   const cleanMenuText = (str?: string): string => {
     if (!str) return '';
     return str.replace(/\*/g, '').trim();
@@ -3586,8 +3675,9 @@ export function generateCardapioMensalPDF(
 
     order.forEach((dayName) => {
       const item = daysInWeek.find((d) => d.dayOfWeek === dayName);
-      if (!item) {
-        row.push('-');
+      if (isOutOfMonthDay(item)) {
+        // Célula fora do mês vigente (mês anterior/posterior): NÃO exibe data nem prato
+        row.push('');
       } else if (item.isHoliday) {
         row.push(`DIA ${item.dayNumber}\n\n${cleanMenuText(item.holidayDescription || 'FERIADO')}`);
       } else {
@@ -3654,12 +3744,23 @@ export function generateCardapioMensalPDF(
       5: { cellWidth: 50.6, halign: 'center' },
     },
     didParseCell: (data) => {
-      // Destaque em amarelo para dias de feriado ou recesso
-      if (typeof data.cell.raw === 'string' && (data.cell.raw.includes('FERIADO') || data.cell.raw.includes('RECESSO'))) {
-        data.cell.styles.fillColor = [254, 240, 138];
-        data.cell.styles.textColor = [161, 98, 7];
-        data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.halign = 'center';
+      if (data.section === 'body' && data.column.index > 0) {
+        const weekNum = data.row.index + 1;
+        const order = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+        const dayName = order[data.column.index - 1];
+        const daysInWeek = daysByWeek[weekNum] || [];
+        const item = daysInWeek.find((d) => d.dayOfWeek === dayName);
+
+        if (isOutOfMonthDay(item)) {
+          // Fundo com tonalidade neutra (cinza muito claro #F9FAFB)
+          data.cell.styles.fillColor = [249, 250, 251];
+          data.cell.styles.textColor = [203, 213, 225];
+        } else if (typeof data.cell.raw === 'string' && (data.cell.raw.includes('FERIADO') || data.cell.raw.includes('RECESSO'))) {
+          data.cell.styles.fillColor = [254, 240, 138];
+          data.cell.styles.textColor = [161, 98, 7];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.halign = 'center';
+        }
       }
     },
     willDrawCell: (data) => {
@@ -3679,6 +3780,23 @@ export function generateCardapioMensalPDF(
 
       const cell = data.cell;
       const centerX = cell.x + cell.width / 2;
+      const centerY = cell.y + cell.height / 2;
+
+      // =========================================================================
+      // TRATAMENTO VISUAL: CÉLULAS FORA DO MÊS VIGENTE (MÊS ANTERIOR / POSTERIOR)
+      // =========================================================================
+      if (isOutOfMonthDay(item)) {
+        // 1. Fundo com tonalidade neutra (cinza muito claro #F9FAFB)
+        doc.setFillColor(249, 250, 251);
+        doc.rect(cell.x + 0.15, cell.y + 0.15, cell.width - 0.3, cell.height - 0.3, 'F');
+
+        // 2. Aplicação de padrão suave / textura sutil de linhas diagonais a 45º (#E2E8F0)
+        drawOutOfMonthCellPattern(doc, cell.x, cell.y, cell.width, cell.height);
+
+        // 3. Ícone discreto central / indicador de célula limpa fora do mês
+        drawOutOfMonthDiscreteIcon(doc, centerX, centerY);
+        return;
+      }
 
       if (!item) {
         doc.setFont('helvetica', 'normal');
@@ -4609,6 +4727,206 @@ export function generateManualNormasPDF(
 
   const dateStr = new Date().toISOString().split('T')[0];
   const filename = `Manual_Normas_Colegio_Crescer_${targetModuleId || 'Geral'}_${dateStr}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o Relatório Oficial de Conformidade e Aceite Digital do Manual de Normas (PDF).
+ * Apresenta auditoria de colaboradores cientes vs pendentes com timbre institucional.
+ */
+export function generateRelatorioConformidadeAceitesPDF(
+  collaborators: {
+    user: UserProfile;
+    aceite?: NormaAceite | null;
+  }[],
+  saveImmediately = false
+): {
+  doc: jsPDF;
+  blob: Blob;
+  blobUrl: string;
+  dataUri: string;
+  dataUrl: string;
+  filename: string;
+  download: () => void;
+} {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const marginX = 14;
+  const contentWidth = pageWidth - marginX * 2;
+
+  const total = collaborators.length;
+  const confirmados = collaborators.filter((c) => Boolean(c.aceite)).length;
+  const pendentes = total - confirmados;
+  const taxaConformidade = total > 0 ? Math.round((confirmados / total) * 100) : 0;
+
+  const docTitle = 'RELATÓRIO DE CONFORMIDADE E ACEITE DIGITAL';
+  const subtitle = 'Manual de Orientações, Normas Internas e Guia de Abordagem Sensível';
+  const filterDetails = [
+    `Total da Equipe: ${total}`,
+    `Assinados: ${confirmados} (${taxaConformidade}%)`,
+    `Pendências: ${pendentes}`,
+    `Emissão: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+  ];
+
+  drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
+
+  let currentY = 38;
+
+  // Metrics summary boxes
+  const boxWidth = (contentWidth - 6) / 3;
+  const boxHeight = 16;
+
+  // Box 1: Confirmados
+  doc.setFillColor(240, 253, 244); // green-50
+  doc.setDrawColor(187, 247, 208); // green-200
+  doc.roundedRect(marginX, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(22, 101, 52); // green-800
+  doc.text('ACEITES CONFIRMADOS', marginX + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${confirmados}`, marginX + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Taxa: ${taxaConformidade}% da equipe`, marginX + 22, currentY + 12);
+
+  // Box 2: Pendentes
+  const box2X = marginX + boxWidth + 3;
+  doc.setFillColor(254, 242, 242); // red-50
+  doc.setDrawColor(254, 202, 202); // red-200
+  doc.roundedRect(box2X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(153, 27, 27); // red-800
+  doc.text('PENDENTES DE LEITURA', box2X + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${pendentes}`, box2X + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${total - confirmados} aguardando ciência`, box2X + 22, currentY + 12);
+
+  // Box 3: Total Equipe
+  const box3X = marginX + (boxWidth + 3) * 2;
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.roundedRect(box3X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59); // slate-800
+  doc.text('TOTAL DE COLABORADORES', box3X + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${total}`, box3X + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Monitoras e Docentes', box3X + 22, currentY + 12);
+
+  currentY += boxHeight + 6;
+
+  // Table using autoTable
+  const tableData = collaborators.map((item) => {
+    const isSigned = Boolean(item.aceite);
+    const cargo = item.user.cargoLabel || (item.user.role === 'coordenador' ? 'Coordenação' : item.user.role === 'professor' ? 'Docente' : item.user.role === 'auxiliar' ? 'Monitora / Estagiária' : 'Colaborador');
+    const dataHora = isSigned && item.aceite?.timestamp
+      ? new Date(item.aceite.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'Pendente';
+    const statusLabel = isSigned ? 'CIENTE E ASSINADO' : 'PENDENTE';
+    const versao = isSigned ? (item.aceite?.appVersion || '2026.1') : '—';
+
+    return [
+      item.user.name || 'Sem nome',
+      cargo,
+      item.user.email || '—',
+      statusLabel,
+      dataHora,
+      versao,
+    ];
+  });
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [['Colaborador / Nome', 'Função / Cargo', 'E-mail Institucional', 'Status de Aceite', 'Data / Hora', 'Versão']],
+    body: tableData,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'left',
+      cellPadding: 2.2,
+    },
+    styles: {
+      font: 'helvetica',
+      fontSize: 7.2,
+      cellPadding: 2,
+      textColor: [30, 41, 59],
+    },
+    columnStyles: {
+      0: { cellWidth: 44, fontStyle: 'bold' },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 44 },
+      3: { cellWidth: 26, halign: 'center' },
+      4: { cellWidth: 24, halign: 'center' },
+      5: { cellWidth: 12, halign: 'center' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 3) {
+        if (data.cell.raw === 'CIENTE E ASSINADO') {
+          data.cell.styles.textColor = [22, 101, 52];
+          data.cell.styles.fontStyle = 'bold';
+        } else {
+          data.cell.styles.textColor = [220, 38, 38];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    },
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || currentY + 50;
+  let sigY = finalY + 12;
+
+  if (sigY > pageHeight - 35) {
+    doc.addPage();
+    sigY = 30;
+  }
+
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.line(25, sigY, 95, sigY);
+  doc.line(115, sigY, 185, sigY);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text('Coordenação do Programa Integral', 60, sigY + 4, { align: 'center' });
+  doc.text('Fernando Veiga', 60, sigY + 7.5, { align: 'center' });
+
+  doc.text('Direção Escolar • Colégio Crescer', 150, sigY + 4, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Auditoria de Conformidade Trabalhista e Pedagógica', 150, sigY + 7.5, { align: 'center' });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const filename = `Relatorio_Conformidade_Aceites_Integral_${dateStr}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

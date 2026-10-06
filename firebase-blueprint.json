@@ -303,6 +303,48 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "moduleId", "title", "type", "summary", "details"]
+    },
+    "NormaAceite": {
+      "title": "NormaAceite",
+      "description": "Digital acknowledgment and reading confirmation of manual guidelines",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 128 },
+        "userRole": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "appVersion": { "type": "string", "maxLength": 32 },
+        "manualHash": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "userName", "userEmail", "timestamp", "appVersion", "manualHash"]
+    },
+    "RelatorioConsolidadoDia": {
+      "title": "RelatorioConsolidadoDia",
+      "description": "Daily consolidated attendance and meal snapshot metrics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 10 },
+        "date": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "maxLength": 32 },
+        "dayOfWeek": { "type": "string", "maxLength": 16 },
+        "totalEsperados": { "type": "number" },
+        "presentes": { "type": "number" },
+        "faltas": { "type": "number" },
+        "justificados": { "type": "number" },
+        "saidasAntecipadas": { "type": "number" },
+        "semEquipamento": { "type": "number" },
+        "pendentes": { "type": "number" },
+        "taxaPresenca": { "type": "number" },
+        "isReopened": { "type": "boolean" },
+        "closedAutomatically": { "type": "boolean" },
+        "lastCalculatedMealsCount": { "type": "number" },
+        "byTurma": { "type": "object" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "date", "status", "presentes", "totalEsperados", "updatedAt"]
     }
   },
   "firestore": {
@@ -369,6 +411,14 @@
     "/manual_normas/{normaId}": {
       "schema": "ManualNorma",
       "description": "Collection of guidelines, internal norms and sensitive approach items"
+    },
+    "/normas_aceites/{aceiteId}": {
+      "schema": "NormaAceite",
+      "description": "Collection of team members digital acceptance records"
+    },
+    "/relatoriosConsolidados/{dateId}": {
+      "schema": "RelatorioConsolidadoDia",
+      "description": "Daily consolidated attendance records and meal count metrics"
     }
   }
 }
