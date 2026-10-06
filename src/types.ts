@@ -146,6 +146,17 @@ export type PontoStatus =
   | 'domingo'
   | 'nao_admitido';
 
+export interface WorkLocation {
+  id: string; // ex: 'sede', 'academia_fit', 'ext_quadra_esportiva_a1b2'
+  name: string; // ex: 'Colégio Crescer (Sede - Rua Itatiba)', 'Academia / Externo'
+  address: string; // ex: 'Rua Itatiba, 1427'
+  latitude: number;
+  longitude: number;
+  radiusMeters: number; // Tolerância estrita (padrão: 100m)
+  description?: string;
+  isCustom?: boolean; // Indica se é um local externo dinâmico cadastrado
+}
+
 export interface PontoRecord {
   id: string; // e.g. "userId_YYYY-MM-DD"
   userId: string;
@@ -167,6 +178,8 @@ export interface PontoRecord {
   longitude?: number;
   distanceMeters?: number;
   geofenceValidated?: boolean;
+  locationId?: string; // ex: 'sede', 'academia_fit'
+  locationName?: string; // ex: 'Colégio Crescer (Sede - Rua Itatiba)', 'Academia Fit'
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
@@ -279,6 +292,8 @@ export interface UserProfile {
   company?: string; // Empresa conveniada (ex: "GADAL - Gestão e Apoio")
   empresa?: string; // Alias para company / Empresa conveniada
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
+  allowedLocations?: string[]; // IDs dos locais de trabalho autorizados para geofencing (ex: ['sede', 'academia_fit']). Padrão: ['sede']
+  customLocations?: WorkLocation[]; // Locais externos de trabalho dinâmicos autorizados para o colaborador
   updatedAt?: string;
 }
 

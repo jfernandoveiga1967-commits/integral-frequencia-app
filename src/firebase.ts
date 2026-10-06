@@ -515,6 +515,10 @@ export function subscribeUsers(
             ajudaDeCusto: data.ajudaDeCusto !== undefined && !isNaN(Number(data.ajudaDeCusto)) ? Number(data.ajudaDeCusto) : 0,
             company: data.company || data.empresa || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
             empresa: data.empresa || data.company || (isMasterAdmin ? 'GADAL - Gestão e Apoio' : 'Colégio Crescer'),
+            allowedLocations: Array.isArray(data.allowedLocations) && data.allowedLocations.length > 0
+              ? data.allowedLocations
+              : ['sede'],
+            customLocations: Array.isArray(data.customLocations) ? data.customLocations : undefined,
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
 
@@ -679,6 +683,12 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     ajudaDeCusto: user.ajudaDeCusto !== undefined && !isNaN(Number(user.ajudaDeCusto)) ? Number(user.ajudaDeCusto) : 0,
     company: user.company ? user.company.trim() : (user.empresa ? user.empresa.trim() : 'GADAL - Gestão e Apoio'),
     empresa: user.empresa ? user.empresa.trim() : (user.company ? user.company.trim() : 'GADAL - Gestão e Apoio'),
+    allowedLocations: Array.isArray(user.allowedLocations) && user.allowedLocations.length > 0
+      ? user.allowedLocations
+      : ['sede'],
+    customLocations: Array.isArray(user.customLocations) && user.customLocations.length > 0
+      ? user.customLocations
+      : [],
     updatedAt: new Date().toISOString(),
   };
 
@@ -2090,6 +2100,8 @@ export function subscribePontoRecords(callback: (records: PontoRecord[]) => void
             longitude: typeof data.longitude === 'number' ? data.longitude : undefined,
             distanceMeters: typeof data.distanceMeters === 'number' ? data.distanceMeters : undefined,
             geofenceValidated: typeof data.geofenceValidated === 'boolean' ? data.geofenceValidated : undefined,
+            locationId: data.locationId || undefined,
+            locationName: data.locationName || undefined,
             createdAt: data.createdAt || new Date().toISOString(),
             updatedAt: data.updatedAt || new Date().toISOString(),
             updatedBy: data.updatedBy || '',
@@ -2130,6 +2142,8 @@ export async function savePontoRecordToFirestore(record: PontoRecord) {
         ...(typeof record.longitude === 'number' ? { longitude: record.longitude } : {}),
         ...(typeof record.distanceMeters === 'number' ? { distanceMeters: record.distanceMeters } : {}),
         ...(typeof record.geofenceValidated === 'boolean' ? { geofenceValidated: record.geofenceValidated } : {}),
+        ...(record.locationId ? { locationId: record.locationId } : {}),
+        ...(record.locationName ? { locationName: record.locationName } : {}),
         createdAt: record.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         updatedBy: record.updatedBy || '',
@@ -2173,6 +2187,8 @@ export async function batchSavePontoRecordsToFirestore(records: PontoRecord[]) {
             ...(typeof record.longitude === 'number' ? { longitude: record.longitude } : {}),
             ...(typeof record.distanceMeters === 'number' ? { distanceMeters: record.distanceMeters } : {}),
             ...(typeof record.geofenceValidated === 'boolean' ? { geofenceValidated: record.geofenceValidated } : {}),
+            ...(record.locationId ? { locationId: record.locationId } : {}),
+            ...(record.locationName ? { locationName: record.locationName } : {}),
             createdAt: record.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             updatedBy: record.updatedBy || '',

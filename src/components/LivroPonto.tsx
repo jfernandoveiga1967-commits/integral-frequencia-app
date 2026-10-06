@@ -44,6 +44,7 @@ import {
   PontoMonthClosing,
   PontoStatus,
   RegimeTrabalho,
+  WorkLocation,
 } from '../types';
 import {
   isCoordenador,
@@ -105,15 +106,24 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
 // ============================================================================
-// PARÂMETROS OFICIAIS DE GEOFENCING (50M) - COLÉGIO CRESCER
+// PARÂMETROS OFICIAIS DE GEOFENCING MULTI-LOCAL (100M) - COLÉGIO CRESCER
 // ============================================================================
-// Coordenadas centrais oficiais da unidade escolar (Rua Itatiba, 1427)
-export const COLEGIO_CRESCER_GEOFENCE = {
-  name: 'Colégio Crescer - Unidade Oficial',
-  address: 'Rua Itatiba, 1427',
-  latitude: -22.9288,
-  longitude: -47.1065,
-  maxRadiusMeters: 50, // Raio padrão de tolerância estrito para 50 metros
+import {
+  OFFICIAL_WORK_LOCATIONS,
+  COLEGIO_CRESCER_GEOFENCE,
+  getUserAllowedLocations,
+  getAllWorkLocations,
+  generateLocationId,
+  saveCustomWorkLocationToStorage,
+  geocodeAddress,
+  getCurrentDeviceLocation,
+} from '../utils/workLocations';
+
+export {
+  OFFICIAL_WORK_LOCATIONS,
+  COLEGIO_CRESCER_GEOFENCE,
+  getUserAllowedLocations,
+  getAllWorkLocations,
 };
 
 /**
@@ -312,6 +322,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     isOpen: boolean;
     type: 'OUT_OF_BOUNDS' | 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE' | 'UNSUPPORTED';
     distanceMeters?: number;
+    targetLocationName?: string;
+    targetLocationAddress?: string;
+    targetLocationRadius?: number;
+    userAllowedLocations?: WorkLocation[];
     userLat?: number;
     userLng?: number;
     accuracy?: number;
@@ -487,6 +501,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [userEditDivisorHours, setUserEditDivisorHours] = useState<number | string>(DIVISOR_MENSAL_PADRAO);
   const [userEditAjudaDeCusto, setUserEditAjudaDeCusto] = useState<number | string>(0);
   const [userEditCompany, setUserEditCompany] = useState('');
+  const [userEditAllowedLocations, setUserEditAllowedLocations] = useState<string[]>(['sede']);
 
   // Dynamic calculation for schedule input in user edit modal
   const userEditScheduleCalculation = useMemo(() => {
@@ -536,6 +551,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       setUserEditDivisorHours(targetUser.contractDivisorHours || DIVISOR_MENSAL_PADRAO);
       setUserEditAjudaDeCusto(targetUser.ajudaDeCusto !== undefined && targetUser.ajudaDeCusto !== null ? targetUser.ajudaDeCusto : 0);
       setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
+      setUserEditAllowedLocations(
+        Array.isArray(targetUser.allowedLocations) && targetUser.allowedLocations.length > 0
+          ? targetUser.allowedLocations
+          : ['sede']
+      );
     }
   }, [targetUser, showEditUserModal]);
 
@@ -608,6 +628,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       ajudaDeCusto: parsedAjuda,
       baseSalary: parsedSalary,
       company: userEditCompany.trim() || 'GADAL - Gestão e Apoio',
+      allowedLocations: userEditAllowedLocations.length > 0 ? userEditAllowedLocations : ['sede'],
       updatedAt: new Date().toISOString(),
     };
 
@@ -825,7 +846,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    // 4. Validação Obrigatória de Geolocalização por Geofencing (50m) no Colégio Crescer
+    // 4. Validação Obrigatória de Geolocalização por Geofencing (100m) com Locais Restritos por Usuário
     let userCoords: GeolocationPositionResult;
     try {
       userCoords = await requestCurrentDeviceLocation();
@@ -864,22 +885,45 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    // Cálculo da distância em metros via Fórmula de Haversine
-    const distanceMeters = calculateHaversineDistanceMeters(
-      userCoords.latitude,
-      userCoords.longitude,
-      COLEGIO_CRESCER_GEOFENCE.latitude,
-      COLEGIO_CRESCER_GEOFENCE.longitude
-    );
+    // Obter locais autorizados estritamente para o colaborador atual (oficiais + externos cadastrados)
+    // Regra Padrão (Default): Se o campo não estiver preenchido, o colaborador possui autorização EXCLUSIVA para a 'sede' (Colégio Crescer - Rua Itatiba)
+    const userAllowedLocations = getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations));
 
-    // Validação estrita do raio de 50 metros do Colégio Crescer
-    if (distanceMeters > COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters) {
+    // Validação restritiva: calcula a distância APENAS em relação aos locais presentes no allowedLocations daquele usuário
+    const locationEvaluations = userAllowedLocations.map((loc) => {
+      const dist = calculateHaversineDistanceMeters(
+        userCoords.latitude,
+        userCoords.longitude,
+        loc.latitude,
+        loc.longitude
+      );
+      return {
+        location: loc,
+        distanceMeters: dist,
+        isValid: dist <= loc.radiusMeters,
+      };
+    });
+
+    // Procura se o colaborador está dentro de algum dos seus locais autorizados (<= 100m)
+    const approvedMatch = locationEvaluations.find((e) => e.isValid);
+
+    if (!approvedMatch) {
+      // Bloqueio! Se um usuário sem permissão tentar bater o ponto na academia,
+      // o sistema ignora a academia e exibe que ele está fora do perímetro da SEDE.
+      const closestEvaluation = [...locationEvaluations].sort(
+        (a, b) => a.distanceMeters - b.distanceMeters
+      )[0];
+
       setIsRegisteringPunch(false);
       isRegisteringPunchRef.current = false;
       setGeofenceModal({
         isOpen: true,
         type: 'OUT_OF_BOUNDS',
-        distanceMeters,
+        distanceMeters: closestEvaluation.distanceMeters,
+        targetLocationName: closestEvaluation.location.name,
+        targetLocationAddress: closestEvaluation.location.address,
+        targetLocationRadius: closestEvaluation.location.radiusMeters,
+        userAllowedLocations,
         userLat: userCoords.latitude,
         userLng: userCoords.longitude,
         accuracy: userCoords.accuracy,
@@ -926,8 +970,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       ...result.updatedRecord,
       latitude: userCoords.latitude,
       longitude: userCoords.longitude,
-      distanceMeters,
+      distanceMeters: approvedMatch.distanceMeters,
       geofenceValidated: true,
+      locationId: approvedMatch.location.id,
+      locationName: approvedMatch.location.name,
     };
 
     // Immediately trigger state update and save
@@ -967,7 +1013,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     setPunchFeedback({
-      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📍 Perímetro validado: ${distanceMeters}m do Colégio Crescer)`,
+      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📍 Perímetro validado: ${approvedMatch.distanceMeters}m de ${approvedMatch.location.name})`,
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 5000);
@@ -1800,10 +1846,23 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <span>•</span>
                   <span>Tolerância de 5 min</span>
                   <span>•</span>
-                  <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60" title="Validação obrigatória de perímetro: até 50 metros da unidade oficial Rua Itatiba, 1427">
-                    <MapPin className="w-3 h-3 text-emerald-400" />
-                    Geofencing: Colégio Crescer (50m)
-                  </span>
+                  {(() => {
+                    const activeAllowed = getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations));
+                    const hasAcademia = activeAllowed.some((l) => l.id === 'academia_fit');
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60"
+                        title={`Locais de batida autorizados para ${targetUser?.name || 'colaborador'}: ${activeAllowed.map((l) => l.name).join(' • ')} (Raio estrito de 100m)`}
+                      >
+                        <MapPin className="w-3 h-3 text-emerald-400" />
+                        {hasAcademia
+                          ? 'Geofencing: Sede + Academia / Externo (100m)'
+                          : activeAllowed.length > 1
+                          ? `Geofencing: Sede + ${activeAllowed.length - 1} Locais (100m)`
+                          : 'Geofencing: Sede (100m)'}
+                      </span>
+                    );
+                  })()}
                 </p>
               </div>
             </div>
@@ -1830,7 +1889,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
                   : isUserInactiveOrDismissed(targetUser)
                   ? 'Colaborador com status Inativo ou Desligado (Batidas bloqueadas)'
-                  : 'Registrar batida de ponto agora com validação obrigatória por Geofencing (50m do Colégio Crescer)'
+                  : `Registrar batida de ponto com validação geográfica (Locais autorizados: ${getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations)).map((l) => l.name).join(' ou ')})`
               }
             >
               {isRegisteringPunch ? (
@@ -2503,10 +2562,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                         {rec?.geofenceValidated && (
                           <span
                             className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded shrink-0"
-                            title={`Batida com validação de geolocalização no Colégio Crescer (${rec.distanceMeters ?? 0}m de distância)`}
+                            title={`Batida com validação de geolocalização: ${rec.locationName || 'Sede'} (${rec.distanceMeters ?? 0}m de distância)`}
                           >
                             <MapPin className="w-2.5 h-2.5 text-emerald-600" />
-                            {rec.distanceMeters ?? 0}m
+                            {rec.locationName ? (rec.locationId === 'academia_fit' ? 'Academia' : 'Sede') : 'Sede'} • {rec.distanceMeters ?? 0}m
                           </span>
                         )}
                       </div>
@@ -4266,6 +4325,55 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Locais de Trabalho Autorizados para Ponto (Geofencing 100m)
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-slate-950/70 rounded-xl border border-slate-800">
+                  {getAllWorkLocations(targetUser?.customLocations).map((loc) => {
+                    const isChecked = userEditAllowedLocations.includes(loc.id);
+                    const isSede = loc.id === 'sede';
+                    return (
+                      <label
+                        key={loc.id}
+                        className={`flex items-start space-x-2.5 p-2 rounded-lg border transition cursor-pointer select-none ${
+                          isChecked
+                            ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={isSede}
+                          onChange={(e) => {
+                            if (isSede) return;
+                            if (e.target.checked) {
+                              setUserEditAllowedLocations((prev) => [...prev, loc.id]);
+                            } else {
+                              setUserEditAllowedLocations((prev) => prev.filter((id) => id !== loc.id));
+                            }
+                          }}
+                          className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 bg-slate-800 border-slate-700"
+                        />
+                        <div className="text-[11px] leading-tight">
+                          <strong className="block text-white font-bold">{loc.name}</strong>
+                          <span className="text-slate-400 text-[10px] block mt-0.5">{loc.address}</span>
+                          {isSede ? (
+                            <span className="text-[9px] text-emerald-400 font-bold block mt-0.5">Sede Principal (Padrão)</span>
+                          ) : (
+                            <span className="text-[9px] text-amber-400 font-bold block mt-0.5">Polo Externo Autorizado</span>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Regra Restritiva: Se 'Academia / Externo' não for marcada, o ponto só poderá ser registrado dentro de 100m da Sede (Rua Itatiba, 1427).
+                </span>
+              </div>
+
               <div className="flex justify-end space-x-2 pt-4 border-t border-slate-800">
                 <button
                   type="button"
@@ -4287,7 +4395,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         </div>
       )}
       {/* ========================================================================= */}
-      {/* MODAL 6: ALERTA E ORIENTAÇÃO DE GEOFENCING (RAIO DE 50M) */}
+      {/* MODAL 6: ALERTA E ORIENTAÇÃO DE GEOFENCING (RAIO DE 100M) */}
       {/* ========================================================================= */}
       {geofenceModal && geofenceModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
@@ -4310,6 +4418,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
                 <div className="bg-rose-950/30 border border-rose-800/40 rounded-xl p-4 space-y-2.5">
                   <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Local Avaliado:</span>
+                    <span className="text-xs font-bold text-white font-mono truncate max-w-[200px]" title={geofenceModal.targetLocationName}>
+                      {geofenceModal.targetLocationName || COLEGIO_CRESCER_GEOFENCE.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-300 font-medium">Distância Calculada:</span>
                     <span className="text-sm font-black text-rose-300 font-mono">
                       {geofenceModal.distanceMeters !== undefined
@@ -4322,28 +4436,48 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-300 font-medium">Raio Máximo Permitido:</span>
                     <span className="text-sm font-bold text-emerald-400 font-mono">
-                      {COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters} metros
+                      {geofenceModal.targetLocationRadius || COLEGIO_CRESCER_GEOFENCE.radiusMeters} metros
                     </span>
                   </div>
                   <div className="flex items-center justify-between border-t border-rose-900/50 pt-2">
                     <span className="text-xs text-slate-300 font-medium">Distância Excedente:</span>
                     <span className="text-xs font-bold text-amber-400 font-mono">
-                      +{Math.max(0, (geofenceModal.distanceMeters ?? 0) - COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters)} metros além do limite
+                      +{Math.max(0, (geofenceModal.distanceMeters ?? 0) - (geofenceModal.targetLocationRadius || COLEGIO_CRESCER_GEOFENCE.radiusMeters))} metros além do limite
                     </span>
                   </div>
                 </div>
 
-                <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2 text-xs text-slate-300">
+                <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2.5 text-xs text-slate-300">
                   <div className="flex items-start space-x-2">
                     <Building2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <div>
-                      <strong className="text-white block">{COLEGIO_CRESCER_GEOFENCE.name}</strong>
-                      <span className="text-slate-400">{COLEGIO_CRESCER_GEOFENCE.address}</span>
+                      <strong className="text-white block">{geofenceModal.targetLocationName || COLEGIO_CRESCER_GEOFENCE.name}</strong>
+                      <span className="text-slate-400 text-[11px]">{geofenceModal.targetLocationAddress || COLEGIO_CRESCER_GEOFENCE.address}</span>
                     </div>
                   </div>
-                  <p className="text-slate-300 text-[11px] leading-relaxed pt-1 border-t border-slate-700/50">
-                    A batida de ponto deve ocorrer <strong>estritamente dentro das dependências do Colégio Crescer</strong>. Aproxime-se da unidade escolar e tente registrar novamente.
-                  </p>
+
+                  <div className="pt-2 border-t border-slate-700/50 space-y-1.5">
+                    <span className="text-[11px] text-slate-300 block font-semibold">
+                      Locais autorizados na ficha deste colaborador:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {(geofenceModal.userAllowedLocations || [COLEGIO_CRESCER_GEOFENCE]).map((l) => (
+                        <span key={l.id} className="text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-200 font-medium">
+                          📍 {l.name}
+                        </span>
+                      ))}
+                    </div>
+                    {(!geofenceModal.userAllowedLocations || geofenceModal.userAllowedLocations.length <= 1) ? (
+                      <p className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-800/40 p-2 rounded leading-relaxed">
+                        ⚠️ Este colaborador possui autorização de ponto <strong>exclusivamente na SEDE (Colégio Crescer - Rua Itatiba)</strong>. A batida em outros locais (ex: Academia / Externo) é restrita e ignorada até liberação formal na ficha do colaborador.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        A batida de ponto deve ocorrer <strong>estritamente dentro de 100 metros de um dos seus locais autorizados</strong>. Aproxime-se do local e tente registrar novamente.
+                      </p>
+                    )}
+                  </div>
+
                   {geofenceModal.userLat !== undefined && geofenceModal.userLng !== undefined && (
                     <div className="text-[10px] text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
                       Coordenadas detectadas: {geofenceModal.userLat.toFixed(5)}, {geofenceModal.userLng.toFixed(5)}
@@ -4391,7 +4525,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
                 <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
                   <p>
-                    Para registrar seu ponto, a legislação e as diretrizes do <strong>Colégio Crescer</strong> exigem a validação de presença dentro do perímetro da escola (50m).
+                    Para registrar seu ponto, a legislação e as diretrizes do <strong>Colégio Crescer</strong> exigem a validação de presença dentro do perímetro da escola (100m).
                   </p>
                   <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-2 text-[11px]">
                     <p className="font-bold text-white">Como habilitar a localização no celular ou navegador:</p>
