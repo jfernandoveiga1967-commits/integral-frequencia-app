@@ -163,6 +163,42 @@ export interface DailyConsolidatedMetrics {
 }
 
 /**
+ * Verifica se um aluno deve ser considerado como matrícula ativa no escopo consolidado.
+ * Alinhado 100% com o indicador superior de 'Total Matriculados':
+ * - Considera qualquer aluno que possui status 'ativo' no banco de dados (ou sem status definido, padrão 'ativo').
+ * - Trata alunos ativos recentemente adicionados para que sejam sempre computados no consolidado sem divergência.
+ * - Alunos com status 'inativo' ou 'cancelado' só são considerados em datas retroativas anteriores ou iguais à data de inativação.
+ */
+export function isStudentActiveInDatabase(
+  student: Student | null | undefined,
+  referenceDate?: string
+): boolean {
+  if (!student) return false;
+  const status = (student.status || (student as any).statusMatricula || 'ativo').toLowerCase().trim();
+
+  // Aluno com status 'ativo': SEMPRE computado como matrícula ativa, inclusive os recém-adicionados
+  if (status === 'ativo') {
+    // Alunos de contrato avulso só deixam de ser ativos se a data de referência for posterior ao término do contrato
+    if (student.tipoContrato === 'avulso' && student.dataTerminoContrato && referenceDate) {
+      if (referenceDate > student.dataTerminoContrato) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Alunos inativos ou cancelados: só considerados se a data de consulta for anterior ou igual à inativação
+  if (status === 'inativo' || status === 'cancelado') {
+    if (referenceDate) {
+      return isStudentActiveOnDate(student, referenceDate);
+    }
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Calculates daily consolidated attendance metrics for a specific date.
  * Single Source of Truth for Header, Top Monitor, WeeklyReport, and PDF Generators.
  */
@@ -178,8 +214,8 @@ export function getDailyConsolidatedMetrics(
     ? students
     : students.filter((s) => s.turma === turmaFilter);
 
-  // Total active enrolled students in the scope
-  const activeEnrolledStudents = targetStudents.filter((s) => isStudentActiveOnDate(s, dateStr));
+  // Total active enrolled students in the scope (alinhado rigorosamente à regra de alunos ativos no banco de dados)
+  const activeEnrolledStudents = targetStudents.filter((s) => isStudentActiveInDatabase(s, dateStr));
   const totalMatriculados = activeEnrolledStudents.length;
 
   // Map of Routine Records on this date by studentId
@@ -460,7 +496,7 @@ export function getPeriodConsolidatedMetrics(
     scopeTurma: turmaFilter,
     schoolDaysCount: schoolDaysInfo.effectiveDaysCount,
     holidaysCount: schoolDaysInfo.holidaysCount,
-    totalMatriculasAtivas: targetStudents.filter((s) => isStudentActiveOnDate(s, endDate)).length,
+    totalMatriculasAtivas: targetStudents.filter((s) => isStudentActiveInDatabase(s, endDate)).length,
     dailyMetrics,
     totalEsperadosAcumulados,
     totalPresentesAcumulados,

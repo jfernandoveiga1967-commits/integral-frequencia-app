@@ -162,6 +162,11 @@ export interface PontoRecord {
   note?: string;
   extraMinutes?: number;
   missingMinutes?: number;
+  // Auditoria de Geofencing (Geolocalização)
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  geofenceValidated?: boolean;
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
@@ -415,6 +420,7 @@ export interface RelatorioConsolidadoDia {
   date: string; // YYYY-MM-DD
   status: 'finalizada' | 'pendente' | 'reaberta' | 'fechada_automaticamente';
   dayOfWeek: string;
+  totalMatriculados?: number;
   totalEsperados: number;
   presentes: number;
   faltas: number;
@@ -429,6 +435,7 @@ export interface RelatorioConsolidadoDia {
   byTurma?: Record<
     string,
     {
+      totalMatriculados?: number;
       presentes: number;
       faltas: number;
       justificados: number;

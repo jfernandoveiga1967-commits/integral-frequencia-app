@@ -34,6 +34,8 @@ import {
   Download,
   GraduationCap,
   Loader2,
+  MapPin,
+  Navigation,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -101,6 +103,77 @@ import { loadPontoRecords } from '../utils/storageUtils';
 import { playPontoSuccessSound } from '../utils/notificationUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
+
+// ============================================================================
+// PARÂMETROS OFICIAIS DE GEOFENCING (50M) - COLÉGIO CRESCER
+// ============================================================================
+// Coordenadas centrais oficiais da unidade escolar (Rua Itatiba, 1427)
+export const COLEGIO_CRESCER_GEOFENCE = {
+  name: 'Colégio Crescer - Unidade Oficial',
+  address: 'Rua Itatiba, 1427',
+  latitude: -22.9288,
+  longitude: -47.1065,
+  maxRadiusMeters: 50, // Raio padrão de tolerância estrito para 50 metros
+};
+
+/**
+ * Cálculo da distância entre duas coordenadas geográficas via Fórmula de Haversine (em metros).
+ */
+export function calculateHaversineDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000; // Raio médio da Terra em metros
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+export interface GeolocationPositionResult {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+}
+
+/**
+ * Solicita a localização nativa do dispositivo com alta precisão (GPS obrigatório)
+ */
+export function requestCurrentDeviceLocation(): Promise<GeolocationPositionResult> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      const err = new Error('Geolocalização não suportada neste navegador ou aparelho.');
+      (err as any).code = -1;
+      reject(err);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        resolve({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+      },
+      (err) => {
+        reject(err);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000, // 10 segundos timeout
+        maximumAge: 0,  // Sempre posição fresca
+      }
+    );
+  });
+}
 
 interface LivroPontoProps {
   currentUser: UserProfile | null;
@@ -234,6 +307,17 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [isRegisteringPunch, setIsRegisteringPunch] = useState<boolean>(false);
   const isRegisteringPunchRef = useRef<boolean>(false);
 
+  // Geofencing Validation & Diagnostics Modal State
+  const [geofenceModal, setGeofenceModal] = useState<{
+    isOpen: boolean;
+    type: 'OUT_OF_BOUNDS' | 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE' | 'UNSUPPORTED';
+    distanceMeters?: number;
+    userLat?: number;
+    userLng?: number;
+    accuracy?: number;
+    customMessage?: string;
+  } | null>(null);
+
   // Live time ticker for clock
   const [liveClock, setLiveClock] = useState<string>(() => {
     const d = new Date();
@@ -255,7 +339,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       showHolidayModal ||
       showEditDayModal ||
       showEditUserModal ||
-      pdfPreviewState?.isOpen
+      pdfPreviewState?.isOpen ||
+      geofenceModal?.isOpen
     );
     if (isAnyModalOpen) {
       const originalOverflow = document.body.style.overflow;
@@ -269,6 +354,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           setShowEditDayModal(null);
           setShowEditUserModal(false);
           setPdfPreviewState(null);
+          setGeofenceModal(null);
         }
       };
       window.addEventListener('keydown', handleKeyDown);
@@ -278,7 +364,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         window.removeEventListener('keydown', handleKeyDown);
       };
     }
-  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen]);
+  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen, geofenceModal?.isOpen]);
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -739,6 +825,68 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
+    // 4. Validação Obrigatória de Geolocalização por Geofencing (50m) no Colégio Crescer
+    let userCoords: GeolocationPositionResult;
+    try {
+      userCoords = await requestCurrentDeviceLocation();
+    } catch (geoErr: any) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
+      const errorCode = geoErr?.code;
+      if (errorCode === 1) {
+        // PERMISSION_DENIED
+        setGeofenceModal({
+          isOpen: true,
+          type: 'PERMISSION_DENIED',
+          customMessage: 'Permissão de localização GPS recusada no navegador ou celular.',
+        });
+      } else if (errorCode === 3) {
+        // TIMEOUT
+        setGeofenceModal({
+          isOpen: true,
+          type: 'TIMEOUT',
+          customMessage: 'Tempo limite esgotado ao buscar sinal de GPS (10 segundos).',
+        });
+      } else if (errorCode === 2) {
+        // POSITION_UNAVAILABLE
+        setGeofenceModal({
+          isOpen: true,
+          type: 'POSITION_UNAVAILABLE',
+          customMessage: 'Sinal de localização ou GPS indisponível no dispositivo.',
+        });
+      } else {
+        setGeofenceModal({
+          isOpen: true,
+          type: 'UNSUPPORTED',
+          customMessage: geoErr?.message || 'Geolocalização não suportada ou indisponível.',
+        });
+      }
+      return;
+    }
+
+    // Cálculo da distância em metros via Fórmula de Haversine
+    const distanceMeters = calculateHaversineDistanceMeters(
+      userCoords.latitude,
+      userCoords.longitude,
+      COLEGIO_CRESCER_GEOFENCE.latitude,
+      COLEGIO_CRESCER_GEOFENCE.longitude
+    );
+
+    // Validação estrita do raio de 50 metros do Colégio Crescer
+    if (distanceMeters > COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters) {
+      setIsRegisteringPunch(false);
+      isRegisteringPunchRef.current = false;
+      setGeofenceModal({
+        isOpen: true,
+        type: 'OUT_OF_BOUNDS',
+        distanceMeters,
+        userLat: userCoords.latitude,
+        userLng: userCoords.longitude,
+        accuracy: userCoords.accuracy,
+      });
+      return;
+    }
+
     const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
 
     const result = processSequentialPunch({
@@ -773,9 +921,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       console.warn('Erro ao salvar timestamp da batida:', e);
     }
 
+    // Incorpora campos de auditoria de geofencing no registro para persistência no Firestore
+    const recordWithAudit: PontoRecord = {
+      ...result.updatedRecord,
+      latitude: userCoords.latitude,
+      longitude: userCoords.longitude,
+      distanceMeters,
+      geofenceValidated: true,
+    };
+
     // Immediately trigger state update and save
     try {
-      await onSavePontoRecord(result.updatedRecord);
+      await onSavePontoRecord(recordWithAudit);
     } catch (err: any) {
       console.error('Erro ao salvar ponto no servidor:', err);
       setIsRegisteringPunch(false);
@@ -810,7 +967,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     setPunchFeedback({
-      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso!`,
+      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📍 Perímetro validado: ${distanceMeters}m do Colégio Crescer)`,
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 5000);
@@ -1638,8 +1795,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <h1 className="text-xl font-black text-slate-100 flex items-center gap-2">
                   Fechamento do Ponto
                 </h1>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Horário Oficial: <strong className="text-emerald-400">{liveClock}</strong> • Tolerância automática de 5 minutos na entrada e saída
+                <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <span>Horário Oficial: <strong className="text-emerald-400">{liveClock}</strong></span>
+                  <span>•</span>
+                  <span>Tolerância de 5 min</span>
+                  <span>•</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60" title="Validação obrigatória de perímetro: até 50 metros da unidade oficial Rua Itatiba, 1427">
+                    <MapPin className="w-3 h-3 text-emerald-400" />
+                    Geofencing: Colégio Crescer (50m)
+                  </span>
                 </p>
               </div>
             </div>
@@ -1661,18 +1825,18 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               }`}
               title={
                 isRegisteringPunch
-                  ? 'Registrando batida de ponto...'
+                  ? 'Validando localização GPS e registrando batida...'
                   : isMonthClosed
                   ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
                   : isUserInactiveOrDismissed(targetUser)
                   ? 'Colaborador com status Inativo ou Desligado (Batidas bloqueadas)'
-                  : 'Registrar batida de ponto com o horário exato de agora'
+                  : 'Registrar batida de ponto agora com validação obrigatória por Geofencing (50m do Colégio Crescer)'
               }
             >
               {isRegisteringPunch ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
-                  <span>[ ⏳ Registrando ponto... ]</span>
+                  <span>[ ⏳ Validando GPS e Ponto... ]</span>
                 </>
               ) : (
                 <>
@@ -2333,8 +2497,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     </td>
 
                     {/* Observation note */}
-                    <td className="py-2 px-3 text-slate-500 text-[11px] truncate max-w-xs">
-                      {rec?.note || item.holidayItem?.description || (item.isWk ? '' : '—')}
+                    <td className="py-2 px-3 text-slate-500 text-[11px] max-w-xs">
+                      <div className="flex items-center space-x-1.5 truncate">
+                        <span className="truncate">{rec?.note || item.holidayItem?.description || (item.isWk ? '' : '—')}</span>
+                        {rec?.geofenceValidated && (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded shrink-0"
+                            title={`Batida com validação de geolocalização no Colégio Crescer (${rec.distanceMeters ?? 0}m de distância)`}
+                          >
+                            <MapPin className="w-2.5 h-2.5 text-emerald-600" />
+                            {rec.distanceMeters ?? 0}m
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Admin Action */}
@@ -4108,6 +4283,208 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* MODAL 6: ALERTA E ORIENTAÇÃO DE GEOFENCING (RAIO DE 50M) */}
+      {/* ========================================================================= */}
+      {geofenceModal && geofenceModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 text-white rounded-2xl w-full max-w-md border border-slate-700/80 shadow-2xl p-6 space-y-4">
+            {geofenceModal.type === 'OUT_OF_BOUNDS' ? (
+              <>
+                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
+                  <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-400">
+                    <MapPin className="w-6 h-6 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-rose-400">
+                      Fora do Perímetro Autorizado
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Geofencing • Registro de Ponto Bloqueado
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-rose-950/30 border border-rose-800/40 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Distância Calculada:</span>
+                    <span className="text-sm font-black text-rose-300 font-mono">
+                      {geofenceModal.distanceMeters !== undefined
+                        ? geofenceModal.distanceMeters > 1000
+                          ? `${(geofenceModal.distanceMeters / 1000).toFixed(2)} km (${geofenceModal.distanceMeters} m)`
+                          : `${geofenceModal.distanceMeters} metros`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Raio Máximo Permitido:</span>
+                    <span className="text-sm font-bold text-emerald-400 font-mono">
+                      {COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters} metros
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-rose-900/50 pt-2">
+                    <span className="text-xs text-slate-300 font-medium">Distância Excedente:</span>
+                    <span className="text-xs font-bold text-amber-400 font-mono">
+                      +{Math.max(0, (geofenceModal.distanceMeters ?? 0) - COLEGIO_CRESCER_GEOFENCE.maxRadiusMeters)} metros além do limite
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2 text-xs text-slate-300">
+                  <div className="flex items-start space-x-2">
+                    <Building2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-white block">{COLEGIO_CRESCER_GEOFENCE.name}</strong>
+                      <span className="text-slate-400">{COLEGIO_CRESCER_GEOFENCE.address}</span>
+                    </div>
+                  </div>
+                  <p className="text-slate-300 text-[11px] leading-relaxed pt-1 border-t border-slate-700/50">
+                    A batida de ponto deve ocorrer <strong>estritamente dentro das dependências do Colégio Crescer</strong>. Aproxime-se da unidade escolar e tente registrar novamente.
+                  </p>
+                  {geofenceModal.userLat !== undefined && geofenceModal.userLng !== undefined && (
+                    <div className="text-[10px] text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
+                      Coordenadas detectadas: {geofenceModal.userLat.toFixed(5)}, {geofenceModal.userLng.toFixed(5)}
+                      {geofenceModal.accuracy ? ` (Precisão: ±${Math.round(geofenceModal.accuracy)}m)` : ''}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setGeofenceModal(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Entendido
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGeofenceModal(null);
+                      handleQuickPunch();
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Tentar Novamente</span>
+                  </button>
+                </div>
+              </>
+            ) : geofenceModal.type === 'PERMISSION_DENIED' ? (
+              <>
+                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
+                  <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-amber-400">
+                      Permissão de Localização Negada
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Acesso ao GPS Obrigatório para Batida
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+                  <p>
+                    Para registrar seu ponto, a legislação e as diretrizes do <strong>Colégio Crescer</strong> exigem a validação de presença dentro do perímetro da escola (50m).
+                  </p>
+                  <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-2 text-[11px]">
+                    <p className="font-bold text-white">Como habilitar a localização no celular ou navegador:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                      <li>Toque no ícone de <strong>cadeado ou configurações</strong> ao lado da barra de endereço do navegador.</li>
+                      <li>Localize a opção <strong>Localização / GPS</strong> e altere para <strong>Permitir</strong>.</li>
+                      <li>Verifique se o <strong>GPS / Localização</strong> do seu aparelho celular está ativado.</li>
+                      <li>Toque no botão abaixo para tentar registrar novamente.</li>
+                    </ol>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setGeofenceModal(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGeofenceModal(null);
+                      handleQuickPunch();
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Tentar Novamente</span>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
+                  <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-amber-400">
+                      {geofenceModal.type === 'TIMEOUT'
+                        ? 'Tempo Limite do GPS Esgotado'
+                        : geofenceModal.type === 'POSITION_UNAVAILABLE'
+                        ? 'Sinal de GPS Indisponível'
+                        : 'Geolocalização Não Suportada'}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Dificuldade de Conexão com Satélites GPS
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+                  <p>
+                    {geofenceModal.type === 'TIMEOUT'
+                      ? 'O GPS do dispositivo demorou mais de 10 segundos para obter alta precisão.'
+                      : geofenceModal.type === 'POSITION_UNAVAILABLE'
+                      ? 'O dispositivo não conseguiu obter uma leitura de sinal GPS válida no momento.'
+                      : 'O navegador utilizado não possui suporte à API nativa de geolocalização.'}
+                  </p>
+                  <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-1.5 text-[11px]">
+                    <p className="font-bold text-white">Orientações recomendadas:</p>
+                    <ul className="list-disc list-inside space-y-1 text-slate-300">
+                      <li>Certifique-se de que a localização em alta precisão está ligada no aparelho.</li>
+                      <li>Se estiver em subsolo ou área fechada, aproxime-se de uma janela ou área aberta.</li>
+                      <li>Verifique se o Wi-Fi ou dados móveis estão ativos para acelerar a triangulação.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setGeofenceModal(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGeofenceModal(null);
+                      handleQuickPunch();
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Tentar Novamente</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

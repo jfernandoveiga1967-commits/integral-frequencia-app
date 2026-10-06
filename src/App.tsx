@@ -898,18 +898,39 @@ export default function App() {
     shouldSyncRecords,
   ]);
 
-  // Event listener for date selection from day pills
+  // Event listener and handler for date selection from day pills and date input
+  const handleSelectDate = useCallback(
+    (newDateStr: string) => {
+      if (!newDateStr) return;
+      setSelectedDate(newDateStr);
+      try {
+        const [y, m, d] = newDateStr.split('-').map(Number);
+        if (y && m && d) {
+          const dt = new Date(y, m - 1, d, 12, 0, 0);
+          const { year, weekNumber } = getISOWeekNumber(dt);
+          if (weekNumber !== currentWeek.weekNumber || year !== currentWeek.year) {
+            setCurrentWeek(getWeekInfo(year, weekNumber));
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao sincronizar semana da data selecionada:', err);
+      }
+    },
+    [currentWeek.weekNumber, currentWeek.year]
+  );
+
   useEffect(() => {
-    const handleSelectDate = (e: CustomEvent<string>) => {
-      if (e && e.detail) {
-        setSelectedDate(e.detail);
+    const onAppSelectDate = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      if (customEvent && customEvent.detail) {
+        handleSelectDate(customEvent.detail);
       }
     };
-    window.addEventListener('app_select_date', handleSelectDate as EventListener);
+    window.addEventListener('app_select_date', onAppSelectDate as EventListener);
     return () => {
-      window.removeEventListener('app_select_date', handleSelectDate as EventListener);
+      window.removeEventListener('app_select_date', onAppSelectDate as EventListener);
     };
-  }, []);
+  }, [handleSelectDate]);
 
   // 12. Autosincro e Encerramento Automático de Chamadas do Dia Anterior / Pendentes / Reabertas
   const hasAutoConsolidatedRef = useRef(false);
@@ -2067,7 +2088,7 @@ export default function App() {
                   Existem {todayConsolidated.pendentes} {todayConsolidated.pendentes === 1 ? 'aluno esperado com chamada pendente' : 'alunos esperados com chamada pendente/não lançada'} hoje
                 </h4>
                 <p className="text-xs text-amber-800/90 mt-0.5">
-                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} alunos com frequência prevista hoje</strong> (de {students.length} matriculados). Alunos sem agenda para hoje não geram pendência.
+                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} alunos com frequência prevista hoje</strong> (de {todayConsolidated.totalMatriculados} matriculados). Alunos sem agenda para hoje não geram pendência.
                 </p>
               </div>
             </div>
@@ -2136,6 +2157,7 @@ export default function App() {
             onSelectTurma={(newTurma) => {
               setSelectedClass(newTurma);
             }}
+            onSelectDate={handleSelectDate}
             isLoadingStudents={!isInitialStudentsLoaded && students.length === 0}
             onSaveRecord={handleSaveRecord}
             onBatchMarkPresent={handleBatchMarkPresent}

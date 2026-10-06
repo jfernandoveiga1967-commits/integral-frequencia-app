@@ -10,7 +10,7 @@ import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, Calendar, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
@@ -30,6 +30,7 @@ interface AttendanceSheetProps {
   isLoadingStudents?: boolean;
   selectedTurma?: string;
   onSelectTurma?: (turma: TurmaType | 'TODAS') => void;
+  onSelectDate?: (date: string) => void;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
   onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
   onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
@@ -49,6 +50,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   isLoadingStudents = false,
   selectedTurma: externalSelectedTurma,
   onSelectTurma,
+  onSelectDate,
   onSaveRecord,
   onBatchMarkPresent,
   onClearRecords,
@@ -248,6 +250,17 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     onSelectTurma?.(newTurma);
     window.dispatchEvent(new CustomEvent('app_turma_filter_change', { detail: { turma: newTurma } }));
   };
+
+  const todayStr = useMemo(() => toISODateString(new Date()), []);
+
+  const handleDateChange = useCallback(
+    (newDate: string) => {
+      if (!newDate) return;
+      onSelectDate?.(newDate);
+      window.dispatchEvent(new CustomEvent('app_select_date', { detail: newDate }));
+    },
+    [onSelectDate]
+  );
 
   // Sincroniza a modalidade selecionada conforme permissões do usuário
   useEffect(() => {
@@ -514,7 +527,6 @@ function getCurrentHHMM(): string {
   const stats = useMemo(() => {
     // Validação nos Diários de Classe:
     // Garanta que chamadas só possam contar nas estatísticas se pertencerem a dias letivos já ocorridos ou ao dia atual.
-    const todayStr = toISODateString(new Date());
     if (selectedDate > todayStr) {
       return {
         presente: 0,
@@ -984,11 +996,30 @@ function getCurrentHHMM(): string {
             </select>
           </div>
 
-          {/* Day of Week Selector */}
+          {/* Day of Week Selector with Interactive Date Picker */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Dia da Chamada na Semana:
-            </label>
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <label className="block text-xs font-semibold text-slate-600">
+                Dia da Chamada na Semana:
+              </label>
+              <div className="flex items-center space-x-1.5 bg-white border border-slate-300 rounded-lg px-2 py-0.5 shadow-2xs focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500">
+                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-500">Data:</span>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  max={todayStr}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    if (newDate) {
+                      handleDateChange(newDate);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+                  title="Escolha qualquer data letiva anterior para visualizar e editar chamadas passadas"
+                />
+              </div>
+            </div>
             <div className="grid grid-cols-5 gap-1">
               {weekDays.map((day) => {
                 const isSelected = selectedDate === day.dateStr;
@@ -1002,9 +1033,7 @@ function getCurrentHHMM(): string {
                     type="button"
                     title={dayHoliday ? `${dayHoliday.name} (${isRecess ? 'Recesso Escolar' : 'Feriado Oficial'})` : undefined}
                     onClick={() => {
-                      // Call parent update
-                      const event = new CustomEvent('app_select_date', { detail: day.dateStr });
-                      window.dispatchEvent(event);
+                      handleDateChange(day.dateStr);
                     }}
                     className={`px-1.5 py-1.5 text-center rounded-lg text-xs font-semibold transition-all cursor-pointer border relative ${
                       isSelected
@@ -1417,8 +1446,30 @@ function getCurrentHHMM(): string {
                 <FileText className="w-3.5 h-3.5" />
                 <span>Salvar PDF</span>
               </button>
-              <div className="text-xs font-semibold bg-slate-800 text-indigo-300 px-3 py-1 rounded-lg border border-slate-700">
-                Data: {selectedDate.split('-').reverse().join('/')}
+              <div className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-750 text-white px-2.5 py-1 rounded-lg border border-slate-700 shadow-inner focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-400 transition-colors">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <label htmlFor="daily-sheet-date-picker" className="text-xs font-bold text-slate-300 shrink-0 cursor-pointer">
+                  Data:
+                </label>
+                <input
+                  id="daily-sheet-date-picker"
+                  type="date"
+                  value={selectedDate}
+                  max={todayStr}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    if (newDate) {
+                      handleDateChange(newDate);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer [color-scheme:dark] px-1 py-0.5 rounded"
+                  title="Selecionar data da chamada (escolha qualquer data letiva anterior para visualizar, editar e finalizar chamadas passadas)"
+                />
+                {selectedDate < todayStr && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950 hidden sm:inline-block shrink-0 shadow-2xs" title="Visualizando chamada de data retroativa">
+                    Retroativo
+                  </span>
+                )}
               </div>
             </div>
           </div>

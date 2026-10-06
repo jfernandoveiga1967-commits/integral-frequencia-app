@@ -2086,6 +2086,10 @@ export function subscribePontoRecords(callback: (records: PontoRecord[]) => void
             note: data.note || '',
             extraMinutes: data.extraMinutes || 0,
             missingMinutes: data.missingMinutes || 0,
+            latitude: typeof data.latitude === 'number' ? data.latitude : undefined,
+            longitude: typeof data.longitude === 'number' ? data.longitude : undefined,
+            distanceMeters: typeof data.distanceMeters === 'number' ? data.distanceMeters : undefined,
+            geofenceValidated: typeof data.geofenceValidated === 'boolean' ? data.geofenceValidated : undefined,
             createdAt: data.createdAt || new Date().toISOString(),
             updatedAt: data.updatedAt || new Date().toISOString(),
             updatedBy: data.updatedBy || '',
@@ -2122,6 +2126,10 @@ export async function savePontoRecordToFirestore(record: PontoRecord) {
         note: record.note || '',
         extraMinutes: record.extraMinutes || 0,
         missingMinutes: record.missingMinutes || 0,
+        ...(typeof record.latitude === 'number' ? { latitude: record.latitude } : {}),
+        ...(typeof record.longitude === 'number' ? { longitude: record.longitude } : {}),
+        ...(typeof record.distanceMeters === 'number' ? { distanceMeters: record.distanceMeters } : {}),
+        ...(typeof record.geofenceValidated === 'boolean' ? { geofenceValidated: record.geofenceValidated } : {}),
         createdAt: record.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         updatedBy: record.updatedBy || '',
@@ -2161,6 +2169,10 @@ export async function batchSavePontoRecordsToFirestore(records: PontoRecord[]) {
             note: record.note || '',
             extraMinutes: record.extraMinutes || 0,
             missingMinutes: record.missingMinutes || 0,
+            ...(typeof record.latitude === 'number' ? { latitude: record.latitude } : {}),
+            ...(typeof record.longitude === 'number' ? { longitude: record.longitude } : {}),
+            ...(typeof record.distanceMeters === 'number' ? { distanceMeters: record.distanceMeters } : {}),
+            ...(typeof record.geofenceValidated === 'boolean' ? { geofenceValidated: record.geofenceValidated } : {}),
             createdAt: record.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             updatedBy: record.updatedBy || '',
@@ -2869,7 +2881,7 @@ export async function recalculateAndTriggerConsolidation(
   const turmas = options?.turmasList && options.turmasList.length > 0 ? options.turmasList : TURMAS_LIST;
   const byTurma: Record<
     string,
-    { presentes: number; faltas: number; justificados: number; pendentes: number; total: number }
+    { totalMatriculados?: number; presentes: number; faltas: number; justificados: number; pendentes: number; total: number }
   > = {};
 
   turmas.forEach((t) => {
@@ -2877,6 +2889,7 @@ export async function recalculateAndTriggerConsolidation(
       convertPastPendingToAbsence: false,
     });
     byTurma[t] = {
+      totalMatriculados: tMetrics.totalMatriculados,
       presentes: tMetrics.presentes,
       faltas: tMetrics.faltas,
       justificados: tMetrics.justificados,
@@ -2899,6 +2912,7 @@ export async function recalculateAndTriggerConsolidation(
     date,
     status,
     dayOfWeek: metrics.dayName ? metrics.dayName.toLowerCase() : '',
+    totalMatriculados: metrics.totalMatriculados,
     totalEsperados: metrics.totalEsperados,
     presentes: metrics.presentes,
     faltas: metrics.faltas,
