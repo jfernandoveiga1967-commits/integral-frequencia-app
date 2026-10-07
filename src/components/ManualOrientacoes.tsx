@@ -45,6 +45,8 @@ import {
   NormaAceite,
   MODULE_METADATA,
   INITIAL_MANUAL_NORMAS,
+  compareNormasBySectionNumber,
+  parseSectionNumber,
 } from '../types/manualNormas';
 import {
   subscribeManualNormas,
@@ -381,7 +383,7 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
                 onChange={(e) => setType(e.target.value as NormaType)}
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-bold focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="diretriz">🔵 Diretriz Institucional (Azul)</option>
+                <option value="diretriz">🔵 Orientação Institucional - Programa do Integral (Azul)</option>
                 <option value="proibicao">🔴 Proibição Expressa / Falta Grave (Vermelho)</option>
                 <option value="alerta">🟡 Atenção & Segurança (Âmbar)</option>
                 <option value="recomendado">🟢 Boa Prática Recomendada (Verde)</option>
@@ -1192,10 +1194,10 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
       const matchTags = Array.isArray(norma.tags) && norma.tags.some((t) => t.toLowerCase().includes(term));
 
       return matchTitle || matchSummary || matchSection || matchModule || matchDetails || matchTags;
-    });
+    }).sort(compareNormasBySectionNumber);
   }, [normas, selectedModule, alertTypeFilter, searchTerm]);
 
-  // Group filtered normas into the 4 Thematic Categories
+  // Group filtered normas into the 4 Thematic Categories with strict numerical section sorting
   const groupedThematicNormas = useMemo(() => {
     const map: Record<ThematicCategoryId, ManualNorma[]> = {
       rotina_operacional: [],
@@ -1207,6 +1209,11 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     filteredNormas.forEach((n) => {
       const cat = getThematicCategory(n);
       map[cat].push(n);
+    });
+
+    // Ordenação rigorosa crescente por número de seção (ex: 1, 2, 3, 4, 10, 11...)
+    (Object.keys(map) as ThematicCategoryId[]).forEach((catId) => {
+      map[catId].sort(compareNormasBySectionNumber);
     });
 
     return map;
@@ -1385,6 +1392,28 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">Diretrizes Sensíveis</span>
             <span className="text-base sm:text-lg font-black text-indigo-300">{countDiretrizes} diretrizes</span>
           </div>
+        </div>
+      </div>
+
+      {/* Tarja Oficial de Orientação Institucional */}
+      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 p-3.5 sm:p-4 rounded-3xl border border-indigo-500/30 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex items-center space-x-2.5">
+          <div className="p-2 rounded-xl bg-indigo-500/20 text-amber-400">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-indigo-100 block">
+              ORIENTAÇÃO INSTITUCIONAL - PROGRAMA DO INTEGRAL
+            </span>
+            <span className="text-[11px] text-slate-400 block">
+              Diretrizes oficiais aplicáveis a toda a equipe de monitoria e pedagógica do Colégio Crescer
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-1.5 shrink-0">
+          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+            Normas Oficiais 2026/2027
+          </span>
         </div>
       </div>
 
@@ -1828,7 +1857,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
                         ? 'ATENÇÃO & SEGURANÇA'
                         : isRecomendado
                         ? 'BOA PRÁTICA RECOMENDADA'
-                        : 'DIRETRIZ INSTITUCIONAL';
+                        : 'ORIENTAÇÃO INSTITUCIONAL - PROGRAMA DO INTEGRAL';
 
                       const moduleMeta = MODULE_METADATA[norma.moduleId];
 

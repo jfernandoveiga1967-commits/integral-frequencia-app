@@ -32,6 +32,48 @@ export interface NormaAceite {
   userAgent?: string;
 }
 
+/**
+ * Converte o número de seção para valor numérico decimal para garantir ordenação crescente natural
+ * (ex: 1, 2, 3, 4, 10, 11...). Seções introdutórias (Objetivos, Apresentação) ficam no início (0).
+ */
+export function parseSectionNumber(section?: string | null): number {
+  if (!section) return 999;
+  const clean = section.trim();
+  if (/^objetivo/i.test(clean) || /^apresenta/i.test(clean)) return 0;
+
+  const match = clean.match(/^(\d+)(?:\.([a-z0-9]+))?/i);
+  if (match) {
+    const major = parseInt(match[1], 10);
+    let minor = 0;
+    if (match[2]) {
+      const sub = match[2];
+      const charCode = sub.toLowerCase().charCodeAt(0);
+      if (charCode >= 97 && charCode <= 122) {
+        minor = (charCode - 96) / 100;
+      } else {
+        minor = parseInt(sub, 10) / 100;
+      }
+    }
+    return major + minor;
+  }
+
+  const anyNum = clean.match(/\d+/);
+  if (anyNum) {
+    return parseInt(anyNum[0], 10);
+  }
+  return 999;
+}
+
+/**
+ * Comparador numérico para ordenação rigorosa por seção (ex: 1, 2, 3, 4, 10, 11...)
+ */
+export function compareNormasBySectionNumber(a: ManualNorma, b: ManualNorma): number {
+  const numA = parseSectionNumber(a.sectionNumber);
+  const numB = parseSectionNumber(b.sectionNumber);
+  if (numA !== numB) return numA - numB;
+  return (a.order ?? 0) - (b.order ?? 0);
+}
+
 export const MODULE_METADATA: Record<
   ModuleCategory,
   {

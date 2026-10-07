@@ -17,7 +17,7 @@ import {
   TurmaAtribuicao,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
-import { ManualNorma, MODULE_METADATA, NormaAceite } from '../types/manualNormas';
+import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -4583,7 +4583,8 @@ export function generateManualNormasPDF(
     ? MODULE_METADATA[targetModuleId as keyof typeof MODULE_METADATA].title
     : 'MANUAL DE ORIENTAÇÕES, NORMAS INTERNAS E ABORDAGEM SENSÍVEL';
 
-  const subtitle = 'Colégio Crescer • Documento Oficial de Consulta e Capacitação Contínua da Equipe';
+  // Subtítulo excluído conforme diretriz institucional
+  const subtitle = '';
   const filterDetails = [
     `Total de Diretrizes: ${targetNormas.length}`,
     `Módulo: ${targetModuleId && targetModuleId !== 'all' ? targetModuleId : 'Geral (Todos os Módulos)'}`,
@@ -4594,7 +4595,7 @@ export function generateManualNormasPDF(
 
   let currentY = 38;
 
-  // Intro Banner Box
+  // Intro Banner Box (Tarja de Orientação Institucional)
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
   doc.roundedRect(marginX, currentY, contentWidth, 18, 2, 2, 'FD');
@@ -4602,7 +4603,7 @@ export function generateManualNormasPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
-  doc.text('ORIENTAÇÃO INSTITUCIONAL DA COORDENAÇÃO PEDAGÓGICA', marginX + 4, currentY + 5.5);
+  doc.text('ORIENTAÇÃO INSTITUCIONAL - PROGRAMA DO INTEGRAL', marginX + 4, currentY + 5.5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
@@ -4614,12 +4615,14 @@ export function generateManualNormasPDF(
 
   currentY += 23;
 
-  // Group by module in pedagogical order
+  // Group by module in pedagogical order with strict numerical section sorting
   const modulesOrder = ['normas_internas', 'academia_transporte', 'guia_sensivel'];
   const grouped = new Map<string, ManualNorma[]>();
 
   modulesOrder.forEach((modId) => {
-    const items = targetNormas.filter((n) => n.moduleId === modId);
+    const items = targetNormas
+      .filter((n) => n.moduleId === modId)
+      .sort(compareNormasBySectionNumber);
     if (items.length > 0) {
       grouped.set(modId, items);
     }
@@ -4630,6 +4633,7 @@ export function generateManualNormasPDF(
     if (!modulesOrder.includes(n.moduleId)) {
       const arr = grouped.get(n.moduleId) || [];
       arr.push(n);
+      arr.sort(compareNormasBySectionNumber);
       grouped.set(n.moduleId, arr);
     }
   });
