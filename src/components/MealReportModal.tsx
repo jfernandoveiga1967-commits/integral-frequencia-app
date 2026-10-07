@@ -14,6 +14,7 @@ import {
   exportMealReportToCSV,
   loadMealConfig,
   saveMealConfig,
+  getRollCallPresencesForDate,
 } from '../utils/mealFinanceUtils';
 import { generateMealFinancialPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -115,8 +116,9 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
   // Overrides em memória: { "2026-08-01": { manualCount: 20, unitPrice: 15, notes: "", isManualOverride: true, lastCalculatedMealsCount?: number, isReopenedCall?: boolean } }
   const [customEntries, setCustomEntries] = useState<
-    Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+    Record<string, { manualCount?: number; editableStudents?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
   >({});
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
 
   // Auto-salvamento debounced de 500ms
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -177,24 +179,56 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         212;
 
       const sanitizeLoadedEntries = (
-        rawEntries?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+        rawEntries?: Record<string, { manualCount?: number; editableStudents?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
       ) => {
-        if (!rawEntries) return {};
-        const sanitized: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
-        Object.entries(rawEntries).forEach(([dateKey, val]) => {
-          if (!val) return;
-          // Se houver registro salvo/manual para o dia no banco, priorize e NÃO resete para undefined/0
-          const hasCount = val.manualCount !== undefined && val.manualCount !== null;
-          const isExplicitOverride = Boolean(val.isManualOverride || hasCount);
+        const sanitized: Record<string, { manualCount?: number; editableStudents?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
+        if (rawEntries) {
+          Object.entries(rawEntries).forEach(([dateKey, val]) => {
+            if (!val) return;
+            const rawCount = val.editableStudents !== undefined ? val.editableStudents : val.manualCount;
+            const hasCount = rawCount !== undefined && rawCount !== null;
+            let count = hasCount ? Number(rawCount) : undefined;
+            const rollCallCount = getRollCallPresencesForDate(dateKey, records);
 
-          sanitized[dateKey] = {
-            ...val,
-            manualCount: hasCount ? Number(val.manualCount) : undefined,
-            isManualOverride: isExplicitOverride,
-            lastCalculatedMealsCount: val.lastCalculatedMealsCount !== undefined ? Number(val.lastCalculatedMealsCount) : (hasCount ? Number(val.manualCount) : undefined),
-            isReopenedCall: val.isReopenedCall,
-          };
+            // DIRETRIZ SÊNIOR (Item 1):
+            // Caso o campo 'ALUNOS (EDITÁVEL)' (editableStudents) do dia esteja zerado ou nulo
+            // e a chamada automática possuir valor (ex: 165 alunos no dia 06/10/2026),
+            // preencha automaticamente editableStudents com o total de presentes (presentCount) da chamada do dia!
+            if ((count === undefined || count === 0) && rollCallCount > 0) {
+              count = rollCallCount;
+            }
+
+            const isExplicitOverride = count !== undefined && count > 0 && rollCallCount > 0
+              ? (count !== rollCallCount && Boolean(val.isManualOverride))
+              : Boolean(val.isManualOverride);
+
+            sanitized[dateKey] = {
+              ...val,
+              manualCount: count,
+              editableStudents: count,
+              isManualOverride: isExplicitOverride,
+              lastCalculatedMealsCount: val.lastCalculatedMealsCount !== undefined ? Number(val.lastCalculatedMealsCount) : count,
+              isReopenedCall: val.isReopenedCall,
+            };
+          });
+        }
+
+        // Também assegura que qualquer dia com chamada realizada no mês seja pré-carregado
+        records.forEach((r) => {
+          if (!r || !r.date || !r.date.startsWith(monthKey)) return;
+          if (!sanitized[r.date]) {
+            const rollCallCount = getRollCallPresencesForDate(r.date, records);
+            if (rollCallCount > 0) {
+              sanitized[r.date] = {
+                manualCount: rollCallCount,
+                editableStudents: rollCallCount,
+                isManualOverride: false,
+                lastCalculatedMealsCount: rollCallCount,
+              };
+            }
+          }
         });
+
         return sanitized;
       };
 
@@ -378,7 +412,18 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
   // Funções de Construção de Configuração e Auto-Salvamento Instantâneo (Debounce de 500ms)
   const buildConfigToSave = (
-    entriesOverride?: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+    entriesOverride?: Record<
+      string,
+      {
+        manualCount?: number;
+        editableStudents?: number;
+        unitPrice?: number;
+        notes?: string;
+        isManualOverride?: boolean;
+        lastCalculatedMealsCount?: number;
+        isReopenedCall?: boolean;
+      }
+    >
   ): MealReportConfig => {
     const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
     const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
@@ -390,18 +435,26 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
     activeEntries.forEach((entry) => {
       const userEntry = sourceEntries[entry.date];
-      // Verifica se há contagem salva explicitamente pelo usuário ou vinda do banco
-      const hasExplicitManualCount = userEntry?.manualCount !== undefined && userEntry?.manualCount !== null;
-      const isManual = Boolean(userEntry?.isManualOverride || hasExplicitManualCount || entry.isManualOverride);
+      const rawCount = userEntry?.editableStudents !== undefined ? userEntry?.editableStudents : userEntry?.manualCount;
+      const hasExplicitCount = rawCount !== undefined && rawCount !== null;
+      let effectiveManualCount: number | undefined;
 
-      const effectiveManualCount = hasExplicitManualCount
-        ? Number(userEntry.manualCount)
-        : (entry.manualCount !== undefined && entry.manualCount !== null
-            ? Number(entry.manualCount)
-            : (entry.systemCount > 0 ? entry.systemCount : undefined));
+      if (hasExplicitCount && Number(rawCount) > 0) {
+        effectiveManualCount = Number(rawCount);
+      } else if (entry.manualCount !== undefined && entry.manualCount !== null && Number(entry.manualCount) > 0) {
+        effectiveManualCount = Number(entry.manualCount);
+      } else if (entry.systemCount > 0) {
+        effectiveManualCount = entry.systemCount;
+      } else {
+        effectiveManualCount = hasExplicitCount ? Number(rawCount) : (entry.manualCount ?? 0);
+      }
 
       const effectiveUnitPrice = userEntry?.unitPrice !== undefined ? Number(userEntry.unitPrice) : entry.unitPrice;
       const effectiveNotes = userEntry?.notes !== undefined ? userEntry.notes : (entry.notes || '');
+      const isManual = Boolean(
+        userEntry?.isManualOverride ||
+        (effectiveManualCount !== undefined && effectiveManualCount > 0 && effectiveManualCount !== entry.systemCount)
+      );
 
       entriesToSave[entry.date] = {
         ...(entriesToSave[entry.date] || {}),
@@ -409,6 +462,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         notes: effectiveNotes,
         isManualOverride: isManual,
         manualCount: effectiveManualCount,
+        editableStudents: effectiveManualCount,
         lastCalculatedMealsCount: entry.lastCalculatedMealsCount || (effectiveManualCount && effectiveManualCount > 0 ? effectiveManualCount : undefined),
         isReopenedCall: entry.isReopenedCall,
         updatedAt: new Date().toISOString(),
@@ -493,6 +547,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       [dateStr]: {
         ...customEntries[dateStr],
         manualCount: num,
+        editableStudents: num,
         isManualOverride: true,
       },
     };
@@ -553,11 +608,23 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   // Aplicar preço padrão a todos os dias do período (Recálculo instantâneo geral)
   const handleApplyPriceToAll = (priceOverride?: number) => {
     const priceToApply = priceOverride !== undefined ? priceOverride : defaultUnitPrice;
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = { ...customEntries };
+    const updated: Record<
+      string,
+      {
+        manualCount?: number;
+        editableStudents?: number;
+        unitPrice?: number;
+        notes?: string;
+        isManualOverride?: boolean;
+        lastCalculatedMealsCount?: number;
+        isReopenedCall?: boolean;
+      }
+    > = { ...customEntries };
     activeEntries.forEach((e) => {
       updated[e.date] = {
         ...updated[e.date],
         manualCount: e.manualCount,
+        editableStudents: e.editableStudents ?? e.manualCount,
         unitPrice: priceToApply,
         notes: e.notes || '',
         isManualOverride: e.isManualOverride,
@@ -570,34 +637,92 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     showNotice(`Preço unitário R$ ${priceToApply.toFixed(2).replace('.', ',')} aplicado a todas as linhas do período.`);
   };
 
-  // Restaurar valores calculados pela chamada do sistema
-  const handleResetToSystem = () => {
-    if (!window.confirm('Deseja restaurar as quantidades de alunos conforme os registros originais da chamada do sistema?')) {
-      return;
+  // 2. Reparo Completo do Botão '[ Restaurar Chamada ]'
+  const handleResetToSystem = async () => {
+    try {
+      setIsRestoring(true);
+      const updated: Record<string, {
+        manualCount?: number;
+        editableStudents?: number;
+        unitPrice?: number;
+        notes?: string;
+        isManualOverride?: boolean;
+        lastCalculatedMealsCount?: number;
+        isReopenedCall?: boolean;
+        updatedAt?: string;
+      }> = { ...customEntries };
+
+      let restoredDaysCount = 0;
+
+      // Percorre todos os dias do período exibido
+      activeEntries.forEach((entry) => {
+        const dateStr = entry.date;
+        const rollCallPresentCount = getRollCallPresencesForDate(dateStr, records);
+        const presentCount = entry.presentes && entry.presentes > 0
+          ? entry.presentes
+          : (entry.systemCount > 0 ? entry.systemCount : rollCallPresentCount);
+        const dayPrice = entry.unitPrice !== undefined && entry.unitPrice !== null
+          ? Number(entry.unitPrice)
+          : defaultUnitPrice;
+
+        if (presentCount > 0) {
+          // Para cada dia com chamada realizada (presentCount > 0), force editableStudents = presentCount e recalcule o totalDiario
+          updated[dateStr] = {
+            ...updated[dateStr],
+            manualCount: presentCount,
+            editableStudents: presentCount,
+            unitPrice: dayPrice,
+            notes: entry.notes || entry.holidayName || '',
+            isManualOverride: false,
+            lastCalculatedMealsCount: presentCount,
+            isReopenedCall: false,
+            updatedAt: new Date().toISOString(),
+          };
+          restoredDaysCount++;
+        } else if (entry.isSchoolDay) {
+          const fallback = entry.lastCalculatedMealsCount || 0;
+          updated[dateStr] = {
+            ...updated[dateStr],
+            manualCount: fallback,
+            editableStudents: fallback,
+            unitPrice: dayPrice,
+            notes: entry.notes || entry.holidayName || '',
+            isManualOverride: false,
+            lastCalculatedMealsCount: fallback,
+            isReopenedCall: entry.isReopenedCall,
+            updatedAt: new Date().toISOString(),
+          };
+        } else {
+          updated[dateStr] = {
+            ...updated[dateStr],
+            manualCount: 0,
+            editableStudents: 0,
+            unitPrice: dayPrice,
+            notes: entry.holidayName || (entry.dayOfWeek === 'sabado' || entry.dayOfWeek === 'domingo' ? 'Final de Semana' : ''),
+            isManualOverride: false,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+      });
+
+      // 1. Force a re-renderização do estado local
+      setCustomEntries({ ...updated });
+
+      // 2. Monta a configuração e salva no LocalStorage imediatamente
+      const configToSave = buildConfigToSave(updated);
+      pendingConfigRef.current = configToSave;
+      saveMealConfig(configToSave);
+
+      // 3. Salva a atualização no Firestore
+      await saveMealReportToFirestore(configToSave);
+
+      showNotice(`Chamada restaurada com sucesso! ${restoredDaysCount} dia(s) com presenças foram sincronizados e salvos no Firestore.`);
+    } catch (err: any) {
+      console.error('Erro ao restaurar chamada e salvar no Firestore:', err);
+      showNotice('Erro ao salvar restauração no servidor: ' + (err?.message || 'Falha de comunicação'));
+    } finally {
+      setIsRestoring(false);
     }
-    const updated: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }> = {};
-    activeEntries.forEach((e) => {
-      if (e.isSchoolDay) {
-        updated[e.date] = {
-          manualCount: e.systemCount,
-          unitPrice: defaultUnitPrice,
-          notes: e.holidayName || '',
-          isManualOverride: false,
-          lastCalculatedMealsCount: e.lastCalculatedMealsCount,
-          isReopenedCall: e.isReopenedCall,
-        };
-      } else {
-        updated[e.date] = {
-          manualCount: 0,
-          unitPrice: defaultUnitPrice,
-          notes: e.holidayName || (e.dayOfWeek === 'sabado' || e.dayOfWeek === 'domingo' ? 'Final de Semana' : ''),
-          isManualOverride: false,
-        };
-      }
-    });
-    setCustomEntries(updated);
-    scheduleDebouncedAutoSave(updated);
-    showNotice('Quantidades restauradas conforme a chamada do sistema.');
   };
 
   const showNotice = (msg: string) => {
@@ -956,11 +1081,12 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
             <button
               type="button"
               onClick={handleResetToSystem}
-              className="flex items-center space-x-1 px-3 py-1.5 rounded-2xl text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer"
-              title="Recalcular com as presenças reais da chamada do sistema"
+              disabled={isRestoring}
+              className="flex items-center space-x-1 px-3 py-1.5 rounded-2xl text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+              title="Recalcular com as presenças reais da chamada oficial do sistema e salvar no Firestore"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Restaurar Chamada</span>
+              <RotateCcw className={`w-3.5 h-3.5 text-indigo-600 ${isRestoring ? 'animate-spin' : ''}`} />
+              <span>{isRestoring ? 'Restaurando...' : 'Restaurar Chamada'}</span>
             </button>
           </div>
 

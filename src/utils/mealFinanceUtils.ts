@@ -123,6 +123,33 @@ export function syncMealSnapshotsFromRecords(records: AttendanceRecord[]): void 
 }
 
 /**
+ * Retorna o total de alunos presentes na chamada oficial para uma data específica
+ */
+export function getRollCallPresencesForDate(dateStr: string, records: AttendanceRecord[]): number {
+  if (!Array.isArray(records) || records.length === 0) return 0;
+  
+  // 1. Prioriza registros da rotina/chamada geral
+  const routineRecords = records.filter((r) => {
+    if (!r || r.date !== dateStr) return false;
+    return isRoutineActivity(r.activity) || !r.activity;
+  });
+
+  if (routineRecords.length > 0) {
+    return routineRecords.filter((r) => isPresencaStatus(r.status)).length;
+  }
+
+  // 2. Fallback por aluno único com presença registrada na data
+  const dayRecords = records.filter((r) => r && r.date === dateStr);
+  const presentStudentIds = new Set<string>();
+  dayRecords.forEach((r) => {
+    if (isPresencaStatus(r.status) && r.studentId) {
+      presentStudentIds.add(r.studentId);
+    }
+  });
+  return presentStudentIds.size;
+}
+
+/**
  * Constrói a lista detalhada de dias para um período específico (Data Inicial a Data Final)
  * Mantém a regra de desconsiderar sábados, domingos e feriados cadastrados nos cálculos padrão.
  */
@@ -172,8 +199,6 @@ export function buildMealEntriesForDateRange(
     const isSchoolDay = !isWeekend && !isHoliday;
 
     // 1. Coluna TOTAL ESPERADOS (Alunos Efetivamente Esperados no Dia):
-    // Substitui o total geral de matriculados pelo número de alunos com contrato/escala
-    // agendados para este dia específico da semana (isStudentScheduledForDate).
     let expectedStudentsCount = 0;
     if (isSchoolDay) {
       const scheduledStudents = students.filter((s) => {
@@ -195,40 +220,53 @@ export function buildMealEntriesForDateRange(
     let hasCallConcluded = false;
 
     if (isSchoolDay) {
-      // Filtrar registros de presença no dia:
-      // Considera 'presente', 'saida_antecipada' ou 'sem_equipamento' exclusivamente na modalidade 'Rotina'
-      const dayRoutineRecords = records.filter((r) => {
+      const routineRecords = records.filter((r) => {
         if (!r || r.date !== dateStr) return false;
         return isRoutineActivity(r.activity) || !r.activity;
       });
 
-      if (dayRoutineRecords.length > 0) {
+      if (routineRecords.length > 0) {
         hasCallConcluded = true;
-        dayPresentes = dayRoutineRecords.filter((r) => isPresencaStatus(r.status)).length;
-        dayFaltas = dayRoutineRecords.filter((r) => isFaltaStatus(r.status)).length;
-        dayAtestados = dayRoutineRecords.filter((r) => isJustificadoStatus(r.status)).length;
-        // pendentesDoDia = expectedStudentsCount - (presencas + faltas + atestados)
+        dayPresentes = routineRecords.filter((r) => isPresencaStatus(r.status)).length;
+        dayFaltas = routineRecords.filter((r) => isFaltaStatus(r.status)).length;
+        dayAtestados = routineRecords.filter((r) => isJustificadoStatus(r.status)).length;
         dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas + dayAtestados));
         systemCount = dayPresentes;
       } else {
-        // Sem chamada de Rotina realizada no dia (dias pendentes ou futuros):
-        // systemCount permanece 0 até que a chamada oficial de Rotina seja registrada.
-        hasCallConcluded = false;
-        systemCount = 0;
-        dayPresentes = 0;
-        dayFaltas = 0;
-        dayAtestados = 0;
-        // pendentesDoDia = expectedStudentsCount - (0 + 0) = expectedStudentsCount
-        dayPendentes = expectedStudentsCount;
+        // Fallback: se houver registros de chamada no dia sem tag específica
+        const anyDayRecords = records.filter((r) => r && r.date === dateStr);
+        if (anyDayRecords.length > 0) {
+          const presentSet = new Set<string>();
+          const faltaSet = new Set<string>();
+          const atestadoSet = new Set<string>();
+          anyDayRecords.forEach((r) => {
+            if (!r.studentId) return;
+            if (isPresencaStatus(r.status)) presentSet.add(r.studentId);
+            else if (isJustificadoStatus(r.status)) atestadoSet.add(r.studentId);
+            else if (isFaltaStatus(r.status)) faltaSet.add(r.studentId);
+          });
+          dayPresentes = presentSet.size;
+          dayFaltas = faltaSet.size;
+          dayAtestados = atestadoSet.size;
+          hasCallConcluded = dayPresentes > 0 || dayFaltas > 0;
+          dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas + dayAtestados));
+          systemCount = dayPresentes;
+        } else {
+          hasCallConcluded = false;
+          systemCount = 0;
+          dayPresentes = 0;
+          dayFaltas = 0;
+          dayAtestados = 0;
+          dayPendentes = expectedStudentsCount;
+        }
       }
     }
 
     const savedDay = savedEntries[dateStr];
-
-    // PRIORIZAÇÃO ABSOLUTA DE DADOS SALVOS:
-    // Se existe registro manual ou valor salvo no banco/storage para a data, exiba estritamente o valor salvo!
-    const hasSavedManualCount = savedDay?.manualCount !== undefined && savedDay?.manualCount !== null;
-    const isExplicitManualOverride = Boolean(savedDay?.isManualOverride || hasSavedManualCount);
+    const rawSavedCount = savedDay?.editableStudents !== undefined ? savedDay?.editableStudents : savedDay?.manualCount;
+    const hasSavedCount = rawSavedCount !== undefined && rawSavedCount !== null;
+    const savedCountNum = hasSavedCount ? Number(rawSavedCount) : undefined;
+    const isSavedZeroOrNull = savedCountNum === undefined || isNaN(savedCountNum) || savedCountNum === 0;
 
     // Snapshot e Fallback de Histórico (Fallback de Chamada Reaberta)
     let lastCalculatedMealsCount = savedDay?.lastCalculatedMealsCount;
@@ -236,7 +274,6 @@ export function buildMealEntriesForDateRange(
     let effectiveSystemCount = systemCount;
 
     if (dayPresentes > 0) {
-      // Chamada ativa de rotina com presenças: atualiza o snapshot com a contagem real
       lastCalculatedMealsCount = dayPresentes;
       effectiveSystemCount = dayPresentes;
       isReopenedCall = false;
@@ -246,9 +283,6 @@ export function buildMealEntriesForDateRange(
       lastCalculatedMealsCount !== undefined &&
       lastCalculatedMealsCount > 0
     ) {
-      // Chamada de rotina de um dia letivo que foi reaberta / zerada / pendente:
-      // O Relatório Financeiro NÃO deve zerar o número de refeições do dia:
-      // Mantém o último snapshot registrado e marca o aviso de chamada reaberta.
       isReopenedCall = true;
       effectiveSystemCount = lastCalculatedMealsCount;
     }
@@ -257,24 +291,30 @@ export function buildMealEntriesForDateRange(
     let isManualOverride = false;
 
     if (isSchoolDay) {
-      // DIRETRIZ SÊNIOR: Se houver registro salvo/manual para o dia, exiba estritamente o valor
-      // salvo no banco e NÃO resete para 0 (mesmo que a chamada automática indique pendência).
-      if (hasSavedManualCount) {
-        manualCount = Number(savedDay!.manualCount);
-        isManualOverride = true;
+      if (!isSavedZeroOrNull) {
+        // Se houver valor manual salvo maior que zero, preserva o valor explicitamente editado pelo usuário
+        manualCount = savedCountNum!;
+        isManualOverride = Boolean(savedDay?.isManualOverride ?? true);
+      } else if (effectiveSystemCount > 0) {
+        // DIRETRIZ SÊNIOR (Item 1):
+        // Caso o campo 'ALUNOS (EDITÁVEL)' (editableStudents) do dia esteja zerado ou nulo
+        // e a chamada automática possuir valor (ex: 165 alunos no dia 06/10/2026),
+        // preenche automaticamente editableStudents com o total de presentes (presentCount) da chamada do dia!
+        manualCount = effectiveSystemCount;
+        isManualOverride = false;
       } else if (isReopenedCall && lastCalculatedMealsCount !== undefined && lastCalculatedMealsCount > 0) {
         manualCount = lastCalculatedMealsCount;
         isManualOverride = false;
       } else {
-        manualCount = effectiveSystemCount;
+        manualCount = 0;
         isManualOverride = false;
       }
     } else {
-      manualCount = hasSavedManualCount ? Number(savedDay!.manualCount) : 0;
-      isManualOverride = hasSavedManualCount;
+      manualCount = !isSavedZeroOrNull ? savedCountNum! : 0;
+      isManualOverride = !isSavedZeroOrNull;
     }
 
-    const unitPrice = savedDay?.unitPrice !== undefined ? savedDay.unitPrice : effectiveUnitPrice;
+    const unitPrice = savedDay?.unitPrice !== undefined ? Number(savedDay.unitPrice) : effectiveUnitPrice;
     const notes = savedDay?.notes || (isHoliday ? (holidayMatch?.name || 'Recesso/Feriado') : isWeekend ? 'Final de Semana' : '');
 
     entries.push({
@@ -291,8 +331,9 @@ export function buildMealEntriesForDateRange(
       pendentes: isReopenedCall ? 0 : dayPendentes,
       systemCount: isSchoolDay ? effectiveSystemCount : 0,
       manualCount,
+      editableStudents: manualCount,
       isManualOverride,
-      lastCalculatedMealsCount,
+      lastCalculatedMealsCount: lastCalculatedMealsCount || (manualCount > 0 ? manualCount : undefined),
       isReopenedCall,
       unitPrice,
       total: manualCount * unitPrice,

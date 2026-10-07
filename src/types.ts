@@ -173,7 +173,11 @@ export interface PontoRecord {
   note?: string;
   extraMinutes?: number;
   missingMinutes?: number;
-  // Auditoria de Geofencing (Geolocalização)
+  // Auditoria de Validação por Wi-Fi Institucional / Rede
+  wifiValidated?: boolean;
+  networkName?: string; // ex: 'Wi-Fi Colégio Crescer'
+  clientIp?: string;
+  // Auditoria de Geofencing (legado / compatibilidade)
   latitude?: number;
   longitude?: number;
   distanceMeters?: number;
@@ -313,6 +317,7 @@ export interface MealDailyEntry {
   pendentes?: number; // Alunos pendentes de registro
   systemCount: number; // Alunos presentes calculados automaticamente pela chamada
   manualCount: number; // Quantidade de alunos (editável pelo financeiro)
+  editableStudents?: number; // Campo ALUNOS EDITÁVEL (alias direto e canônico de manualCount)
   isManualOverride?: boolean; // Se o valor foi alterado manualmente pelo usuário
   lastCalculatedMealsCount?: number; // Último snapshot de refeições calculado da chamada concluída
   isReopenedCall?: boolean; // Se a chamada de um dia passado foi reaberta ou está pendente (preserva último snapshot)
@@ -345,6 +350,7 @@ export interface MealReportConfig {
     string,
     {
       manualCount?: number;
+      editableStudents?: number;
       unitPrice?: number;
       notes?: string;
       isManualOverride?: boolean;

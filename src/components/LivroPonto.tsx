@@ -36,6 +36,8 @@ import {
   Loader2,
   MapPin,
   Navigation,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -106,84 +108,34 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
 
 // ============================================================================
-// PARÂMETROS OFICIAIS DE GEOFENCING MULTI-LOCAL (100M) - COLÉGIO CRESCER
+// VALIDAÇÃO POR REDE WI-FI INSTITUCIONAL / IP - COLÉGIO CRESCER
 // ============================================================================
 import {
+  allowedWifiSSIDs,
+  allowIPValidation,
+  DEFAULT_NETWORK_NAME,
+  NETWORK_VALIDATION_CONFIG,
+  verifySchoolNetwork,
+  getClientPublicIP,
   OFFICIAL_WORK_LOCATIONS,
   COLEGIO_CRESCER_GEOFENCE,
   getUserAllowedLocations,
   getAllWorkLocations,
   generateLocationId,
-  saveCustomWorkLocationToStorage,
-  geocodeAddress,
-  getCurrentDeviceLocation,
 } from '../utils/workLocations';
 
 export {
+  allowedWifiSSIDs,
+  allowIPValidation,
+  DEFAULT_NETWORK_NAME,
+  NETWORK_VALIDATION_CONFIG,
+  verifySchoolNetwork,
+  getClientPublicIP,
   OFFICIAL_WORK_LOCATIONS,
   COLEGIO_CRESCER_GEOFENCE,
   getUserAllowedLocations,
   getAllWorkLocations,
 };
-
-/**
- * Cálculo da distância entre duas coordenadas geográficas via Fórmula de Haversine (em metros).
- */
-export function calculateHaversineDistanceMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371000; // Raio médio da Terra em metros
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
-}
-
-export interface GeolocationPositionResult {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-}
-
-/**
- * Solicita a localização nativa do dispositivo com alta precisão (GPS obrigatório)
- */
-export function requestCurrentDeviceLocation(): Promise<GeolocationPositionResult> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !navigator.geolocation) {
-      const err = new Error('Geolocalização não suportada neste navegador ou aparelho.');
-      (err as any).code = -1;
-      reject(err);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        resolve({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        });
-      },
-      (err) => {
-        reject(err);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000, // 10 segundos timeout
-        maximumAge: 0,  // Sempre posição fresca
-      }
-    );
-  });
-}
 
 interface LivroPontoProps {
   currentUser: UserProfile | null;
@@ -317,20 +269,15 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   const [isRegisteringPunch, setIsRegisteringPunch] = useState<boolean>(false);
   const isRegisteringPunchRef = useRef<boolean>(false);
 
-  // Geofencing Validation & Diagnostics Modal State
-  const [geofenceModal, setGeofenceModal] = useState<{
+  // Modal de Orientação e Validação de Rede Wi-Fi Institucional
+  const [wifiModal, setWifiModal] = useState<{
     isOpen: boolean;
-    type: 'OUT_OF_BOUNDS' | 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE' | 'UNSUPPORTED';
-    distanceMeters?: number;
-    targetLocationName?: string;
-    targetLocationAddress?: string;
-    targetLocationRadius?: number;
-    userAllowedLocations?: WorkLocation[];
-    userLat?: number;
-    userLng?: number;
-    accuracy?: number;
-    customMessage?: string;
+    clientIp?: string;
+    reason?: 'SUCCESS' | 'OUT_OF_NETWORK' | 'CELLULAR_CONNECTION' | 'OFFLINE' | 'IP_MISMATCH';
+    message?: string;
   } | null>(null);
+
+  const setGeofenceModal = (_val: any) => setWifiModal(null);
 
   // Live time ticker for clock
   const [liveClock, setLiveClock] = useState<string>(() => {
@@ -354,7 +301,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       showEditDayModal ||
       showEditUserModal ||
       pdfPreviewState?.isOpen ||
-      geofenceModal?.isOpen
+      wifiModal?.isOpen
     );
     if (isAnyModalOpen) {
       const originalOverflow = document.body.style.overflow;
@@ -368,7 +315,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           setShowEditDayModal(null);
           setShowEditUserModal(false);
           setPdfPreviewState(null);
-          setGeofenceModal(null);
+          setWifiModal(null);
         }
       };
       window.addEventListener('keydown', handleKeyDown);
@@ -378,7 +325,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         window.removeEventListener('keydown', handleKeyDown);
       };
     }
-  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen, geofenceModal?.isOpen]);
+  }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen, wifiModal?.isOpen]);
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -846,87 +793,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       return;
     }
 
-    // 4. Validação Obrigatória de Geolocalização por Geofencing (100m) com Locais Restritos por Usuário
-    let userCoords: GeolocationPositionResult;
-    try {
-      userCoords = await requestCurrentDeviceLocation();
-    } catch (geoErr: any) {
+    // 4. Validação Obrigatória de Conexão na Rede Wi-Fi Institucional / IP do Colégio Crescer
+    const networkResult = await verifySchoolNetwork();
+    if (!networkResult.isValid) {
       setIsRegisteringPunch(false);
       isRegisteringPunchRef.current = false;
-      const errorCode = geoErr?.code;
-      if (errorCode === 1) {
-        // PERMISSION_DENIED
-        setGeofenceModal({
-          isOpen: true,
-          type: 'PERMISSION_DENIED',
-          customMessage: 'Permissão de localização GPS recusada no navegador ou celular.',
-        });
-      } else if (errorCode === 3) {
-        // TIMEOUT
-        setGeofenceModal({
-          isOpen: true,
-          type: 'TIMEOUT',
-          customMessage: 'Tempo limite esgotado ao buscar sinal de GPS (10 segundos).',
-        });
-      } else if (errorCode === 2) {
-        // POSITION_UNAVAILABLE
-        setGeofenceModal({
-          isOpen: true,
-          type: 'POSITION_UNAVAILABLE',
-          customMessage: 'Sinal de localização ou GPS indisponível no dispositivo.',
-        });
-      } else {
-        setGeofenceModal({
-          isOpen: true,
-          type: 'UNSUPPORTED',
-          customMessage: geoErr?.message || 'Geolocalização não suportada ou indisponível.',
-        });
-      }
-      return;
-    }
-
-    // Obter locais autorizados estritamente para o colaborador atual (oficiais + externos cadastrados)
-    // Regra Padrão (Default): Se o campo não estiver preenchido, o colaborador possui autorização EXCLUSIVA para a 'sede' (Colégio Crescer - Rua Itatiba)
-    const userAllowedLocations = getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations));
-
-    // Validação restritiva: calcula a distância APENAS em relação aos locais presentes no allowedLocations daquele usuário
-    const locationEvaluations = userAllowedLocations.map((loc) => {
-      const dist = calculateHaversineDistanceMeters(
-        userCoords.latitude,
-        userCoords.longitude,
-        loc.latitude,
-        loc.longitude
-      );
-      return {
-        location: loc,
-        distanceMeters: dist,
-        isValid: dist <= loc.radiusMeters,
-      };
-    });
-
-    // Procura se o colaborador está dentro de algum dos seus locais autorizados (<= 100m)
-    const approvedMatch = locationEvaluations.find((e) => e.isValid);
-
-    if (!approvedMatch) {
-      // Bloqueio! Se um usuário sem permissão tentar bater o ponto na academia,
-      // o sistema ignora a academia e exibe que ele está fora do perímetro da SEDE.
-      const closestEvaluation = [...locationEvaluations].sort(
-        (a, b) => a.distanceMeters - b.distanceMeters
-      )[0];
-
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setGeofenceModal({
+      setWifiModal({
         isOpen: true,
-        type: 'OUT_OF_BOUNDS',
-        distanceMeters: closestEvaluation.distanceMeters,
-        targetLocationName: closestEvaluation.location.name,
-        targetLocationAddress: closestEvaluation.location.address,
-        targetLocationRadius: closestEvaluation.location.radiusMeters,
-        userAllowedLocations,
-        userLat: userCoords.latitude,
-        userLng: userCoords.longitude,
-        accuracy: userCoords.accuracy,
+        clientIp: networkResult.clientIp,
+        reason: networkResult.reason || 'OUT_OF_NETWORK',
+        message: 'Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto presencial.',
       });
       return;
     }
@@ -965,15 +841,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       console.warn('Erro ao salvar timestamp da batida:', e);
     }
 
-    // Incorpora campos de auditoria de geofencing no registro para persistência no Firestore
+    // Incorpora campos de auditoria de validação por Wi-Fi no registro para persistência no Firestore
     const recordWithAudit: PontoRecord = {
       ...result.updatedRecord,
-      latitude: userCoords.latitude,
-      longitude: userCoords.longitude,
-      distanceMeters: approvedMatch.distanceMeters,
+      wifiValidated: true,
+      networkName: 'Wi-Fi Colégio Crescer',
+      clientIp: networkResult.clientIp,
       geofenceValidated: true,
-      locationId: approvedMatch.location.id,
-      locationName: approvedMatch.location.name,
+      locationName: 'Sede (Wi-Fi Colégio Crescer)',
     };
 
     // Immediately trigger state update and save
@@ -1013,7 +888,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
 
     setPunchFeedback({
-      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📍 Perímetro validado: ${approvedMatch.distanceMeters}m de ${approvedMatch.location.name})`,
+      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📶 Conexão validada: Wi-Fi Colégio Crescer)`,
       type: 'success',
     });
     setTimeout(() => setPunchFeedback(null), 5000);
@@ -1846,23 +1721,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <span>•</span>
                   <span>Tolerância de 5 min</span>
                   <span>•</span>
-                  {(() => {
-                    const activeAllowed = getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations));
-                    const hasAcademia = activeAllowed.some((l) => l.id === 'academia_fit');
-                    return (
-                      <span
-                        className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60"
-                        title={`Locais de batida autorizados para ${targetUser?.name || 'colaborador'}: ${activeAllowed.map((l) => l.name).join(' • ')} (Raio estrito de 100m)`}
-                      >
-                        <MapPin className="w-3 h-3 text-emerald-400" />
-                        {hasAcademia
-                          ? 'Geofencing: Sede + Academia / Externo (100m)'
-                          : activeAllowed.length > 1
-                          ? `Geofencing: Sede + ${activeAllowed.length - 1} Locais (100m)`
-                          : 'Geofencing: Sede (100m)'}
-                      </span>
-                    );
-                  })()}
+                  <span
+                    className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60"
+                    title="Validação presencial obrigatória via rede Wi-Fi Institucional do Colégio Crescer"
+                  >
+                    <Wifi className="w-3 h-3 text-emerald-400" />
+                    Validação por Wi-Fi Institucional (Colégio Crescer)
+                  </span>
                 </p>
               </div>
             </div>
@@ -2559,13 +2424,13 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     <td className="py-2 px-3 text-slate-500 text-[11px] max-w-xs">
                       <div className="flex items-center space-x-1.5 truncate">
                         <span className="truncate">{rec?.note || item.holidayItem?.description || (item.isWk ? '' : '—')}</span>
-                        {rec?.geofenceValidated && (
+                        {(rec?.wifiValidated || rec?.geofenceValidated) && (
                           <span
                             className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded shrink-0"
-                            title={`Batida com validação de geolocalização: ${rec.locationName || 'Sede'} (${rec.distanceMeters ?? 0}m de distância)`}
+                            title={`Batida com validação por Wi-Fi Institucional: ${rec.networkName || 'Wi-Fi Colégio Crescer'}${rec.clientIp ? ` (IP: ${rec.clientIp})` : ''}`}
                           >
-                            <MapPin className="w-2.5 h-2.5 text-emerald-600" />
-                            {rec.locationName ? (rec.locationId === 'academia_fit' ? 'Academia' : 'Sede') : 'Sede'} • {rec.distanceMeters ?? 0}m
+                            <Wifi className="w-2.5 h-2.5 text-emerald-600" />
+                            Wi-Fi Institucional
                           </span>
                         )}
                       </div>
@@ -4325,53 +4190,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Locais de Trabalho Autorizados para Ponto (Geofencing 100m)
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-slate-950/70 rounded-xl border border-slate-800">
-                  {getAllWorkLocations(targetUser?.customLocations).map((loc) => {
-                    const isChecked = userEditAllowedLocations.includes(loc.id);
-                    const isSede = loc.id === 'sede';
-                    return (
-                      <label
-                        key={loc.id}
-                        className={`flex items-start space-x-2.5 p-2 rounded-lg border transition cursor-pointer select-none ${
-                          isChecked
-                            ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          disabled={isSede}
-                          onChange={(e) => {
-                            if (isSede) return;
-                            if (e.target.checked) {
-                              setUserEditAllowedLocations((prev) => [...prev, loc.id]);
-                            } else {
-                              setUserEditAllowedLocations((prev) => prev.filter((id) => id !== loc.id));
-                            }
-                          }}
-                          className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 bg-slate-800 border-slate-700"
-                        />
-                        <div className="text-[11px] leading-tight">
-                          <strong className="block text-white font-bold">{loc.name}</strong>
-                          <span className="text-slate-400 text-[10px] block mt-0.5">{loc.address}</span>
-                          {isSede ? (
-                            <span className="text-[9px] text-emerald-400 font-bold block mt-0.5">Sede Principal (Padrão)</span>
-                          ) : (
-                            <span className="text-[9px] text-amber-400 font-bold block mt-0.5">Polo Externo Autorizado</span>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
+              <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl space-y-1.5">
+                <div className="flex items-center space-x-2 text-emerald-400 font-bold text-xs">
+                  <Wifi className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Validação por Wi-Fi Institucional Ativa</span>
                 </div>
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  Regra Restritiva: Se 'Academia / Externo' não for marcada, o ponto só poderá ser registrado dentro de 100m da Sede (Rua Itatiba, 1427).
-                </span>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  A validação presencial é 100% automática e global para todos os colaboradores conectados à rede Wi-Fi do Colégio Crescer (<code className="text-emerald-300">Colegio_Crescer</code>, <code className="text-emerald-300">Colegio_Crescer_ADM</code> ou <code className="text-emerald-300">Colegio_Crescer_Staff</code>).
+                </p>
               </div>
 
               <div className="flex justify-end space-x-2 pt-4 border-t border-slate-800">
@@ -4395,230 +4221,84 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         </div>
       )}
       {/* ========================================================================= */}
-      {/* MODAL 6: ALERTA E ORIENTAÇÃO DE GEOFENCING (RAIO DE 100M) */}
+      {/* MODAL: ALERTA E ORIENTAÇÃO DE REDE WI-FI INSTITUCIONAL */}
       {/* ========================================================================= */}
-      {geofenceModal && geofenceModal.isOpen && (
+      {wifiModal && wifiModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
           <div className="bg-slate-900 text-white rounded-2xl w-full max-w-md border border-slate-700/80 shadow-2xl p-6 space-y-4">
-            {geofenceModal.type === 'OUT_OF_BOUNDS' ? (
-              <>
-                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
-                  <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-400">
-                    <MapPin className="w-6 h-6 animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-rose-400">
-                      Fora do Perímetro Autorizado
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Geofencing • Registro de Ponto Bloqueado
-                    </p>
-                  </div>
-                </div>
+            <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
+              <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
+                <WifiOff className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-amber-400">
+                  Fora da Rede Institucional
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Validação por Wi-Fi • Registro Presencial Obrigatório
+                </p>
+              </div>
+            </div>
 
-                <div className="bg-rose-950/30 border border-rose-800/40 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-300 font-medium">Local Avaliado:</span>
-                    <span className="text-xs font-bold text-white font-mono truncate max-w-[200px]" title={geofenceModal.targetLocationName}>
-                      {geofenceModal.targetLocationName || COLEGIO_CRESCER_GEOFENCE.name}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-300 font-medium">Distância Calculada:</span>
-                    <span className="text-sm font-black text-rose-300 font-mono">
-                      {geofenceModal.distanceMeters !== undefined
-                        ? geofenceModal.distanceMeters > 1000
-                          ? `${(geofenceModal.distanceMeters / 1000).toFixed(2)} km (${geofenceModal.distanceMeters} m)`
-                          : `${geofenceModal.distanceMeters} metros`
-                        : '—'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-300 font-medium">Raio Máximo Permitido:</span>
-                    <span className="text-sm font-bold text-emerald-400 font-mono">
-                      {geofenceModal.targetLocationRadius || COLEGIO_CRESCER_GEOFENCE.radiusMeters} metros
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-rose-900/50 pt-2">
-                    <span className="text-xs text-slate-300 font-medium">Distância Excedente:</span>
-                    <span className="text-xs font-bold text-amber-400 font-mono">
-                      +{Math.max(0, (geofenceModal.distanceMeters ?? 0) - (geofenceModal.targetLocationRadius || COLEGIO_CRESCER_GEOFENCE.radiusMeters))} metros além do limite
-                    </span>
-                  </div>
-                </div>
+            {/* Mensagem Orientativa Principal da Diretriz */}
+            <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-4 space-y-2">
+              <p className="text-sm font-bold text-amber-200 leading-snug">
+                Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto presencial.
+              </p>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Para garantir a presença física no colégio, as batidas de ponto só podem ser efetuadas através da conexão institucional do Colégio Crescer.
+              </p>
+            </div>
 
-                <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2.5 text-xs text-slate-300">
-                  <div className="flex items-start space-x-2">
-                    <Building2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="text-white block">{geofenceModal.targetLocationName || COLEGIO_CRESCER_GEOFENCE.name}</strong>
-                      <span className="text-slate-400 text-[11px]">{geofenceModal.targetLocationAddress || COLEGIO_CRESCER_GEOFENCE.address}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-700/50 space-y-1.5">
-                    <span className="text-[11px] text-slate-300 block font-semibold">
-                      Locais autorizados na ficha deste colaborador:
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {(geofenceModal.userAllowedLocations || [COLEGIO_CRESCER_GEOFENCE]).map((l) => (
-                        <span key={l.id} className="text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-200 font-medium">
-                          📍 {l.name}
-                        </span>
-                      ))}
-                    </div>
-                    {(!geofenceModal.userAllowedLocations || geofenceModal.userAllowedLocations.length <= 1) ? (
-                      <p className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-800/40 p-2 rounded leading-relaxed">
-                        ⚠️ Este colaborador possui autorização de ponto <strong>exclusivamente na SEDE (Colégio Crescer - Rua Itatiba)</strong>. A batida em outros locais (ex: Academia / Externo) é restrita e ignorada até liberação formal na ficha do colaborador.
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-slate-400 leading-relaxed">
-                        A batida de ponto deve ocorrer <strong>estritamente dentro de 100 metros de um dos seus locais autorizados</strong>. Aproxime-se do local e tente registrar novamente.
-                      </p>
-                    )}
-                  </div>
-
-                  {geofenceModal.userLat !== undefined && geofenceModal.userLng !== undefined && (
-                    <div className="text-[10px] text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
-                      Coordenadas detectadas: {geofenceModal.userLat.toFixed(5)}, {geofenceModal.userLng.toFixed(5)}
-                      {geofenceModal.accuracy ? ` (Precisão: ±${Math.round(geofenceModal.accuracy)}m)` : ''}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-end space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setGeofenceModal(null)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+            {/* Detalhes de Redes Autorizadas */}
+            <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2.5 text-xs text-slate-300">
+              <span className="text-[11px] text-slate-400 block font-semibold uppercase tracking-wider">
+                Redes Wi-Fi Oficiais Autorizadas:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {allowedWifiSSIDs.map((ssid) => (
+                  <span
+                    key={ssid}
+                    className="inline-flex items-center space-x-1 text-[11px] bg-slate-950 px-2.5 py-1 rounded-lg border border-emerald-800/60 text-emerald-300 font-mono font-medium"
                   >
-                    Entendido
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGeofenceModal(null);
-                      handleQuickPunch();
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Tentar Novamente</span>
-                  </button>
-                </div>
-              </>
-            ) : geofenceModal.type === 'PERMISSION_DENIED' ? (
-              <>
-                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
-                  <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-amber-400">
-                      Permissão de Localização Negada
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Acesso ao GPS Obrigatório para Batida
-                    </p>
-                  </div>
-                </div>
+                    <Wifi className="w-3 h-3 text-emerald-400" />
+                    <span>{ssid}</span>
+                  </span>
+                ))}
+              </div>
 
-                <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
-                  <p>
-                    Para registrar seu ponto, a legislação e as diretrizes do <strong>Colégio Crescer</strong> exigem a validação de presença dentro do perímetro da escola (100m).
-                  </p>
-                  <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-2 text-[11px]">
-                    <p className="font-bold text-white">Como habilitar a localização no celular ou navegador:</p>
-                    <ol className="list-decimal list-inside space-y-1 text-slate-300">
-                      <li>Toque no ícone de <strong>cadeado ou configurações</strong> ao lado da barra de endereço do navegador.</li>
-                      <li>Localize a opção <strong>Localização / GPS</strong> e altere para <strong>Permitir</strong>.</li>
-                      <li>Verifique se o <strong>GPS / Localização</strong> do seu aparelho celular está ativado.</li>
-                      <li>Toque no botão abaixo para tentar registrar novamente.</li>
-                    </ol>
+              <div className="pt-2 border-t border-slate-700/50 space-y-1 text-[11px]">
+                <p className="text-slate-400">
+                  • Se estiver utilizando rede móvel (4G/5G de celular), ative o Wi-Fi e selecione uma das redes acima.
+                </p>
+                {wifiModal.clientIp && (
+                  <div className="text-[10px] text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800 mt-1">
+                    IP Público detectado: <span className="text-white font-bold">{wifiModal.clientIp}</span>
                   </div>
-                </div>
+                )}
+              </div>
+            </div>
 
-                <div className="flex items-center justify-end space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setGeofenceModal(null)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
-                  >
-                    Fechar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGeofenceModal(null);
-                      handleQuickPunch();
-                    }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Tentar Novamente</span>
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
-                  <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-amber-400">
-                      {geofenceModal.type === 'TIMEOUT'
-                        ? 'Tempo Limite do GPS Esgotado'
-                        : geofenceModal.type === 'POSITION_UNAVAILABLE'
-                        ? 'Sinal de GPS Indisponível'
-                        : 'Geolocalização Não Suportada'}
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Dificuldade de Conexão com Satélites GPS
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
-                  <p>
-                    {geofenceModal.type === 'TIMEOUT'
-                      ? 'O GPS do dispositivo demorou mais de 10 segundos para obter alta precisão.'
-                      : geofenceModal.type === 'POSITION_UNAVAILABLE'
-                      ? 'O dispositivo não conseguiu obter uma leitura de sinal GPS válida no momento.'
-                      : 'O navegador utilizado não possui suporte à API nativa de geolocalização.'}
-                  </p>
-                  <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-1.5 text-[11px]">
-                    <p className="font-bold text-white">Orientações recomendadas:</p>
-                    <ul className="list-disc list-inside space-y-1 text-slate-300">
-                      <li>Certifique-se de que a localização em alta precisão está ligada no aparelho.</li>
-                      <li>Se estiver em subsolo ou área fechada, aproxime-se de uma janela ou área aberta.</li>
-                      <li>Verifique se o Wi-Fi ou dados móveis estão ativos para acelerar a triangulação.</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setGeofenceModal(null)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
-                  >
-                    Fechar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGeofenceModal(null);
-                      handleQuickPunch();
-                    }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Tentar Novamente</span>
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setWifiModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Entendido
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWifiModal(null);
+                  handleQuickPunch();
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Verificar Wi-Fi e Tentar Novamente</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

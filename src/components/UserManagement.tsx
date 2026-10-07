@@ -32,14 +32,6 @@ import { ScheduleManager } from './ScheduleManager';
 import { HolidayManager } from './HolidayManager';
 import { fetchAllUsersDirectFromServer } from '../firebase';
 import {
-  OFFICIAL_WORK_LOCATIONS,
-  getAllWorkLocations,
-  generateLocationId,
-  saveCustomWorkLocationToStorage,
-  geocodeAddress,
-  getCurrentDeviceLocation,
-} from '../utils/workLocations';
-import {
   ShieldCheck,
   GraduationCap,
   UserCheck,
@@ -93,7 +85,6 @@ import {
   X,
   RefreshCw,
   MapPin,
-  Compass,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -212,141 +203,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formContractDivisorHours, setFormContractDivisorHours] = useState<number | string>(220);
   const [formAjudaDeCusto, setFormAjudaDeCusto] = useState<number | string>(0);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
-
-  // Geofencing: Locais de trabalho autorizados (allowedLocations) e locais externos dinâmicos
-  const [formAllowedLocations, setFormAllowedLocations] = useState<string[]>(['sede']);
-  const [formCustomLocations, setFormCustomLocations] = useState<WorkLocation[]>([]);
-
-  // Estado para cadastro dinâmico de novo endereço externo
-  const [isAddingExternalLocation, setIsAddingExternalLocation] = useState(false);
-  const [newLocName, setNewLocName] = useState('');
-  const [newLocAddress, setNewLocAddress] = useState('');
-  const [newLocLat, setNewLocLat] = useState<string>('');
-  const [newLocLng, setNewLocLng] = useState<string>('');
-  const [isCapturingCoords, setIsCapturingCoords] = useState(false);
-  const [captureStatus, setCaptureStatus] = useState<{
-    text: string;
-    type: 'success' | 'error' | 'info';
-  } | null>(null);
-
-  const allAvailableLocations = useMemo(() => {
-    return getAllWorkLocations(formCustomLocations);
-  }, [formCustomLocations]);
-
-  const handleCaptureOrGeocodeCoordinates = async () => {
-    setIsCapturingCoords(true);
-    setCaptureStatus({ text: 'Buscando coordenadas (Geocodificação de endereço / GPS)...', type: 'info' });
-    try {
-      const addressToSearch = newLocAddress.trim();
-      let foundLat: number | null = null;
-      let foundLng: number | null = null;
-      let methodLabel = '';
-
-      // 1. Tenta Geocodificar via Endereço/Logradouro
-      if (addressToSearch) {
-        const geoResult = await geocodeAddress(addressToSearch);
-        if (geoResult) {
-          foundLat = geoResult.latitude;
-          foundLng = geoResult.longitude;
-          methodLabel = 'Endereço Geocodificado (OpenStreetMap)';
-        }
-      }
-
-      // 2. Se não encontrou ou endereço vazio, tenta GPS nativo
-      if (foundLat === null || foundLng === null) {
-        try {
-          const gps = await getCurrentDeviceLocation(8000);
-          foundLat = gps.latitude;
-          foundLng = gps.longitude;
-          methodLabel = `GPS do dispositivo (precisão ±${Math.round(gps.accuracy)}m)`;
-        } catch (gpsErr) {
-          console.warn('GPS nativo falhou:', gpsErr);
-        }
-      }
-
-      if (foundLat !== null && foundLng !== null) {
-        setNewLocLat(foundLat.toFixed(6));
-        setNewLocLng(foundLng.toFixed(6));
-        setCaptureStatus({
-          text: `Coordenadas capturadas com sucesso via ${methodLabel}! Lat: ${foundLat.toFixed(5)}, Lng: ${foundLng.toFixed(5)}`,
-          type: 'success',
-        });
-      } else {
-        setCaptureStatus({
-          text: 'Não foi possível obter automaticamente. Digite o endereço completo com número e cidade ou preencha a Latitude/Longitude manualmente.',
-          type: 'error',
-        });
-      }
-    } catch (err: any) {
-      setCaptureStatus({
-        text: 'Erro ao capturar coordenadas: ' + (err?.message || 'Falha na busca'),
-        type: 'error',
-      });
-    } finally {
-      setIsCapturingCoords(false);
-    }
-  };
-
-  const handleConfirmAddExternalLocation = () => {
-    const trimmedName = newLocName.trim();
-    const trimmedAddress = newLocAddress.trim();
-    const parsedLat = parseFloat(newLocLat);
-    const parsedLng = parseFloat(newLocLng);
-
-    if (!trimmedName) {
-      setCaptureStatus({ text: 'Por favor, informe o Nome do Local (ex: Quadra Esportiva).', type: 'error' });
-      return;
-    }
-    if (!trimmedAddress) {
-      setCaptureStatus({ text: 'Por favor, informe o Endereço / Logradouro.', type: 'error' });
-      return;
-    }
-    if (isNaN(parsedLat) || isNaN(parsedLng)) {
-      setCaptureStatus({ text: 'Coordenadas inválidas. Clique em [ Capturar / Geocodificar Coordenadas ] ou insira valores numéricos válidos.', type: 'error' });
-      return;
-    }
-
-    // Gera ID único canônico (slug/hash) para evitar duplicações
-    const uniqueId = generateLocationId(trimmedName, trimmedAddress);
-
-    // Verifica se já existe na lista
-    const existing = allAvailableLocations.find(
-      (l) => l.id === uniqueId || (l.name.toLowerCase() === trimmedName.toLowerCase() && l.address.toLowerCase() === trimmedAddress.toLowerCase())
-    );
-
-    const targetId = existing ? existing.id : uniqueId;
-
-    if (!existing) {
-      const newLoc: WorkLocation = {
-        id: targetId,
-        name: trimmedName,
-        address: trimmedAddress,
-        latitude: parsedLat,
-        longitude: parsedLng,
-        radiusMeters: 100,
-        isCustom: true,
-      };
-
-      saveCustomWorkLocationToStorage(newLoc);
-      setFormCustomLocations((prev) => {
-        const withoutDup = prev.filter((p) => p.id !== targetId);
-        return [...withoutDup, newLoc];
-      });
-    }
-
-    // Marca automaticamente nas permissões do colaborador
-    setFormAllowedLocations((prev) => {
-      if (prev.includes(targetId)) return prev;
-      return [...prev, targetId];
-    });
-
-    setNewLocName('');
-    setNewLocAddress('');
-    setNewLocLat('');
-    setNewLocLng('');
-    setCaptureStatus(null);
-    setIsAddingExternalLocation(false);
-  };
 
   // Dynamic calculation for schedule and lunch interval
   const scheduleCalculation = useMemo(() => {
@@ -672,18 +528,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
     setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
     setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
-
-    const userAllowed = Array.isArray(user.allowedLocations) && user.allowedLocations.length > 0
-      ? user.allowedLocations
-      : ['sede'];
-    setFormAllowedLocations(userAllowed);
-    setFormCustomLocations(Array.isArray(user.customLocations) ? user.customLocations : []);
-    setIsAddingExternalLocation(false);
-    setNewLocName('');
-    setNewLocAddress('');
-    setNewLocLat('');
-    setNewLocLng('');
-    setCaptureStatus(null);
   };
 
   const handleReloadUsers = async () => {
@@ -732,14 +576,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormContractDivisorHours(220);
     setFormAjudaDeCusto(0);
     setFormCompany('GADAL - Gestão e Apoio');
-    setFormAllowedLocations(['sede']);
-    setFormCustomLocations([]);
-    setIsAddingExternalLocation(false);
-    setNewLocName('');
-    setNewLocAddress('');
-    setNewLocLat('');
-    setNewLocLng('');
-    setCaptureStatus(null);
     setIsNewUserModalOpen(true);
   };
 
@@ -966,8 +802,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       company: formCompany.trim() || 'GADAL - Gestão e Apoio',
       empresa: formCompany.trim() || 'GADAL - Gestão e Apoio',
       workShiftType: formWorkShiftType,
-      allowedLocations: formAllowedLocations.length > 0 ? Array.from(new Set(formAllowedLocations)) : ['sede'],
-      customLocations: formCustomLocations.filter((l) => formAllowedLocations.includes(l.id)),
+      allowedLocations: Array.isArray(editingUser?.allowedLocations) && editingUser.allowedLocations.length > 0
+        ? editingUser.allowedLocations
+        : ['sede'],
+      customLocations: editingUser?.customLocations || [],
       updatedAt: new Date().toISOString(),
     };
 
@@ -3419,218 +3257,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     );
                   })}
                 </div>
-              </div>
-
-              {/* LOCAIS DE TRABALHO AUTORIZADOS (GEOFENCING 50M) */}
-              <div className="pt-3 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center space-x-1.5">
-                    <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <label className="block font-bold text-slate-800 uppercase tracking-wider text-xs">
-                      LOCAIS DE TRABALHO AUTORIZADOS (GEOFENCING 100M):
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingExternalLocation((prev) => !prev)}
-                    className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{isAddingExternalLocation ? 'Fechar Cadastro Externo' : '+ Adicionar Novo Endereço Externo'}</span>
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-500 mb-2.5">
-                  Selecione onde o colaborador tem permissão para registrar ponto. A Sede Principal é autorizada por padrão (tolerância de 100m).
-                </p>
-
-                {/* Lista de Locais em estilo botão/checkbox toggle */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {allAvailableLocations.map((loc) => {
-                    const isSede = loc.id === 'sede';
-                    const isChecked = isSede || formAllowedLocations.includes(loc.id);
-
-                    return (
-                      <button
-                        key={loc.id}
-                        type="button"
-                        onClick={() => {
-                          if (isSede) return;
-                          setFormAllowedLocations((prev) =>
-                            prev.includes(loc.id) ? prev.filter((id) => id !== loc.id) : [...prev, loc.id]
-                          );
-                        }}
-                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start justify-between ${
-                          isChecked
-                            ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-xs'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="space-y-0.5 pr-2">
-                          <div className="flex items-center space-x-1.5">
-                            <span className="text-xs font-black">{loc.name}</span>
-                            {isSede && (
-                              <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-200/80 text-emerald-800 px-1.5 py-0.2 rounded">
-                                Padrão
-                              </span>
-                            )}
-                            {loc.isCustom && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded">
-                                Externo
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-slate-500 leading-tight">
-                            {loc.address}
-                          </p>
-                          <span className="text-[9px] text-slate-400 font-mono block">
-                            Raio: {loc.radiusMeters}m • Coords: {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
-                          </span>
-                        </div>
-
-                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${
-                          isChecked
-                            ? 'bg-emerald-600 border-emerald-600 text-white'
-                            : 'bg-white border-slate-300 text-transparent'
-                        }`}>
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Painel expansível: Cadastrar Novo Endereço Externo */}
-                {isAddingExternalLocation && (
-                  <div className="mt-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                      <div className="flex items-center space-x-1.5">
-                        <Building2 className="w-4 h-4 text-emerald-600" />
-                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-                          Cadastrar Novo Endereço Externo
-                        </h4>
-                      </div>
-                      <span className="text-[10px] text-slate-500">
-                        Prevenção automática contra duplicatas
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                          Nome do Local <span className="text-rose-500">*</span>:
-                        </label>
-                        <input
-                          type="text"
-                          value={newLocName}
-                          onChange={(e) => setNewLocName(e.target.value)}
-                          placeholder="Ex: Quadra Esportiva, Unidade 2..."
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                          Endereço / Logradouro <span className="text-rose-500">*</span>:
-                        </label>
-                        <input
-                          type="text"
-                          value={newLocAddress}
-                          onChange={(e) => setNewLocAddress(e.target.value)}
-                          placeholder="Ex: Rua Visconde de Indaiatuba, 340, Campinas..."
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Botão de Captura e Coordenadas */}
-                    <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={handleCaptureOrGeocodeCoordinates}
-                          disabled={isCapturingCoords}
-                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 text-xs transition disabled:opacity-50 cursor-pointer"
-                        >
-                          {isCapturingCoords ? (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Compass className="w-3.5 h-3.5 text-indigo-600" />
-                          )}
-                          <span>
-                            {isCapturingCoords ? 'Buscando Coordenadas...' : '[ Capturar / Geocodificar Coordenadas ]'}
-                          </span>
-                        </button>
-                        <span className="text-[10px] text-slate-400">
-                          Busca online via OpenStreetMap ou GPS do aparelho
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            Latitude:
-                          </label>
-                          <input
-                            type="text"
-                            value={newLocLat}
-                            onChange={(e) => setNewLocLat(e.target.value)}
-                            placeholder="-22.931500"
-                            className="w-full font-mono text-xs px-2 py-1 bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            Longitude:
-                          </label>
-                          <input
-                            type="text"
-                            value={newLocLng}
-                            onChange={(e) => setNewLocLng(e.target.value)}
-                            placeholder="-47.103000"
-                            className="w-full font-mono text-xs px-2 py-1 bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          />
-                        </div>
-                      </div>
-
-                      {captureStatus && (
-                        <div
-                          className={`p-2 rounded-lg text-[11px] leading-tight flex items-start space-x-1.5 ${
-                            captureStatus.type === 'success'
-                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                              : captureStatus.type === 'error'
-                              ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                              : 'bg-blue-50 text-blue-800 border border-blue-200'
-                          }`}
-                        >
-                          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                          <span>{captureStatus.text}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end space-x-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAddingExternalLocation(false);
-                          setCaptureStatus(null);
-                        }}
-                        className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 font-bold cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleConfirmAddExternalLocation}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shadow-xs transition flex items-center space-x-1 cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Salvar e Vincular Novo Local</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Abas Liberadas */}
