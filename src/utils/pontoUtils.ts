@@ -1242,6 +1242,7 @@ export function calculateMonthlyPontoFinancials({
   valorHoraAula?: number;
   duracaoAulaMinutos?: number;
   totalAulas?: number;
+  aulasNaoMinistradas?: number;
   salarioAulas?: number;
   horaAtividade?: number;
   dsr?: number;
@@ -1418,6 +1419,87 @@ export function calculateMonthlyPontoFinancials({
   const extraHoursDecimal = totalExtraMinutes / 60;
   const extraHoursFormatted = formatMinutesToHoursAndMinutes(totalExtraMinutes);
   const extraHoursAmount = extraHours50Amount + extraHours100Amount;
+
+  if (regimeTrabalho === 'prestador_aula_efetiva') {
+    // =========================================================================
+    // REGIME PRESTADOR POR AULA EFETIVA (PJ / HORISTA EFETIVO)
+    // - Remuneração exclusiva por aula realizada com registro de chamada
+    // - Feriados e recessos: R$ 0,00 (sem DSR / sem feriados remunerados)
+    // - Aulas não realizadas / faltas: R$ 0,00
+    // - Sem Hora-Atividade (0%) e Sem DSR (0)
+    // =========================================================================
+    const totalAulas = customTotalAulas !== undefined && customTotalAulas !== null
+      ? Math.max(0, Number(customTotalAulas))
+      : calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula);
+
+    const aulasNaoMinistradas = paidHolidaysCount + paidRecessDaysCount + unjustifiedAbsencesCount;
+
+    // Salário / Valor das Aulas Dadas: N * Valor da Hora-Aula
+    const salarioAulas = calcularSalarioAulas(totalAulas, safeValorHoraAula);
+
+    const safeManualAdd = Number(manualAddition) || 0;
+    const safeManualDesc = Number(manualDiscount) || 0;
+    const totalDescontos = safeManualDesc;
+
+    // Subtotal: Salário de Aulas Dadas + Adicionais Manuais - Descontos
+    const subtotalSalarial = Math.max(
+      0,
+      salarioAulas + safeManualAdd - totalDescontos
+    );
+
+    // Valor Total Líquido a Pagar: Subtotal + Ajuda de Custo (se houver)
+    const netTotal = subtotalSalarial + safeAjudaDeCusto;
+
+    return {
+      regimeTrabalho: 'prestador_aula_efetiva',
+      valorHoraAula: safeValorHoraAula,
+      duracaoAulaMinutos: safeDuracaoAula,
+      totalAulas,
+      aulasNaoMinistradas,
+      salarioAulas,
+      horaAtividade: 0,
+      dsr: 0,
+      baseSalary: salarioAulas,
+      divisorHours: safeDivisorHours,
+      divisorDays: safeDivisorDays,
+      contractDailyHours: Number(safeHours.toFixed(2)),
+      contractDailyMinutes: safeMinutes,
+      contractDailyHoursFormatted: formattedContractHours,
+      diariaRate: 0,
+      hourlyRate: safeValorHoraAula,
+      minuteRate: safeValorHoraAula / 60,
+      ajudaDeCusto: safeAjudaDeCusto,
+      extraHoursRateMultiplier: safeExtraMultiplier,
+      unjustifiedAbsencesCount,
+      unjustifiedAbsencesDiscount: 0,
+      totalWorkedMinutes,
+      totalWorkedFormatted,
+      totalExtraMinutes: 0,
+      extraHoursDecimal: 0,
+      extraHoursFormatted: '0h00min',
+      extraHoursAmount: 0,
+      totalExtraMinutes50: 0,
+      extraHours50Decimal: 0,
+      extraHours50Formatted: '0h00min',
+      extraHours50Amount: 0,
+      totalExtraMinutes100: 0,
+      extraHours100Decimal: 0,
+      extraHours100Formatted: '0h00min',
+      extraHours100Amount: 0,
+      restDaysWorkedCount,
+      totalMissingMinutes: 0,
+      missingHoursFormatted: '0h00min',
+      missingHoursDiscount: 0,
+      paidHolidaysCount,
+      paidRecessDaysCount,
+      workedDaysCount,
+      manualAddition: safeManualAdd,
+      manualDiscount: safeManualDesc,
+      totalDescontos,
+      subtotalSalarial: Math.round(subtotalSalarial * 100) / 100,
+      netTotal: Math.round(netTotal * 100) / 100,
+    };
+  }
 
   if (isProfessor) {
     // =========================================================================

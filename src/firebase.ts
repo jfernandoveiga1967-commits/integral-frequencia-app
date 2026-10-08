@@ -504,8 +504,14 @@ export function subscribeUsers(
             baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
               ? Number(data.baseSalary)
               : (isMasterAdmin ? 0 : 1200),
-            regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
-            regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+            regimeTrabalho: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+              ? 'prestador_aula_efetiva'
+              : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+              ? 'professor_horista'
+              : 'mensalista',
+            regimeContratual: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+              ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+              : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
               ? 'Prof. Horista'
               : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
             valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
@@ -670,8 +676,14 @@ export async function saveUserToFirestore(user: UserProfile): Promise<UserProfil
     baseSalary: user.baseSalary !== undefined && user.baseSalary !== null && !isNaN(Number(user.baseSalary))
       ? Number(user.baseSalary)
       : (isMasterAdmin ? 0 : 1200),
-    regimeTrabalho: (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
-    regimeContratual: (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista')))
+    regimeTrabalho: (user.regimeTrabalho === 'prestador_aula_efetiva' || user.regimeContratual?.toLowerCase().includes('efetiv') || user.regimeContratual?.toLowerCase().includes('prestador'))
+      ? 'prestador_aula_efetiva'
+      : (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista')))
+      ? 'professor_horista'
+      : 'mensalista',
+    regimeContratual: (user.regimeTrabalho === 'prestador_aula_efetiva' || user.regimeContratual?.toLowerCase().includes('efetiv') || user.regimeContratual?.toLowerCase().includes('prestador'))
+      ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+      : (user.regimeTrabalho === 'professor_horista' || (!user.regimeTrabalho && user.regimeContratual?.toLowerCase().includes('horista')))
       ? 'Prof. Horista'
       : (user.regimeContratual && !user.regimeContratual.toLowerCase().includes('horista') ? user.regimeContratual : 'CLT'),
     valorHoraAula: user.valorHoraAula !== undefined && user.valorHoraAula !== null && !isNaN(Number(user.valorHoraAula))
@@ -824,8 +836,14 @@ export function parseUserProfileFromFirestoreData(data: any, docId: string): Use
     baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
       ? Number(data.baseSalary)
       : (isMasterAdmin ? 0 : 1200),
-    regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
-    regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+    regimeTrabalho: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+      ? 'prestador_aula_efetiva'
+      : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+      ? 'professor_horista'
+      : 'mensalista',
+    regimeContratual: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+      ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+      : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
       ? 'Prof. Horista'
       : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
     valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,
@@ -1070,8 +1088,14 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
         baseSalary: data.baseSalary !== undefined && data.baseSalary !== null && !isNaN(Number(data.baseSalary))
           ? Number(data.baseSalary)
           : (isMasterAdmin ? 0 : 1200),
-        regimeTrabalho: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista'))) ? 'professor_horista' : 'mensalista',
-        regimeContratual: (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+        regimeTrabalho: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+          ? 'prestador_aula_efetiva'
+          : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
+          ? 'professor_horista'
+          : 'mensalista',
+        regimeContratual: (data.regimeTrabalho === 'prestador_aula_efetiva' || data.regimeContratual?.toLowerCase().includes('efetiv') || data.regimeContratual?.toLowerCase().includes('prestador'))
+          ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+          : (data.regimeTrabalho === 'professor_horista' || (!data.regimeTrabalho && data.regimeContratual?.toLowerCase().includes('horista')))
           ? 'Prof. Horista'
           : (data.regimeContratual && !data.regimeContratual.toLowerCase().includes('horista') ? data.regimeContratual : 'CLT'),
         valorHoraAula: data.valorHoraAula !== undefined && data.valorHoraAula !== null && !isNaN(Number(data.valorHoraAula)) ? Number(data.valorHoraAula) : undefined,

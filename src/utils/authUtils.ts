@@ -48,6 +48,36 @@ export const PRESET_USERS: UserProfile[] = [
     canMarkAttendance: false,
     company: 'Colégio Crescer',
   } as UserProfile,
+  {
+    id: 'usr_danyelpereira',
+    name: 'Danyel Pereira',
+    email: 'danyel.pereira@crescercampinas.com.br',
+    role: 'professor' as UserRole,
+    cargoLabel: 'Professor de Educação Física / Oficinas',
+    avatarColor: 'bg-emerald-600',
+    birthDate: '1995-05-15',
+    pin: '15/05/1995',
+    status: 'ATIVO' as UserStatus,
+    regimeTrabalho: 'prestador_aula_efetiva',
+    regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
+    valorHoraAula: 50,
+    duracaoAulaMinutos: 50,
+    assignedActivities: ['Judô', 'Futebol'],
+    specialtyActivity: 'Judô',
+    assignedTurmas: [],
+    allowedClassIds: [],
+    allowedTabs: ['frequencia', 'ponto', 'semanario', 'relatorio', 'manual'],
+    company: 'Prestação de Serviços PJ',
+    empresa: 'Prestação de Serviços PJ',
+    contractSchedule: '13:00 - 17:30',
+    horarioInicio: '13:00',
+    horarioFim: '17:30',
+    workShiftType: 'continua_6h',
+    ajudaDeCusto: 0,
+    baseSalary: 0,
+    canManageStudents: false,
+    canMarkAttendance: true,
+  } as UserProfile,
 ];
 
 // ---------------------------------------------------------------------------
@@ -299,6 +329,13 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         assignedTurmas: Array.isArray(raw.assignedTurmas)
           ? raw.assignedTurmas
           : (existing.assignedTurmas || []),
+        regimeTrabalho: raw.regimeTrabalho || existing.regimeTrabalho || 'mensalista',
+        regimeContratual: raw.regimeContratual || existing.regimeContratual || undefined,
+        valorHoraAula: raw.valorHoraAula !== undefined && raw.valorHoraAula !== null ? Number(raw.valorHoraAula) : existing.valorHoraAula,
+        duracaoAulaMinutos: raw.duracaoAulaMinutos !== undefined ? Number(raw.duracaoAulaMinutos) : existing.duracaoAulaMinutos,
+        ajudaDeCusto: raw.ajudaDeCusto !== undefined ? Number(raw.ajudaDeCusto) : existing.ajudaDeCusto,
+        company: raw.company || raw.empresa || existing.company,
+        empresa: raw.empresa || raw.company || existing.empresa,
       };
       userById.set(raw.id, normalizedUser);
     });

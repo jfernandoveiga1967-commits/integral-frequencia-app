@@ -23,9 +23,10 @@ import {
 import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
-import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
+import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isHolidayOrRecess, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { formatCurrencyBR } from '../utils/pontoUtils';
 import {
   BarChart3,
   Printer,
@@ -49,6 +50,8 @@ import {
   CalendarOff,
   Info,
   Utensils,
+  DollarSign,
+  GraduationCap,
 } from 'lucide-react';
 
 export const SPECIALIST_WORKSHOPS: ActivityType[] = [
@@ -498,6 +501,220 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     title: '',
   });
 
+  // -------------------------------------------------------------------------
+  // 6. Apuração de Aulas Efetivas (Prestadores de Serviço / Professores PJ)
+  // -------------------------------------------------------------------------
+  const prestadorUsers = useMemo(() => {
+    const list = (users || []).filter(
+      (u) =>
+        u.regimeTrabalho === 'prestador_aula_efetiva' ||
+        (u.regimeContratual && u.regimeContratual.toLowerCase().includes('efetiv')) ||
+        (u.name && u.name.toLowerCase().includes('danyel'))
+    );
+    if (list.length === 0) {
+      const danyelFromUsers = (users || []).find((u) => u.name && u.name.toLowerCase().includes('danyel'));
+      if (danyelFromUsers) {
+        list.push({
+          ...danyelFromUsers,
+          regimeTrabalho: 'prestador_aula_efetiva',
+          regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
+          valorHoraAula: danyelFromUsers.valorHoraAula || 50,
+          duracaoAulaMinutos: danyelFromUsers.duracaoAulaMinutos || 50,
+        });
+      } else {
+        list.push({
+          id: 'usr_danyelpereira',
+          name: 'Danyel Pereira',
+          email: 'danyel.pereira@crescercampinas.com.br',
+          role: 'professor',
+          cargoLabel: 'Professor de Educação Física / Oficinas',
+          avatarColor: 'bg-emerald-600',
+          regimeTrabalho: 'prestador_aula_efetiva',
+          regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
+          valorHoraAula: 50,
+          duracaoAulaMinutos: 50,
+          assignedActivities: ['Judô', 'Futebol'],
+          specialtyActivity: 'Judô',
+        } as UserProfile);
+      }
+    }
+    return list;
+  }, [users]);
+
+  const [selectedPrestadorId, setSelectedPrestadorId] = useState<string>(() => {
+    return prestadorUsers[0]?.id || 'usr_danyelpereira';
+  });
+
+  const selectedPrestador = useMemo(() => {
+    return prestadorUsers.find((u) => u.id === selectedPrestadorId) || prestadorUsers[0];
+  }, [prestadorUsers, selectedPrestadorId]);
+
+  const prestadorActivities = useMemo(() => {
+    if (!selectedPrestador) return [];
+    const acts = new Set<string>();
+    if (Array.isArray(selectedPrestador.assignedActivities) && selectedPrestador.assignedActivities.length > 0) {
+      selectedPrestador.assignedActivities.forEach((a) => a && acts.add(a));
+    }
+    if (selectedPrestador.specialtyActivity) {
+      acts.add(selectedPrestador.specialtyActivity);
+    }
+    if (acts.size === 0) {
+      SPECIALIST_WORKSHOPS.forEach((w) => acts.add(w));
+    }
+    return Array.from(acts);
+  }, [selectedPrestador]);
+
+  interface AulaEfetivaItem {
+    date: string;
+    dayOfWeekLabel: string;
+    activity: string;
+    turma: string;
+    status: 'realizada' | 'feriado' | 'cancelada';
+    statusLabel: string;
+    motivo?: string;
+    qtdAlunosComChamada: number;
+    valorUnitario: number;
+    valorTotal: number;
+  }
+
+  const apuracaoAulasEfetivas = useMemo(() => {
+    if (!selectedPrestador) {
+      return {
+        itens: [] as AulaEfetivaItem[],
+        totalAulasDadas: 0,
+        aulasNaoMinistradas: 0,
+        valorHoraAula: 0,
+        valorTotalAulasDadas: 0,
+        ajudaDeCusto: 0,
+        valorTotalLiquidoAPagar: 0,
+      };
+    }
+
+    const valorHora = Number(selectedPrestador.valorHoraAula) || 50;
+    const ajudaCusto = Number(selectedPrestador.ajudaDeCusto) || 0;
+    const items: AulaEfetivaItem[] = [];
+
+    const startObj = new Date(effectiveStartDate + 'T12:00:00');
+    const endObj = new Date(effectiveEndDate + 'T12:00:00');
+    const curr = new Date(startObj);
+
+    let totalAulasDadas = 0;
+    let aulasNaoMinistradas = 0;
+
+    while (curr <= endObj) {
+      const dateStr = curr.toISOString().split('T')[0];
+      const dayOfWeekNum = curr.getDay(); // 0 = Dom, 6 = Sab
+      const dayOfWeekLabel = getDayOfWeekLabel(getDayOfWeekFromDate(dateStr));
+      const holidayItem = isHolidayOrRecess(dateStr, holidays);
+
+      if (dayOfWeekNum === 0 || dayOfWeekNum === 6) {
+        curr.setDate(curr.getDate() + 1);
+        continue;
+      }
+
+      if (holidayItem) {
+        // Feriados cadastrados no calendário do sistema NÃO devem contabilizar valor de hora-aula
+        aulasNaoMinistradas++;
+        items.push({
+          date: dateStr,
+          dayOfWeekLabel,
+          activity: prestadorActivities[0] || 'Oficina Especialista',
+          turma: 'Todas as turmas',
+          status: 'feriado',
+          statusLabel: 'Feriado / Recesso Escolar',
+          motivo: `${holidayItem.name} (${holidayItem.type === 'feriado' ? 'Feriado Nacional/Oficial' : 'Recesso Escolar'})`,
+          qtdAlunosComChamada: 0,
+          valorUnitario: 0,
+          valorTotal: 0,
+        });
+      } else {
+        // Aulas em dia letivo: somar APENAS as aulas que possuem registro de chamada/frequência concluído
+        const dateRecords = records.filter(
+          (r) => r.date === dateStr && prestadorActivities.includes(r.activity)
+        );
+
+        const groups = new Map<string, AttendanceRecord[]>();
+        dateRecords.forEach((r) => {
+          const key = `${r.activity}:::${r.turma}`;
+          const list = groups.get(key) || [];
+          list.push(r);
+          groups.set(key, list);
+        });
+
+        if (groups.size > 0) {
+          groups.forEach((recsInGroup, key) => {
+            const [act, turm] = key.split(':::');
+            totalAulasDadas++;
+            items.push({
+              date: dateStr,
+              dayOfWeekLabel,
+              activity: act,
+              turma: turm,
+              status: 'realizada',
+              statusLabel: 'Aula Ministrada com Chamada Realizada',
+              motivo: `Chamada concluída com ${recsInGroup.length} aluno(s) registrados`,
+              qtdAlunosComChamada: recsInGroup.length,
+              valorUnitario: valorHora,
+              valorTotal: valorHora,
+            });
+          });
+        } else {
+          // Aulas não realizadas/canceladas NÃO devem contabilizar valor de hora-aula
+          aulasNaoMinistradas++;
+          items.push({
+            date: dateStr,
+            dayOfWeekLabel,
+            activity: prestadorActivities[0] || 'Oficina Especialista',
+            turma: 'Geral',
+            status: 'cancelada',
+            statusLabel: 'Aula Não Ministrada / Cancelada',
+            motivo: 'Sem registro de chamada/frequência no dia',
+            qtdAlunosComChamada: 0,
+            valorUnitario: 0,
+            valorTotal: 0,
+          });
+        }
+      }
+
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    const valorTotalAulasDadas = totalAulasDadas * valorHora;
+    const valorTotalLiquidoAPagar = valorTotalAulasDadas + ajudaCusto;
+
+    return {
+      itens: items,
+      totalAulasDadas,
+      aulasNaoMinistradas,
+      valorHoraAula: valorHora,
+      valorTotalAulasDadas,
+      ajudaDeCusto: ajudaCusto,
+      valorTotalLiquidoAPagar,
+    };
+  }, [selectedPrestador, effectiveStartDate, effectiveEndDate, holidays, records, prestadorActivities]);
+
+  const [copiedDemonstrativo, setCopiedDemonstrativo] = useState(false);
+
+  const handleCopyDemonstrativo = () => {
+    const text = `*DEMONSTRATIVO DE PRESTAÇÃO DE SERVIÇOS — AULAS EFETIVAS*\n` +
+      `Colaborador(a): ${selectedPrestador?.name || 'Professor'}\n` +
+      `Período: ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}\n` +
+      `Regime: Prestador por Aula Efetiva (PJ/Horista Efetivo)\n` +
+      `----------------------------------------\n` +
+      `• Total de Aulas Dadas: ${apuracaoAulasEfetivas.totalAulasDadas} aula(s) realizadas\n` +
+      `• Aulas Não Ministradas / Feriados: ${apuracaoAulasEfetivas.aulasNaoMinistradas} aula(s) (R$ 0,00)\n` +
+      `• Valor da Hora-Aula: ${formatCurrencyBR(apuracaoAulasEfetivas.valorHoraAula)}/aula\n` +
+      `• Valor Total de Aulas Dadas: ${formatCurrencyBR(apuracaoAulasEfetivas.valorTotalAulasDadas)}\n` +
+      `• Ajuda de Custo: ${formatCurrencyBR(apuracaoAulasEfetivas.ajudaDeCusto)}\n` +
+      `----------------------------------------\n` +
+      `*Valor Total Liquido a Pagar: ${formatCurrencyBR(apuracaoAulasEfetivas.valorTotalLiquidoAPagar)}*\n\n` +
+      `Colégio Crescer • Programa do Integral`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedDemonstrativo(true);
+    setTimeout(() => setCopiedDemonstrativo(false), 2500);
+  };
+
   // Quick Open Modal Handlers
   const handleOpenStudentModal = (studentId?: string) => {
     if (studentId) setSelectedPdfStudentId(studentId);
@@ -690,6 +907,18 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             >
               <Utensils className="w-4 h-4 text-amber-600" />
               <span>Refeições (Almoço)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const el = document.getElementById('demonstrativo-aulas-efetivas');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-emerald-500/20"
+              title="Ir para o Demonstrativo de Aulas Efetivas e Medição de Serviços (Professores PJ)"
+            >
+              <Award className="w-4 h-4 text-emerald-600" />
+              <span>Aulas Efetivas (PJ)</span>
             </button>
 
             <button
@@ -937,6 +1166,286 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <Utensils className="w-4 h-4 text-amber-400" />
             <span>Abrir Módulo de Refeições</span>
           </button>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SEÇÃO: APURAÇÃO DE AULAS EFETIVAS / MEDIÇÃO DE PRESTAÇÃO DE SERVIÇO (PJ) */}
+      {/* ========================================================================= */}
+      <div id="demonstrativo-aulas-efetivas" className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
+        {/* Header da Apuração */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                Medição de Prestação de Serviços
+              </span>
+              <span className="text-xs text-slate-400 font-medium">
+                Apuração por Aula Dada / Efetiva com Chamada
+              </span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2 mt-1">
+              <Award className="w-5 h-5 text-emerald-600" />
+              <span>Demonstrativo de Aulas Efetivas (Professores PJ / Horistas Efetivos)</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              Cálculo baseado exclusivamente nas aulas com registro de chamada concluído. Feriados e aulas não realizadas não computam valor de hora-aula.
+            </p>
+          </div>
+
+          {/* Seleção do Prestador / Professor */}
+          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
+            <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-2xl">
+              <GraduationCap className="w-4 h-4 text-emerald-600 shrink-0" />
+              <label className="text-xs font-bold text-slate-700">Colaborador(a):</label>
+              <select
+                value={selectedPrestadorId}
+                onChange={(e) => setSelectedPrestadorId(e.target.value)}
+                className="bg-white border border-slate-200 text-slate-900 text-xs font-bold rounded-xl px-2.5 py-1 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                {prestadorUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} {u.regimeTrabalho === 'prestador_aula_efetiva' ? '(PJ Efetivo)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCopyDemonstrativo}
+              className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                copiedDemonstrativo
+                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300'
+              }`}
+              title="Copiar resumo do demonstrativo para envio via WhatsApp ou e-mail"
+            >
+              {copiedDemonstrativo ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedDemonstrativo ? 'Copiado!' : 'Copiar Demonstrativo'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Informações Contratuais do Docente */}
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2">
+            <span className="font-extrabold text-slate-900">{selectedPrestador?.name}</span>
+            <span className="text-slate-400">•</span>
+            <span className="text-slate-600">{selectedPrestador?.cargoLabel || 'Professor(a)'}</span>
+            <span className="text-slate-400">•</span>
+            <span className="font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300 text-[11px]">
+              {selectedPrestador?.regimeContratual || 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-3 text-slate-600">
+            <span>Oficina(s): <strong className="text-slate-800">{prestadorActivities.join(', ')}</strong></span>
+            <span>•</span>
+            <span>Período: <strong className="text-slate-800">{formatDateBR(effectiveStartDate)} a {formatDateBR(effectiveEndDate)}</strong></span>
+          </div>
+        </div>
+
+        {/* 3 CARDS OBRIGATÓRIOS DO PROMPT + HORA-AULA E AJUDA DE CUSTO */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Total de Aulas Dadas */}
+          <div className="bg-emerald-50/60 border border-emerald-300 rounded-2xl p-4 shadow-2xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-emerald-900 tracking-wider">
+                Total de Aulas Dadas
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-black text-emerald-950">
+                {apuracaoAulasEfetivas.totalAulasDadas}
+              </span>
+              <span className="text-xs text-emerald-800 font-bold">
+                aulas realizadas
+              </span>
+            </div>
+            <p className="text-[11px] text-emerald-700 mt-1 font-medium">
+              Com registro de chamada concluído no período
+            </p>
+          </div>
+
+          {/* Card 2: Aulas Não Ministradas / Feriados */}
+          <div className="bg-rose-50/60 border border-rose-300 rounded-2xl p-4 shadow-2xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-rose-900 tracking-wider">
+                Aulas Não Ministradas / Feriados
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+                <CalendarOff className="w-5 h-5 text-rose-600" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-black text-rose-950">
+                {apuracaoAulasEfetivas.aulasNaoMinistradas}
+              </span>
+              <span className="text-xs text-rose-800 font-bold">
+                aulas / feriados
+              </span>
+            </div>
+            <p className="text-[11px] text-rose-700 mt-1 font-medium">
+              R$ 0,00 (Sem cobrança em feriados ou cancelamentos)
+            </p>
+          </div>
+
+          {/* Card 3: Valor da Hora-Aula */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-2xs relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase text-slate-600 tracking-wider">
+                Valor da Hora-Aula
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold">
+                <DollarSign className="w-5 h-5 text-slate-700" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-black text-slate-900">
+                {formatCurrencyBR(apuracaoAulasEfetivas.valorHoraAula)}
+              </span>
+              <span className="text-xs text-slate-600 font-bold">
+                / aula efetiva
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Duração contratual: {selectedPrestador?.duracaoAulaMinutos || 50} min
+            </p>
+          </div>
+
+          {/* Card 4: Valor Total Liquido a Pagar */}
+          <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-4 shadow-md relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-emerald-100 tracking-wider">
+                Valor Total Liquido a Pagar
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center font-bold">
+                <Check className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline space-x-2">
+              <span className="text-3xl font-black text-white">
+                {formatCurrencyBR(apuracaoAulasEfetivas.valorTotalLiquidoAPagar)}
+              </span>
+            </div>
+            <p className="text-[11px] text-emerald-100 mt-1 font-medium">
+              {apuracaoAulasEfetivas.totalAulasDadas} aulas × {formatCurrencyBR(apuracaoAulasEfetivas.valorHoraAula)}
+              {apuracaoAulasEfetivas.ajudaDeCusto > 0 && ` + ${formatCurrencyBR(apuracaoAulasEfetivas.ajudaDeCusto)} ajuda`}
+            </p>
+          </div>
+        </div>
+
+        {/* Tabela Analítica Dia a Dia da Medição */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-emerald-600" />
+              <span>Detalhamento Diário das Aulas e Chamadas no Período</span>
+            </h4>
+            <span className="text-[11px] text-slate-500 font-medium">
+              {apuracaoAulasEfetivas.itens.length} registros no período
+            </span>
+          </div>
+
+          <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
+                <tr>
+                  <th className="px-3.5 py-2.5">Data / Dia</th>
+                  <th className="px-3.5 py-2.5">Modalidade / Turma</th>
+                  <th className="px-3.5 py-2.5 text-center">Status da Apuração</th>
+                  <th className="px-3.5 py-2.5">Motivo / Registro</th>
+                  <th className="px-3.5 py-2.5 text-center">Alunos Registrados</th>
+                  <th className="px-3.5 py-2.5 text-right">Valor Creditado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {apuracaoAulasEfetivas.itens.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                      Nenhum dia letivo ou aula encontrada no período selecionado.
+                    </td>
+                  </tr>
+                ) : (
+                  apuracaoAulasEfetivas.itens.map((item, idx) => {
+                    const isRealizada = item.status === 'realizada';
+                    const isFeriado = item.status === 'feriado';
+
+                    return (
+                      <tr
+                        key={`${item.date}_${item.activity}_${item.turma}_${idx}`}
+                        className={`transition-colors ${
+                          isRealizada
+                            ? 'bg-white hover:bg-emerald-50/40'
+                            : isFeriado
+                            ? 'bg-rose-50/30 hover:bg-rose-50/60'
+                            : 'bg-amber-50/20 hover:bg-amber-50/40'
+                        }`}
+                      >
+                        <td className="px-3.5 py-2.5 whitespace-nowrap">
+                          <span className="font-extrabold text-slate-900 block">{formatDateBR(item.date)}</span>
+                          <span className="text-[10px] text-slate-500 font-medium">{item.dayOfWeekLabel}</span>
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <div className="font-bold text-slate-800">{item.activity}</div>
+                          <div className="text-[11px] text-slate-500">{item.turma}</div>
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center whitespace-nowrap">
+                          {isRealizada ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Aula Ministrada</span>
+                            </span>
+                          ) : isFeriado ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">
+                              <CalendarOff className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Feriado / Recesso</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                              <XCircle className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Não Ministrada</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-[11px] text-slate-600">
+                          {item.motivo}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center font-bold text-slate-700">
+                          {isRealizada ? `${item.qtdAlunosComChamada} alunos` : '—'}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-black whitespace-nowrap">
+                          {isRealizada ? (
+                            <span className="text-emerald-700 font-mono text-sm">
+                              {formatCurrencyBR(item.valorTotal)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">
+                              R$ 0,00
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              <tfoot className="bg-slate-50 font-black border-t-2 border-slate-200 text-xs">
+                <tr>
+                  <td colSpan={5} className="px-3.5 py-3 text-right uppercase tracking-wider text-slate-700">
+                    Valor Total Liquido a Pagar ({apuracaoAulasEfetivas.totalAulasDadas} aulas dadas):
+                  </td>
+                  <td className="px-3.5 py-3 text-right font-mono text-sm text-emerald-800 font-black whitespace-nowrap">
+                    {formatCurrencyBR(apuracaoAulasEfetivas.valorTotalLiquidoAPagar)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       </div>
 

@@ -519,7 +519,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
     // Fonte de verdade única e soberana: regimeTrabalho técnico (não o texto legado de regimeContratual)
     const initialRegime: RegimeTrabalho =
-      user.regimeTrabalho === 'professor_horista'
+      user.regimeTrabalho === 'prestador_aula_efetiva'
+        ? 'prestador_aula_efetiva'
+        : user.regimeTrabalho === 'professor_horista'
         ? 'professor_horista'
         : 'mensalista';
     setFormRegimeTrabalho(initialRegime);
@@ -647,9 +649,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       (u) => u && (u.email || '').trim().toLowerCase() === normalizedEmail && (!editingUser || u.id !== editingUser.id)
     );
 
-    // Parse e validação do Valor da Hora-Aula para Professor Horista
+    // Parse e validação do Valor da Hora-Aula para Professor Horista ou Prestador por Aula Efetiva
     let parsedHoraAula: number | undefined = undefined;
-    if (formRegimeTrabalho === 'professor_horista') {
+    if (formRegimeTrabalho === 'professor_horista' || formRegimeTrabalho === 'prestador_aula_efetiva') {
       if (typeof formValorHoraAula === 'number') {
         parsedHoraAula = isNaN(formValorHoraAula) ? undefined : formValorHoraAula;
       } else if (typeof formValorHoraAula === 'string' && formValorHoraAula.trim() !== '') {
@@ -664,7 +666,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       }
 
       if (parsedHoraAula === undefined || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
-        showToast('Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero (ex: 31.49).', 'error');
+        showToast(`Para o regime ${formRegimeTrabalho === 'prestador_aula_efetiva' ? 'Prestador por Aula Efetiva' : 'Professor Horista'}, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero (ex: 35.00).`, 'error');
         return;
       }
     }
@@ -785,17 +787,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       contractDailyHoursFormatted: formattedHoursStr,
       baseSalary: parsedSalary,
       regimeTrabalho: formRegimeTrabalho,
-      regimeContratual: formRegimeTrabalho === 'professor_horista'
+      regimeContratual: formRegimeTrabalho === 'prestador_aula_efetiva'
+        ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+        : formRegimeTrabalho === 'professor_horista'
         ? 'Prof. Horista'
         : (formWorkShiftType === 'continua_6h'
             ? 'Jornada Contínua / Mensalista (6h)'
-            : (editingUser?.regimeContratual && !editingUser.regimeContratual.toLowerCase().includes('horista')
+            : (editingUser?.regimeContratual && !editingUser.regimeContratual.toLowerCase().includes('horista') && !editingUser.regimeContratual.toLowerCase().includes('efetiv')
                 ? editingUser.regimeContratual
                 : 'CLT')),
-      valorHoraAula: formRegimeTrabalho === 'professor_horista' ? parsedHoraAula : undefined,
+      valorHoraAula: (formRegimeTrabalho === 'professor_horista' || formRegimeTrabalho === 'prestador_aula_efetiva') ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
-      hourlyRate: formRegimeTrabalho === 'professor_horista'
+      hourlyRate: (formRegimeTrabalho === 'professor_horista' || formRegimeTrabalho === 'prestador_aula_efetiva')
         ? (parsedHoraAula || 0)
         : Number((parsedSalary / (Number(formContractDivisorHours) || 220)).toFixed(4)),
       ajudaDeCusto: parsedAjudaDeCusto,
@@ -1828,7 +1832,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <span className="text-indigo-300 hidden sm:inline">•</span>
                             <div className="flex items-center space-x-1.5 font-bold">
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
-                              {user.regimeTrabalho === 'professor_horista' ? (
+                              {user.regimeTrabalho === 'prestador_aula_efetiva' ? (
+                                <span>
+                                  Regime: <strong className="text-emerald-950 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">Prestador por Aula Efetiva (PJ/Horista Efetivo)</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula efetiva) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </span>
+                              ) : user.regimeTrabalho === 'professor_horista' ? (
                                 <span>
                                   Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </span>
@@ -2811,7 +2819,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </div>
                 </div>
 
-                {/* Seleção de Regime de Trabalho (Mensalista 220h vs Professor Horista) */}
+                {/* Seleção de Regime de Trabalho (Mensalista 220h vs Professor Horista vs Prestador por Aula Efetiva) */}
                 <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="block font-bold text-indigo-950 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
@@ -2819,13 +2827,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       <span>Regime de Trabalho Contratual:</span>
                     </label>
                     <span className="text-[10px] font-semibold text-indigo-700 bg-white/80 px-2 py-0.5 rounded-md border border-indigo-100">
-                      {formRegimeTrabalho === 'professor_horista'
+                      {formRegimeTrabalho === 'prestador_aula_efetiva'
+                        ? 'Aulas Efetivas com Chamada • Sem DSR/Feriados'
+                        : formRegimeTrabalho === 'professor_horista'
                         ? 'Aulas Reais + 5% Hora-Ativ. + 1/6 DSR'
                         : 'Jornada Padrão • Divisor 220h'}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setFormRegimeTrabalho('mensalista')}
@@ -2856,15 +2866,93 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       <div>
                         <div className="font-bold text-xs">Professor Horista</div>
                         <div className={`text-[10px] ${formRegimeTrabalho === 'professor_horista' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                          Por Aulas Dadas (CLT/CCT)
+                          CLT (DSR + Hora-Ativ.)
                         </div>
                       </div>
                       {formRegimeTrabalho === 'professor_horista' && <Check className="w-4 h-4 text-white" />}
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormRegimeTrabalho('prestador_aula_efetiva')}
+                      className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                        formRegimeTrabalho === 'prestador_aula_efetiva'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-xs">Prestador por Aula Efetiva</div>
+                        <div className={`text-[10px] ${formRegimeTrabalho === 'prestador_aula_efetiva' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                          PJ / Horista Efetivo
+                        </div>
+                      </div>
+                      {formRegimeTrabalho === 'prestador_aula_efetiva' && <Check className="w-4 h-4 text-white" />}
+                    </button>
                   </div>
 
                   {/* Campos Condicionais conforme o Regime */}
-                  {formRegimeTrabalho === 'professor_horista' ? (
+                  {formRegimeTrabalho === 'prestador_aula_efetiva' ? (
+                    <div className="p-3 bg-white border border-emerald-300 rounded-xl space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block font-bold text-emerald-950 text-[11px] mb-1 flex items-center justify-between">
+                            <span>Valor da Hora-Aula (R$): *</span>
+                            <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Por Aula Dada</span>
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            required
+                            value={formValorHoraAula}
+                            onChange={(e) => setFormValorHoraAula(e.target.value)}
+                            placeholder="Ex: 50.00"
+                            className="w-full px-3 py-2 bg-emerald-50/40 border border-emerald-300 rounded-xl text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            Valor creditado exclusivamente por aula realizada com chamada
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-[11px] mb-1">
+                            Duração da Aula (minutos):
+                          </label>
+                          <input
+                            type="number"
+                            min="30"
+                            max="120"
+                            value={formDuracaoAulaMinutos}
+                            onChange={(e) => setFormDuracaoAulaMinutos(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                            placeholder="50"
+                            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="text-[9px] text-slate-400 block mt-0.5">
+                            Duração padrão das oficinas: 50 minutos
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg text-[10px] text-emerald-950 space-y-0.5">
+                        <div className="font-bold flex items-center gap-1 text-emerald-950">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          Regras de Medição de Prestação de Serviços (Aula Efetiva):
+                        </div>
+                        <p>
+                          • <strong>Aulas Realizadas:</strong> Remuneração exclusiva por aula com chamada/frequência concluída pela monitoria ou docente.
+                        </p>
+                        <p>
+                          • <strong>Feriados e Recessos:</strong> Aulas não ocorridas em feriados NÃO geram crédito (R$ 0,00).
+                        </p>
+                        <p>
+                          • <strong>Aulas Não Ministradas / Canceladas:</strong> Faltas ou cancelamentos não são contabilizados.
+                        </p>
+                        <p>
+                          • <strong>Valor Líquido:</strong> Total de Aulas Dadas × Valor da Hora-Aula (sem reflexo de DSR ou hora-atividade).
+                        </p>
+                      </div>
+                    </div>
+                  ) : formRegimeTrabalho === 'professor_horista' ? (
                     <div className="p-3 bg-white border border-indigo-200 rounded-xl space-y-2.5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div>

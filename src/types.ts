@@ -119,7 +119,7 @@ export const AVAILABLE_APP_TABS: AppTabOption[] = [
 
 export const ALL_APP_TAB_IDS: TabType[] = AVAILABLE_APP_TABS.map((t) => t.id);
 
-export type RegimeTrabalho = 'mensalista' | 'professor_horista';
+export type RegimeTrabalho = 'mensalista' | 'professor_horista' | 'prestador_aula_efetiva';
 
 export type HolidayType = 'feriado' | 'recesso';
 

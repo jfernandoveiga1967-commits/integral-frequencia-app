@@ -523,11 +523,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const parsedAjuda = userEditAjudaDeCusto !== '' && !isNaN(Number(userEditAjudaDeCusto)) ? Math.max(0, Number(userEditAjudaDeCusto)) : 0;
     const computedHourlyRate = Number((parsedSalary / parsedDivisor).toFixed(4));
 
-    if (userEditRegimeTrabalho === 'professor_horista') {
+    if (userEditRegimeTrabalho === 'professor_horista' || userEditRegimeTrabalho === 'prestador_aula_efetiva') {
       const parsedHoraAula = Number(userEditValorHoraAula);
       if (!userEditValorHoraAula || isNaN(parsedHoraAula) || parsedHoraAula <= 0) {
         setPunchFeedback({
-          text: 'Para o regime Professor Horista, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero.',
+          text: `Para o regime ${userEditRegimeTrabalho === 'prestador_aula_efetiva' ? 'Prestador por Aula Efetiva' : 'Professor Horista'}, o campo Valor da Hora-Aula (R$) é obrigatório e deve ser maior que zero.`,
           type: 'error',
         });
         setTimeout(() => setPunchFeedback(null), 4000);
@@ -554,14 +554,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       phone: userEditPhone.trim() || undefined,
       pixKey: userEditPixKey.trim() || userEditPhone.trim() || undefined,
       regimeTrabalho: userEditRegimeTrabalho,
-      regimeContratual: userEditRegimeTrabalho === 'professor_horista'
+      regimeContratual: userEditRegimeTrabalho === 'prestador_aula_efetiva'
+        ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+        : userEditRegimeTrabalho === 'professor_horista'
         ? 'Prof. Horista'
         : (userEditWorkShiftType === 'continua_6h'
             ? 'Jornada Contínua / Mensalista (6h)'
             : (targetUser?.regimeContratual && !targetUser.regimeContratual.toLowerCase().includes('horista')
                 ? targetUser.regimeContratual
                 : 'CLT')),
-      valorHoraAula: userEditRegimeTrabalho === 'professor_horista' ? Number(userEditValorHoraAula) : undefined,
+      valorHoraAula: (userEditRegimeTrabalho === 'professor_horista' || userEditRegimeTrabalho === 'prestador_aula_efetiva') ? Number(userEditValorHoraAula) : undefined,
       duracaoAulaMinutos: Number(userEditDuracaoAulaMinutos) || DURACAO_AULA_PADRAO_MINUTOS,
       workShiftType: userEditWorkShiftType,
       contractSchedule: finalSchedule,
@@ -571,7 +573,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       contractDailyMinutes: resolvedMinutes,
       contractDailyHoursFormatted: formattedHoursStr,
       contractDivisorHours: parsedDivisor,
-      hourlyRate: userEditRegimeTrabalho === 'professor_horista' ? (Number(userEditValorHoraAula) || 0) : computedHourlyRate,
+      hourlyRate: (userEditRegimeTrabalho === 'professor_horista' || userEditRegimeTrabalho === 'prestador_aula_efetiva') ? (Number(userEditValorHoraAula) || 0) : computedHourlyRate,
       ajudaDeCusto: parsedAjuda,
       baseSalary: parsedSalary,
       company: userEditCompany.trim() || 'GADAL - Gestão e Apoio',
@@ -2003,7 +2005,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <span className="text-slate-400 block font-medium">Horário Contratual:</span>
               <strong className="text-slate-800 font-bold">{contractSchedule} ({contractDailyHoursFormatted}/dia)</strong>
             </div>
-            {regimeTrabalho === 'professor_horista' ? (
+            {regimeTrabalho === 'prestador_aula_efetiva' ? (
+              <div className="bg-emerald-50/70 px-3 py-1.5 rounded-lg border border-emerald-200">
+                <span className="text-emerald-700 block font-medium">Hora-Aula (Efetiva):</span>
+                <strong className="text-emerald-950 font-bold">{formatCurrencyBR(valorHoraAula || 0)} / aula dada</strong>
+              </div>
+            ) : regimeTrabalho === 'professor_horista' ? (
               <div className="bg-indigo-50/70 px-3 py-1.5 rounded-lg border border-indigo-200">
                 <span className="text-indigo-700 block font-medium">Hora-Aula:</span>
                 <strong className="text-indigo-900 font-bold">{formatCurrencyBR(valorHoraAula || 0)} / aula</strong>
@@ -2469,7 +2476,11 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <h3 className="text-sm font-black text-slate-900">
                   Apuração Financeira & Fechamento da Folha
                 </h3>
-                {financials.regimeTrabalho === 'professor_horista' ? (
+                {financials.regimeTrabalho === 'prestador_aula_efetiva' ? (
+                  <p className="text-xs text-slate-500">
+                    Regime: <strong className="text-emerald-700">Prestador por Aula Efetiva (PJ/Horista Efetivo)</strong> • Hora-Aula: <strong>{formatCurrencyBR(financials.valorHoraAula || 0)}</strong> ({financials.duracaoAulaMinutos}min) • Medição exclusiva de aulas com chamada realizada • Sem DSR / Sem Feriados
+                  </p>
+                ) : financials.regimeTrabalho === 'professor_horista' ? (
                   <p className="text-xs text-slate-500">
                     Regime: <strong className="text-indigo-700">Professor Horista</strong> • Hora-Aula: <strong>{formatCurrencyBR(financials.valorHoraAula || 0)}</strong> ({financials.duracaoAulaMinutos}min) • Aulas no Mês: <strong>{financials.totalAulas}</strong> • Hora-Atividade: <strong>5%</strong> • DSR: <strong>1/6</strong>
                   </p>
@@ -2487,7 +2498,80 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           </div>
 
           {/* Grid of calculations */}
-          {financials.regimeTrabalho === 'professor_horista' ? (
+          {financials.regimeTrabalho === 'prestador_aula_efetiva' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-2xs">
+                <div>
+                  <span className="text-emerald-950 font-bold block truncate text-[11px]">Total de Aulas Dadas:</span>
+                  <span className="text-[10px] text-emerald-700 block truncate font-medium">Chamadas Realizadas</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-emerald-950 truncate block">
+                    {financials.totalAulas} aulas
+                  </span>
+                  <span className="text-[9px] text-emerald-700 block">{financials.duracaoAulaMinutos} min / aula</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-rose-50/70 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-rose-800 font-bold block truncate text-[11px]">Aulas Não Ministradas / Feriados:</span>
+                  <span className="text-[10px] text-rose-600 block truncate">Sem crédito de hora</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-rose-900 truncate block">
+                    {financials.aulasNaoMinistradas || 0} aulas / feriados
+                  </span>
+                  <span className="text-[9px] text-rose-600 block">R$ 0,00 (Não remunerado)</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-slate-600 font-bold block truncate text-[11px]">Valor da Hora-Aula:</span>
+                  <span className="text-[10px] text-slate-400 block truncate">Por aula dada</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-slate-900 truncate mt-1">
+                  {formatCurrencyBR(financials.valorHoraAula || 0)}
+                </span>
+              </div>
+
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                <div>
+                  <span className="text-indigo-800 font-bold block truncate text-[11px]">Salário de Aulas Dadas:</span>
+                  <span className="text-[10px] text-indigo-600 block truncate">Aulas × Hora-Aula</span>
+                </div>
+                <span className="text-sm sm:text-base font-black text-indigo-900 truncate mt-1">
+                  {formatCurrencyBR(financials.salarioAulas)}
+                </span>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-2xs">
+                <div>
+                  <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
+                  <span className="text-[10px] text-emerald-600 block truncate">Sem descontos</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
+                    {formatCurrencyBR(financials.ajudaDeCusto)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-100/80 border-2 border-emerald-500 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
+                <div>
+                  <span className="text-emerald-950 font-black block truncate text-[11px]">Valor Total Liquido a Pagar:</span>
+                  <span className="text-[10px] text-emerald-800 block truncate font-semibold">Aulas Dadas + Ajuda</span>
+                </div>
+                <div className="mt-1">
+                  <span className="text-base sm:text-lg font-black text-emerald-950 truncate block">
+                    {formatCurrencyBR(financials.netTotal)}
+                  </span>
+                  <span className="text-[9px] text-emerald-800 font-bold block">Fechamento Líquido</span>
+                </div>
+              </div>
+            </div>
+          ) : financials.regimeTrabalho === 'professor_horista' ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">
               <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
                 <div>
@@ -4091,6 +4175,123 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Seleção de Regime de Trabalho no Livro Ponto */}
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-300 font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <GraduationCap className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>Regime de Trabalho Contratual:</span>
+                  </label>
+                  <span className="text-[10px] font-semibold text-indigo-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                    {userEditRegimeTrabalho === 'prestador_aula_efetiva'
+                      ? 'Aulas Efetivas com Chamada'
+                      : userEditRegimeTrabalho === 'professor_horista'
+                      ? 'CLT (Aulas + DSR + Ativ.)'
+                      : 'Mensalista (220h)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUserEditRegimeTrabalho('mensalista')}
+                    className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                      userEditRegimeTrabalho === 'mensalista'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-xs">Mensalista</div>
+                      <div className={`text-[10px] ${userEditRegimeTrabalho === 'mensalista' ? 'text-indigo-200' : 'text-slate-400'}`}>
+                        220h Padrão
+                      </div>
+                    </div>
+                    {userEditRegimeTrabalho === 'mensalista' && <Check className="w-4 h-4 text-white" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setUserEditRegimeTrabalho('professor_horista')}
+                    className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                      userEditRegimeTrabalho === 'professor_horista'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-xs">Prof. Horista</div>
+                      <div className={`text-[10px] ${userEditRegimeTrabalho === 'professor_horista' ? 'text-indigo-200' : 'text-slate-400'}`}>
+                        CLT + DSR
+                      </div>
+                    </div>
+                    {userEditRegimeTrabalho === 'professor_horista' && <Check className="w-4 h-4 text-white" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setUserEditRegimeTrabalho('prestador_aula_efetiva')}
+                    className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                      userEditRegimeTrabalho === 'prestador_aula_efetiva'
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-xs">Prestador por Aula</div>
+                      <div className={`text-[10px] ${userEditRegimeTrabalho === 'prestador_aula_efetiva' ? 'text-emerald-100' : 'text-slate-400'}`}>
+                        PJ / Horista Efetivo
+                      </div>
+                    </div>
+                    {userEditRegimeTrabalho === 'prestador_aula_efetiva' && <Check className="w-4 h-4 text-white" />}
+                  </button>
+                </div>
+
+                {/* Campos Específicos para Horista ou Prestador de Aula Efetiva */}
+                {(userEditRegimeTrabalho === 'professor_horista' || userEditRegimeTrabalho === 'prestador_aula_efetiva') && (
+                  <div className="p-3 bg-slate-900/90 border border-emerald-500/30 rounded-xl space-y-2 mt-2">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-slate-300 font-semibold block text-[11px] mb-1">
+                          Valor da Hora-Aula (R$): *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={userEditValorHoraAula}
+                          onChange={(e) => setUserEditValorHoraAula(e.target.value)}
+                          placeholder="Ex: 50.00"
+                          className="w-full bg-slate-800 border border-emerald-500/50 rounded-lg p-2 text-emerald-400 font-mono font-bold text-xs focus:border-emerald-500 focus:outline-none"
+                        />
+                        <span className="text-[9px] text-slate-400 mt-0.5 block">
+                          {userEditRegimeTrabalho === 'prestador_aula_efetiva' ? 'Por aula com chamada realizada' : 'Base contratual por aula'}
+                        </span>
+                      </div>
+                      <div>
+                        <label className="text-slate-300 font-semibold block text-[11px] mb-1">
+                          Duração da Aula (min):
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={userEditDuracaoAulaMinutos}
+                          onChange={(e) => setUserEditDuracaoAulaMinutos(e.target.value)}
+                          placeholder="50"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                        />
+                        <span className="text-[9px] text-slate-400 mt-0.5 block">Padrão: 50 minutos</span>
+                      </div>
+                    </div>
+                    {userEditRegimeTrabalho === 'prestador_aula_efetiva' && (
+                      <p className="text-[10px] text-emerald-300/90 pt-1 border-t border-slate-800">
+                        ✓ <strong>Prestador por Aula Efetiva:</strong> Remuneração exclusiva por aula que possui registro de presença/chamada no sistema. Feriados e faltas não computam crédito (R$ 0,00).
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
