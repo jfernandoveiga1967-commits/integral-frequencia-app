@@ -58,6 +58,7 @@ interface MealReportModalProps {
   records: AttendanceRecord[];
   holidays: HolidayItem[];
   currentUser?: UserProfile | null;
+  onFinalizeCall?: (date: string) => void | Promise<void>;
 }
 
 const MONTH_NAMES = [
@@ -82,11 +83,13 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   records,
   holidays,
   currentUser,
+  onFinalizeCall,
 }) => {
   const currentDate = new Date();
   const todayStr = toISODateString(currentDate);
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1); // 1-12
+  const [finalizingDate, setFinalizingDate] = useState<string | null>(null);
 
   const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
   const daysInCurrentMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -1153,12 +1156,36 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {/* Banner de Aviso de Chamada de Rotina Pendente */}
           {daysWithPendingCall.length > 0 && (
-            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5 shadow-2xs">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <span className="font-bold">Aviso sobre Chamada de Rotina Pendente:</span>{' '}
-                Há <strong>{daysWithPendingCall.length} dia(s) letivo(s)</strong> no período selecionado com chamada de Rotina ainda não concluída (alunos pendentes). A contagem de refeições automáticas pode estar subestimada até que a chamada seja concluída pelas turmas.
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+              <div className="flex items-start gap-2.5 flex-1 min-w-[280px]">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <span className="font-bold">Aviso sobre Chamada de Rotina Pendente:</span>{' '}
+                  Há <strong>{daysWithPendingCall.length} dia(s) letivo(s)</strong> no período selecionado com chamada de Rotina ainda não concluída (alunos pendentes).
+                </div>
               </div>
+              {onFinalizeCall && (
+                <button
+                  type="button"
+                  disabled={Boolean(finalizingDate)}
+                  onClick={async () => {
+                    const confirmClose = window.confirm(
+                      `Deseja encerrar a chamada e resolver as pendências de todos os ${daysWithPendingCall.length} dia(s) letivo(s) selecionados (${daysWithPendingCall.map((d) => d.date).join(', ')}), convertendo os alunos sem marcação em Falta no banco de dados?`
+                    );
+                    if (!confirmClose) return;
+                    for (const day of daysWithPendingCall) {
+                      setFinalizingDate(day.date);
+                      await onFinalizeCall(day.date);
+                    }
+                    setFinalizingDate(null);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] shrink-0 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  title="Encerrar todas as chamadas com pendência no período"
+                >
+                  {finalizingDate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{finalizingDate ? 'Consolidando...' : 'Encerrar Pendências do Período'}</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -1262,13 +1289,42 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                                 </span>
                               )}
                               {e.pendentes !== undefined && e.pendentes > 0 && e.date <= todayStr && !e.isReopenedCall && (
-                                <span
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
-                                  title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data (${e.totalEsperados ?? 0} esperados no dia).`}
-                                >
-                                  <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
-                                  <span>{e.pendentes} pendentes</span>
-                                </span>
+                                <div className="inline-flex items-center gap-1 flex-wrap justify-center">
+                                  <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
+                                    title={`⚠️ ${e.pendentes} alunos com chamada pendente nesta data (${e.totalEsperados ?? 0} esperados no dia).`}
+                                  >
+                                    <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                    <span>{e.pendentes} pendentes</span>
+                                  </span>
+                                  {onFinalizeCall && (
+                                    <button
+                                      type="button"
+                                      disabled={finalizingDate === e.date}
+                                      onClick={async () => {
+                                        const confirmed = window.confirm(
+                                          `Deseja encerrar a chamada do dia ${e.dayLabel} (${e.date}), convertendo os ${e.pendentes} alunos pendentes em Falta e consolidando no Firestore?`
+                                        );
+                                        if (!confirmed) return;
+                                        try {
+                                          setFinalizingDate(e.date);
+                                          await onFinalizeCall(e.date);
+                                        } finally {
+                                          setFinalizingDate(null);
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Encerrar pendências deste dia"
+                                    >
+                                      {finalizingDate === e.date ? (
+                                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                      ) : (
+                                        <CheckCircle2 className="w-2.5 h-2.5" />
+                                      )}
+                                      <span>{finalizingDate === e.date ? '...' : 'Encerrar'}</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
                           ) : (

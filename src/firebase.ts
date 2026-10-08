@@ -3005,6 +3005,7 @@ export async function recalculateAndTriggerConsolidation(
 
     if (!currentEntry.isManualOverride) {
       updatedEntry.manualCount = metrics.presentes;
+      updatedEntry.editableStudents = metrics.presentes;
     }
 
     baseReport.entries[date] = updatedEntry;

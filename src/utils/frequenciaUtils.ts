@@ -220,9 +220,16 @@ export function getDailyConsolidatedMetrics(
 
   // Map of Routine Records on this date by studentId
   const routineRecordMap = new Map<string, AttendanceRecord>();
+  // Map of ANY Records on this date by studentId (fallback resiliente para presenças registradas em outras modalidades)
+  const anyRecordMap = new Map<string, AttendanceRecord>();
   records.forEach((r) => {
-    if (r.date === dateStr && isRoutineActivity(r.activity)) {
-      routineRecordMap.set(r.studentId, r);
+    if (r.date === dateStr && r.studentId) {
+      if (isRoutineActivity(r.activity) || !r.activity) {
+        routineRecordMap.set(r.studentId, r);
+      }
+      if (!anyRecordMap.has(r.studentId) || isPresencaStatus(r.status)) {
+        anyRecordMap.set(r.studentId, r);
+      }
     }
   });
 
@@ -240,25 +247,32 @@ export function getDailyConsolidatedMetrics(
   const todayStr = new Date().toISOString().split('T')[0];
   const isPastDate = dateStr < todayStr;
   const isToday = dateStr === todayStr;
-  const hasRecordsOnDate = routineRecordMap.size > 0;
+  const hasRecordsOnDate = routineRecordMap.size > 0 || anyRecordMap.size > 0;
 
   // Build lookup map for students by id
   const studentById = new Map<string, Student>();
   students.forEach((s) => studentById.set(s.id, s));
 
   // Build the list of students to evaluate for this date:
-  // REGRA DE OURO / PADRONIZAÇÃO DE ESPERADOS:
-  // 1. Desvincular das matrículas totais: Nunca utilizar a contagem total de matrículas ativas (ex: 212/231)
-  //    como valor padrão fixo na linha dos dias passados.
-  // 2. Prioridade da Chamada Oficial: Assim que uma chamada de rotina for finalizada ou no histórico de dias passados,
-  //    a quantidade de esperados é travada EXATAMENTE na quantidade de alunos que responderam à chamada (Presenças + Faltas + Atestados).
-  // 3. Dias passados sem chamada realizada totalizam 0 esperados.
-  // 4. No dia atual, se a chamada estiver em andamento, os alunos programados sem marcação são computados como pendentes.
+  // Base Esperada Rigorosa: Alunos matriculados ativos programados para este dia da semana (contrato) + alunos com chamada registrada
   const evaluatedMap = new Map<string, Student>();
+  const scheduledStudents = activeEnrolledStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
 
-  if (isPastDate) {
-    if (hasRecordsOnDate) {
-      // Chamada histórica concluída: avalia estritamente os alunos que responderam à chamada de rotina
+  if (isPastDate || isToday) {
+    if (options?.lockToRoutineRecords) {
+      // Se explicitamente solicitado travar estritamente em quem respondeu:
+      routineRecordMap.forEach((rec, studentId) => {
+        const student = studentById.get(studentId) || targetStudents.find((s) => s.id === studentId);
+        if (student && (isAllTurmas || student.turma === turmaFilter)) {
+          evaluatedMap.set(student.id, student);
+        }
+      });
+    } else {
+      // Regra Consolidada Oficial: Avalia SEMPRE todos os alunos matriculados ativos programados para este dia letivo
+      scheduledStudents.forEach((st) => {
+        evaluatedMap.set(st.id, st);
+      });
+      // Inclui também qualquer aluno com registro lançado nesta data (mesmo fora da grade de frequência semanal)
       routineRecordMap.forEach((rec, studentId) => {
         const student = studentById.get(studentId) || targetStudents.find((s) => s.id === studentId);
         if (student) {
@@ -274,30 +288,8 @@ export function getDailyConsolidatedMetrics(
           } as Student);
         }
       });
-    } else {
-      // Dia passado sem registro de chamada: 0 esperados (não projeta matrículas)
-    }
-  } else if (isToday) {
-    if (hasRecordsOnDate && (options?.lockToRoutineRecords || options?.convertPastPendingToAbsence)) {
-      // Chamada de hoje já finalizada: trava na lista de quem respondeu à chamada
-      routineRecordMap.forEach((rec, studentId) => {
+      anyRecordMap.forEach((rec, studentId) => {
         const student = studentById.get(studentId) || targetStudents.find((s) => s.id === studentId);
-        if (student) {
-          if (isAllTurmas || student.turma === turmaFilter) {
-            evaluatedMap.set(student.id, student);
-          }
-        }
-      });
-    } else {
-      // Chamada de hoje em andamento ou aguardando realização:
-      // Considera os alunos programados para hoje
-      const scheduledStudents = activeEnrolledStudents.filter((s) => isStudentScheduledForDate(s, dateStr));
-      scheduledStudents.forEach((st) => {
-        evaluatedMap.set(st.id, st);
-      });
-      // Inclui também qualquer aluno com registro lançado hoje
-      routineRecordMap.forEach((rec, studentId) => {
-        const student = studentById.get(studentId);
         if (student && (isAllTurmas || student.turma === turmaFilter)) {
           evaluatedMap.set(student.id, student);
         }
@@ -312,7 +304,8 @@ export function getDailyConsolidatedMetrics(
   const shouldConvertPending = Boolean(options?.convertPastPendingToAbsence && isCallClosed);
 
   evaluatedStudents.forEach((student) => {
-    const rec = routineRecordMap.get(student.id);
+    // Prioriza registro da Rotina; se ausente, faz fallback para qualquer registro do aluno no dia
+    const rec = routineRecordMap.get(student.id) || anyRecordMap.get(student.id);
     let category = resolveStudentAttendanceCategory(student, rec, dateStr);
 
     if (category === 'PRESENTE') {

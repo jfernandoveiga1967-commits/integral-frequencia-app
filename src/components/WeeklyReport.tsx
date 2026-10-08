@@ -52,6 +52,7 @@ import {
   Utensils,
   DollarSign,
   GraduationCap,
+  Loader2,
 } from 'lucide-react';
 
 export const SPECIALIST_WORKSHOPS: ActivityType[] = [
@@ -77,6 +78,7 @@ interface WeeklyReportProps {
   currentUser?: UserProfile | null;
   users?: UserProfile[];
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
+  onFinalizeCall?: (date: string) => Promise<void> | void;
 }
 
 export const WeeklyReport: React.FC<WeeklyReportProps> = ({
@@ -89,8 +91,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   currentUser,
   users = [],
   onDeleteTurma,
+  onFinalizeCall,
 }) => {
   const isCoordenador = currentUser?.role === 'coordenador';
+  const [finalizingDate, setFinalizingDate] = useState<string | null>(null);
   const userAssignedTurmas = useMemo(() => {
     if (!currentUser) return [];
     if (Array.isArray(currentUser.allowedClassIds) && currentUser.allowedClassIds.length > 0) {
@@ -1718,12 +1722,77 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                       </td>
                       <td className="px-4 py-3 text-center">
                         {d.pendentes > 0 ? (
-                          <span
-                            className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold border border-amber-300 cursor-help"
-                            title={`Alunos sem registro: ${d.pendingStudents.map((s) => s.name).join(', ')}`}
-                          >
-                            {d.pendentes} pendente{d.pendentes > 1 ? 's' : ''}
-                          </span>
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <span
+                              className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold border border-amber-300 cursor-help"
+                              title={`Alunos sem registro: ${d.pendingStudents.map((s) => s.name).join(', ')}`}
+                            >
+                              {d.pendentes} pendente{d.pendentes > 1 ? 's' : ''}
+                            </span>
+                            {onFinalizeCall && isCoordenador && (
+                              <button
+                                type="button"
+                                disabled={finalizingDate === d.dateStr}
+                                onClick={async () => {
+                                  const ok = window.confirm(
+                                    `Deseja encerrar a chamada do dia ${formatDateBR(d.dateStr)} (${d.dayName}) convertendo os ${d.pendentes} alunos pendentes em Falta e consolidando os relatórios no Firestore?`
+                                  );
+                                  if (!ok) return;
+                                  try {
+                                    setFinalizingDate(d.dateStr);
+                                    await onFinalizeCall(d.dateStr);
+                                  } finally {
+                                    setFinalizingDate(null);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-extrabold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                title="Encerrar chamada e converter pendências deste dia em Falta"
+                              >
+                                {finalizingDate === d.dateStr ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                )}
+                                <span>{finalizingDate === d.dateStr ? 'Gravando...' : 'Encerrar Dia'}</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : d.pendenciasConvertidas !== undefined && d.pendenciasConvertidas > 0 ? (
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <span
+                              className="inline-block px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200"
+                              title={`${d.pendenciasConvertidas} pendências convertidas em Falta para somar 100% dos esperados.`}
+                            >
+                              0 ({d.pendenciasConvertidas} conv.)
+                            </span>
+                            {onFinalizeCall && isCoordenador && (
+                              <button
+                                type="button"
+                                disabled={finalizingDate === d.dateStr}
+                                onClick={async () => {
+                                  const ok = window.confirm(
+                                    `Deseja gravar formalmente o fechamento da chamada do dia ${formatDateBR(d.dateStr)} (${d.dayName}) no Firestore, registrando as faltas dos ${d.pendenciasConvertidas} alunos não marcados?`
+                                  );
+                                  if (!ok) return;
+                                  try {
+                                    setFinalizingDate(d.dateStr);
+                                    await onFinalizeCall(d.dateStr);
+                                  } finally {
+                                    setFinalizingDate(null);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-extrabold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                title="Gravar formalmente o encerramento deste dia no banco de dados"
+                              >
+                                {finalizingDate === d.dateStr ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                )}
+                                <span>{finalizingDate === d.dateStr ? 'Gravando...' : 'Consolidar no Banco'}</span>
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-slate-400 font-normal">0</span>
                         )}
@@ -2590,6 +2659,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           records={records}
           holidays={holidays}
           currentUser={currentUser}
+          onFinalizeCall={onFinalizeCall}
         />
       )}
 

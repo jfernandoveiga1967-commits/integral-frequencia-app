@@ -2241,6 +2241,7 @@ export default function App() {
             currentUser={currentUser}
             users={users}
             onDeleteTurma={handleDeleteTurma}
+            onFinalizeCall={handleFinalizeAttendanceCall}
           />
         )}
 

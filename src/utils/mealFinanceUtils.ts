@@ -2,13 +2,14 @@ import * as XLSX from 'xlsx';
 import {
   Student,
   AttendanceRecord,
+  AttendanceStatus,
   HolidayItem,
   DayOfWeek,
   MealDailyEntry,
   MealReportConfig,
 } from '../types';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, isHolidayOrRecess, isStudentScheduledForDate } from './dateUtils';
-import { isPresencaStatus, isFaltaStatus, isJustificadoStatus, isRoutineActivity } from './frequenciaUtils';
+import { isPresencaStatus, isFaltaStatus, isJustificadoStatus, isRoutineActivity, normalizeAttendanceStatus } from './frequenciaUtils';
 
 export const MEAL_STORAGE_KEY_PREFIX = 'crescer_meal_config_';
 
@@ -128,24 +129,27 @@ export function syncMealSnapshotsFromRecords(records: AttendanceRecord[]): void 
 export function getRollCallPresencesForDate(dateStr: string, records: AttendanceRecord[]): number {
   if (!Array.isArray(records) || records.length === 0) return 0;
   
+  const presentStudentIds = new Set<string>();
+
   // 1. Prioriza registros da rotina/chamada geral
   const routineRecords = records.filter((r) => {
     if (!r || r.date !== dateStr) return false;
     return isRoutineActivity(r.activity) || !r.activity;
   });
-
-  if (routineRecords.length > 0) {
-    return routineRecords.filter((r) => isPresencaStatus(r.status)).length;
-  }
+  routineRecords.forEach((r) => {
+    if (isPresencaStatus(r.status) && r.studentId) {
+      presentStudentIds.add(r.studentId);
+    }
+  });
 
   // 2. Fallback por aluno único com presença registrada na data
   const dayRecords = records.filter((r) => r && r.date === dateStr);
-  const presentStudentIds = new Set<string>();
   dayRecords.forEach((r) => {
     if (isPresencaStatus(r.status) && r.studentId) {
       presentStudentIds.add(r.studentId);
     }
   });
+
   return presentStudentIds.size;
 }
 
@@ -224,41 +228,36 @@ export function buildMealEntriesForDateRange(
         if (!r || r.date !== dateStr) return false;
         return isRoutineActivity(r.activity) || !r.activity;
       });
+      const anyDayRecords = records.filter((r) => r && r.date === dateStr);
 
-      if (routineRecords.length > 0) {
+      const studentStatusMap = new Map<string, AttendanceStatus>();
+      // 1. Adiciona qualquer registro lançado no dia para o aluno (fallback resiliente de oficinas)
+      anyDayRecords.forEach((r) => {
+        if (r && r.studentId && r.status) {
+          studentStatusMap.set(r.studentId, normalizeAttendanceStatus(r.status));
+        }
+      });
+      // 2. Sobrescreve com registros oficiais da rotina (prioridade máxima)
+      routineRecords.forEach((r) => {
+        if (r && r.studentId && r.status) {
+          studentStatusMap.set(r.studentId, normalizeAttendanceStatus(r.status));
+        }
+      });
+
+      if (studentStatusMap.size > 0) {
         hasCallConcluded = true;
-        dayPresentes = routineRecords.filter((r) => isPresencaStatus(r.status)).length;
-        dayFaltas = routineRecords.filter((r) => isFaltaStatus(r.status)).length;
-        dayAtestados = routineRecords.filter((r) => isJustificadoStatus(r.status)).length;
+        dayPresentes = Array.from(studentStatusMap.values()).filter((s) => isPresencaStatus(s)).length;
+        dayFaltas = Array.from(studentStatusMap.values()).filter((s) => isFaltaStatus(s)).length;
+        dayAtestados = Array.from(studentStatusMap.values()).filter((s) => isJustificadoStatus(s)).length;
         dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas + dayAtestados));
         systemCount = dayPresentes;
       } else {
-        // Fallback: se houver registros de chamada no dia sem tag específica
-        const anyDayRecords = records.filter((r) => r && r.date === dateStr);
-        if (anyDayRecords.length > 0) {
-          const presentSet = new Set<string>();
-          const faltaSet = new Set<string>();
-          const atestadoSet = new Set<string>();
-          anyDayRecords.forEach((r) => {
-            if (!r.studentId) return;
-            if (isPresencaStatus(r.status)) presentSet.add(r.studentId);
-            else if (isJustificadoStatus(r.status)) atestadoSet.add(r.studentId);
-            else if (isFaltaStatus(r.status)) faltaSet.add(r.studentId);
-          });
-          dayPresentes = presentSet.size;
-          dayFaltas = faltaSet.size;
-          dayAtestados = atestadoSet.size;
-          hasCallConcluded = dayPresentes > 0 || dayFaltas > 0;
-          dayPendentes = Math.max(0, expectedStudentsCount - (dayPresentes + dayFaltas + dayAtestados));
-          systemCount = dayPresentes;
-        } else {
-          hasCallConcluded = false;
-          systemCount = 0;
-          dayPresentes = 0;
-          dayFaltas = 0;
-          dayAtestados = 0;
-          dayPendentes = expectedStudentsCount;
-        }
+        hasCallConcluded = false;
+        systemCount = 0;
+        dayPresentes = 0;
+        dayFaltas = 0;
+        dayAtestados = 0;
+        dayPendentes = expectedStudentsCount;
       }
     }
 
