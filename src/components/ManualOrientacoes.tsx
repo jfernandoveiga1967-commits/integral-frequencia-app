@@ -37,7 +37,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import type { jsPDF } from 'jspdf';
-import { UserProfile } from '../types';
+import { UserProfile, NormaReminderRecord } from '../types';
 import {
   ManualNorma,
   ModuleCategory,
@@ -56,6 +56,7 @@ import {
   saveNormaAceiteToFirestore,
   subscribeAllNormasAceites,
   subscribeUsers,
+  subscribeNormasReminders,
 } from '../firebase';
 import {
   generateManualNormasPDF,
@@ -63,6 +64,7 @@ import {
 } from '../utils/pdfGenerator';
 import { isCoordenador, getLocalUsersList } from '../utils/authUtils';
 import { PdfViewerModal } from './PdfViewerModal';
+import { EnviarLembreteModal } from './EnviarLembreteModal';
 
 export interface ManualOrientacoesProps {
   currentUser?: UserProfile | null;
@@ -558,6 +560,9 @@ interface StatusAceiteModalProps {
   onClose: () => void;
   users: UserProfile[];
   aceites: NormaAceite[];
+  reminders?: NormaReminderRecord[];
+  currentUser?: UserProfile | null;
+  normas?: ManualNorma[];
   onSendReminder: (userId: string, userName: string) => void;
   reminderSentUsers: Record<string, boolean>;
   onExportPDF: () => void;
@@ -568,25 +573,34 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
   onClose,
   users,
   aceites,
+  reminders = [],
+  currentUser,
+  normas = [],
   onSendReminder,
   reminderSentUsers,
   onExportPDF,
 }) => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'cientes' | 'pendentes'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUserForReminder, setSelectedUserForReminder] = useState<UserProfile | null>(null);
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
 
   if (!isOpen) return null;
 
-  // Mapear cada usuário para seu registro de aceite
+  // Mapear cada usuário para seu registro de aceite e lembrete
   const usersWithAceite = users
     .filter((u) => u.status !== 'inativo' && u.name)
     .map((user) => {
       const userAceite = aceites.find(
         (a) => a.userId === user.id || (user.email && a.userEmail?.toLowerCase() === user.email.toLowerCase())
       );
+      const userReminder = (reminders || []).find(
+        (r) => r.userId === user.id
+      );
       return {
         user,
         aceite: userAceite || null,
+        reminder: userReminder || null,
         isSigned: Boolean(userAceite),
       };
     })
@@ -742,21 +756,22 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
                     <th className="px-4 py-3">Colaborador / Função</th>
                     <th className="px-4 py-3">E-mail</th>
                     <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-center">Data / Hora</th>
+                    <th className="px-4 py-3 text-center">Data / Hora Aceite</th>
+                    <th className="px-4 py-3 text-center">Último Lembrete Enviado</th>
                     <th className="px-4 py-3 text-right">Ação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredList.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                         Nenhum colaborador encontrado com os filtros selecionados.
                       </td>
                     </tr>
                   ) : (
                     filteredList.map((item) => {
                       const isSigned = item.isSigned;
-                      const hasSentReminder = Boolean(reminderSentUsers[item.user.id]);
+                      const hasSentReminder = Boolean(reminderSentUsers[item.user.id]) || Boolean(item.reminder);
                       const cargo = item.user.cargoLabel || (item.user.role === 'coordenador' ? 'Coordenação' : item.user.role === 'professor' ? 'Docente' : item.user.role === 'auxiliar' ? 'Monitora / Estagiária' : 'Colaborador');
 
                       return (
@@ -808,6 +823,32 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
                             )}
                           </td>
 
+                          <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                            {item.reminder?.lastSentAt ? (
+                              <div className="inline-flex flex-col items-center">
+                                <span className="text-[11px] font-bold text-slate-800">
+                                  {new Date(item.reminder.lastSentAt).toLocaleDateString('pt-BR')}{' '}
+                                  <span className="text-slate-400 font-normal">
+                                    às {new Date(item.reminder.lastSentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </span>
+                                <span
+                                  className={`inline-flex items-center space-x-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full mt-0.5 ${
+                                    item.reminder.channel === 'whatsapp'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : item.reminder.channel === 'app'
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  }`}
+                                >
+                                  {item.reminder.channel === 'whatsapp' ? '📱 WhatsApp' : item.reminder.channel === 'app' ? '🔔 App' : '📱+🔔 Ambos'}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">Nenhum</span>
+                            )}
+                          </td>
+
                           <td className="px-4 py-3 text-right">
                             {isSigned ? (
                               <span className="text-[11px] text-emerald-600 font-bold inline-flex items-center space-x-1">
@@ -817,25 +858,15 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => onSendReminder(item.user.id, item.user.name)}
-                                disabled={hasSentReminder}
-                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center space-x-1 ml-auto cursor-pointer ${
-                                  hasSentReminder
-                                    ? 'bg-slate-100 text-slate-400 cursor-default'
-                                    : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
-                                }`}
+                                onClick={() => {
+                                  setSelectedUserForReminder(item.user);
+                                  setIsReminderModalOpen(true);
+                                }}
+                                className="px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center space-x-1 ml-auto cursor-pointer bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs hover:shadow-xs"
+                                title="Disparar lembrete via WhatsApp Direct ou Notificação no App"
                               >
-                                {hasSentReminder ? (
-                                  <>
-                                    <Check className="w-3 h-3 text-emerald-500" />
-                                    <span>Lembrete Enviado</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Send className="w-3 h-3 text-indigo-600" />
-                                    <span>Enviar Lembrete</span>
-                                  </>
-                                )}
+                                <Send className="w-3 h-3 text-indigo-600" />
+                                <span>{hasSentReminder ? 'Reenviar Lembrete' : 'Enviar Lembrete'}</span>
                               </button>
                             )}
                           </td>
@@ -848,6 +879,26 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Modal de Disparo de Lembrete (WhatsApp Direct e Notificação no App) */}
+        {isReminderModalOpen && selectedUserForReminder && (
+          <EnviarLembreteModal
+            isOpen={isReminderModalOpen}
+            onClose={() => {
+              setIsReminderModalOpen(false);
+              setSelectedUserForReminder(null);
+            }}
+            targetUser={selectedUserForReminder}
+            currentUser={currentUser || null}
+            normas={normas}
+            defaultNormaTitle="Normas Internas e Rotina do Integral (Manual 2026)"
+            onReminderSent={(res) => {
+              if (selectedUserForReminder) {
+                onSendReminder(selectedUserForReminder.id, selectedUserForReminder.name);
+              }
+            }}
+          />
+        )}
 
         {/* Footer */}
         <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
@@ -936,6 +987,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   // Estados para Gestão de Aceite Digital e Auditoria da Equipe
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => getLocalUsersList());
   const [allAceites, setAllAceites] = useState<NormaAceite[]>([]);
+  const [allReminders, setAllReminders] = useState<NormaReminderRecord[]>([]);
   const [isConfirmingAceite, setIsConfirmingAceite] = useState(false);
   const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
@@ -960,6 +1012,14 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   useEffect(() => {
     const unsub = subscribeAllNormasAceites((items) => {
       setAllAceites(items);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to real-time normas_reminders
+  useEffect(() => {
+    const unsub = subscribeNormasReminders((items) => {
+      setAllReminders(items);
     });
     return () => unsub();
   }, []);
@@ -2139,6 +2199,9 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
           onClose={() => setIsStatusAceiteModalOpen(false)}
           users={eligibleUsers}
           aceites={allAceites}
+          reminders={allReminders}
+          currentUser={currentUser}
+          normas={normas}
           onSendReminder={handleSendReminder}
           reminderSentUsers={reminderSentUsers}
           onExportPDF={handleExportRelatorioConformidadePDF}

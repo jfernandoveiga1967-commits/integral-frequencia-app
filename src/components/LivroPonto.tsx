@@ -47,7 +47,9 @@ import {
   PontoStatus,
   RegimeTrabalho,
   WorkLocation,
+  AttendanceRecord,
 } from '../types';
+import { calculateApuracaoAulasEfetivasPrestador } from '../utils/frequenciaUtils';
 import {
   isCoordenador,
   getRoleBadgeStyle,
@@ -102,7 +104,7 @@ import {
   generateAllReceiptsPDF,
 } from '../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../utils/printUtils';
-import { loadPontoRecords } from '../utils/storageUtils';
+import { loadPontoRecords, loadAttendanceRecords } from '../utils/storageUtils';
 import { playPontoSuccessSound } from '../utils/notificationUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
@@ -143,6 +145,7 @@ interface LivroPontoProps {
   holidays: HolidayItem[];
   pontoRecords: PontoRecord[];
   pontoClosings: PontoMonthClosing[];
+  attendanceRecords?: AttendanceRecord[];
   onSavePontoRecord: (record: PontoRecord) => Promise<any> | void;
   onBatchSavePontoRecords: (records: PontoRecord[]) => Promise<any> | void;
   onSavePontoClosing: (closing: PontoMonthClosing) => Promise<any> | void;
@@ -158,6 +161,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   holidays = [],
   pontoRecords = [],
   pontoClosings = [],
+  attendanceRecords = [],
   onSavePontoRecord,
   onBatchSavePontoRecords,
   onSavePontoClosing,
@@ -670,6 +674,34 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     return list;
   }, [selectedYear, selectedMonth, monthKey, daysInMonth, holidays, monthUserRecords, targetUser?.dataAdmissao]);
 
+  // Registros de chamada/frequência para apuração inteira de aulas de prestadores PJ / Efetivo
+  const effectiveAttendanceRecords = useMemo(() => {
+    if (attendanceRecords && attendanceRecords.length > 0) {
+      return attendanceRecords;
+    }
+    return loadAttendanceRecords();
+  }, [attendanceRecords]);
+
+  // Apuração de Aulas Efetivas por Chamadas Concluídas (Prestador PJ / Efetivo)
+  const prestadorApuracao = useMemo(() => {
+    if (regimeTrabalho !== 'prestador_aula_efetiva' || !targetUser) return null;
+    const padMonth = String(selectedMonth).padStart(2, '0');
+    const startDate = `${selectedYear}-${padMonth}-01`;
+    const endDate = `${selectedYear}-${padMonth}-${String(daysInMonth).padStart(2, '0')}`;
+    const activities = Array.isArray(targetUser.assignedActivities) && targetUser.assignedActivities.length > 0
+      ? targetUser.assignedActivities
+      : (targetUser.specialtyActivity ? [targetUser.specialtyActivity] : ['Flauta']);
+
+    return calculateApuracaoAulasEfetivasPrestador({
+      prestador: targetUser,
+      startDate,
+      endDate,
+      holidays,
+      records: effectiveAttendanceRecords,
+      prestadorActivities: activities,
+    });
+  }, [regimeTrabalho, targetUser, selectedYear, selectedMonth, daysInMonth, holidays, effectiveAttendanceRecords]);
+
   // Financial Calculations
   const financials = useMemo(() => {
     return calculateMonthlyPontoFinancials({
@@ -681,6 +713,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       regimeTrabalho,
       valorHoraAula,
       duracaoAulaMinutos,
+      customTotalAulas: prestadorApuracao ? prestadorApuracao.totalAulasDadas : undefined,
       divisorHours,
       divisorDays: 30,
       ajudaDeCusto,
@@ -701,6 +734,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     regimeTrabalho,
     valorHoraAula,
     duracaoAulaMinutos,
+    prestadorApuracao,
     divisorHours,
     ajudaDeCusto,
     contractDailyHours,
@@ -2539,7 +2573,9 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
                 <div>
                   <span className="text-indigo-800 font-bold block truncate text-[11px]">Salário de Aulas Dadas:</span>
-                  <span className="text-[10px] text-indigo-600 block truncate">Aulas × Hora-Aula</span>
+                  <span className="text-[10px] text-indigo-600 block truncate font-medium">
+                    {financials.totalAulas} aulas × {formatCurrencyBR(financials.valorHoraAula || 0)}
+                  </span>
                 </div>
                 <span className="text-sm sm:text-base font-black text-indigo-900 truncate mt-1">
                   {formatCurrencyBR(financials.salarioAulas)}

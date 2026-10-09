@@ -518,15 +518,29 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
     // Fonte de verdade única e soberana: regimeTrabalho técnico (não o texto legado de regimeContratual)
+    const isPrestadorDanyel =
+      user.id === 'usr_danyelpereira' ||
+      (user.name && user.name.toLowerCase().includes('danyel'));
+
     const initialRegime: RegimeTrabalho =
-      user.regimeTrabalho === 'prestador_aula_efetiva'
+      user.regimeTrabalho === 'prestador_aula_efetiva' ||
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('efetiv')) ||
+      isPrestadorDanyel
         ? 'prestador_aula_efetiva'
         : user.regimeTrabalho === 'professor_horista'
         ? 'professor_horista'
         : 'mensalista';
     setFormRegimeTrabalho(initialRegime);
-    setFormValorHoraAula(user.valorHoraAula !== undefined && user.valorHoraAula !== null ? user.valorHoraAula : '');
-    setFormDuracaoAulaMinutos(user.duracaoAulaMinutos !== undefined ? user.duracaoAulaMinutos : 50);
+    setFormValorHoraAula(
+      user.valorHoraAula !== undefined && user.valorHoraAula !== null && Number(user.valorHoraAula) > 0
+        ? user.valorHoraAula
+        : (isPrestadorDanyel || initialRegime === 'prestador_aula_efetiva' ? 80 : '')
+    );
+    setFormDuracaoAulaMinutos(
+      user.duracaoAulaMinutos !== undefined && Number(user.duracaoAulaMinutos) > 0
+        ? user.duracaoAulaMinutos
+        : 50
+    );
     setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
     setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
     setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
@@ -1686,10 +1700,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             </span>
 
                             {user.phone && (
-                              <span className="flex items-center text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
+                              <a
+                                href={generateWhatsAppUrl(user.phone, `Olá, ${user.name}! Mensagem da Coordenação do Integral.`)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Abrir WhatsApp Direct com o colaborador"
+                                className="flex items-center text-emerald-700 hover:text-emerald-800 font-bold bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px] transition-colors"
+                              >
                                 <Phone className="w-3 h-3 text-emerald-600 mr-1 shrink-0" />
                                 <span>{formatPhoneDisplay(user.phone)}</span>
-                              </span>
+                              </a>
                             )}
 
                             {/* Compact Badges shown in header */}
@@ -2874,7 +2894,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => setFormRegimeTrabalho('prestador_aula_efetiva')}
+                      onClick={() => {
+                        setFormRegimeTrabalho('prestador_aula_efetiva');
+                        if (!formValorHoraAula || Number(formValorHoraAula) <= 0) {
+                          setFormValorHoraAula(80);
+                        }
+                        if (!formDuracaoAulaMinutos || Number(formDuracaoAulaMinutos) <= 0) {
+                          setFormDuracaoAulaMinutos(50);
+                        }
+                      }}
                       className={`px-3 py-2 rounded-xl text-left border transition text-xs font-semibold flex items-center justify-between cursor-pointer ${
                         formRegimeTrabalho === 'prestador_aula_efetiva'
                           ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
@@ -2906,7 +2934,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             required
                             value={formValorHoraAula}
                             onChange={(e) => setFormValorHoraAula(e.target.value)}
-                            placeholder="Ex: 50.00"
+                            placeholder="Ex: 80.00"
                             className="w-full px-3 py-2 bg-emerald-50/40 border border-emerald-300 rounded-xl text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
                           <span className="text-[9px] text-slate-500 block mt-0.5">

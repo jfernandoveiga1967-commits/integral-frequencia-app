@@ -1427,14 +1427,15 @@ export function calculateMonthlyPontoFinancials({
     // - Feriados e recessos: R$ 0,00 (sem DSR / sem feriados remunerados)
     // - Aulas não realizadas / faltas: R$ 0,00
     // - Sem Hora-Atividade (0%) e Sem DSR (0)
+    // - Contabilização INTEIRA de aulas por chamada/turma concluída (sem fracionamento decimal como 10.8)
     // =========================================================================
     const totalAulas = customTotalAulas !== undefined && customTotalAulas !== null
-      ? Math.max(0, Number(customTotalAulas))
-      : calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula);
+      ? Math.max(0, Math.round(Number(customTotalAulas)))
+      : Math.max(0, Math.round(calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula)));
 
     const aulasNaoMinistradas = paidHolidaysCount + paidRecessDaysCount + unjustifiedAbsencesCount;
 
-    // Salário / Valor das Aulas Dadas: N * Valor da Hora-Aula
+    // Salário / Valor das Aulas Dadas: N de Aulas Dadas * Valor da Hora-Aula (ex: 8 * R$ 31,49 ou 8 * R$ 80,00)
     const salarioAulas = calcularSalarioAulas(totalAulas, safeValorHoraAula);
 
     const safeManualAdd = Number(manualAddition) || 0;
@@ -1507,8 +1508,8 @@ export function calculateMonthlyPontoFinancials({
     // =========================================================================
     // Total de Aulas Reais (N): apurado pelas batidas validadas (ou informado manualmente)
     const totalAulas = customTotalAulas !== undefined && customTotalAulas !== null
-      ? Math.max(0, Number(customTotalAulas))
-      : calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula);
+      ? Math.max(0, Math.round(Number(customTotalAulas)))
+      : Math.max(0, Math.round(calcularAulasDeMinutos(totalWorkedMinutes, safeDuracaoAula)));
 
     // Salário de Aulas: N * Valor da Hora-Aula
     const salarioAulas = calcularSalarioAulas(totalAulas, safeValorHoraAula);

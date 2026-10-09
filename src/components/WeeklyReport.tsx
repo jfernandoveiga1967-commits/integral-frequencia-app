@@ -24,7 +24,7 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isHolidayOrRecess, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
-import { getPeriodConsolidatedMetrics } from '../utils/frequenciaUtils';
+import { getPeriodConsolidatedMetrics, calculateApuracaoAulasEfetivasPrestador, AulaEfetivaItem } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
 import {
@@ -568,133 +568,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     return Array.from(acts);
   }, [selectedPrestador]);
 
-  interface AulaEfetivaItem {
-    date: string;
-    dayOfWeekLabel: string;
-    activity: string;
-    turma: string;
-    status: 'realizada' | 'feriado' | 'cancelada';
-    statusLabel: string;
-    motivo?: string;
-    qtdAlunosComChamada: number;
-    valorUnitario: number;
-    valorTotal: number;
-  }
-
   const apuracaoAulasEfetivas = useMemo(() => {
-    if (!selectedPrestador) {
-      return {
-        itens: [] as AulaEfetivaItem[],
-        totalAulasDadas: 0,
-        aulasNaoMinistradas: 0,
-        valorHoraAula: 0,
-        valorTotalAulasDadas: 0,
-        ajudaDeCusto: 0,
-        valorTotalLiquidoAPagar: 0,
-      };
-    }
-
-    const valorHora = Number(selectedPrestador.valorHoraAula) || 50;
-    const ajudaCusto = Number(selectedPrestador.ajudaDeCusto) || 0;
-    const items: AulaEfetivaItem[] = [];
-
-    const startObj = new Date(effectiveStartDate + 'T12:00:00');
-    const endObj = new Date(effectiveEndDate + 'T12:00:00');
-    const curr = new Date(startObj);
-
-    let totalAulasDadas = 0;
-    let aulasNaoMinistradas = 0;
-
-    while (curr <= endObj) {
-      const dateStr = curr.toISOString().split('T')[0];
-      const dayOfWeekNum = curr.getDay(); // 0 = Dom, 6 = Sab
-      const dayOfWeekLabel = getDayOfWeekLabel(getDayOfWeekFromDate(dateStr));
-      const holidayItem = isHolidayOrRecess(dateStr, holidays);
-
-      if (dayOfWeekNum === 0 || dayOfWeekNum === 6) {
-        curr.setDate(curr.getDate() + 1);
-        continue;
-      }
-
-      if (holidayItem) {
-        // Feriados cadastrados no calendário do sistema NÃO devem contabilizar valor de hora-aula
-        aulasNaoMinistradas++;
-        items.push({
-          date: dateStr,
-          dayOfWeekLabel,
-          activity: prestadorActivities[0] || 'Oficina Especialista',
-          turma: 'Todas as turmas',
-          status: 'feriado',
-          statusLabel: 'Feriado / Recesso Escolar',
-          motivo: `${holidayItem.name} (${holidayItem.type === 'feriado' ? 'Feriado Nacional/Oficial' : 'Recesso Escolar'})`,
-          qtdAlunosComChamada: 0,
-          valorUnitario: 0,
-          valorTotal: 0,
-        });
-      } else {
-        // Aulas em dia letivo: somar APENAS as aulas que possuem registro de chamada/frequência concluído
-        const dateRecords = records.filter(
-          (r) => r.date === dateStr && prestadorActivities.includes(r.activity)
-        );
-
-        const groups = new Map<string, AttendanceRecord[]>();
-        dateRecords.forEach((r) => {
-          const key = `${r.activity}:::${r.turma}`;
-          const list = groups.get(key) || [];
-          list.push(r);
-          groups.set(key, list);
-        });
-
-        if (groups.size > 0) {
-          groups.forEach((recsInGroup, key) => {
-            const [act, turm] = key.split(':::');
-            totalAulasDadas++;
-            items.push({
-              date: dateStr,
-              dayOfWeekLabel,
-              activity: act,
-              turma: turm,
-              status: 'realizada',
-              statusLabel: 'Aula Ministrada com Chamada Realizada',
-              motivo: `Chamada concluída com ${recsInGroup.length} aluno(s) registrados`,
-              qtdAlunosComChamada: recsInGroup.length,
-              valorUnitario: valorHora,
-              valorTotal: valorHora,
-            });
-          });
-        } else {
-          // Aulas não realizadas/canceladas NÃO devem contabilizar valor de hora-aula
-          aulasNaoMinistradas++;
-          items.push({
-            date: dateStr,
-            dayOfWeekLabel,
-            activity: prestadorActivities[0] || 'Oficina Especialista',
-            turma: 'Geral',
-            status: 'cancelada',
-            statusLabel: 'Aula Não Ministrada / Cancelada',
-            motivo: 'Sem registro de chamada/frequência no dia',
-            qtdAlunosComChamada: 0,
-            valorUnitario: 0,
-            valorTotal: 0,
-          });
-        }
-      }
-
-      curr.setDate(curr.getDate() + 1);
-    }
-
-    const valorTotalAulasDadas = totalAulasDadas * valorHora;
-    const valorTotalLiquidoAPagar = valorTotalAulasDadas + ajudaCusto;
-
-    return {
-      itens: items,
-      totalAulasDadas,
-      aulasNaoMinistradas,
-      valorHoraAula: valorHora,
-      valorTotalAulasDadas,
-      ajudaDeCusto: ajudaCusto,
-      valorTotalLiquidoAPagar,
-    };
+    return calculateApuracaoAulasEfetivasPrestador({
+      prestador: selectedPrestador,
+      startDate: effectiveStartDate,
+      endDate: effectiveEndDate,
+      holidays,
+      records,
+      prestadorActivities,
+    });
   }, [selectedPrestador, effectiveStartDate, effectiveEndDate, holidays, records, prestadorActivities]);
 
   const [copiedDemonstrativo, setCopiedDemonstrativo] = useState(false);

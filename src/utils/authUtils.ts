@@ -50,20 +50,20 @@ export const PRESET_USERS: UserProfile[] = [
   } as UserProfile,
   {
     id: 'usr_danyelpereira',
-    name: 'Danyel Pereira',
+    name: 'Danyel Pereira (Flauta)',
     email: 'danyel.pereira@crescercampinas.com.br',
     role: 'professor' as UserRole,
-    cargoLabel: 'Professor de Educação Física / Oficinas',
+    cargoLabel: 'Professor de Flauta / Musicalização',
     avatarColor: 'bg-emerald-600',
     birthDate: '1995-05-15',
     pin: '15/05/1995',
     status: 'ATIVO' as UserStatus,
     regimeTrabalho: 'prestador_aula_efetiva',
     regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-    valorHoraAula: 50,
+    valorHoraAula: 80,
     duracaoAulaMinutos: 50,
-    assignedActivities: ['Judô', 'Futebol'],
-    specialtyActivity: 'Judô',
+    assignedActivities: ['Flauta'],
+    specialtyActivity: 'Flauta',
     assignedTurmas: [],
     allowedClassIds: [],
     allowedTabs: ['frequencia', 'ponto', 'semanario', 'relatorio', 'manual'],
@@ -314,25 +314,45 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
     rawUsers.forEach((raw) => {
       if (!raw || !raw.id) return;
       const existing = userById.get(raw.id) || ({} as UserProfile);
+      const isDanyel =
+        raw.id === 'usr_danyelpereira' ||
+        (raw.name && raw.name.toLowerCase().includes('danyel'));
+
       const normalizedUser: UserProfile = {
         ...existing,
         ...raw,
+        name: isDanyel
+          ? (raw.name && raw.name.includes('Flauta') ? raw.name : 'Danyel Pereira (Flauta)')
+          : raw.name || existing.name,
         email: raw.email || existing.email || '',
-        cargoLabel: raw.cargoLabel || existing.cargoLabel || '',
+        cargoLabel: isDanyel
+          ? 'Professor de Flauta / Musicalização'
+          : (raw.cargoLabel || existing.cargoLabel || ''),
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
         status: raw.status || existing.status || ('ATIVO' as UserStatus),
         dataAdmissao: raw.dataAdmissao || existing.dataAdmissao || undefined,
-        assignedActivities: Array.isArray(raw.assignedActivities)
-          ? raw.assignedActivities
-          : (existing.assignedActivities || []),
+        assignedActivities: isDanyel
+          ? Array.from(new Set(['Flauta', ...(Array.isArray(raw.assignedActivities) ? raw.assignedActivities : [])]))
+          : (Array.isArray(raw.assignedActivities)
+              ? raw.assignedActivities
+              : (existing.assignedActivities || [])),
+        specialtyActivity: isDanyel ? 'Flauta' : (raw.specialtyActivity || existing.specialtyActivity),
         assignedTurmas: Array.isArray(raw.assignedTurmas)
           ? raw.assignedTurmas
           : (existing.assignedTurmas || []),
-        regimeTrabalho: raw.regimeTrabalho || existing.regimeTrabalho || 'mensalista',
-        regimeContratual: raw.regimeContratual || existing.regimeContratual || undefined,
-        valorHoraAula: raw.valorHoraAula !== undefined && raw.valorHoraAula !== null ? Number(raw.valorHoraAula) : existing.valorHoraAula,
-        duracaoAulaMinutos: raw.duracaoAulaMinutos !== undefined ? Number(raw.duracaoAulaMinutos) : existing.duracaoAulaMinutos,
+        regimeTrabalho: isDanyel
+          ? 'prestador_aula_efetiva'
+          : (raw.regimeTrabalho || existing.regimeTrabalho || 'mensalista'),
+        regimeContratual: isDanyel
+          ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+          : (raw.regimeContratual || existing.regimeContratual || undefined),
+        valorHoraAula: isDanyel
+          ? (raw.valorHoraAula && Number(raw.valorHoraAula) > 0 ? Number(raw.valorHoraAula) : 80)
+          : (raw.valorHoraAula !== undefined && raw.valorHoraAula !== null ? Number(raw.valorHoraAula) : existing.valorHoraAula),
+        duracaoAulaMinutos: isDanyel
+          ? (raw.duracaoAulaMinutos && Number(raw.duracaoAulaMinutos) > 0 ? Number(raw.duracaoAulaMinutos) : 50)
+          : (raw.duracaoAulaMinutos !== undefined ? Number(raw.duracaoAulaMinutos) : existing.duracaoAulaMinutos),
         ajudaDeCusto: raw.ajudaDeCusto !== undefined ? Number(raw.ajudaDeCusto) : existing.ajudaDeCusto,
         company: raw.company || raw.empresa || existing.company,
         empresa: raw.empresa || raw.company || existing.empresa,

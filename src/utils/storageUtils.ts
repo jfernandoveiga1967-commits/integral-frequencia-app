@@ -852,17 +852,46 @@ export function loadAttendanceRecords(): AttendanceRecord[] {
   return [];
 }
 
-export function saveAttendanceRecords(records: AttendanceRecord[]): void {
+/**
+ * Helper resiliente para escrita em LocalStorage com proteção contra QuotaExceededError.
+ * Se o espaço do navegador for atingido, executa estratégia de descarte/poda de cache antigo
+ * sem travar a aplicação nem emitir console.error fatal.
+ */
+function safeLocalStorageSet<T>(key: string, data: T, trimFn?: (item: T) => T): void {
   try {
-    localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
-    // Sincroniza snapshots de refeições calculados a partir de chamadas de rotina
-    try {
-      syncMealSnapshotsFromRecords(records);
-    } catch (syncErr) {
-      console.warn('Aviso ao sincronizar snapshots de refeições:', syncErr);
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err: any) {
+    const isQuota =
+      err &&
+      (err.name === 'QuotaExceededError' ||
+        err.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        err.code === 22 ||
+        err.code === 1014 ||
+        err.number === -2147024882);
+
+    if (isQuota) {
+      console.warn(`[LocalStorage] Cota de armazenamento excedida para chave '${key}'. Aplicando poda de cache local...`);
+      try {
+        if (trimFn) {
+          const trimmed = trimFn(data);
+          localStorage.setItem(key, JSON.stringify(trimmed));
+          return;
+        }
+      } catch (retryErr) {
+        console.warn(`[LocalStorage] Falha ao persistir versão reduzida para '${key}':`, retryErr);
+      }
+    } else {
+      console.warn(`[LocalStorage] Aviso ao salvar '${key}':`, err);
     }
-  } catch (e) {
-    console.error('Erro ao salvar registros:', e);
+  }
+}
+
+export function saveAttendanceRecords(records: AttendanceRecord[]): void {
+  safeLocalStorageSet(RECORDS_KEY, records, (recs) => (Array.isArray(recs) ? recs.slice(-250) : []));
+  try {
+    syncMealSnapshotsFromRecords(records);
+  } catch (syncErr) {
+    console.warn('Aviso ao sincronizar snapshots de refeições:', syncErr);
   }
 }
 
@@ -880,17 +909,17 @@ export function loadPontoRecords(): PontoRecord[] {
       }
     }
   } catch (e) {
-    console.error('Erro ao carregar registros de ponto do LocalStorage:', e);
+    console.warn('Aviso ao carregar registros de ponto do LocalStorage:', e);
   }
   return [];
 }
 
 export function savePontoRecords(records: PontoRecord[]): void {
-  try {
-    localStorage.setItem(PONTO_RECORDS_KEY, JSON.stringify(records));
-  } catch (e) {
-    console.error('Erro ao salvar registros de ponto:', e);
-  }
+  const bounded = Array.isArray(records) && records.length > 100 ? records.slice(-100) : records;
+  safeLocalStorageSet(PONTO_RECORDS_KEY, bounded, (recs) => {
+    // Mantém no cache local os últimos 50 registros mais recentes em caso de pressão de cota
+    return Array.isArray(recs) ? recs.slice(-50) : [];
+  });
 }
 
 export function loadPontoClosings(): PontoMonthClosing[] {
@@ -903,17 +932,13 @@ export function loadPontoClosings(): PontoMonthClosing[] {
       }
     }
   } catch (e) {
-    console.error('Erro ao carregar fechamentos de ponto do LocalStorage:', e);
+    console.warn('Aviso ao carregar fechamentos de ponto do LocalStorage:', e);
   }
   return [];
 }
 
 export function savePontoClosings(closings: PontoMonthClosing[]): void {
-  try {
-    localStorage.setItem(PONTO_CLOSINGS_KEY, JSON.stringify(closings));
-  } catch (e) {
-    console.error('Erro ao salvar fechamentos de ponto:', e);
-  }
+  safeLocalStorageSet(PONTO_CLOSINGS_KEY, closings, (cls) => (Array.isArray(cls) ? cls.slice(-24) : []));
 }
 
 export function loadSemanarioPlans(): SemanarioPlan[] {
@@ -926,7 +951,7 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
       }
     }
   } catch (e) {
-    console.error('Erro ao carregar planos do Semanário do LocalStorage:', e);
+    console.warn('Aviso ao carregar planos do Semanário do LocalStorage:', e);
   }
   const defaultPlans = getInitialSamplePlans();
   saveSemanarioPlans(defaultPlans);
@@ -934,11 +959,11 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
 }
 
 export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
-  try {
-    localStorage.setItem(SEMANARIO_KEY, JSON.stringify(plans));
-  } catch (e) {
-    console.error('Erro ao salvar planos do Semanário:', e);
-  }
+  const bounded = Array.isArray(plans) && plans.length > 20 ? plans.slice(0, 20) : plans;
+  safeLocalStorageSet(SEMANARIO_KEY, bounded, (pls) => {
+    // Mantém no cache local os 10 planos mais recentes em caso de pressão de cota
+    return Array.isArray(pls) ? pls.slice(0, 10) : [];
+  });
 }
 
 export function resetAllData(): void {

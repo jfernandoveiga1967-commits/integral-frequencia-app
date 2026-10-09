@@ -51,6 +51,7 @@ import { CardapioCulinaria } from './components/CardapioCulinaria';
 import { ManualOrientacoes } from './components/ManualOrientacoes';
 import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
+import { UserNotificationBanner } from './components/UserNotificationBanner';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   DepartureAlertItem,
@@ -2059,6 +2060,12 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
+        {/* Banner de Notificação e Lembrete Direto no App (user_notifications) */}
+        <UserNotificationBanner
+          currentUser={currentUser}
+          onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
+        />
+
         {/* Global Departure Alert Banner (Alerta de Saída Antecipada visível em qualquer aba) */}
         <DepartureAlertBanner
           alerts={activeDepartureAlerts}
@@ -2286,6 +2293,7 @@ export default function App() {
             holidays={holidays}
             pontoRecords={pontoRecords}
             pontoClosings={pontoClosings}
+            attendanceRecords={records}
             onSavePontoRecord={handleSavePontoRecord}
             onBatchSavePontoRecords={handleBatchSavePontoRecords}
             onSavePontoClosing={handleSavePontoClosing}

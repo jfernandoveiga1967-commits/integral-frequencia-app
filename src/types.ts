@@ -468,4 +468,38 @@ export interface RelatorioConsolidadoDia {
   updatedBy: string;
 }
 
+/**
+ * Notificação Direta para Usuário (gravada em 'user_notifications')
+ */
+export interface UserNotification {
+  id: string;
+  userId: string;
+  userName?: string;
+  title: string;
+  message: string;
+  priority: 'alta' | 'media' | 'baixa';
+  type: 'norma_pendente' | 'aviso_geral' | 'lembrete';
+  linkTab?: string;
+  normaId?: string;
+  normaTitle?: string;
+  read: boolean;
+  createdAt: string;
+  createdBy?: string;
+}
+
+/**
+ * Registro de Lembrete de Norma Enviado (gravado em 'normas_reminders')
+ */
+export interface NormaReminderRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  normaId?: string;
+  normaTitle?: string;
+  channel: 'whatsapp' | 'app' | 'ambos';
+  lastSentAt: string;
+  sentBy?: string;
+  messageText?: string;
+}
+
 

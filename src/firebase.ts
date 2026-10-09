@@ -23,7 +23,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { ManualNorma, INITIAL_MANUAL_NORMAS, NormaAceite } from './types/manualNormas';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
@@ -3649,6 +3649,153 @@ export async function getAllNormasAceites(): Promise<NormaAceite[]> {
     return list;
   } catch (error) {
     console.warn('Erro ao buscar todos os normas_aceites:', error);
+    return [];
+  }
+}
+
+/**
+ * Salva notificação de usuário na coleção 'user_notifications' com prioridade alta
+ */
+export async function saveUserNotificationToFirestore(notification: UserNotification): Promise<void> {
+  try {
+    const docRef = doc(db, 'user_notifications', notification.id);
+    await setDoc(docRef, notification, { merge: true });
+    try {
+      const stored = localStorage.getItem(`crescer_notifs_${notification.userId}`);
+      const list: UserNotification[] = stored ? JSON.parse(stored) : [];
+      const updated = [notification, ...list.filter((n) => n.id !== notification.id)];
+      localStorage.setItem(`crescer_notifs_${notification.userId}`, JSON.stringify(updated.slice(0, 30)));
+    } catch {}
+  } catch (err) {
+    console.warn('Erro ao salvar notificação do usuário no Firestore:', err);
+    handleFirestoreError(err, OperationType.WRITE, 'user_notifications');
+    throw err;
+  }
+}
+
+/**
+ * Escuta notificações do usuário específico em tempo real
+ */
+export function subscribeUserNotifications(
+  userId: string,
+  onData: (notifications: UserNotification[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const colRef = collection(db, 'user_notifications');
+    const q = query(colRef, where('userId', '==', userId));
+    return onSnapshot(
+      q,
+      (snap) => {
+        clearFirestoreQuotaExceeded();
+        const list: UserNotification[] = [];
+        snap.forEach((d) => {
+          list.push(d.data() as UserNotification);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        try {
+          localStorage.setItem(`crescer_notifs_${userId}`, JSON.stringify(list.slice(0, 30)));
+        } catch {}
+        onData(list);
+      },
+      (err) => {
+        console.warn('Erro ao escutar user_notifications no Firestore:', err);
+        handleFirestoreError(err, OperationType.LIST, 'user_notifications');
+        onError?.(err);
+        try {
+          const cached = localStorage.getItem(`crescer_notifs_${userId}`);
+          if (cached) onData(JSON.parse(cached));
+          else onData([]);
+        } catch {
+          onData([]);
+        }
+      }
+    );
+  } catch (e) {
+    console.warn('Fallback ao configurar listener de notificações:', e);
+    try {
+      const cached = localStorage.getItem(`crescer_notifs_${userId}`);
+      if (cached) onData(JSON.parse(cached));
+      else onData([]);
+    } catch {
+      onData([]);
+    }
+    return () => {};
+  }
+}
+
+/**
+ * Marca notificação como lida
+ */
+export async function markUserNotificationAsRead(notificationId: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'user_notifications', notificationId);
+    await updateDoc(docRef, { read: true });
+  } catch (err) {
+    console.warn('Erro ao marcar notificação como lida:', err);
+  }
+}
+
+/**
+ * Salva registro de lembrete de norma enviado (normas_reminders)
+ */
+export async function saveNormaReminderToFirestore(reminder: NormaReminderRecord): Promise<void> {
+  try {
+    const docRef = doc(db, 'normas_reminders', reminder.id);
+    await setDoc(docRef, reminder, { merge: true });
+    try {
+      localStorage.setItem(`crescer_reminder_${reminder.userId}`, JSON.stringify(reminder));
+    } catch {}
+  } catch (err) {
+    console.warn('Erro ao salvar lembrete de norma no Firestore:', err);
+    handleFirestoreError(err, OperationType.WRITE, 'normas_reminders');
+  }
+}
+
+/**
+ * Escuta todos os registros de lembrete de normas (normas_reminders) para a auditoria
+ */
+export function subscribeNormasReminders(
+  onData: (reminders: NormaReminderRecord[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const colRef = collection(db, 'normas_reminders');
+    return onSnapshot(
+      colRef,
+      (snap) => {
+        clearFirestoreQuotaExceeded();
+        const list: NormaReminderRecord[] = [];
+        snap.forEach((d) => {
+          list.push(d.data() as NormaReminderRecord);
+        });
+        onData(list);
+      },
+      (err) => {
+        console.warn('Erro ao escutar normas_reminders no Firestore:', err);
+        onError?.(err);
+        onData([]);
+      }
+    );
+  } catch {
+    onData([]);
+    return () => {};
+  }
+}
+
+/**
+ * Busca todos os lembretes de normas enviados
+ */
+export async function getAllNormasReminders(): Promise<NormaReminderRecord[]> {
+  try {
+    const colRef = collection(db, 'normas_reminders');
+    const snap = await getDocs(colRef);
+    const list: NormaReminderRecord[] = [];
+    snap.forEach((d) => {
+      list.push(d.data() as NormaReminderRecord);
+    });
+    return list;
+  } catch {
     return [];
   }
 }
