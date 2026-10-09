@@ -259,6 +259,7 @@ export type UserStatus = 'ATIVO' | 'INATIVO' | 'DESLIGADO' | 'ativo' | 'inativo'
 
 export interface UserProfile {
   id: string;
+  uid?: string; // UID alias para compatibilidade com Firebase Auth
   name: string;
   email: string;
   phone?: string; // Telefone / WhatsApp (ex: 19999999999 ou (19) 99999-9999)
@@ -483,6 +484,7 @@ export interface UserNotification {
   normaId?: string;
   normaTitle?: string;
   read: boolean;
+  status?: 'UNREAD' | 'READ';
   createdAt: string;
   createdBy?: string;
 }

@@ -1,7 +1,7 @@
 // Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings, UserNotification } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import {
   loadStudents,
@@ -132,6 +132,10 @@ import {
   forceManualSync,
   ConnectionState,
 } from './services/syncService';
+import {
+  subscribeUserNotifications,
+  markUserNotificationAsRead,
+} from './services/notificationService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
@@ -861,6 +865,40 @@ export default function App() {
       unsubRecords();
     };
   }, [shouldSyncRecords, selectedDate, todayStr]);
+
+  // 12. Listener Global de Notificações em Tempo Real (onSnapshot no Firestore)
+  // na coleção 'user_notifications' filtrada por userId == currentUser.uid AND status == 'UNREAD'
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>(() => {
+    if (!currentUser) return [];
+    try {
+      const uid = currentUser.uid || currentUser.id;
+      const cached = localStorage.getItem(`crescer_notifs_${uid}`);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    const userUid = currentUser?.uid || currentUser?.id;
+    if (!userUid) {
+      setUserNotifications([]);
+      return;
+    }
+
+    const unsubNotifications = subscribeUserNotifications(
+      userUid,
+      (list) => {
+        setUserNotifications(list);
+      },
+      (err) => {
+        console.warn('Erro ao escutar notificações em tempo real no App.tsx:', err);
+      }
+    );
+
+    return () => {
+      unsubNotifications();
+    };
+  }, [currentUser?.uid, currentUser?.id]);
 
   // Diagnóstico em console do total de ouvintes ativos em tempo real
   useEffect(() => {
@@ -2063,6 +2101,11 @@ export default function App() {
         {/* Banner de Notificação e Lembrete Direto no App (user_notifications) */}
         <UserNotificationBanner
           currentUser={currentUser}
+          notifications={userNotifications}
+          onDismissNotification={async (notifId) => {
+            setUserNotifications((prev) => prev.filter((n) => n.id !== notifId));
+            await markUserNotificationAsRead(notifId);
+          }}
           onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
         />
 

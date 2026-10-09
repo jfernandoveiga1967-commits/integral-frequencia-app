@@ -8,32 +8,40 @@ import {
 
 export interface UserNotificationBannerProps {
   currentUser: UserProfile | null;
+  notifications?: UserNotification[];
+  onDismissNotification?: (id: string) => Promise<void> | void;
   onNavigateToTab?: (tab: string) => void;
 }
 
 export const UserNotificationBanner: React.FC<UserNotificationBannerProps> = ({
   currentUser,
-  onNavigateToTab,
+  notifications: propsNotifications,
+  onDismissNotification,
 }) => {
-  const [notifications, setNotifications] = useState<UserNotification[]>(() => {
+  const [internalNotifications, setInternalNotifications] = useState<UserNotification[]>(() => {
     if (!currentUser) return [];
     try {
-      const cached = localStorage.getItem(`crescer_notifs_${currentUser.id}`);
+      const currentUid = currentUser.uid || currentUser.id;
+      const cached = localStorage.getItem(`crescer_notifs_${currentUid}`);
       if (cached) return JSON.parse(cached);
     } catch {}
     return [];
   });
 
+  const targetUid = currentUser?.uid || currentUser?.id;
+
+  // Se as notificações não vierem de fora via prop, ouve em tempo real
   useEffect(() => {
-    if (!currentUser?.id) {
-      setNotifications([]);
+    if (propsNotifications !== undefined) return;
+    if (!targetUid) {
+      setInternalNotifications([]);
       return;
     }
 
     const unsubscribe = subscribeUserNotifications(
-      currentUser.id,
+      targetUid,
       (list) => {
-        setNotifications(list);
+        setInternalNotifications(list);
       },
       (err) => {
         console.warn('Erro ao escutar notificações do usuário:', err);
@@ -43,47 +51,71 @@ export const UserNotificationBanner: React.FC<UserNotificationBannerProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [currentUser?.id]);
+  }, [targetUid, propsNotifications]);
 
-  // Apenas notificações não lidas
-  const unreadAlerts = notifications.filter((n) => !n.read);
+  const activeList = propsNotifications !== undefined ? propsNotifications : internalNotifications;
+
+  // Apenas notificações com status == 'UNREAD' (ou !read para compatibilidade)
+  const unreadAlerts = activeList.filter(
+    (n) => n.status === 'UNREAD' || (!n.read && n.status !== 'READ')
+  );
+
   if (unreadAlerts.length === 0) return null;
 
   const currentAlert = unreadAlerts[0];
 
   const handleDismiss = async (notificationId: string) => {
-    // Atualiza estado local imediatamente para fluidez
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+    // 1. Oculta imediatamente no estado local para resposta instantânea
+    setInternalNotifications((prev) =>
+      prev.map((n) =>
+        n.id === notificationId ? { ...n, read: true, status: 'READ' as const } : n
+      )
     );
+
+    if (onDismissNotification) {
+      try {
+        await onDismissNotification(notificationId);
+      } catch (err) {
+        console.warn('Erro ao disparar onDismissNotification:', err);
+      }
+    }
+
+    // 2. Atualiza no Firestore: status: 'READ' e read: true (sem forçar navegação imediata)
     try {
       await markUserNotificationAsRead(notificationId);
     } catch (err) {
-      console.warn('Aviso ao marcar notificação como lida:', err);
+      console.warn('Aviso ao marcar notificação como lida no Firestore:', err);
     }
   };
 
-  const handleAction = async (alertItem: UserNotification) => {
-    if (alertItem.linkTab && onNavigateToTab) {
-      onNavigateToTab(alertItem.linkTab);
-    }
-    await handleDismiss(alertItem.id);
-  };
+  // Monta a mensagem no padrão exato solicitado
+  const tituloNorma =
+    currentAlert.normaTitle ||
+    (currentAlert.title && !currentAlert.title.includes('🔔')
+      ? currentAlert.title
+      : 'Normas Internas e Rotina do Integral');
+
+  const formattedMessage =
+    currentAlert.message && currentAlert.message.includes('Identificamos que a norma')
+      ? currentAlert.message
+      : `Identificamos que a norma '📌 ${tituloNorma}' ainda aguarda sua leitura e confirmação de ciente no aplicativo. Por favor, acesse o módulo de Normas para ler e assinar quando possível.`;
 
   return (
-    <div className="bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 text-white rounded-2xl p-0.5 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
+    <aside
+      aria-label="Alerta Informativo do Sistema"
+      className="bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 text-white rounded-2xl p-0.5 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300"
+    >
       <div className="bg-slate-900/95 backdrop-blur-md rounded-[14px] p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white">
+        {/* Conteúdo Informativo */}
         <div className="flex items-start space-x-3 min-w-0">
           <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl shrink-0 border border-rose-500/30">
             <Bell className="w-5 h-5 animate-bounce" />
           </div>
+
           <div className="min-w-0">
             <div className="flex items-center space-x-2">
               <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500 text-white">
-                Prioridade Alta
-              </span>
-              <span className="text-xs text-rose-300 font-bold">
-                Lembrete da Coordenação
+                Aviso do Sistema
               </span>
               {unreadAlerts.length > 1 && (
                 <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-mono">
@@ -91,35 +123,32 @@ export const UserNotificationBanner: React.FC<UserNotificationBannerProps> = ({
                 </span>
               )}
             </div>
-            <h4 className="text-sm font-black text-white mt-0.5 leading-snug truncate">
-              {currentAlert.title || 'Norma Pendente de Leitura e Confirmação'}
+
+            {/* Título Oficial */}
+            <h4 className="text-sm font-black text-white mt-1 leading-snug">
+              🔔 Lembrete da Coordenação do Integral
             </h4>
-            <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-              {currentAlert.message}
+
+            {/* Mensagem Oficial Formatada */}
+            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+              {formattedMessage}
             </p>
           </div>
         </div>
 
+        {/* Apenas o botão discreto de fechar / ciente do aviso: [ ✖ Entendido ] */}
         <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
           <button
             type="button"
-            onClick={() => handleAction(currentAlert)}
-            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 cursor-pointer active:scale-95"
-          >
-            <span>Ler e Confirmar Ciência</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
             onClick={() => handleDismiss(currentAlert.id)}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
-            title="Dispensar aviso"
+            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white border border-slate-700 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95"
+            title="Dispensar aviso e marcar como lido"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5 text-rose-400" />
+            <span>Entendido</span>
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 };

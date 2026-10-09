@@ -141,18 +141,19 @@ export const EnviarLembreteModal: React.FC<EnviarLembreteModalProps> = ({
     const nowIso = new Date().toISOString();
 
     try {
-      // 1. Grava o alerta na coleção 'user_notifications' com prioridade alta
+      // 1. Grava o alerta na coleção 'user_notifications' com prioridade alta e status UNREAD
       await saveUserNotificationToFirestore({
         id: `notif_${targetUser.id}_${Date.now()}`,
         userId: targetUser.id,
         userName: targetUser.name,
-        title: `Leitura Pendente: ${selectedNormaTitle}`,
-        message: `Identificamos que a norma '📌 ${selectedNormaTitle}' ainda aguarda sua leitura e confirmação de ciente no aplicativo. Por favor, acesse o app para ler e assinar. Atenciosamente, Coordenação do Integral`,
+        title: `🔔 Lembrete da Coordenação do Integral`,
+        message: `Identificamos que a norma '📌 ${selectedNormaTitle}' ainda aguarda sua leitura e confirmação de ciente no aplicativo. Por favor, acesse o módulo de Normas para ler e assinar quando possível.`,
         priority: 'alta',
         type: 'norma_pendente',
         linkTab: 'manual',
         normaTitle: selectedNormaTitle,
         read: false,
+        status: 'UNREAD',
         createdAt: nowIso,
         createdBy: currentUser?.name || 'Coordenação',
       });

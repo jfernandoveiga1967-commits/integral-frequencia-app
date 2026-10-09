@@ -3654,17 +3654,22 @@ export async function getAllNormasAceites(): Promise<NormaAceite[]> {
 }
 
 /**
- * Salva notificação de usuário na coleção 'user_notifications' com prioridade alta
+ * Salva notificação de usuário na coleção 'user_notifications' com prioridade alta e status UNREAD
  */
 export async function saveUserNotificationToFirestore(notification: UserNotification): Promise<void> {
   try {
-    const docRef = doc(db, 'user_notifications', notification.id);
-    await setDoc(docRef, notification, { merge: true });
+    const payload: UserNotification = {
+      ...notification,
+      status: notification.status || 'UNREAD',
+      read: notification.read ?? false,
+    };
+    const docRef = doc(db, 'user_notifications', payload.id);
+    await setDoc(docRef, payload, { merge: true });
     try {
-      const stored = localStorage.getItem(`crescer_notifs_${notification.userId}`);
+      const stored = localStorage.getItem(`crescer_notifs_${payload.userId}`);
       const list: UserNotification[] = stored ? JSON.parse(stored) : [];
-      const updated = [notification, ...list.filter((n) => n.id !== notification.id)];
-      localStorage.setItem(`crescer_notifs_${notification.userId}`, JSON.stringify(updated.slice(0, 30)));
+      const updated = [payload, ...list.filter((n) => n.id !== payload.id)];
+      localStorage.setItem(`crescer_notifs_${payload.userId}`, JSON.stringify(updated.slice(0, 30)));
     } catch {}
   } catch (err) {
     console.warn('Erro ao salvar notificação do usuário no Firestore:', err);
@@ -3675,15 +3680,24 @@ export async function saveUserNotificationToFirestore(notification: UserNotifica
 
 /**
  * Escuta notificações do usuário específico em tempo real
+ * Filtrada por userId == currentUser.uid AND status == 'UNREAD'
  */
 export function subscribeUserNotifications(
   userId: string,
   onData: (notifications: UserNotification[]) => void,
   onError?: (err: any) => void
 ): () => void {
+  if (!userId) {
+    onData([]);
+    return () => {};
+  }
   try {
     const colRef = collection(db, 'user_notifications');
-    const q = query(colRef, where('userId', '==', userId));
+    const q = query(
+      colRef,
+      where('userId', '==', userId),
+      where('status', '==', 'UNREAD')
+    );
     return onSnapshot(
       q,
       (snap) => {
@@ -3699,14 +3713,37 @@ export function subscribeUserNotifications(
         onData(list);
       },
       (err) => {
-        console.warn('Erro ao escutar user_notifications no Firestore:', err);
-        handleFirestoreError(err, OperationType.LIST, 'user_notifications');
-        onError?.(err);
+        console.warn('Erro ao escutar user_notifications com status UNREAD, usando fallback:', err);
+        // Fallback resiliente caso existam documentos sem status explícito
         try {
-          const cached = localStorage.getItem(`crescer_notifs_${userId}`);
-          if (cached) onData(JSON.parse(cached));
-          else onData([]);
+          const fallbackQ = query(colRef, where('userId', '==', userId));
+          return onSnapshot(
+            fallbackQ,
+            (fallbackSnap) => {
+              const list: UserNotification[] = [];
+              fallbackSnap.forEach((d) => {
+                const item = d.data() as UserNotification;
+                if (item.status === 'UNREAD' || (!item.read && item.status !== 'READ')) {
+                  list.push(item);
+                }
+              });
+              list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+              onData(list);
+            },
+            (fallbackErr) => {
+              handleFirestoreError(fallbackErr, OperationType.LIST, 'user_notifications');
+              onError?.(fallbackErr);
+              try {
+                const cached = localStorage.getItem(`crescer_notifs_${userId}`);
+                if (cached) onData(JSON.parse(cached));
+                else onData([]);
+              } catch {
+                onData([]);
+              }
+            }
+          );
         } catch {
+          onError?.(err);
           onData([]);
         }
       }
@@ -3725,12 +3762,16 @@ export function subscribeUserNotifications(
 }
 
 /**
- * Marca notificação como lida
+ * Marca notificação como lida no Firestore atualizando status para 'READ'
  */
 export async function markUserNotificationAsRead(notificationId: string): Promise<void> {
   try {
     const docRef = doc(db, 'user_notifications', notificationId);
-    await updateDoc(docRef, { read: true });
+    await updateDoc(docRef, {
+      read: true,
+      status: 'READ',
+      readAt: new Date().toISOString(),
+    });
   } catch (err) {
     console.warn('Erro ao marcar notificação como lida:', err);
   }
