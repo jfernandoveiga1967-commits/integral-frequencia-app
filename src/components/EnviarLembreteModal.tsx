@@ -57,23 +57,16 @@ export const EnviarLembreteModal: React.FC<EnviarLembreteModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // App Link calculation
-  const appLink = useMemo(() => {
-    if (typeof window !== 'undefined' && window.location) {
-      return `${window.location.origin}`;
-    }
-    return 'https://ais-pre-5rjshkym6njzczm43eb6k4-381793974571.us-east1.run.app';
-  }, []);
-
-  // Exact template from prompt directive:
-  // "Olá, {nome}! Lembrete da Coordenação do Integral:
+  // Template oficial do lembrete:
+  // "Olá, {nomeCompleto}! Lembrete da Coordenação do Integral:
   // Identificamos que a norma '📌 {tituloNorma}' ainda aguarda sua leitura e confirmação de ciente no aplicativo.
-  // Por favor, acesse o app para ler e assinar: {linkApp}"
+  // Por favor, acesse o app para ler e assinar.
+  // Atenciosamente, Coordenação do Integral"
   const messageText = useMemo(() => {
-    const nome = targetUser.name || 'Colaborador';
-    const titulo = selectedNormaTitle.trim();
-    return `Olá, ${nome}! Lembrete da Coordenação do Integral:\nIdentificamos que a norma '📌 ${titulo}' ainda aguarda sua leitura e confirmação de ciente no aplicativo.\nPor favor, acesse o app para ler e assinar: ${appLink}`;
-  }, [targetUser.name, selectedNormaTitle, appLink]);
+    const nomeCompleto = (targetUser.name || 'Colaborador').trim();
+    const tituloNorma = selectedNormaTitle.trim();
+    return `Olá, ${nomeCompleto}! Lembrete da Coordenação do Integral:\nIdentificamos que a norma '📌 ${tituloNorma}' ainda aguarda sua leitura e confirmação de ciente no aplicativo.\nPor favor, acesse o app para ler e assinar.\nAtenciosamente, Coordenação do Integral`;
+  }, [targetUser.name, selectedNormaTitle]);
 
   const whatsappUrl = useMemo(() => {
     return generateWhatsAppUrl(phone, messageText);
@@ -154,7 +147,7 @@ export const EnviarLembreteModal: React.FC<EnviarLembreteModalProps> = ({
         userId: targetUser.id,
         userName: targetUser.name,
         title: `Leitura Pendente: ${selectedNormaTitle}`,
-        message: `Identificamos que a norma '📌 ${selectedNormaTitle}' ainda aguarda sua leitura e confirmação de ciente no aplicativo.`,
+        message: `Identificamos que a norma '📌 ${selectedNormaTitle}' ainda aguarda sua leitura e confirmação de ciente no aplicativo. Por favor, acesse o app para ler e assinar. Atenciosamente, Coordenação do Integral`,
         priority: 'alta',
         type: 'norma_pendente',
         linkTab: 'manual',
@@ -368,7 +361,7 @@ export const EnviarLembreteModal: React.FC<EnviarLembreteModalProps> = ({
                   <ExternalLink className="w-4 h-4 text-emerald-200 group-hover:translate-x-0.5 transition-transform" />
                 </div>
                 <p className="text-[10px] text-emerald-100 text-left font-normal">
-                  Abre o WhatsApp com mensagem e link direto para o número da monitora.
+                  Abre o WhatsApp com a mensagem formatada diretamente para o contato da monitora.
                 </p>
               </button>
 
