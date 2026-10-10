@@ -93,6 +93,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /manual_user_progress/{userId} {
+      allow read, write: if true;
+    }
+
+    match /manual_acknowledgments/{ackId} {
+      allow read, write: if true;
+    }
+
     match /test/{docId} {
       allow read, write: if true;
     }

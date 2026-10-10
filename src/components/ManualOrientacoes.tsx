@@ -65,6 +65,16 @@ import {
 import { isCoordenador, getLocalUsersList } from '../utils/authUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { EnviarLembreteModal } from './EnviarLembreteModal';
+import { ManualNormaCard } from './ManualNormaCard';
+import { TermoAceiteManual } from './TermoAceiteManual';
+import {
+  subscribeUserManualProgress,
+  markNormaCompletedInFirestore,
+  saveFullManualAcknowledgmentToFirestore,
+  subscribeUserManualAcknowledgment,
+  ManualAcknowledgmentRecord,
+  UserManualProgress,
+} from '../services/manualProgressService';
 
 export interface ManualOrientacoesProps {
   currentUser?: UserProfile | null;
@@ -993,6 +1003,36 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
   const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});
 
+  // Novo mecanismo de dois níveis: Checklist por Norma + Trava do Termo Geral
+  const [normIdsCompleted, setNormIdsCompleted] = useState<string[]>([]);
+  const [currentAckRecord, setCurrentAckRecord] = useState<ManualAcknowledgmentRecord | null>(null);
+
+  const currentUserId = currentUser?.id || (currentUser as any)?.uid || '';
+
+  // Escuta o array 'normIdsCompleted' do Firestore do usuário logado
+  useEffect(() => {
+    if (!currentUserId) {
+      setNormIdsCompleted([]);
+      return;
+    }
+    const unsub = subscribeUserManualProgress(currentUserId, (prog) => {
+      setNormIdsCompleted(prog.normIdsCompleted || []);
+    });
+    return () => unsub();
+  }, [currentUserId]);
+
+  // Escuta o aceite final na coleção 'manual_acknowledgments'
+  useEffect(() => {
+    if (!currentUserId) {
+      setCurrentAckRecord(null);
+      return;
+    }
+    const unsub = subscribeUserManualAcknowledgment(currentUserId, (ack) => {
+      setCurrentAckRecord(ack);
+    });
+    return () => unsub();
+  }, [currentUserId]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -1069,39 +1109,53 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
     ).length;
   }, [eligibleUsers, allAceites]);
 
-  // Confirmar leitura do Manual pelo usuário atual
-  const handleConfirmAceite = async () => {
-    if (!currentUser) {
-      alert('É necessário estar autenticado para registrar o termo de ciência.');
+  // Ação 1: Confirmar Ciência de Norma Individual (Checklist individual 100%)
+  const handleConfirmNormaScience = async (normaId: string) => {
+    if (!currentUserId) {
+      alert('É necessário estar autenticado para registrar ciência na norma.');
       return;
     }
-    if (!hasDeclaredCheckbox) {
-      alert('Por favor, marque a caixa confirmando que leu e está de acordo com as normas.');
+
+    try {
+      const updated = await markNormaCompletedInFirestore(currentUserId, normaId, currentUser);
+      setNormIdsCompleted(updated);
+      showToast('🟢 Ciência da norma confirmada com sucesso!');
+    } catch (err: any) {
+      alert(`Erro ao registrar ciência da norma: ${err?.message || 'Falha na conexão'}`);
+    }
+  };
+
+  // Ação 2: Confirmar e Aceitar Todo o Manual Institucional (Após normIdsCompleted === totalNormasAtivas)
+  const handleConfirmFullManual = async () => {
+    if (!currentUser) {
+      alert('É necessário estar autenticado para registrar o termo de ciência institucional.');
+      return;
+    }
+
+    const totalAtivas = normas.length;
+    if (normIdsCompleted.length < totalAtivas) {
+      alert(`Você ainda possui ${totalAtivas - normIdsCompleted.length} norma(s) pendente(s) de leitura.`);
       return;
     }
 
     try {
       setIsConfirmingAceite(true);
-      const payload: NormaAceite = {
-        id: `aceite_${currentUser.id}`,
-        userId: currentUser.id,
-        userName: currentUser.name || 'Colaborador',
-        userEmail: currentUser.email || '',
-        userRole: currentUser.cargoLabel || currentUser.role || 'auxiliar',
-        timestamp: new Date().toISOString(),
-        appVersion: '2026.1',
-        manualHash: 'crescer_manual_normas_2026_v1',
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-      };
-
-      await saveNormaAceiteToFirestore(payload);
-      showToast('Termo de Ciência e Compromisso registrado com sucesso no Firestore!');
+      const ackRecord = await saveFullManualAcknowledgmentToFirestore({
+        currentUser,
+        totalNormasCount: totalAtivas,
+        normIdsCompleted,
+      });
+      setCurrentAckRecord(ackRecord);
+      showToast('🎉 Termo de Aceite Institucional de todo o manual registrado com sucesso no Firestore!');
     } catch (err: any) {
-      alert(`Erro ao registrar aceite: ${err?.message || 'Falha na conexão'}`);
+      alert(`Erro ao registrar aceite do manual: ${err?.message || 'Falha na conexão'}`);
     } finally {
       setIsConfirmingAceite(false);
     }
   };
+
+  // Mantém compatibilidade com handleConfirmAceite
+  const handleConfirmAceite = handleConfirmFullManual;
 
   // Enviar lembrete a colaborador pendente
   const handleSendReminder = (userId: string, userName: string) => {
@@ -1879,185 +1933,27 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
                       const isNormaExpanded = Boolean(expandedNormas[norma.id]);
                       const isHighlighted = highlightedCardId === norma.id;
 
-                      const isProibicao = norma.type === 'proibicao';
-                      const isAlerta = norma.type === 'alerta';
-                      const isRecomendado = norma.type === 'recomendado';
-
-                      const cardBorder = isHighlighted
-                        ? 'border-indigo-500 ring-4 ring-indigo-400/30 bg-indigo-50/40 shadow-lg'
-                        : isProibicao
-                        ? 'border-rose-200 hover:border-rose-300 bg-white'
-                        : isAlerta
-                        ? 'border-amber-200 hover:border-amber-300 bg-white'
-                        : isRecomendado
-                        ? 'border-emerald-200 hover:border-emerald-300 bg-white'
-                        : 'border-slate-200 hover:border-indigo-200 bg-white';
-
-                      const badgeBg = isProibicao
-                        ? 'bg-rose-600 text-white'
-                        : isAlerta
-                        ? 'bg-amber-500 text-white'
-                        : isRecomendado
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-indigo-600 text-white';
-
-                      const badgeIcon = isProibicao ? (
-                        <Ban className="w-3 h-3 text-rose-200 shrink-0" />
-                      ) : isAlerta ? (
-                        <AlertTriangle className="w-3 h-3 text-amber-200 shrink-0" />
-                      ) : isRecomendado ? (
-                        <CheckCircle2 className="w-3 h-3 text-emerald-200 shrink-0" />
-                      ) : (
-                        <Sparkles className="w-3 h-3 text-indigo-200 shrink-0" />
-                      );
-
-                      const badgeLabel = isProibicao
-                        ? 'PROIBIÇÃO / INFRAÇÃO GRAVE'
-                        : isAlerta
-                        ? 'ATENÇÃO & SEGURANÇA'
-                        : isRecomendado
-                        ? 'BOA PRÁTICA RECOMENDADA'
-                        : 'ORIENTAÇÃO INSTITUCIONAL - PROGRAMA DO INTEGRAL';
-
-                      const moduleMeta = MODULE_METADATA[norma.moduleId];
+                      const isNormaCompleted = normIdsCompleted.includes(norma.id);
 
                       return (
-                        <div
+                        <ManualNormaCard
                           key={norma.id}
-                          id={`card-${norma.id}`}
-                          className={`rounded-2xl border ${cardBorder} shadow-xs overflow-hidden transition-all duration-200`}
-                        >
-                          {/* Top Card Header */}
-                          <div className="p-4 sm:p-4.5 flex items-start sm:items-center justify-between gap-3 text-left">
-                            <div
-                              onClick={() => toggleNormaCard(norma.id)}
-                              className="flex-1 flex items-start sm:items-center space-x-3 cursor-pointer"
-                            >
-                              <div className="p-2 rounded-xl bg-slate-900 text-white shrink-0 mt-0.5 sm:mt-0 shadow-2xs">
-                                {norma.moduleId === 'normas_internas' ? (
-                                  <Award className="w-4 h-4 text-indigo-400" />
-                                ) : norma.moduleId === 'academia_transporte' ? (
-                                  <Bus className="w-4 h-4 text-amber-400" />
-                                ) : (
-                                  <HeartHandshake className="w-4 h-4 text-rose-400" />
-                                )}
-                              </div>
-                              <div>
-                                <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                                  <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${badgeBg}`}>
-                                    {badgeIcon}
-                                    <span>{badgeLabel}</span>
-                                  </span>
-                                  {norma.sectionNumber && (
-                                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                                      Seção {norma.sectionNumber}
-                                    </span>
-                                  )}
-                                  <span className="text-[11px] font-bold text-slate-400">
-                                    {moduleMeta ? moduleMeta.title : norma.moduleTitle}
-                                  </span>
-                                </div>
-
-                                <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
-                                  {norma.title}
-                                </h4>
-                                {norma.summary && (
-                                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
-                                    {norma.summary}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Actions: Admin (Edit / Delete) + Toggle Chevron */}
-                            <div className="flex items-center space-x-1.5 shrink-0">
-                              {isAdmin && (
-                                <div className="flex items-center space-x-1 bg-slate-50 border border-slate-200 rounded-xl p-1">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setNormaEditing(norma);
-                                      setIsEditModalOpen(true);
-                                    }}
-                                    className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
-                                    title="Editar esta norma"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setNormaDeleting(norma);
-                                    }}
-                                    className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
-                                    title="Excluir esta norma do banco"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => toggleNormaCard(norma.id)}
-                                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
-                                title={isNormaExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
-                              >
-                                {isNormaExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Expanded Card Details */}
-                          {isNormaExpanded && (
-                            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 bg-slate-50/50">
-                              {norma.summary && (
-                                <p className="text-xs text-slate-700 font-semibold bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                                  {norma.summary}
-                                </p>
-                              )}
-
-                              <div>
-                                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                                  Diretrizes e Procedimentos Oficiais:
-                                </span>
-                                <ul className="space-y-1.5">
-                                  {norma.details.map((detail, dIdx) => (
-                                    <li
-                                      key={dIdx}
-                                      className="text-xs text-slate-800 flex items-start space-x-2 leading-relaxed"
-                                    >
-                                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
-                                      <span>{detail}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-
-                              <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {Array.isArray(norma.tags) &&
-                                    norma.tags.map((tag) => (
-                                      <span
-                                        key={tag}
-                                        className="text-[9px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200"
-                                      >
-                                        #{tag}
-                                      </span>
-                                    ))}
-                                </div>
-
-                                {norma.updatedAt && (
-                                  <span className="text-[10px] text-slate-400 font-medium">
-                                    Atualizado em {new Date(norma.updatedAt).toLocaleDateString('pt-BR')} {norma.updatedBy ? `por ${norma.updatedBy}` : ''}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                          norma={norma}
+                          isExpanded={isNormaExpanded}
+                          isHighlighted={isHighlighted}
+                          isAdmin={isAdmin}
+                          currentUser={currentUser}
+                          isCompleted={isNormaCompleted}
+                          onToggleExpand={() => toggleNormaCard(norma.id)}
+                          onConfirmNormaScience={handleConfirmNormaScience}
+                          onEditNorma={(n) => {
+                            setNormaEditing(n);
+                            setIsEditModalOpen(true);
+                          }}
+                          onDeleteNorma={(n) => {
+                            setNormaDeleting(n);
+                          }}
+                        />
                       );
                     })}
                   </div>
@@ -2068,129 +1964,33 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
         )}
       </div>
 
-      {/* 5. TERMO DE CIÊNCIA E COMPROMISSO INSTITUCIONAL (RODAPÉ) */}
-      <div id="termo-de-aceite" className="mt-8 rounded-3xl overflow-hidden border shadow-sm transition-all duration-200">
-        {currentUserAceite ? (
-          // CARD QUANDO JÁ ASSINADO
-          <div className="bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 border-2 border-emerald-400 p-6 sm:p-7 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start sm:items-center space-x-3.5">
-                <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md shrink-0">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Termo de Ciência Assinado</span>
-                    </span>
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                      Conformidade Verificada
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900 leading-tight">
-                    Declaração de Ciência e Compromisso Institucional
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Seu aceite digital está registrado e autenticado com segurança no banco de dados.
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-left sm:text-right sm:self-center shrink-0 bg-white/80 p-3 rounded-2xl border border-emerald-200/80 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Assinado em</span>
-                <span className="text-xs font-black text-emerald-700 block">
-                  {new Date(currentUserAceite.timestamp).toLocaleDateString('pt-BR')} às{' '}
-                  {new Date(currentUserAceite.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <span className="text-[9px] text-slate-400 block font-mono">
-                  Hash: {currentUserAceite.manualHash}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white/90 p-4 rounded-2xl border border-emerald-100 text-xs text-slate-700 leading-relaxed space-y-1.5 shadow-2xs">
-              <p className="font-semibold text-slate-800">
-                "Eu, <strong className="text-emerald-900">{currentUser?.name || currentUserAceite.userName}</strong> ({currentUser?.email || currentUserAceite.userEmail}), confirmo que realizei a leitura atenta e tomei plena ciência de todas as diretrizes do Manual de Normas Internas, Rotina do Integral, Regras da Academia e Transporte, e do Guia de Abordagem Sensível do Colégio Crescer, assumindo o compromisso de aplicá-las com rigor e zelo profissional."
-              </p>
-              <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-400 pt-2 border-t border-slate-100">
-                <span>Colaborador(a): <strong>{currentUser?.name || currentUserAceite.userName}</strong></span>
-                <span>Função: <strong>{currentUser?.cargoLabel || currentUser?.role || currentUserAceite.userRole}</strong></span>
-                <span>Registro ID: <code className="font-mono text-emerald-600 font-bold">{currentUserAceite.id}</code></span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          // CARD QUANDO PENDENTE
-          <div className="bg-gradient-to-br from-indigo-50/90 via-white to-amber-50/50 border-2 border-indigo-200 p-6 sm:p-7 space-y-4">
-            <div className="flex items-start space-x-3.5">
-              <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-md shrink-0">
-                <FileCheck className="w-6 h-6 text-amber-300" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white">
-                    <AlertTriangle className="w-3 h-3" />
-                    <span>Aguardando Confirmação de Leitura</span>
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Conformidade Funcional 2026/2027
-                  </span>
-                </div>
-                <h3 className="text-lg font-black text-slate-900">
-                  Termo de Ciência e Compromisso Institucional
-                </h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Conforme as disposições regimentais do Colégio Crescer, todas as monitoras, docentes e colaboradores do Programa Integral devem formalizar a ciência das normas e condutas após a leitura do manual.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 text-xs text-slate-700 leading-relaxed space-y-2 shadow-2xs">
-              <p className="font-medium">
-                <strong>Declaração de Ciência:</strong> "Declaro que li atentamente e compreendi todas as 32 normas, fluxos operacionais, diretrizes de vestuário, uso do rádio frequência 2, regras de segurança do parque e da academia, e os princípios de abordagem sensível e não violenta estabelecidos pela Coordenação do Programa Integral do Colégio Crescer, comprometendo-me a cumpri-las integralmente."
-              </p>
-
-              <label className="flex items-start space-x-2.5 pt-2 border-t border-slate-100 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={hasDeclaredCheckbox}
-                  onChange={(e) => setHasDeclaredCheckbox(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded-md border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                />
-                <span className="text-xs font-bold text-slate-800">
-                  Confirmo que li todo o manual e estou de acordo com todas as diretrizes institucionais.
-                </span>
-              </label>
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-              <p className="text-[11px] text-slate-500">
-                Seu aceite registrará data, hora e autenticação digital vinculada ao seu usuário ({currentUser?.name || 'Colaborador'}).
-              </p>
-
-              <button
-                type="button"
-                onClick={handleConfirmAceite}
-                disabled={isConfirmingAceite || !hasDeclaredCheckbox}
-                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-700/30 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              >
-                {isConfirmingAceite ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Registrando Aceite no Firestore...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                    <span>[ Confirmar Leitura e Ciente das Normas ]</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* 5. TERMO DE CIÊNCIA E COMPROMISSO INSTITUCIONAL COM TRAVA DE LIBERAÇÃO (RODAPÉ) */}
+      <TermoAceiteManual
+        currentUser={currentUser}
+        totalNormasAtivas={normas.length}
+        normIdsCompleted={normIdsCompleted}
+        existingAcknowledgment={currentAckRecord}
+        legacyAceite={currentUserAceite}
+        isConfirming={isConfirmingAceite}
+        onConfirmFullManual={handleConfirmFullManual}
+        onNavigateToPendingNormas={() => {
+          // Localiza a primeira norma pendente e foca nela
+          const firstPending = normas.find((n) => !normIdsCompleted.includes(n.id));
+          if (firstPending) {
+            const cat = getThematicCategory(firstPending);
+            setExpandedCategories((prev) => ({ ...prev, [cat]: true }));
+            setExpandedNormas((prev) => ({ ...prev, [firstPending.id]: true }));
+            setHighlightedCardId(firstPending.id);
+            const el = document.getElementById(`card-${firstPending.id}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            setTimeout(() => setHighlightedCardId(null), 3000);
+          } else {
+            window.scrollTo({ top: 350, behavior: 'smooth' });
+          }
+        }}
+      />
 
       {/* Admin Status de Aceite Modal */}
       {isStatusAceiteModalOpen && (
