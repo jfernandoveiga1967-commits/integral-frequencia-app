@@ -534,7 +534,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormValorHoraAula(
       user.valorHoraAula !== undefined && user.valorHoraAula !== null && Number(user.valorHoraAula) > 0
         ? user.valorHoraAula
-        : (isPrestadorDanyel || initialRegime === 'prestador_aula_efetiva' ? 80 : '')
+        : (isPrestadorDanyel || initialRegime === 'prestador_aula_efetiva' ? 33.06 : '')
     );
     setFormDuracaoAulaMinutos(
       user.duracaoAulaMinutos !== undefined && Number(user.duracaoAulaMinutos) > 0
@@ -2897,7 +2897,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       onClick={() => {
                         setFormRegimeTrabalho('prestador_aula_efetiva');
                         if (!formValorHoraAula || Number(formValorHoraAula) <= 0) {
-                          setFormValorHoraAula(80);
+                          setFormValorHoraAula(33.06);
                         }
                         if (!formDuracaoAulaMinutos || Number(formDuracaoAulaMinutos) <= 0) {
                           setFormDuracaoAulaMinutos(50);
@@ -2934,7 +2934,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             required
                             value={formValorHoraAula}
                             onChange={(e) => setFormValorHoraAula(e.target.value)}
-                            placeholder="Ex: 80.00"
+                            placeholder="Ex: 33.06"
                             className="w-full px-3 py-2 bg-emerald-50/40 border border-emerald-300 rounded-xl text-emerald-950 font-bold font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
                           <span className="text-[9px] text-slate-500 block mt-0.5">

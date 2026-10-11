@@ -298,6 +298,22 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     };
   }, [monthKey, isOpen, currentUser]);
 
+  // Escutador para atualizações em tempo real quando chamadas forem salvas ou atualizadas
+  useEffect(() => {
+    const handleMealUpdate = (e: any) => {
+      if (e.detail?.baseReport?.entries) {
+        setCustomEntries((prev) => ({
+          ...prev,
+          ...e.detail.baseReport.entries,
+        }));
+      }
+    };
+    window.addEventListener('app_meal_report_updated', handleMealUpdate);
+    return () => {
+      window.removeEventListener('app_meal_report_updated', handleMealUpdate);
+    };
+  }, []);
+
   // Identificação do período ativo (ex: 1ª Quinzena, 2ª Quinzena, Mês Completo ou Personalizado)
   const periodInfo = useMemo(() => {
     const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -1201,10 +1217,10 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                   <th className="py-3 px-3 w-28 text-center" title="Presentes apurados automaticamente na chamada de rotina do dia">
                     Chamada (Auto)
                   </th>
-                  <th className="py-3 px-3 w-36 text-center">
+                  <th className="py-3 px-3 w-44 text-center">
                     <span className="flex items-center justify-center space-x-1">
                       <Edit3 className="w-3 h-3 text-amber-400" />
-                      <span>Alunos (Editável)</span>
+                      <span>Alunos Editáveis / Refeições Servidas</span>
                     </span>
                   </th>
                   <th className="py-3 px-3 w-32 text-right">Valor Unit. (R$)</th>

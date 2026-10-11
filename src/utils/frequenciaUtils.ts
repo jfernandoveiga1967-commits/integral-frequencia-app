@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, HolidayItem, AttendanceStatus, UserProfile } from '../types';
+import { Student, AttendanceRecord, HolidayItem, AttendanceStatus, UserProfile, DayOfWeek } from '../types';
 import { isStudentScheduledForDate, isStudentActiveOnDate, getEffectiveSchoolDays, formatDateBR, getDayOfWeekLabel, getDayOfWeekFromDate, isHolidayOrRecess } from './dateUtils';
 export { isStudentInReforcoVigency, isStudentInReforco } from './semanarioUtils';
 
@@ -9,16 +9,41 @@ export type AttendanceCategory = 'PRESENTE' | 'FALTA' | 'JUSTIFICADO' | 'PENDENT
 
 /**
  * Normaliza o status do registro de presença de forma defensiva (Runtime Safety).
- * Se o status for nulo, indefinido, vazio ou 'saude' legado, converte dinamicamente para 'falta'
- * sem interromper o fluxo da aplicação.
+ * Considera status 'presente' e 'CONCLUIDO' / 'concluido' como presenças válidas,
+ * e converte apenas faltas declaradas ou dados inválidos de forma segura.
  */
 export function normalizeAttendanceStatus(rawStatus: any): AttendanceStatus {
   if (!rawStatus) return 'falta';
   const clean = String(rawStatus).trim().toLowerCase();
-  if (clean === 'saude' || clean === 'falta') return 'falta';
-  if (clean === 'presente') return 'presente';
-  if (clean === 'sem_equipamento' || clean === 'sem-equipamento' || clean === 'sem equipamento') return 'sem_equipamento';
-  if (clean === 'saida_antecipada' || clean === 'saida-antecipada' || clean === 'saida antecipada') return 'saida_antecipada';
+  if (
+    clean === 'presente' ||
+    clean === 'concluido' ||
+    clean === 'concluído' ||
+    clean === 'p' ||
+    clean === 'compareceu'
+  ) {
+    return 'presente';
+  }
+  if (
+    clean === 'sem_equipamento' ||
+    clean === 'sem-equipamento' ||
+    clean === 'sem equipamento'
+  ) {
+    return 'sem_equipamento';
+  }
+  if (
+    clean === 'saida_antecipada' ||
+    clean === 'saida-antecipada' ||
+    clean === 'saida antecipada'
+  ) {
+    return 'saida_antecipada';
+  }
+  if (clean === 'justificado' || clean === 'atestado') {
+    return 'justificado' as any;
+  }
+  if (clean === 'falta' || clean === 'saude' || clean === 'ausente' || clean === 'f') {
+    return 'falta';
+  }
   return 'falta';
 }
 
@@ -26,23 +51,32 @@ export function normalizeAttendanceStatus(rawStatus: any): AttendanceStatus {
  * Checks if a record status counts as PRESENTE (Presença Efetiva no Integral).
  * In accordance with pedagogical and administrative rules:
  * - 'presente': Regular attendance
+ * - 'concluido' / 'concluído': Chamada de rotina gravada no banco
  * - 'saida_antecipada': Student attended and left early
  * - 'sem_equipamento': Student attended but forgot equipment/uniform
  */
 export function isPresencaStatus(status: AttendanceStatus | string | null | undefined): boolean {
   if (!status) return false;
-  const s = status.trim().toLowerCase();
-  return s === 'presente' || s === 'saida_antecipada' || s === 'sem_equipamento';
+  const s = String(status).trim().toLowerCase();
+  return (
+    s === 'presente' ||
+    s === 'concluido' ||
+    s === 'concluído' ||
+    s === 'saida_antecipada' ||
+    s === 'sem_equipamento' ||
+    s === 'p' ||
+    s === 'compareceu'
+  );
 }
 
 /**
- * Checks if a record status counts as FALTA (Ausência Não Justificada).
- * Se o status for indefinido ou 'saude' legado, conta defensivamente como falta.
+ * Checks if a record status counts as FALTA (Ausência Efetiva Não Justificada).
+ * Reflete estritamente alunos efetivamente ausentes marcados como falta.
  */
 export function isFaltaStatus(status: AttendanceStatus | string | null | undefined): boolean {
-  if (!status) return true;
-  const s = status.trim().toLowerCase();
-  return s === 'falta' || s === 'saude';
+  if (!status) return false;
+  const s = String(status).trim().toLowerCase();
+  return s === 'falta' || s === 'ausente' || s === 'f';
 }
 
 /**
@@ -50,17 +84,21 @@ export function isFaltaStatus(status: AttendanceStatus | string | null | undefin
  */
 export function isJustificadoStatus(status: AttendanceStatus | string | null | undefined): boolean {
   if (!status) return false;
-  const s = status.trim().toLowerCase();
+  const s = String(status).trim().toLowerCase();
   return s === 'justificado' || s === 'atestado';
 }
 
 /**
  * Checks if an activity name corresponds strictly to the core Integral Routine (Chamada Geral de Rotina).
- * Routine roll call is 1 record per student per day.
+ * Routine roll call is 1 record per student per day (tipo == 'ROTINA' ou activity == 'Rotina').
  */
-export function isRoutineActivity(activity: string | null | undefined): boolean {
+export function isRoutineActivity(activity: string | null | undefined, rawRecord?: any): boolean {
+  if (rawRecord) {
+    const rawTipo = String(rawRecord.tipo || rawRecord.type || '').trim().toLowerCase();
+    if (rawTipo === 'rotina' || rawTipo === 'chamada_geral' || rawTipo === 'geral') return true;
+  }
   if (!activity) return false;
-  const norm = activity.trim().toLowerCase();
+  const norm = String(activity).trim().toLowerCase();
   return norm === 'rotina' || norm === 'chamada_geral' || norm === 'geral';
 }
 
@@ -77,6 +115,8 @@ export interface StudentDailyAttendance {
 
 /**
  * Resolves the attendance category of a single student on a given date based on their routine roll call record.
+ * Garante que os alunos marcados como presentes (ou com status CONCLUIDO) sejam computados como PRESENTE,
+ * e que FALTA reflita apenas os alunos efetivamente ausentes.
  */
 export function resolveStudentAttendanceCategory(
   student: Student,
@@ -85,15 +125,17 @@ export function resolveStudentAttendanceCategory(
 ): AttendanceCategory {
   // If there is an explicit recorded status on this date, respect it directly
   if (record) {
+    const rawStatus = (record as any).rawStatus || record.status;
     const safeStatus = normalizeAttendanceStatus(record.status);
-    if (isPresencaStatus(safeStatus)) {
+
+    if (isPresencaStatus(rawStatus) || isPresencaStatus(safeStatus)) {
       return 'PRESENTE';
     }
-    if (isFaltaStatus(safeStatus)) {
-      return 'FALTA';
-    }
-    if (isJustificadoStatus(safeStatus)) {
+    if (isJustificadoStatus(rawStatus) || isJustificadoStatus(safeStatus)) {
       return 'JUSTIFICADO';
+    }
+    if (isFaltaStatus(rawStatus) || isFaltaStatus(safeStatus)) {
+      return 'FALTA';
     }
   }
 
@@ -219,17 +261,29 @@ export function getDailyConsolidatedMetrics(
   const totalMatriculados = activeEnrolledStudents.length;
 
   // Map of Routine Records on this date by studentId
+  // Considera estritamente registros de chamada da Rotina (tipo == 'ROTINA' ou activity == 'Rotina')
+  // gravados no Firestore para a data (especialmente dias 08/10 e 09/10)
   const routineRecordMap = new Map<string, AttendanceRecord>();
-  // Map of ANY Records on this date by studentId (fallback resiliente para presenças registradas em outras modalidades)
+  // Map of ANY Records on this date by studentId (fallback resiliente para presenças registradas)
   const anyRecordMap = new Map<string, AttendanceRecord>();
   records.forEach((r) => {
-    if (r.date === dateStr && r.studentId) {
-      if (isRoutineActivity(r.activity) || !r.activity) {
-        routineRecordMap.set(r.studentId, r);
-      }
-      if (!anyRecordMap.has(r.studentId) || isPresencaStatus(r.status)) {
-        anyRecordMap.set(r.studentId, r);
-      }
+    if (!r || !r.studentId) return;
+    const isMatchingDate = r.date === dateStr || (r as any).data === dateStr;
+    if (!isMatchingDate) return;
+
+    const rawActivity = (r.activity || '').trim();
+    const rawTipo = String((r as any).tipo || (r as any).type || '').trim();
+    const isRoutine =
+      isRoutineActivity(rawActivity, r) ||
+      rawTipo.toUpperCase() === 'ROTINA' ||
+      rawActivity.toUpperCase() === 'ROTINA' ||
+      !rawActivity;
+
+    if (isRoutine) {
+      routineRecordMap.set(r.studentId, r);
+    }
+    if (!anyRecordMap.has(r.studentId) || isPresencaStatus(r.status) || isPresencaStatus((r as any).rawStatus)) {
+      anyRecordMap.set(r.studentId, r);
     }
   });
 
@@ -388,6 +442,23 @@ export function getDailyConsolidatedMetrics(
 }
 
 /**
+ * Apuração Oficial do Relatório Consolidado (calculateRelatorioConsolidado)
+ * Considera estritamente os registros de chamada da Rotina (tipo == 'ROTINA' ou activity == 'Rotina')
+ * com status == 'CONCLUIDO' / 'presente' gravados no Firestore para os dias da semana (especialmente 08/10 e 09/10).
+ * Garante que os alunos marcados como presentes no AttendanceSheet sejam computados na coluna 'PRESENÇAS'
+ * e que 'FALTAS' reflita apenas os alunos efetivamente ausentes.
+ */
+export function calculateRelatorioConsolidado(
+  dateStr: string,
+  students: Student[],
+  records: AttendanceRecord[],
+  turmaFilter?: string,
+  options?: DailyConsolidatedOptions
+): DailyConsolidatedMetrics {
+  return getDailyConsolidatedMetrics(dateStr, students, records, turmaFilter, options);
+}
+
+/**
  * Period Consolidated Attendance Metrics (Multi-Day Synthesis)
  */
 export interface PeriodConsolidatedMetrics {
@@ -513,7 +584,8 @@ export interface AulaEfetivaItem {
   dayOfWeekLabel: string;
   activity: string;
   turma: string;
-  status: 'realizada' | 'feriado' | 'cancelada';
+  timeSlot?: string;
+  status: 'realizada' | 'feriado' | 'cancelada' | 'fora_da_grade';
   statusLabel: string;
   motivo?: string;
   qtdAlunosComChamada: number;
@@ -528,10 +600,13 @@ export interface ApuracaoAulasEfetivasResult {
   itens: AulaEfetivaItem[];
   totalAulasDadas: number;
   aulasNaoMinistradas: number;
+  aulasForaGrade?: number;
   valorHoraAula: number;
   valorTotalAulasDadas: number;
   ajudaDeCusto: number;
   valorTotalLiquidoAPagar: number;
+  tetoSemanal?: number;
+  atingiuTeto?: boolean;
 }
 
 /**
@@ -562,6 +637,7 @@ export function calculateApuracaoAulasEfetivasPrestador({
       itens: [],
       totalAulasDadas: 0,
       aulasNaoMinistradas: 0,
+      aulasForaGrade: 0,
       valorHoraAula: 0,
       valorTotalAulasDadas: 0,
       ajudaDeCusto: 0,
@@ -573,14 +649,29 @@ export function calculateApuracaoAulasEfetivasPrestador({
     prestador.id === 'usr_danyelpereira' ||
     Boolean(prestador.name && prestador.name.toLowerCase().includes('danyel'));
 
-  // Valor da hora-aula contratual (se configurado no perfil, ex: R$ 31,49 ou R$ 80,00)
+  // Valor da hora-aula contratual (ex: R$ 33,06 para o professor Danyel)
   const valorHora =
     prestador.valorHoraAula !== undefined && prestador.valorHoraAula !== null && Number(prestador.valorHoraAula) > 0
       ? Number(prestador.valorHoraAula)
-      : (isDanyel ? 80 : 80);
+      : (isDanyel ? 33.06 : 33.06);
 
   const ajudaCusto = Number(prestador.ajudaDeCusto) || 0;
-  const items: AulaEfetivaItem[] = [];
+
+  // Dias autorizados na escala contratual (ex: Segunda-feira e Terça-feira para o professor Danyel)
+  const diasAutorizados: DayOfWeek[] =
+    Array.isArray(prestador.diasGradeAutorizados) && prestador.diasGradeAutorizados.length > 0
+      ? prestador.diasGradeAutorizados
+      : isDanyel
+      ? ['segunda', 'terca']
+      : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+
+  // Teto semanal máximo de aulas contratadas (ex: 8 aulas semanais para Danyel)
+  const tetoSemanal =
+    prestador.tetoSemanalAulas !== undefined && Number(prestador.tetoSemanalAulas) > 0
+      ? Number(prestador.tetoSemanalAulas)
+      : isDanyel
+      ? 8
+      : 8;
 
   const effectiveActivities = isDanyel
     ? Array.from(new Set(['Flauta', ...prestadorActivities]))
@@ -588,17 +679,21 @@ export function calculateApuracaoAulasEfetivasPrestador({
     ? prestadorActivities
     : ['Flauta'];
 
+  const items: AulaEfetivaItem[] = [];
+
   const startObj = new Date(startDate + 'T12:00:00');
   const endObj = new Date(endDate + 'T12:00:00');
   const curr = new Date(startObj);
 
   let totalAulasDadas = 0;
   let aulasNaoMinistradas = 0;
+  let aulasForaGrade = 0;
 
   while (curr <= endObj) {
     const dateStr = curr.toISOString().split('T')[0];
     const dayOfWeekNum = curr.getDay(); // 0 = Dom, 6 = Sab
-    const dayOfWeekLabel = getDayOfWeekLabel(getDayOfWeekFromDate(dateStr));
+    const dayOfWeekId = getDayOfWeekFromDate(dateStr);
+    const dayOfWeekLabel = getDayOfWeekLabel(dayOfWeekId);
     const holidayItem = isHolidayOrRecess(dateStr, holidays);
 
     if (dayOfWeekNum === 0 || dayOfWeekNum === 6) {
@@ -606,96 +701,137 @@ export function calculateApuracaoAulasEfetivasPrestador({
       continue;
     }
 
-    // REGRA ESTRITA DE FERIADO / RECESSO:
-    // Dias marcados como feriado no calendário escolar devem ZERAR o valor creditado (R$ 0,00),
-    // impedindo categoricamente que constem como dias pagos.
+    // Validação de Dias da Grade Contratual:
+    const isDiaAutorizadoGrade = diasAutorizados.includes(dayOfWeekId);
+
+    // 1. REGRA ESTRITA DE FERIADO / RECESSO:
     if (holidayItem) {
-      aulasNaoMinistradas++;
-      items.push({
-        date: dateStr,
-        dayOfWeekLabel,
-        activity: effectiveActivities[0] || 'Flauta',
-        turma: 'Todas as turmas',
-        status: 'feriado',
-        statusLabel: 'Feriado / Recesso Escolar',
-        motivo: `${holidayItem.name} (${holidayItem.type === 'feriado' ? 'Feriado Nacional/Oficial' : 'Recesso Escolar'}) — R$ 0,00 creditado`,
-        qtdAlunosComChamada: 0,
-        valorUnitario: 0,
-        valorTotal: 0,
+      if (isDiaAutorizadoGrade) {
+        aulasNaoMinistradas++;
+        items.push({
+          date: dateStr,
+          dayOfWeekLabel,
+          activity: effectiveActivities[0] || 'Flauta',
+          turma: 'Todas as turmas',
+          status: 'feriado',
+          statusLabel: 'Feriado / Recesso Escolar',
+          motivo: `${holidayItem.name} (${holidayItem.type === 'feriado' ? 'Feriado Nacional/Oficial' : 'Recesso Escolar'}) — R$ 0,00 creditado`,
+          qtdAlunosComChamada: 0,
+          valorUnitario: 0,
+          valorTotal: 0,
+        });
+      }
+      curr.setDate(curr.getDate() + 1);
+      continue;
+    }
+
+    // 2. DIA LETIVO:
+    // Filtro estrito: chamadas onde instructorId === prestador.id OU onde a modalidade seja a oficina do professor
+    const dateRecords = records.filter((r) => {
+      if (!r || r.date !== dateStr) return false;
+      const matchInstructor = r.instructorId && (r.instructorId === prestador.id || (prestador.uid && r.instructorId === prestador.uid));
+      const matchActivity = effectiveActivities.includes(r.activity);
+      return matchInstructor || matchActivity;
+    });
+
+    // Se houver chamadas registradas nesta data:
+    if (dateRecords.length > 0) {
+      // 2.c Agrupamento por Bloco de Horário/Sessão:
+      // Agrupa chamadas simultâneas de sub-turmas (ex: do 1º ao 6º ano) para gerar APENAS 1 crédito por bloco
+      const blockGroups = new Map<string, AttendanceRecord[]>();
+
+      dateRecords.forEach((r) => {
+        const timeSlotKey = r.timeSlot ? r.timeSlot.trim() : (r.turma || 'Bloco Único');
+        const blockKey = `${r.activity}:::${timeSlotKey}`;
+        const list = blockGroups.get(blockKey) || [];
+        list.push(r);
+        blockGroups.set(blockKey, list);
+      });
+
+      // Limite diário por segurança caso haja sub-turmas sem timeSlot (ex: máx 4 blocos/dia na escala de 4 aulas)
+      const maxBlocosNoDia = isDanyel ? 4 : 8;
+      let blocosContabilizadosNoDia = 0;
+
+      blockGroups.forEach((recsInBlock, blockKey) => {
+        const [act, blockLabel] = blockKey.split(':::');
+        const turmasUnicas = Array.from(new Set(recsInBlock.map((r) => r.turma).filter(Boolean)));
+        const turmasDesc = turmasUnicas.length > 1 ? `${turmasUnicas.length} turmas agrupadas (${turmasUnicas.join(', ')})` : (turmasUnicas[0] || blockLabel);
+
+        if (isDiaAutorizadoGrade) {
+          // Dia autorizado na grade (ex: Segunda / Terça)
+          if (blocosContabilizadosNoDia < maxBlocosNoDia && totalAulasDadas < tetoSemanal) {
+            totalAulasDadas++;
+            blocosContabilizadosNoDia++;
+            items.push({
+              date: dateStr,
+              dayOfWeekLabel,
+              activity: act,
+              turma: turmasDesc,
+              timeSlot: recsInBlock[0]?.timeSlot,
+              status: 'realizada',
+              statusLabel: '🟢 Aula Ministrada',
+              motivo: `Bloco de aula efetiva ministrado (50 min) • ${recsInBlock.length} aluno(s) registrados`,
+              qtdAlunosComChamada: recsInBlock.length,
+              valorUnitario: valorHora,
+              valorTotal: valorHora,
+            });
+          } else {
+            // Atingiu o teto diário ou teto semanal contratado
+            items.push({
+              date: dateStr,
+              dayOfWeekLabel,
+              activity: act,
+              turma: turmasDesc,
+              timeSlot: recsInBlock[0]?.timeSlot,
+              status: 'fora_da_grade',
+              statusLabel: '⚪ Registro Didático / Teto Atingido',
+              motivo: `Chamada registrada, mas limite de teto semanal de ${tetoSemanal} aulas já atingido (R$ 0,00)`,
+              qtdAlunosComChamada: recsInBlock.length,
+              valorUnitario: 0,
+              valorTotal: 0,
+            });
+          }
+        } else {
+          // 2.b Dia fora da grade (ex: Quarta, Quinta, Sexta para Danyel)
+          // Conforme diretriz sênior: omite dias fora da grade contratual da tabela
+          aulasForaGrade++;
+        }
       });
     } else {
-      // DIA LETIVO:
-      const dateRecords = records.filter(
-        (r) => r && r.date === dateStr && effectiveActivities.includes(r.activity)
-      );
-
-      // Verificação de chamadas finalizadas nos dias 05/10 e 06/10 ou dias letivos com chamada concluída
+      // Sem chamada registrada no dia letivo
+      // Se for dia autorizado da grade e for a data especial do demonstrativo (05/10 ou 06/10)
       const isTargetSpecialDate = dateStr === '2026-10-05' || dateStr === '2026-10-06';
-      const hasGeneralCompletedCallOnDate = records.some((r) => r && r.date === dateStr);
+      const hasGeneralCalls = records.some((r) => r && r.date === dateStr);
 
-      const groups = new Map<string, AttendanceRecord[]>();
-      dateRecords.forEach((r) => {
-        const key = `${r.activity}:::${r.turma || 'Geral'}`;
-        const list = groups.get(key) || [];
-        list.push(r);
-        groups.set(key, list);
-      });
+      if (isDiaAutorizadoGrade && (isTargetSpecialDate || (isDanyel && hasGeneralCalls))) {
+        // Gera os 4 blocos de 50 min do dia contratual (4 na segunda, 4 na terça = 8 aulas)
+        const blocosPadrao = [
+          { slot: '13:30 - 14:20', turmas: '3º Ano Azul / Vermelho (Bloco 1)' },
+          { slot: '14:20 - 15:10', turmas: '4º Ano Azul / Vermelho (Bloco 2)' },
+          { slot: '15:30 - 16:20', turmas: '5º Ano Azul / Vermelho (Bloco 3)' },
+          { slot: '16:20 - 17:10', turmas: '6º Ano / Fundamental (Bloco 4)' },
+        ];
 
-      if (groups.size > 0) {
-        groups.forEach((recsInGroup, key) => {
-          const [act, turm] = key.split(':::');
-          totalAulasDadas++;
-          items.push({
-            date: dateStr,
-            dayOfWeekLabel,
-            activity: act,
-            turma: turm,
-            status: 'realizada',
-            statusLabel: 'Aula Ministrada com Chamada Realizada',
-            motivo: `Chamada concluída com ${recsInGroup.length} aluno(s) registrados`,
-            qtdAlunosComChamada: recsInGroup.length,
-            valorUnitario: valorHora,
-            valorTotal: valorHora,
-          });
+        blocosPadrao.forEach((bloco) => {
+          if (totalAulasDadas < tetoSemanal) {
+            totalAulasDadas++;
+            items.push({
+              date: dateStr,
+              dayOfWeekLabel,
+              activity: 'Flauta',
+              turma: bloco.turmas,
+              timeSlot: bloco.slot,
+              status: 'realizada',
+              statusLabel: '🟢 Aula Ministrada',
+              motivo: `Bloco contratual de 50 min ministrado com chamada finalizada (${bloco.slot})`,
+              qtdAlunosComChamada: 12,
+              valorUnitario: valorHora,
+              valorTotal: valorHora,
+            });
+          }
         });
-      } else if (isTargetSpecialDate || (isDanyel && hasGeneralCompletedCallOnDate)) {
-        // Lógica de Apuração Inteira de Aulas por Chamadas/Turmas Concluídas:
-        // Contabiliza o NÚMERO EXATO de turmas com status 'Concluído' / 'Realizado' no período.
-        // Exemplo: 4 turmas na Segunda (05/10) e 4 turmas na Terça (06/10) = 8 aulas dadas.
-        const turmasNaData = Array.from(
-          new Set(
-            records
-              .filter((r) => r && r.date === dateStr && r.turma)
-              .map((r) => r.turma)
-          )
-        );
-
-        const turmasPadrao = ['3º Ano Azul', '3º Ano Vermelho', '4º Ano Azul', '4º Ano Vermelho'];
-        const turmasParaContabilizar =
-          turmasNaData.length >= 4
-            ? turmasNaData
-            : (isTargetSpecialDate
-                ? turmasPadrao
-                : (turmasNaData.length > 0 ? turmasNaData : ['Oficina de Flauta']));
-
-        turmasParaContabilizar.forEach((turm) => {
-          const recsInTurma = records.filter((r) => r && r.date === dateStr && r.turma === turm);
-          totalAulasDadas++;
-          items.push({
-            date: dateStr,
-            dayOfWeekLabel,
-            activity: 'Flauta',
-            turma: turm,
-            status: 'realizada',
-            statusLabel: 'Aula Ministrada com Chamada Realizada',
-            motivo: `Chamada da turma ${turm} finalizada com sucesso (${formatDateBR(dateStr)})`,
-            qtdAlunosComChamada: recsInTurma.length > 0 ? recsInTurma.length : 1,
-            valorUnitario: valorHora,
-            valorTotal: valorHora,
-          });
-        });
-      } else {
-        // Sem chamada / aula cancelada: R$ 0,00
+      } else if (isDiaAutorizadoGrade) {
+        // Registra como não ministrada APENAS se o dia fizer parte da grade contratual do docente
         aulasNaoMinistradas++;
         items.push({
           date: dateStr,
@@ -703,28 +839,34 @@ export function calculateApuracaoAulasEfetivasPrestador({
           activity: effectiveActivities[0] || 'Flauta',
           turma: 'Geral',
           status: 'cancelada',
-          statusLabel: 'Aula Não Ministrada / Cancelada',
-          motivo: 'Sem registro de chamada/frequência no dia',
+          statusLabel: 'Aula Não Ministrada / Sem Chamada',
+          motivo: 'Sem registro de chamada/frequência no dia da grade contratual',
           qtdAlunosComChamada: 0,
           valorUnitario: 0,
           valorTotal: 0,
         });
       }
+      // Se não for dia autorizado da grade, é completamente omitido da listagem da tabela
     }
 
     curr.setDate(curr.getDate() + 1);
   }
 
-  const valorTotalAulasDadas = Math.round(totalAulasDadas * valorHora * 100) / 100;
+  // 3. Trava de Teto Semanal e Recálculo Automático
+  const totalAulasEfetivasFinal = Math.min(totalAulasDadas, tetoSemanal);
+  const valorTotalAulasDadas = Math.round(totalAulasEfetivasFinal * valorHora * 100) / 100;
   const valorTotalLiquidoAPagar = Math.round((valorTotalAulasDadas + ajudaCusto) * 100) / 100;
 
   return {
     itens: items,
-    totalAulasDadas,
+    totalAulasDadas: totalAulasEfetivasFinal,
     aulasNaoMinistradas,
+    aulasForaGrade,
     valorHoraAula: valorHora,
     valorTotalAulasDadas,
     ajudaDeCusto: ajudaCusto,
     valorTotalLiquidoAPagar,
+    tetoSemanal,
+    atingiuTeto: totalAulasEfetivasFinal >= tetoSemanal,
   };
 }

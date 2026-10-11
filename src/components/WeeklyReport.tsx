@@ -24,7 +24,7 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isHolidayOrRecess, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
-import { getPeriodConsolidatedMetrics, calculateApuracaoAulasEfetivasPrestador, AulaEfetivaItem } from '../utils/frequenciaUtils';
+import { getPeriodConsolidatedMetrics, calculateRelatorioConsolidado, calculateApuracaoAulasEfetivasPrestador, AulaEfetivaItem } from '../utils/frequenciaUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
 import {
@@ -448,12 +448,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // 4. Numerical Consolidated Report State & Table Calculation
   const [numericTurmaFilter, setNumericTurmaFilter] = useState<string>('all');
-  const [convertPastPendingToAbsence, setConvertPastPendingToAbsence] = useState<boolean>(true);
+  const [convertPastPendingToAbsence, setConvertPastPendingToAbsence] = useState<boolean>(false);
   const [showNumericModal, setShowNumericModal] = useState(false);
   const [pdfNumericTurma, setPdfNumericTurma] = useState<string>('all');
   const [pdfNumericStartDate, setPdfNumericStartDate] = useState<string>(effectiveStartDate);
   const [pdfNumericEndDate, setPdfNumericEndDate] = useState<string>(effectiveEndDate);
-  const [pdfNumericConvertPending, setPdfNumericConvertPending] = useState<boolean>(true);
+  const [pdfNumericConvertPending, setPdfNumericConvertPending] = useState<boolean>(false);
 
   // 5. Meal Financial Report Modal State
   const [showMealReportModal, setShowMealReportModal] = useState(false);
@@ -522,23 +522,29 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           ...danyelFromUsers,
           regimeTrabalho: 'prestador_aula_efetiva',
           regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-          valorHoraAula: danyelFromUsers.valorHoraAula || 50,
+          valorHoraAula: danyelFromUsers.valorHoraAula && Number(danyelFromUsers.valorHoraAula) > 0 ? Number(danyelFromUsers.valorHoraAula) : 33.06,
           duracaoAulaMinutos: danyelFromUsers.duracaoAulaMinutos || 50,
+          diasGradeAutorizados: danyelFromUsers.diasGradeAutorizados || ['segunda', 'terca'],
+          tetoSemanalAulas: danyelFromUsers.tetoSemanalAulas || 8,
+          assignedActivities: Array.from(new Set(['Flauta', ...(danyelFromUsers.assignedActivities || [])])),
+          specialtyActivity: 'Flauta',
         });
       } else {
         list.push({
           id: 'usr_danyelpereira',
-          name: 'Danyel Pereira',
+          name: 'Danyel Pereira (Flauta)',
           email: 'danyel.pereira@crescercampinas.com.br',
           role: 'professor',
-          cargoLabel: 'Professor de Educação Física / Oficinas',
+          cargoLabel: 'Professor de Flauta / Musicalização',
           avatarColor: 'bg-emerald-600',
           regimeTrabalho: 'prestador_aula_efetiva',
           regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-          valorHoraAula: 50,
+          valorHoraAula: 33.06,
           duracaoAulaMinutos: 50,
-          assignedActivities: ['Judô', 'Futebol'],
-          specialtyActivity: 'Judô',
+          diasGradeAutorizados: ['segunda', 'terca'],
+          tetoSemanalAulas: 8,
+          assignedActivities: ['Flauta'],
+          specialtyActivity: 'Flauta',
         } as UserProfile);
       }
     }
@@ -1075,7 +1081,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <span>Demonstrativo de Aulas Efetivas (Professores PJ / Horistas Efetivos)</span>
             </h3>
             <p className="text-xs text-slate-500">
-              Cálculo baseado exclusivamente nas aulas com registro de chamada concluído. Feriados e aulas não realizadas não computam valor de hora-aula.
+              Cálculo baseado exclusivamente nos blocos ministrados nos dias da grade contratual do docente. Dias fora da escala contratual são omitidos da listagem de cobrança.
             </p>
           </div>
 
@@ -1284,7 +1290,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                           {isRealizada ? (
                             <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Aula Ministrada</span>
+                              <span>🟢 Aula Ministrada</span>
+                            </span>
+                          ) : item.status === 'fora_da_grade' ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300" title="Registro pedagógico de presença mantido, sem crédito financeiro">
+                              <span>⚪ Registro Didático</span>
                             </span>
                           ) : isFeriado ? (
                             <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">

@@ -1133,6 +1133,8 @@ export default function App() {
     const newRecord: AttendanceRecord = {
       ...recordData,
       id: recordId,
+      instructorId: recordData.instructorId || currentUser?.id || currentUser?.uid || undefined,
+      instructorName: recordData.instructorName || currentUser?.name || undefined,
       createdAt: new Date().toISOString(),
     };
     
@@ -1192,6 +1194,8 @@ export default function App() {
           weekNumber: currentWeek.weekNumber,
           year: currentWeek.year,
           status: 'presente',
+          instructorId: currentUser?.id || currentUser?.uid || undefined,
+          instructorName: currentUser?.name || undefined,
           createdAt: new Date().toISOString(),
         });
       });

@@ -613,6 +613,8 @@ function getCurrentHHMM(): string {
       exitTime: status === 'saida_antecipada' ? exitTime : undefined,
       equipmentMissingDetails: equipmentDetails,
       observation: currentObs || undefined,
+      instructorId: currentUser?.id || currentUser?.uid || undefined,
+      instructorName: currentUser?.name || undefined,
     };
 
     // Limpa timer anterior de conclusão suave

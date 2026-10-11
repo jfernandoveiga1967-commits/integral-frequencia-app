@@ -58,6 +58,11 @@ export interface AttendanceRecord {
   exitTime?: string; // e.g., "15:30" for saida_antecipada
   equipmentMissingDetails?: string; // e.g., "Sem maiô/sunga", "Esqueceu a flauta", "Sem kimono"
   observation?: string; // General notes e.g., "Atestado de 2 dias"
+  instructorId?: string; // ID do professor/instrutor responsável logado
+  instructorName?: string; // Nome do professor/instrutor responsável logado
+  timeSlot?: string; // Bloco/Horário da aula (ex: "13:30 - 14:20")
+  tipo?: string; // Modalidade/Tipo da chamada no banco (ex: "ROTINA")
+  rawStatus?: string; // Status bruto original do documento (ex: "CONCLUIDO")
   createdAt: string;
 }
 
@@ -299,6 +304,8 @@ export interface UserProfile {
   workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada'; // Tipo de jornada (Contínua 6h sem almoço vs Padrão 8h+ com almoço)
   allowedLocations?: string[]; // IDs dos locais de trabalho autorizados para geofencing (ex: ['sede', 'academia_fit']). Padrão: ['sede']
   customLocations?: WorkLocation[]; // Locais externos de trabalho dinâmicos autorizados para o colaborador
+  diasGradeAutorizados?: DayOfWeek[]; // Dias autorizados na escala contratual (ex: ['segunda', 'terca'])
+  tetoSemanalAulas?: number; // Teto limite máximo semanal de aulas contratadas (ex: 8)
   updatedAt?: string;
 }
 
@@ -392,6 +399,8 @@ export interface SemanarioPlan {
   development: string; // Descrição / Passo a passo detalhado da proposta
   materials?: string; // Recursos e materiais necessários
   teacherName?: string; // Legacy/fallback: Monitora ou Professora responsável
+  instructorId?: string; // ID do professor/instrutor responsável logado
+  instructorName?: string; // Nome do professor/instrutor responsável logado
   status: SemanarioStatus; // 'realizada' | 'pendente' | 'substituida'
   substitutionReason?: string; // Motivo da substituição (quando status === 'substituida')
   photos?: string[]; // URLs ou Base64 das fotos/mídias anexas

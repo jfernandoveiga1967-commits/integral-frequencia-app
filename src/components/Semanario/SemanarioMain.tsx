@@ -579,6 +579,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     const updated: SemanarioPlan = {
       ...target,
       status: newStatus,
+      instructorId: currentUser?.id || currentUser?.uid || target.instructorId,
+      instructorName: currentUser?.name || target.instructorName,
       substitutionReason: newStatus === 'substituida' ? reason || target.substitutionReason : undefined,
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name,

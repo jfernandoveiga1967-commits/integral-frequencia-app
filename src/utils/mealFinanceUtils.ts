@@ -125,27 +125,35 @@ export function syncMealSnapshotsFromRecords(records: AttendanceRecord[]): void 
 
 /**
  * Retorna o total de alunos presentes na chamada oficial para uma data específica
+ * Considera estritamente a chamada de Rotina (tipo == 'ROTINA' ou activity == 'Rotina') e status 'CONCLUIDO' / 'presente'
  */
 export function getRollCallPresencesForDate(dateStr: string, records: AttendanceRecord[]): number {
   if (!Array.isArray(records) || records.length === 0) return 0;
   
   const presentStudentIds = new Set<string>();
 
-  // 1. Prioriza registros da rotina/chamada geral
+  // 1. Prioriza registros da rotina/chamada geral (tipo == 'ROTINA' ou activity == 'Rotina')
   const routineRecords = records.filter((r) => {
-    if (!r || r.date !== dateStr) return false;
-    return isRoutineActivity(r.activity) || !r.activity;
+    if (!r || (r.date !== dateStr && (r as any).data !== dateStr)) return false;
+    const isRoutine =
+      isRoutineActivity(r.activity, r) ||
+      String((r as any).tipo || '').toUpperCase() === 'ROTINA' ||
+      String((r as any).type || '').toUpperCase() === 'ROTINA' ||
+      !r.activity;
+    return isRoutine;
   });
   routineRecords.forEach((r) => {
-    if (isPresencaStatus(r.status) && r.studentId) {
+    const rawStatus = (r as any).rawStatus || r.status;
+    if ((isPresencaStatus(r.status) || isPresencaStatus(rawStatus)) && r.studentId) {
       presentStudentIds.add(r.studentId);
     }
   });
 
   // 2. Fallback por aluno único com presença registrada na data
-  const dayRecords = records.filter((r) => r && r.date === dateStr);
+  const dayRecords = records.filter((r) => r && (r.date === dateStr || (r as any).data === dateStr));
   dayRecords.forEach((r) => {
-    if (isPresencaStatus(r.status) && r.studentId) {
+    const rawStatus = (r as any).rawStatus || r.status;
+    if ((isPresencaStatus(r.status) || isPresencaStatus(rawStatus)) && r.studentId) {
       presentStudentIds.add(r.studentId);
     }
   });
@@ -215,7 +223,7 @@ export function buildMealEntriesForDateRange(
 
     const dayTotalEsperados = isSchoolDay ? expectedStudentsCount : 0;
 
-    // Calcular quantidade de alunos presentes segundo a chamada do sistema
+    // Calcular quantidade de alunos presentes segundo a chamada do sistema (Rotina)
     let systemCount = 0;
     let dayPresentes = 0;
     let dayFaltas = 0;
@@ -225,22 +233,27 @@ export function buildMealEntriesForDateRange(
 
     if (isSchoolDay) {
       const routineRecords = records.filter((r) => {
-        if (!r || r.date !== dateStr) return false;
-        return isRoutineActivity(r.activity) || !r.activity;
+        if (!r || (r.date !== dateStr && (r as any).data !== dateStr)) return false;
+        const isRoutine =
+          isRoutineActivity(r.activity, r) ||
+          String((r as any).tipo || '').toUpperCase() === 'ROTINA' ||
+          String((r as any).type || '').toUpperCase() === 'ROTINA' ||
+          !r.activity;
+        return isRoutine;
       });
-      const anyDayRecords = records.filter((r) => r && r.date === dateStr);
+      const anyDayRecords = records.filter((r) => r && (r.date === dateStr || (r as any).data === dateStr));
 
       const studentStatusMap = new Map<string, AttendanceStatus>();
       // 1. Adiciona qualquer registro lançado no dia para o aluno (fallback resiliente de oficinas)
       anyDayRecords.forEach((r) => {
         if (r && r.studentId && r.status) {
-          studentStatusMap.set(r.studentId, normalizeAttendanceStatus(r.status));
+          studentStatusMap.set(r.studentId, normalizeAttendanceStatus((r as any).rawStatus || r.status));
         }
       });
       // 2. Sobrescreve com registros oficiais da rotina (prioridade máxima)
       routineRecords.forEach((r) => {
         if (r && r.studentId && r.status) {
-          studentStatusMap.set(r.studentId, normalizeAttendanceStatus(r.status));
+          studentStatusMap.set(r.studentId, normalizeAttendanceStatus((r as any).rawStatus || r.status));
         }
       });
 
@@ -290,17 +303,19 @@ export function buildMealEntriesForDateRange(
     let isManualOverride = false;
 
     if (isSchoolDay) {
-      if (!isSavedZeroOrNull) {
-        // Se houver valor manual salvo maior que zero, preserva o valor explicitamente editado pelo usuário
+      // Conexão direta com a chamada da Rotina diária:
+      // Se houver override manual explícito e intencional do usuário, preserva
+      if (savedDay?.isManualOverride === true && !isSavedZeroOrNull) {
         manualCount = savedCountNum!;
-        isManualOverride = Boolean(savedDay?.isManualOverride ?? true);
+        isManualOverride = true;
       } else if (effectiveSystemCount > 0) {
-        // DIRETRIZ SÊNIOR (Item 1):
-        // Caso o campo 'ALUNOS (EDITÁVEL)' (editableStudents) do dia esteja zerado ou nulo
-        // e a chamada automática possuir valor (ex: 165 alunos no dia 06/10/2026),
-        // preenche automaticamente editableStudents com o total de presentes (presentCount) da chamada do dia!
+        // Conecta a contagem de presenças apurada na chamada da Rotina diária diretamente
+        // à coluna 'Alunos Editáveis / Refeições Servidas' do módulo de almoço
         manualCount = effectiveSystemCount;
         isManualOverride = false;
+      } else if (!isSavedZeroOrNull) {
+        manualCount = savedCountNum!;
+        isManualOverride = Boolean(savedDay?.isManualOverride);
       } else if (isReopenedCall && lastCalculatedMealsCount !== undefined && lastCalculatedMealsCount > 0) {
         manualCount = lastCalculatedMealsCount;
         isManualOverride = false;

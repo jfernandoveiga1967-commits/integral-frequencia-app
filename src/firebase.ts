@@ -56,6 +56,7 @@ import { INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
 import { normalizeAttendanceStatus, getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays } from './utils/dateUtils';
+import { saveMealConfig } from './utils/mealFinanceUtils';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -344,12 +345,17 @@ export function subscribeRecords(
           date: data.date || data.data || '',
           weekNumber: Number(data.weekNumber) || 1,
           year: Number(data.year) || 2026,
-          activity: data.activity || '',
+          activity: data.activity || data.tipo || '',
+          tipo: data.tipo || data.activity || undefined,
           turma: data.turma || '',
           status: normalizeAttendanceStatus(data.status),
+          rawStatus: data.status,
           exitTime: data.exitTime || undefined,
           equipmentMissingDetails: data.equipmentMissingDetails || undefined,
           observation: data.observation || undefined,
+          instructorId: data.instructorId || undefined,
+          instructorName: data.instructorName || undefined,
+          timeSlot: data.timeSlot || undefined,
           createdAt: data.createdAt || new Date().toISOString(),
         });
       });
@@ -1369,11 +1375,15 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
     weekNumber: record.weekNumber,
     year: record.year,
     activity: record.activity,
+    tipo: (record as any).tipo || record.activity, // Sincroniza tipo ('ROTINA' / Oficina) para consultas estritas
     turma: record.turma,
     status: record.status,
     exitTime: record.exitTime || '',
     equipmentMissingDetails: record.equipmentMissingDetails || '',
     observation: record.observation || '',
+    instructorId: record.instructorId || '',
+    instructorName: record.instructorName || '',
+    timeSlot: record.timeSlot || '',
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -1428,11 +1438,15 @@ export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): 
             weekNumber: record.weekNumber,
             year: record.year,
             activity: record.activity,
+            tipo: (record as any).tipo || record.activity, // Sincroniza tipo ('ROTINA' / Oficina)
             turma: record.turma,
             status: record.status,
             exitTime: record.exitTime || '',
             equipmentMissingDetails: record.equipmentMissingDetails || '',
             observation: record.observation || '',
+            instructorId: record.instructorId || '',
+            instructorName: record.instructorName || '',
+            timeSlot: record.timeSlot || '',
             createdAt: record.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           },
@@ -2493,6 +2507,8 @@ export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
         development: plan.development || '',
         materials: plan.materials || '',
         teacherName: plan.teacherName || '',
+        instructorId: plan.instructorId || '',
+        instructorName: plan.instructorName || '',
         status: plan.status || 'pendente',
         substitutionReason: plan.substitutionReason || '',
         photos: plan.photos || [],
@@ -3009,7 +3025,16 @@ export async function recalculateAndTriggerConsolidation(
     }
 
     baseReport.entries[date] = updatedEntry;
+    saveMealConfig(baseReport);
     await saveMealReportToFirestore(baseReport);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('app_meal_report_updated', {
+          detail: { date, monthKey, baseReport },
+        })
+      );
+    }
   } catch (err) {
     console.warn(`Aviso ao sincronizar mealReports/${monthKey} no recálculo:`, err);
   }
@@ -3872,12 +3897,17 @@ export async function fetchRecordsDirectFromServer(
         date: data.date || data.data || '',
         weekNumber: Number(data.weekNumber) || 1,
         year: Number(data.year) || 2026,
-        activity: data.activity || '',
+        activity: data.activity || data.tipo || '',
+        tipo: data.tipo || data.activity || undefined,
         turma: data.turma || '',
         status: normalizeAttendanceStatus(data.status),
+        rawStatus: data.status,
         exitTime: data.exitTime || undefined,
         equipmentMissingDetails: data.equipmentMissingDetails || undefined,
         observation: data.observation || undefined,
+        instructorId: data.instructorId || undefined,
+        instructorName: data.instructorName || undefined,
+        timeSlot: data.timeSlot || undefined,
         createdAt: data.createdAt || new Date().toISOString(),
       });
     });
