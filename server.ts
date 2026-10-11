@@ -580,6 +580,85 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
   }
 });
 
+// API Route: Gerador de Feedback Cordial por Norma com IA e CNV (Coordenação Pedagógica)
+app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
+  try {
+    const { userName, normTitle, normSection, rawContext, normDetails } = req.body;
+    if (!userName || !normTitle || !rawContext) {
+      return res.status(400).json({
+        error: 'Campos obrigatórios ausentes (userName, normTitle, rawContext).',
+      });
+    }
+
+    const ai = getAIClient();
+    if (!ai) {
+      return res.status(503).json({
+        error: 'Chave GEMINI_API_KEY não configurada no ambiente.',
+        useFallback: true,
+      });
+    }
+
+    const prompt = `Você é um coordenador pedagógico experiente, acolhedor e empático do Colégio Crescer.
+Sua missão é redigir um feedback individual fundamentado estritamente na Comunicação Não-Violenta (CNV) para a monitora/colaboradora ${userName}.
+
+Contexto da Situação:
+- Nome da Colaboradora: ${userName}
+- Norma do Manual Institucional: "${normTitle}" ${normSection ? `(Seção ${normSection})` : ''}
+- Diretrizes da Norma: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Normas de conduta e rotina pedagógica do Colégio Crescer'}
+- Fato ocorrido relatado pela coordenação: "${rawContext}"
+
+Pilares Obrigatórios da Comunicação Não-Violenta (CNV):
+1. Acolhimento e Valorização: Inicie saudando a monitora pelo nome com carinho e reconhecendo sua dedicação no cuidado diário com os alunos.
+2. Observação Clara dos Fatos: Descreva o ocorrido de forma respeitosa e serena, sem tons punitivos, julgamentos depreciativos ou acusações.
+3. Significado Pedagógico e Proteção às Crianças: Explique o propósito da norma institucional "${normTitle}", evidenciando que nosso maior valor no Colégio Crescer é a segurança física, o bem-estar emocional e o desenvolvimento saudável das crianças.
+4. Pedido e Orientação Construtiva: Apresente o direcionamento de forma clara, colaborativa e encorajadora para que a conduta seja aprimorada daqui em diante.
+5. Tom Fraterno: Finalize com palavras de apoio e confiança mútua.
+
+Gere uma resposta estritamente em JSON no seguinte formato:
+{
+  "message": "Texto completo da mensagem cordial e acolhedora em parágrafos bem estruturados...",
+  "actionPoints": [
+    "Ponto prático 1 de atenção e cuidado que a monitora deve seguir",
+    "Ponto prático 2 de alinhamento com a segurança das crianças",
+    "Ponto prático 3 de compromisso pedagógico institucional"
+  ]
+}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        maxOutputTokens: 2500,
+        temperature: 0.7,
+      },
+    });
+
+    const responseText = response?.text || '';
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    }
+
+    return res.json({
+      success: true,
+      feedback: {
+        message: parsed?.message || '',
+        actionPoints: Array.isArray(parsed?.actionPoints) ? parsed.actionPoints : [],
+      },
+    });
+  } catch (error: any) {
+    console.warn('Erro na rota /api/gemini/generate-cordial-feedback:', error?.message || error);
+    return res.status(500).json({
+      error: error?.message || 'Falha ao gerar feedback com IA',
+      useFallback: true,
+    });
+  }
+});
+
 // Vite Middleware setup for dev vs production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

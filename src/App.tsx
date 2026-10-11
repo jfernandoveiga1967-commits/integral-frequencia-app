@@ -52,6 +52,7 @@ import { ManualOrientacoes } from './components/ManualOrientacoes';
 import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { UserNotificationBanner } from './components/UserNotificationBanner';
+import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   DepartureAlertItem,
@@ -2112,6 +2113,9 @@ export default function App() {
           }}
           onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
         />
+
+        {/* Modal de Leitura e Aceite de Feedback Pedagógico Cordial (CNV) para a Monitora */}
+        <PedagogicalFeedbackModal currentUser={currentUser} />
 
         {/* Global Departure Alert Banner (Alerta de Saída Antecipada visível em qualquer aba) */}
         <DepartureAlertBanner

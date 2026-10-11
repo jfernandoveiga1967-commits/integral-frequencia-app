@@ -67,6 +67,7 @@ import { PdfViewerModal } from './PdfViewerModal';
 import { EnviarLembreteModal } from './EnviarLembreteModal';
 import { ManualNormaCard } from './ManualNormaCard';
 import { TermoAceiteManual } from './TermoAceiteManual';
+import { GestaoFeedbacksModal } from './GestaoFeedbacksModal';
 import {
   subscribeUserManualProgress,
   markNormaCompletedInFirestore,
@@ -1001,6 +1002,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   const [isConfirmingAceite, setIsConfirmingAceite] = useState(false);
   const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});
 
   // Novo mecanismo de dois níveis: Checklist por Norma + Trava do Termo Geral
@@ -1473,6 +1475,19 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
               >
                 <ClipboardCheck className="w-4 h-4 text-emerald-300" />
                 <span>Status de Aceite ({totalCientesCount}/{eligibleUsers.length})</span>
+              </button>
+            )}
+
+            {/* Admin Action: Gestão de Feedback Cordial Por Norma com IA e CNV */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsFeedbackModalOpen(true)}
+                className="px-3.5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-teal-700/30 transition-all flex items-center space-x-1.5 cursor-pointer"
+                title="Abrir módulo de Feedback Pedagógico Cordial Por Norma com IA (CNV)"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Feedback Cordial (IA)</span>
               </button>
             )}
 
@@ -2080,6 +2095,16 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
           filename={pdfPreviewState.filename}
           title={pdfPreviewState.title}
           onDownload={pdfPreviewState.onDownload}
+        />
+      )}
+
+      {/* Modal de Gestão de Feedbacks Cordiais Por Norma (Coordenação com IA e CNV) */}
+      {isFeedbackModalOpen && (
+        <GestaoFeedbacksModal
+          isOpen={isFeedbackModalOpen}
+          onClose={() => setIsFeedbackModalOpen(false)}
+          currentUser={currentUser}
+          users={allUsers}
         />
       )}
     </div>
