@@ -760,6 +760,110 @@ Responda estritamente em formato JSON:
   }
 });
 
+// API Route: Agente de Voz Sofia — Guia do Integral com Function Calling
+app.post('/api/gemini/voice-agent', async (req, res) => {
+  try {
+    const { prompt, context } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Comando de voz não fornecido.' });
+    }
+
+    const ai = getAIClient();
+    if (ai) {
+      try {
+        const systemInstruction = `Você é Sofia, a assistente e guia inteligente por voz do Período Integral do Colégio Crescer.
+Seu tom é acolhedor, profissional, pedagógico e objetivo.
+Sua resposta será falada em voz alta através de Text-To-Speech (TTS), portanto:
+- Seja concisa, clara e natural (1 a 3 frases no máximo).
+- Evite listar caracteres especiais, asteriscos ou tabelas.
+- Identifique com precisão se a intenção do usuário requer o uso de uma das 3 funções disponíveis:
+  1. consultar_ou_lancar_chamada: para verificar pendências, marcar presença ou falta de alunos.
+  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, procedimentos do Manual de 50 Normas.
+  3. consultar_cardapio_ou_semanario: para consultar almoço, lanche, oficinas ou rotinas do Semanário.
+Retorne um JSON estrito no seguinte formato:
+{
+  "spokenText": "texto que será falado para o usuário",
+  "functionCall": {
+    "name": "consultar_ou_lancar_chamada" | "consultar_manual_normas" | "consultar_cardapio_ou_semanario",
+    "args": { ... }
+  }
+}
+Se nenhuma função for estritamente necessária, omita "functionCall" e apenas responda com "spokenText".`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Comando do usuário: "${prompt}". Contexto atual: Data: ${context?.selectedDate || 'hoje'}, Turma: ${context?.selectedTurma || 'todas'}, Usuário: ${context?.userName || 'colaborador'}.`,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+          },
+        });
+
+        const responseText = response.text || '';
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(responseText);
+        } catch {
+          const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+          parsed = JSON.parse(cleaned);
+        }
+
+        if (parsed?.spokenText) {
+          return res.json({
+            success: true,
+            spokenText: parsed.spokenText,
+            functionCall: parsed.functionCall,
+            isAiGenerated: true,
+          });
+        }
+      } catch (geminiError: any) {
+        console.log('[Sofia Voice Agent] Ativando orquestrador local resiliente:', geminiError?.status || 'indisponível');
+      }
+    }
+
+    // Heurística local de contingência do servidor
+    const lower = prompt.toLowerCase();
+    let functionCall: any = null;
+    let spokenText = 'Comando processado com sucesso.';
+
+    if (lower.includes('presenca') || lower.includes('chamada') || lower.includes('falta') || lower.includes('pendencia')) {
+      functionCall = {
+        name: 'consultar_ou_lancar_chamada',
+        args: {
+          acao: lower.includes('presenca') ? 'lancar_presenca' : lower.includes('falta') ? 'lancar_falta' : 'consultar_pendencias',
+        },
+      };
+      spokenText = 'Consultando informações da chamada de frequência.';
+    } else if (lower.includes('norma') || lower.includes('manual') || lower.includes('regra') || lower.includes('celular') || lower.includes('radio') || lower.includes('alergia')) {
+      functionCall = {
+        name: 'consultar_manual_normas',
+        args: { termoOuTema: prompt },
+      };
+      spokenText = 'Consultando as diretrizes oficiais no Manual de 50 Normas do Colégio Crescer.';
+    } else if (lower.includes('cardapio') || lower.includes('almoco') || lower.includes('lanche') || lower.includes('semanario')) {
+      functionCall = {
+        name: 'consultar_cardapio_ou_semanario',
+        args: { tipo: lower.includes('lanche') ? 'cardapio_lanche' : lower.includes('semanario') ? 'roteiro_semanario' : 'cardapio_almoco' },
+      };
+      spokenText = 'Consultando cardápio e rotinas pedagógicas do Programa Integral.';
+    } else {
+      spokenText = 'Olá! Sou Sofia, assistente por voz do Integral. Como posso te orientar hoje?';
+    }
+
+    return res.json({
+      success: true,
+      spokenText,
+      functionCall,
+      isFallback: true,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: 'Erro ao processar comando de voz.',
+      message: error?.message,
+    });
+  }
+});
+
 // Vite Middleware setup for dev vs production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

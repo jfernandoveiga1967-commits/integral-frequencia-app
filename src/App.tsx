@@ -53,6 +53,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { UserNotificationBanner } from './components/UserNotificationBanner';
 import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal';
+import { VoiceWidget } from './components/VoiceWidget';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   DepartureAlertItem,
@@ -2602,11 +2603,25 @@ export default function App() {
 
       {/* Toast visual de desbloqueio do áudio pelo navegador */}
       {audioUnlockedToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2.5 px-4 py-3 bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold rounded-2xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed bottom-6 left-6 z-50 flex items-center space-x-2.5 px-4 py-3 bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold rounded-2xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
           <span className="text-emerald-300">Áudio liberado:</span>
           <span className="text-slate-200">Alertas sonoros de chamada e saída ativos</span>
         </div>
+      )}
+
+      {/* Agente de IA por Voz — Sofia (Guia do Integral • Colégio Crescer) */}
+      {currentUser && (
+        <VoiceWidget
+          students={students}
+          records={records}
+          currentUser={currentUser}
+          selectedDate={selectedDate}
+          schedules={schedules}
+          onSaveRecord={handleSaveRecord}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+          onSelectDate={(date) => setSelectedDate(date)}
+        />
       )}
     </div>
   );
