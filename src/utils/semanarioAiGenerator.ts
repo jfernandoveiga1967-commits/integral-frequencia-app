@@ -1,8 +1,35 @@
 import { ActivityItem, SemanarioPlan, WeekInfo, ScheduleBlock, UserProfile } from '../types';
 import { getScheduleBlocksForTurma, generateCuratedProposal, DAYS_OF_WEEK_ORDER } from './semanarioUtils';
 import { getWeekDays } from './dateUtils';
-import { getStoredUser } from './authUtils';
-import { loadLocalQuadroAtribuicoes, resolveAtribuicaoForTurma } from './atribuicoesStorage';
+import {
+  fetchGeminiProposal,
+  generateSemanarioProposal,
+  buildFallback4PilaresProposal,
+  detectSegmentoFromTurma,
+  getSegmentoConfig,
+  format4PilaresDevelopment,
+  GeminiProposalResult,
+  StaffListPayload,
+  Semanario4Pilares,
+  SemanarioSegmento,
+  SegmentoConfig,
+} from '../services/semanarioAiService';
+
+export type {
+  GeminiProposalResult,
+  StaffListPayload,
+  Semanario4Pilares,
+  SemanarioSegmento,
+  SegmentoConfig,
+};
+export {
+  fetchGeminiProposal,
+  generateSemanarioProposal,
+  buildFallback4PilaresProposal,
+  detectSegmentoFromTurma,
+  getSegmentoConfig,
+  format4PilaresDevelopment,
+};
 
 export interface SemanarioAiProgress {
   current: number;
@@ -23,170 +50,6 @@ export interface SemanarioAiBatchResult {
   failCount: number;
   failedPlans: SemanarioPlan[];
   wasAborted: boolean;
-}
-
-export interface StaffListPayload {
-  adis: string[];
-  monitors: string[];
-  turmaAtribuicao?: {
-    adi?: string;
-    monitora?: string;
-    assistente?: string;
-  };
-}
-
-export interface GeminiProposalResult {
-  title: string;
-  theme?: string;
-  category?: string;
-  suggestedAdi?: string;
-  suggestedMonitor?: string;
-  livro?: string;
-  versiculo?: string;
-  proposta?: string;
-  dinamica?: string;
-  atividades?: string;
-  objectives: string;
-  development: string;
-  materials: string;
-  formattedDevelopment?: string;
-  dicaMonitora?: string;
-}
-
-/**
- * MATRIZ FIXA DE PADRÃO PEDAGÓGICO — ESCOLA CRESCER
- * Regras mandatórias de estilo e formatação:
- * 1. Caixa baixa (texto discricionário): Proposta, Atividades e Importante iniciam em minúsculas
- * 2. Sem markdown pesado (sem **, *, #)
- * 3. Sem códigos da BNCC ou jargões técnicos
- * 4. Livros e versículos reais (Livro, de Autor (Editora) em Contação de História; citação real em Devocional)
- * 5. Seção 'Atividades:' em texto corrido e fluido descrevendo a dinâmica de forma contínua
- */
-export async function fetchGeminiProposal(
-  turma: string,
-  category: string,
-  dayOfWeek: string,
-  date: string,
-  theme?: string,
-  signal?: AbortSignal,
-  currentUser?: UserProfile | null,
-  staffList?: StaffListPayload
-): Promise<{ success: boolean; proposal?: GeminiProposalResult; error?: string }> {
-  try {
-    const userToVerify = currentUser !== undefined ? currentUser : getStoredUser();
-    const userRole = userToVerify?.role || '';
-    const userEmail = userToVerify?.email || '';
-
-    // Fonte prioritária e mandatória: Quadro de Atribuições vinculado à turma selecionada
-    let finalStaffList: StaffListPayload = staffList || { adis: [], monitors: [] };
-    if (!finalStaffList.turmaAtribuicao || (!finalStaffList.adis.length && !finalStaffList.monitors.length)) {
-      try {
-        const atribuicoes = loadLocalQuadroAtribuicoes();
-        const turmaAtribuicao = resolveAtribuicaoForTurma(turma, atribuicoes);
-        const turmaAdis = [turmaAtribuicao.adiName].filter(Boolean) as string[];
-        const turmaMonitors = [
-          turmaAtribuicao.monitoraName,
-          turmaAtribuicao.monitoraAssistenteName,
-        ].filter(Boolean) as string[];
-
-        finalStaffList = {
-          adis: turmaAdis.length > 0 ? turmaAdis : finalStaffList.adis,
-          monitors: turmaMonitors.length > 0 ? turmaMonitors : finalStaffList.monitors,
-          turmaAtribuicao: {
-            adi: turmaAtribuicao.adiName || undefined,
-            monitora: turmaAtribuicao.monitoraName || undefined,
-            assistente: turmaAtribuicao.monitoraAssistenteName || undefined,
-          },
-        };
-      } catch (e) {
-        // Fallback silencioso
-      }
-    }
-
-    // Se ainda assim não houver profissionais atribuídos, busca nos usuários ativos
-    if (!finalStaffList.adis.length || !finalStaffList.monitors.length) {
-      try {
-        const storedUsersRaw = typeof window !== 'undefined' ? localStorage.getItem('school_users') : null;
-        if (storedUsersRaw) {
-          const storedUsers: any[] = JSON.parse(storedUsersRaw);
-          const active = storedUsers.filter((u: any) => u.status !== 'INATIVO');
-          if (!finalStaffList.adis.length) {
-            finalStaffList.adis = active
-              .filter(
-                (u: any) =>
-                  u.role === 'auxiliar' ||
-                  u.cargoLabel?.toLowerCase().includes('adi') ||
-                  u.cargoLabel?.toLowerCase().includes('auxiliar')
-              )
-              .map((u: any) => u.name)
-              .filter(Boolean);
-          }
-          if (!finalStaffList.monitors.length) {
-            finalStaffList.monitors = active
-              .filter(
-                (u: any) =>
-                  u.role === 'professor' ||
-                  u.cargoLabel?.toLowerCase().includes('monitor') ||
-                  u.cargoLabel?.toLowerCase().includes('professor')
-              )
-              .map((u: any) => u.name)
-              .filter(Boolean);
-          }
-        }
-      } catch (e) {
-        // Fallback silencioso
-      }
-    }
-
-    const res = await fetch('/api/gemini/generate-proposal', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-role': userRole,
-        'x-user-email': userEmail,
-      },
-      body: JSON.stringify({
-        turma,
-        category,
-        dayOfWeek,
-        date,
-        theme: theme && theme.trim() ? theme.trim() : undefined,
-        userRole,
-        userEmail,
-        staffList: finalStaffList,
-      }),
-      signal,
-    });
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      return {
-        success: false,
-        error: errJson?.error || `HTTP ${res.status}: Falha na geração`,
-      };
-    }
-
-    const data = await res.json();
-    if (data.success && data.proposal && data.proposal.title) {
-      return {
-        success: true,
-        proposal: data.proposal,
-      };
-    }
-
-    return {
-      success: false,
-      error: data.error || 'Resposta da IA em formato inesperado',
-    };
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
-      throw err;
-    }
-    return {
-      success: false,
-      error: err.message || 'Erro de conexão com o serviço de IA',
-    };
-  }
 }
 
 /**

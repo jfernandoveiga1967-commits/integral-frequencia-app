@@ -181,11 +181,18 @@ export const PedagogicalFeedbackModal: React.FC<PedagogicalFeedbackModalProps> =
 
             <div className="p-4 sm:p-5 bg-teal-50/50 rounded-2xl border border-teal-100/80 text-xs sm:text-sm text-slate-800 whitespace-pre-wrap leading-relaxed shadow-2xs">
               {activeFeedback?.generatedMessage ? (
-                activeFeedback.generatedMessage.split(/(\*\*.*?\*\*)/g).map((part, idx) => {
+                activeFeedback.generatedMessage.split(/(\*\*.*?\*\*|\*[^*\n]+\*)/g).map((part, idx) => {
                   if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
                     return (
                       <strong key={idx} className="font-extrabold text-slate-900 bg-teal-100/50 px-1 py-0.5 rounded">
                         {part.slice(2, -2)}
+                      </strong>
+                    );
+                  }
+                  if (part.startsWith('*') && part.endsWith('*') && part.length >= 3) {
+                    return (
+                      <strong key={idx} className="font-extrabold text-slate-900 bg-teal-100/50 px-1 py-0.5 rounded">
+                        {part.slice(1, -1)}
                       </strong>
                     );
                   }

@@ -5,6 +5,18 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { getSalutationForName } from './src/utils/genderUtils';
+import {
+  buildDynamicPedagogicalFeedback,
+  buildGeminiFeedbackSystemPrompt,
+  sanitizeCordialMessageForWhatsApp,
+} from './src/utils/feedbackPromptBuilder';
+import {
+  detectSegmentoFromTurma,
+  getSegmentoConfig,
+  buildFallback4PilaresProposal,
+  format4PilaresDevelopment,
+  Semanario4Pilares,
+} from './src/services/semanarioAiService';
 
 dotenv.config();
 
@@ -85,8 +97,11 @@ app.post('/api/gemini/generate-proposal', async (req, res) => {
       });
     }
 
-    // Identificação de categoria e faixa etária da turma
+    // Identificação de categoria e segmento escolar da turma
     const normalizedCat = (category || 'Atividade Geral').trim();
+    const segmento = detectSegmentoFromTurma(turma);
+    const segConfig = getSegmentoConfig(segmento);
+
     const isDevocional = normalizedCat.toLowerCase().includes('devocional');
     const isContacao =
       normalizedCat.toLowerCase().includes('história') ||
@@ -94,11 +109,6 @@ app.post('/api/gemini/generate-proposal', async (req, res) => {
       normalizedCat.toLowerCase().includes('livro') ||
       normalizedCat.toLowerCase().includes('leitura') ||
       normalizedCat.toLowerCase().includes('literatura');
-    const isArtes =
-      normalizedCat.toLowerCase().includes('arte') ||
-      normalizedCat.toLowerCase().includes('desenho') ||
-      normalizedCat.toLowerCase().includes('pintura');
-    const isUpperElementary = /4[º°o]|5[º°o]|6[º°o]/i.test(turma || '');
 
     // Fonte prioritária e mandatória: Quadro de Atribuições vinculado à turma selecionada
     const exactAdi =
@@ -120,135 +130,76 @@ app.post('/api/gemini/generate-proposal', async (req, res) => {
 
     const cleanTheme = theme && String(theme).trim() ? String(theme).trim() : '';
 
-    const prompt = `Você é um coordenador pedagógico experiente na Escola Crescer.
-Sua missão é elaborar a proposta pedagógica para o Semanário do Programa Integral seguindo OBRIGATORIAMENTE a Matriz Fixa de Padrão Pedagógico da instituição.
+    const prompt = `Você é um Arquiteto Pedagógico e Coordenador experiente na Escola Crescer.
+Sua missão é elaborar a proposta pedagógica para o Semanário do Programa Integral estruturada OBRIGATORIAMENTE nos 4 PILARES DIDÁTICOS, com linguagem e tempo adaptados ao segmento escolar da turma.
 
-DADOS DA TURMA E ATIVIDADE:
-- Turma / Faixa Etária: ${turma || 'Ensino Fundamental'}
+DADOS DA TURMA E SEGMENTAÇÃO:
+- Turma: ${turma || 'Ensino Fundamental'}
+- Segmento Escolar: ${segConfig.nomeSegmento} (Faixa Etária: ${segConfig.faixaEtaria})
+- Tempo Estimado Obrigatório para o Segmento: ${segConfig.tempoEstimadoLabel} (${segConfig.tempoEstimadoMinutos} minutos)
+- Diretriz de Linguagem do Segmento: ${segConfig.diretrizLinguagem}
 - Categoria Pedagógica: ${normalizedCat}
 - Tema da Semana: ${cleanTheme ? `"${cleanTheme}" (a proposta deve se inspirar e articular harmoniosamente a este tema)` : 'Nenhum tema inserido (proponha um tema pedagógico relevante, acolhedor e lúdico)'}
 - Dia da semana e data: ${dayOfWeek || ''} ${date ? `(${date})` : ''}
 
-QUADRO DE ATRIBUIÇÕES OFICIAL DA TURMA (${turma}):
-- ADI(s) Oficial(is) Atribuída(s) a esta turma: ${adisText}
-- Monitora(s) Oficial(is) Atribuída(s) a esta turma: ${monitorsText}
+EQUIPE OFICIAL ATRIBUÍDA:
+- ADI(s): ${adisText}
+- Monitora(s): ${monitorsText}
 
-REGRAS DE OURO DE ESTILO E FORMATAÇÃO (ESTRITAMENTE OBRIGATÓRIAS):
-1. Caixa Baixa (Texto Discricionário): Todo o corpo de texto (Proposta, Atividades, Importante) deve usar estritamente letras minúsculas (iniciando o parágrafo em minúscula, ex: "estimular a imaginação...", "acomodar os pequenos...", "respeitar o tempo..."), usando maiúscula apenas no início de novas frases internas, nomes próprios e nomes sagrados (Deus, Jesus).
-2. Sem Markdown Pesado: Proibido o uso de **, *, # ou formatações pesadas. O texto deve sair plano e limpo para impressão e visualização em PDF.
-3. Sem BNCC/Jargões: Proibido incluir códigos da BNCC (ex: EI02CG01, EF15EF01) ou termos técnicos burocráticos.
-4. Livros e Versículos Reais: Na categoria 'Contação de História', informar obrigatoriamente Livro, Autor e Editora reais existentes (formato: "Título do Livro, de Autor (Editora)."). Em 'Devocional', citar versículo bíblico curto e real.
-5. Regra do Título: Frase normal com apenas a primeira letra maiúscula (e nomes próprios/sagrados). NUNCA em CAIXA ALTA. NUNCA repetir o nome do tema da semana nem o nome da categoria no título.
-6. Geração Estritamente Única: Gere apenas uma atividade e pare imediatamente após a seção 'Importante:'.
+ESTRUTURAÇÃO OBRIGATÓRIA NOS 4 PILARES DIDÁTICOS:
+1. Pilar 1 (Intencionalidade & BNCC):
+   - Defina o objetivo pedagógico formativo da atividade (iniciando em letra minúscula).
+   - Defina o foco de desenvolvimento: "motor", "cognitivo", "social" ou "socioemocional".
+   - Liste os materiais simples e acessíveis da rotina escolar.
+   - Tempo estimado: ${segConfig.tempoEstimadoLabel}.
+2. Pilar 2 (Disparador Lúdico):
+   - Crie uma introdução envolvente e disparadora:
+     * Para Mini/Maternal e Infantil: música com gestos, história curta com fantoche ou elemento surpresa.
+     * Para Fundamental I: pergunta disparadora instigante ou enigma cooperativo.
+     * Para 6º Ano (REGRA ESTRITA ANTI-INFANTILIZAÇÃO): pergunta provocadora reflexiva, estudo de caso ou desafio contemporâneo.
+3. Pilar 3 (Desenvolvimento Mão na Massa):
+   - Detalhe o passo a passo da mediação prática do monitor e da ADI com os alunos (3 etapas claras e objetivas).
+4. Pilar 4 (Sintetização & Transição):
+   - Fechamento: partilha, reflexão ou apreciação coletiva.
+   - Organização do Espaço: como as crianças e a equipe guardam os materiais e cuidam da sala.
+   - Transição: encaminhamento sereno e acolhedor para a próxima rotina escolar.
 
-EXEMPLO MATRIZ DE REFERÊNCIA (MODELO OBRIGATÓRIO DE ESTILO E DIAGRAMAÇÃO):
-Contação de História:
-O abraço do monstrinho das cores
-
-Proposta:
-estimular a imaginação, a escuta atenta e o reconhecimento das emoções básicas através de fantoches simples e entonações de voz suaves.
-
-Atividades:
-acomodar os pequenos em almofadas no chão em semicírculo. apresentar os personagens da história com fantoches de feltro ou gravuras coloridas. contar a história com pausas dramáticas, usando expressões faciais e gestos corporais para ilustrar sentimentos como alegria, medo, calma e tristeza. ao final, convidar cada criança a dar um abraço afetuoso no fantoche da cor que ela mais gostou e imitar uma cara alegre junto com o monitor.
-
-Livro:
-O Monstro das Cores, de Anna Llenas (Editora Aletria).
-
-Importante:
-respeitar o tempo de atenção dos pequenos, mantendo a contação entre dez e quinze minutos. acolher no colo quem demonstrar dispersão ou sensibilidade emocional durante a narrativa.
-
-ADAPTAÇÃO DA MATRIZ PARA A CATEGORIA "${normalizedCat}":
-${
-  isDevocional
-    ? `Para categoria Devocional:
-Devocional:
-[Título da atividade em frase normal, sem repetir o tema]
-
-Proposta:
-[texto fluido iniciando em minúscula sobre reflexão, amor de Deus e convivência fraterna]
-
-Atividades:
-[condução prática da roda de conversa, partilha e oração simples e participativa em texto corrido e fluido]
-
-Versículo:
-[citação bíblica curta e real com livro, capítulo e versículo existente, ex: Lucas 6:31]
-
-Importante:
-[orientação acolhedora iniciando em minúscula sobre sensibilidade e respeito]`
-    : isContacao
-    ? `Para categoria Contação de História:
-Contação de História:
-[Título da atividade em frase normal, sem repetir o tema]
-
-Proposta:
-[texto fluido iniciando em minúscula sobre a imaginação e a narrativa]
-
-Atividades:
-[passo a passo detalhado e fluido de acolhimento e contação em texto corrido]
-
-Livro:
-[Título da Obra, de Autor (Editora) - obrigatório obra real existente no mercado brasileiro]
-
-Importante:
-[orientação acolhedora iniciando em minúscula]`
-    : isArtes
-    ? `Para categoria Artes:
-Artes:
-[Título da atividade em frase normal, sem repetir o tema]
-
-Proposta:
-[texto fluido iniciando em minúscula valorizando a sensibilidade artística]
-
-Atividades:
-[passo a passo fluido e prático da oficina artística com as crianças]
-
-Materiais (se aplicável):
-• [Item 1]
-• [Item 2]
-
-Importante:
-[orientação acolhedora iniciando em minúscula]
-${
-  isUpperElementary
-    ? '\nATENÇÃO ESPECIAL (REGRA ANTI-INFANTILIZAÇÃO PARA 4º AO 6º ANO): Como a turma é de 4º ao 6º ano (' +
-      turma +
-      '), proponha técnicas expressivas desafiadoras como mosaicos, mandalas geométricas, estudos de perspectiva básica, luz e sombra com grafite/carvão, esculturas em argila ou modelagem estruturada, pontilhismo ou gravura em relevo. É TERMINANTEMENTE PROIBIDO propor desenhos infantis de pintar, folhas prontas de colorir ou massinha de modelar simples.'
-    : ''
-}`
-    : `Para a categoria ${normalizedCat}:
-${normalizedCat}:
-[Título da atividade em frase normal, sem repetir o tema nem a categoria]
-
-Proposta:
-[texto fluido iniciando em minúscula sobre a vivência prática, sem códigos BNCC]
-
-Atividades:
-[passo a passo fluido e prático em texto corrido de como a monitora conduz a turma e os recursos]
-
-Materiais (se aplicável):
-• [Item 1]
-• [Item 2]
-
-Importante:
-[orientação acolhedora iniciando em minúscula sobre acolhimento e mediação com a ADI]`
-}
-
-EQUIPE OFICIAL DA TURMA:
-- "suggestedAdi": "${adisText}"
-- "suggestedMonitor": "${monitorsText}"
-
-Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
+REGRAS DE ESTILO E FORMATAÇÃO (ESTRITAMENTE OBRIGATÓRIAS):
+- Sem Markdown Pesado: Proibido o uso de **, *, # ou formatações pesadas.
+- Sem BNCC/Jargões: Proibido incluir códigos burocráticos (ex: EI02CG01, EF15EF01).
+- Regra do Título: Frase normal com apenas a primeira letra maiúscula (e nomes próprios/sagrados). NUNCA em CAIXA ALTA. NUNCA repetir o nome do tema da semana nem o da categoria no título.
+${isContacao ? '- Livro: Informar obrigatoriamente Livro, Autor e Editora reais existentes (formato: "Título do Livro, de Autor (Editora).").\n' : ''}${isDevocional ? '- Versículo: Citar versículo bíblico curto e real com livro, capítulo e versículo existentes.\n' : ''}
+Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
 {
   "title": "Nome da atividade em frase normal",
   "theme": "${cleanTheme || 'Tema pedagógico acolhedor'}",
   "suggestedAdi": "${adisText}",
   "suggestedMonitor": "${monitorsText}",
   "category": "${normalizedCat}",
-  ${isContacao ? '"livro": "Título do Livro, de Autor (Editora).",\n  ' : ''}${isDevocional ? '"versiculo": "Citação bíblica curta e real",\n  ' : ''}"proposta": "texto corrido em minúscula...",
-  "atividades": "texto corrido em minúscula com o passo a passo prático...",
+  "segmento": "${segmento}",
+  "tempoEstimadoMinutos": ${segConfig.tempoEstimadoMinutos},
+  ${isContacao ? '"livro": "Título do Livro, de Autor (Editora).",\n  ' : ''}${isDevocional ? '"versiculo": "Citação bíblica curta e real",\n  ' : ''}"pilar1": {
+    "objetivo": "texto em minúscula...",
+    "focoDesenvolvimento": "motor | cognitivo | social | socioemocional",
+    "materiais": ["item 1", "item 2"]
+  },
+  "pilar2": {
+    "tipo": "musica | historia | pergunta | desafio",
+    "descricao": "introdução disparadora envolvente..."
+  },
+  "pilar3": {
+    "passoAPasso": ["etapa 1", "etapa 2", "etapa 3"],
+    "mediacaoMonitor": "mediação da equipe..."
+  },
+  "pilar4": {
+    "fechamento": "finalização com os alunos...",
+    "organizacaoEspaco": "organização dos materiais...",
+    "transicao": "transição para a próxima rotina..."
+  },
   "materials": "• Item 1\\n• Item 2",
-  "importante": "texto corrido em minúscula sobre acolhimento...",
-  "formattedDevelopment": "${isDevocional ? 'Devocional:' : isContacao ? 'Contação de História:' : isArtes ? 'Artes:' : `${normalizedCat}:`}\\nTítulo...\\n\\nProposta:\\n...\\n\\nImportante:\\n..."
+  "proposta": "resumo do objetivo em minúscula...",
+  "atividades": "resumo do passo a passo...",
+  "importante": "orientação acolhedora para a equipe..."
 }`;
 
     let response: any = null;
@@ -267,7 +218,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
         break;
       } catch (err: any) {
         if (attempts >= 2) {
-          console.log('[Semanário IA] Ativando contingência pedagógica integrada (IA/créditos indisponíveis):', err?.status || 'indisponível');
+          console.log('[Semanário IA] Ativando contingência dos 4 Pilares Didáticos (IA/créditos indisponíveis):', err?.status || 'indisponível');
           response = null;
           break;
         }
@@ -285,58 +236,22 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
         try {
           parsed = JSON.parse(cleaned);
         } catch {
-          // Tenta extrair cada campo suportando tanto string quanto array ou objeto
-          try {
-            const extractRawValue = (key: string) => {
-              const regex = new RegExp(`"${key}"\\s*:\\s*(\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\}|"[\\s\\S]*?")`, 'i');
-              const match = cleaned.match(regex);
-              if (!match) return '';
-              try {
-                return JSON.parse(match[1]);
-              } catch {
-                return match[1].replace(/^"|"$/g, '').replace(/\\"/g, '"');
-              }
-            };
-
-            parsed = {
-              title: extractRawValue('title') || 'Vivência pedagógica integrada',
-              theme: extractRawValue('theme') || '',
-              suggestedAdi: extractRawValue('suggestedAdi') || '',
-              suggestedMonitor: extractRawValue('suggestedMonitor') || '',
-              category: extractRawValue('category') || normalizedCat,
-              livro: extractRawValue('livro') || '',
-              versiculo: extractRawValue('versiculo') || '',
-              proposta: extractRawValue('proposta') || extractRawValue('objectives') || '',
-              dinamica: extractRawValue('dinamica') || extractRawValue('development') || '',
-              atividades: extractRawValue('atividades') || extractRawValue('development') || '',
-              materials: extractRawValue('materials') || '',
-              importante: extractRawValue('importante') || extractRawValue('dicaMonitora') || '',
-              formattedDevelopment: extractRawValue('formattedDevelopment') || '',
-            };
-          } catch {
-            parsed = null;
-          }
+          parsed = null;
         }
       }
     }
 
-    if (!parsed) {
+    // Se a IA não respondeu ou houve falha, utiliza o gerador curado oficial dos 4 Pilares Didáticos
+    if (!parsed || !parsed.title) {
+      const fallbackProposal = buildFallback4PilaresProposal(turma, normalizedCat, cleanTheme);
       parsed = {
-        title: cleanTheme ? `Vivência prática sobre ${cleanTheme}` : 'Vivência acolhedora integrada',
-        theme: cleanTheme || 'Vivência pedagógica integrada',
-        suggestedAdi: exactAdi || (staffList?.adis?.[0] || ''),
-        suggestedMonitor: exactMonitor || (staffList?.monitors?.length ? staffList.monitors.join(' e ') : ''),
-        category: normalizedCat,
-        livro: isContacao ? 'O Monstro das Cores, de Anna Llenas (Editora Aletria).' : '',
-        versiculo: isDevocional ? 'Lucas 6:31 - Como vocês querem que os outros lhes façam, façam também vocês a eles.' : '',
-        proposta: 'proporcionar uma vivência acolhedora, participativa e cooperativa, promovendo a integração afetiva e a autonomia das crianças no espaço coletivo.',
-        atividades: 'introduzir a proposta de forma lúdica e acolhedora, distribuindo os materiais e orientando as crianças passo a passo para que todas brinquem, colaborem e desfrutem juntas da dinâmica.',
-        materials: '• Materiais pedagógicos da sala',
-        importante: 'manter a atenção afetuosa a cada criança, acolhendo quem necessitar de mediação mais próxima e celebrando os avanços do grupo.',
+        ...fallbackProposal,
+        suggestedAdi: exactAdi || (staffList?.adis?.[0] || 'Patrícia'),
+        suggestedMonitor: exactMonitor || (staffList?.monitors?.length ? staffList.monitors.join(' e ') : 'Márcia'),
       };
     }
 
-    // Normaliza campos para string caso a IA tenha gerado arrays ou objetos aninhados
+    // Normaliza campos para string limpa
     const toStringField = (val: any): string => {
       if (!val) return '';
       if (typeof val === 'string') return val;
@@ -379,20 +294,15 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
         title = 'Vivência lúdica integrada';
       }
 
-      // Se todo em maiúsculas ou title case forçado, converte para minúsculas
       title = title.toLowerCase();
-
-      // Coloca apenas a 1ª letra em maiúscula
       title = title.charAt(0).toUpperCase() + title.slice(1);
 
-      // Preserva nomes próprios e sagrados
       title = title
         .replace(/\bdeus\b/gi, 'Deus')
         .replace(/\bjesus\b/gi, 'Jesus')
         .replace(/\bbíblia\b/gi, 'Bíblia')
         .replace(/\bsenhor\b/gi, 'Senhor');
 
-      // REGRA ESTRITA: NUNCA repetir o nome do tema da semana nem da categoria no título
       if (cleanTheme) {
         const themeWords = cleanTheme.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
         for (const tw of themeWords) {
@@ -413,7 +323,6 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
         }
       }
 
-      // Ajusta espaçamento e garante primeira maiúscula
       title = title.replace(/\s{2,}/g, ' ').trim();
       if (title.length > 0) {
         title = title.charAt(0).toUpperCase() + title.slice(1);
@@ -421,7 +330,6 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
       return title || 'Vivência lúdica integrada';
     };
 
-    // Garante que o início de cada bloco textual (Proposta, Atividades, Importante) comece em caixa baixa
     const ensureDiscretionaryLowerCase = (str: string): string => {
       if (!str) return '';
       let trimmed = str.trim();
@@ -433,161 +341,123 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
     };
 
     const finalTitle = formatCleanTitle(parsed?.title || '');
-    const propostaStr = cleanPedagogicalText(parsed?.proposta || parsed?.objectives || '');
-    const dinamicaStr = cleanPedagogicalText(parsed?.atividades || parsed?.dinamica || parsed?.development || '');
-    const versiculoStr = cleanPedagogicalText(parsed?.versiculo || '');
     const livroStr = cleanPedagogicalText(parsed?.livro || '');
-    const materialsStr = cleanPedagogicalText(parsed?.materials || '');
+    const versiculoStr = cleanPedagogicalText(parsed?.versiculo || '');
     const importanteStr = cleanPedagogicalText(parsed?.importante || parsed?.dicaMonitora || '');
 
-    // Formata lista de materiais com marcadores simples de bolinha
-    const formatMaterialsLines = (rawMat: string): string => {
-      if (!rawMat) return '';
-      const lines = rawMat
+    // Extrai e valida a estrutura dos 4 Pilares Didáticos
+    const p1Obj = ensureDiscretionaryLowerCase(
+      cleanPedagogicalText(parsed?.pilar1?.objetivo || parsed?.proposta || parsed?.objectives || 'proporcionar vivência acolhedora e integrada')
+    );
+    const p1FocoRaw = String(parsed?.pilar1?.focoDesenvolvimento || 'cognitivo').toLowerCase();
+    const p1Foco = ['motor', 'cognitivo', 'social', 'socioemocional'].includes(p1FocoRaw)
+      ? (p1FocoRaw as 'motor' | 'cognitivo' | 'social' | 'socioemocional')
+      : 'cognitivo';
+
+    let p1Materiais: string[] = [];
+    if (Array.isArray(parsed?.pilar1?.materiais)) {
+      p1Materiais = parsed.pilar1.materiais.map((m: any) => cleanPedagogicalText(m)).filter(Boolean);
+    } else if (parsed?.materials) {
+      p1Materiais = String(parsed.materials)
         .split('\n')
         .map((l) => l.replace(/^[-*•]\s*/, '').trim())
         .filter(Boolean);
-      if (lines.length === 0) return '';
-      return lines.map((l) => `• ${l}`).join('\n');
+    }
+    if (p1Materiais.length === 0) {
+      p1Materiais = ['Materiais pedagógicos simples da rotina escolar'];
+    }
+
+    const p2Tipo = parsed?.pilar2?.tipo || (segmento === 'mini_maternal' ? 'musica' : 'pergunta');
+    const p2Desc = cleanPedagogicalText(
+      parsed?.pilar2?.descricao ||
+      (segmento === 'mini_maternal'
+        ? 'cantar uma melodia suave com palmas para acolher a turma em semicírculo.'
+        : 'apresentar uma pergunta disparadora curiosa para conectar a turma ao tema.')
+    );
+
+    let p3Passos: string[] = [];
+    if (Array.isArray(parsed?.pilar3?.passoAPasso) && parsed.pilar3.passoAPasso.length > 0) {
+      p3Passos = parsed.pilar3.passoAPasso.map((p: any) => cleanPedagogicalText(p)).filter(Boolean);
+    } else if (parsed?.atividades || parsed?.dinamica) {
+      p3Passos = [cleanPedagogicalText(parsed.atividades || parsed.dinamica)];
+    } else {
+      p3Passos = [
+        'Acomodar as crianças com acolhimento e apresentar os recursos pedagógicos.',
+        'Orientar a atividade prática de forma cooperativa e incentivando a autonomia.',
+        'Acompanhar os alunos com mediação afetuosa e escuta atenta.',
+      ];
+    }
+
+    const p3Mediacao = cleanPedagogicalText(
+      parsed?.pilar3?.mediacaoMonitor ||
+      'A monitora e a ADI conduzem a turma com presença atenta e incentivo constante aos avanços do grupo.'
+    );
+
+    const p4Fechamento = cleanPedagogicalText(
+      parsed?.pilar4?.fechamento || 'roda de conversa breve para partilha e apreciação coletiva.'
+    );
+    const p4Organizacao = cleanPedagogicalText(
+      parsed?.pilar4?.organizacaoEspaco || 'organização colaborativa dos materiais na sala.'
+    );
+    const p4Transicao = cleanPedagogicalText(
+      parsed?.pilar4?.transicao || 'transição serena e acolhedora para a próxima rotina escolar.'
+    );
+
+    const pilares: Semanario4Pilares = {
+      pilar1_intencionalidade: {
+        objetivo: p1Obj,
+        focoDesenvolvimento: p1Foco,
+        materiais: p1Materiais,
+        tempoEstimadoMinutos: segConfig.tempoEstimadoMinutos,
+      },
+      pilar2_disparadorLudico: {
+        tipo: p2Tipo,
+        descricao: p2Desc,
+      },
+      pilar3_maoNaMassa: {
+        passoAPasso: p3Passos,
+        mediacaoMonitor: p3Mediacao,
+      },
+      pilar4_sintetizacaoTransicao: {
+        fechamento: p4Fechamento,
+        organizacaoEspaco: p4Organizacao,
+        transicao: p4Transicao,
+      },
+      segmento,
+      tempoEstimadoMinutos: segConfig.tempoEstimadoMinutos,
     };
 
-    const formattedMaterialsList = formatMaterialsLines(materialsStr);
+    const finalFormattedDev = format4PilaresDevelopment(normalizedCat, finalTitle, pilares, {
+      livro: livroStr || undefined,
+      versiculo: versiculoStr || undefined,
+      dicaMonitora: importanteStr || undefined,
+    });
 
-    // Constrói a estrutura oficial exata da Escola Crescer para cada categoria seguindo a Matriz de Referência
-    let finalFormattedDev = '';
-
-    if (isDevocional) {
-      finalFormattedDev = [
-        `Devocional:`,
-        finalTitle,
-        '',
-        `Proposta:`,
-        ensureDiscretionaryLowerCase(
-          propostaStr ||
-            'proporcionar um momento sereno de reflexão sobre a gratidão e o amor de Deus, fortalecendo a convivência harmoniosa e a empatia no cotidiano escolar.'
-        ),
-        '',
-        `Atividades:`,
-        ensureDiscretionaryLowerCase(
-          dinamicaStr ||
-            'acomodar as crianças em roda acolhedora e conversar sobre pequenas atitudes de bondade no dia a dia. em seguida, realizar uma oração simples e participativa onde cada pequeno pode agradecer por um amigo ou pela família.'
-        ),
-        '',
-        `Versículo:`,
-        versiculoStr || 'Lucas 6:31 - Como vocês querem que os outros lhes façam, façam também vocês a eles.',
-        '',
-        `Importante:`,
-        ensureDiscretionaryLowerCase(
-          importanteStr ||
-            'manter um clima de acolhimento sereno e escuta sensível, permitindo que todas as crianças se sintam seguras e amadas.'
-        ),
-      ].join('\n');
-    } else if (isContacao) {
-      finalFormattedDev = [
-        `Contação de História:`,
-        finalTitle,
-        '',
-        `Proposta:`,
-        ensureDiscretionaryLowerCase(
-          propostaStr ||
-            'estimular a imaginação, a escuta atenta e o reconhecimento das emoções básicas através de fantoches simples e entonações de voz suaves.'
-        ),
-        '',
-        `Atividades:`,
-        ensureDiscretionaryLowerCase(
-          dinamicaStr ||
-            'acomodar os pequenos em almofadas no chão em semicírculo. apresentar os personagens da história com fantoches de feltro ou gravuras coloridas. contar a história com pausas dramáticas, usando expressões faciais e gestos corporais para ilustrar sentimentos como alegria, medo, calma e tristeza. ao final, convidar cada criança a dar um abraço afetuoso no fantoche da cor que ela mais gostou e imitar uma cara alegre junto com o monitor.'
-        ),
-        '',
-        `Livro:`,
-        livroStr || 'O Monstro das Cores, de Anna Llenas (Editora Aletria).',
-        '',
-        `Importante:`,
-        ensureDiscretionaryLowerCase(
-          importanteStr ||
-            'respeitar o tempo de atenção dos pequenos, mantendo a contação entre dez e quinze minutos. acolher no colo quem demonstrar dispersão ou sensibilidade emocional durante a narrativa.'
-        ),
-      ].filter(Boolean).join('\n');
-    } else if (isArtes) {
-      const defaultPropostaArtes = isUpperElementary
-        ? 'explorar técnicas de composição expressiva, estimulando a percepção estética, a paciência e a criatividade autônoma na produção artística.'
-        : 'desenvolver a sensibilidade artística, a percepção de cores e formas e a coordenação motora fina em uma vivência plástica acolhedora.';
-
-      const defaultDinamicaArtes = isUpperElementary
-        ? 'apresentar referências de mosaicos e texturas; com mediação atenta da equipe, cada aluno traça suas linhas em suporte firme e preenche com pequenos fragmentos ou estudos de luz e sombra, valorizando o processo individual.'
-        : 'organizar as bancadas com os suportes e tintas; as crianças exploram livremente as misturas de tons e texturas para compor sua produção com carinho e autonomia.';
-
-      finalFormattedDev = [
-        `Artes:`,
-        finalTitle,
-        '',
-        `Proposta:`,
-        ensureDiscretionaryLowerCase(propostaStr || defaultPropostaArtes),
-        '',
-        `Atividades:`,
-        ensureDiscretionaryLowerCase(dinamicaStr || defaultDinamicaArtes),
-        '',
-        formattedMaterialsList ? `Materiais (se aplicável):\n${formattedMaterialsList}\n` : '',
-        `Importante:`,
-        ensureDiscretionaryLowerCase(
-          importanteStr ||
-            'respeitar o ritmo e a expressividade única de cada criação, valorizando o processo criativo e a autonomia individual.'
-        ),
-      ].filter(Boolean).join('\n');
-    } else {
-      finalFormattedDev = [
-        `${normalizedCat}:`,
-        finalTitle,
-        '',
-        `Proposta:`,
-        ensureDiscretionaryLowerCase(
-          propostaStr ||
-            'proporcionar uma vivência participativa e cooperativa, promovendo a integração afetiva e a autonomia das crianças no espaço coletivo.'
-        ),
-        '',
-        `Atividades:`,
-        ensureDiscretionaryLowerCase(
-          dinamicaStr ||
-            'introduzir a proposta de forma lúdica e acolhedora, distribuindo os materiais e orientando as crianças passo a passo para que todas brinquem, colaborem e desfrutem juntas da dinâmica.'
-        ),
-        '',
-        formattedMaterialsList ? `Materiais (se aplicável):\n${formattedMaterialsList}\n` : '',
-        `Importante:`,
-        ensureDiscretionaryLowerCase(
-          importanteStr ||
-            'manter a atenção afetuosa a cada criança, acolhendo quem necessitar de mediação mais próxima e celebrando os avanços do grupo.'
-        ),
-      ].filter(Boolean).join('\n');
-    }
-
-    // Regra de geração estritamente ÚNICA: Garante que o texto para imediatamente após a seção 'Importante:'
-    const importanteIndex = finalFormattedDev.indexOf('Importante:');
-    if (importanteIndex !== -1) {
-      const afterImp = finalFormattedDev.slice(importanteIndex);
-      // Se houver uma quebra dupla após a descrição de Importante seguida de nova atividade, corta
-      const nextSectionMatch = afterImp.search(/\n\n[A-ZÁÉÍÓÚÂÊÔÃÕÇ\s]+:\s*\n/);
-      if (nextSectionMatch !== -1) {
-        finalFormattedDev = finalFormattedDev.slice(0, importanteIndex + nextSectionMatch).trim();
-      }
-    }
+    const finalMaterialsList = p1Materiais.map((m) => `• ${m}`).join('\n');
+    const finalObjectives = `${p1Obj} [Foco: ${p1Foco.toUpperCase()} • ${segConfig.tempoEstimadoLabel}]`;
 
     // Fonte prioritária e mandatória: Quadro de Atribuições vinculado à turma
-    const finalAdi = exactAdi || (typeof parsed?.suggestedAdi === 'string' && parsed.suggestedAdi.trim() ? cleanPedagogicalText(parsed.suggestedAdi) : (staffList?.adis?.[0] || ''));
-    const finalMonitor = exactMonitor || (typeof parsed?.suggestedMonitor === 'string' && parsed.suggestedMonitor.trim() ? cleanPedagogicalText(parsed.suggestedMonitor) : (staffList?.monitors?.length ? staffList.monitors.join(' e ') : ''));
+    const finalAdi = exactAdi || (typeof parsed?.suggestedAdi === 'string' && parsed.suggestedAdi.trim() ? cleanPedagogicalText(parsed.suggestedAdi) : (staffList?.adis?.[0] || 'Patrícia'));
+    const finalMonitor = exactMonitor || (typeof parsed?.suggestedMonitor === 'string' && parsed.suggestedMonitor.trim() ? cleanPedagogicalText(parsed.suggestedMonitor) : (staffList?.monitors?.length ? staffList.monitors.join(' e ') : 'Márcia'));
 
     const normalizedProposal = {
       title: finalTitle,
-      theme: typeof parsed?.theme === 'string' && parsed.theme.trim() ? cleanPedagogicalText(parsed.theme) : (cleanTheme || ''),
+      theme: typeof parsed?.theme === 'string' && parsed.theme.trim() ? cleanPedagogicalText(parsed.theme) : (cleanTheme || 'Vivência pedagógica integrada'),
       suggestedAdi: finalAdi,
       suggestedMonitor: finalMonitor,
       category: normalizedCat,
+      segmento,
       livro: livroStr || undefined,
       versiculo: versiculoStr || undefined,
-      objectives: propostaStr || 'Vivência pedagógica acolhedora e integrada',
-      development: finalFormattedDev, // Preenche a descrição com a estrutura oficial completa da Escola Crescer
-      materials: formattedMaterialsList || materialsStr,
+      objectives: finalObjectives,
+      development: finalFormattedDev,
       formattedDevelopment: finalFormattedDev,
-      dicaMonitora: importanteStr,
+      materials: finalMaterialsList,
+      proposta: p1Obj,
+      atividades: p3Passos.join(' '),
+      dinamica: `${p2Desc} ${p3Mediacao}`,
+      dicaMonitora: importanteStr || undefined,
+      pilares,
     };
 
     return res.json({
@@ -603,7 +473,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
   }
 });
 
-// Helper: Gerador pedagógico oficial de contingência baseado em CNV e cuidado às crianças
+// Helper: Gerador pedagógico oficial de contingência baseado nos 3 Pilares e CNV
 function buildServerFallbackCordialFeedback(
   userName: string,
   normTitle: string,
@@ -611,37 +481,13 @@ function buildServerFallbackCordialFeedback(
   normSection?: string,
   normDetails?: string[]
 ): { message: string; actionPoints: string[] } {
-  const { salutation, firstName } = getSalutationForName(userName);
-  const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
-
-  const message = `Olá, ${salutation} ${firstName}!
-
-Esperamos que seu dia esteja sendo abençoado. Gostaríamos de começar expressando nosso sincero agradecimento pelo seu carinho, dedicação e energia investidos diariamente no acompanhamento dos nossos pequenos no Programa do Integral do Colégio Crescer. Seu papel é fundamental na vida de cada criança!
-
-No espírito de diálogo aberto e contínuo aprimoramento da nossa equipe, gostaríamos de compartilhar uma orientação construtiva sobre uma situação observada recentemente:
-**"${rawContext.trim()}"**
-
-Gostaríamos de revisitar com você a norma institucional **"${normTitle}"${sectionLabel}**. No Colégio Crescer, cada uma dessas diretrizes existe com um único propósito supremo: garantir a integridade física, o acolhimento emocional e a segurança permanente de todas as crianças sob nossa responsabilidade. Quando zelamos por esses detalhes da rotina, construímos um ambiente verdadeiramente protegido e sereno para que os alunos possam florescer.
-
-Contamos imensamente com a sua sensibilidade e parceria para mantermos esse alinhamento no dia a dia. Você faz a diferença em nosso colégio!
-
-Atenciosamente,
-Coordenação do Integral • Colégio Crescer`;
-
-  const actionPoints = [
-    `Revisar e praticar a diretriz institucional "${normTitle}"${sectionLabel} durante toda a rotina de atendimento.`,
-    'Manter foco prioritário e atenção constante na segurança física, bem-estar e integridade dos alunos.',
-    'Buscar proativamente o apoio da coordenação ou de colegas sempre que surgirem dúvidas ou desafios na condução da turma.',
-  ];
-
-  if (Array.isArray(normDetails) && normDetails.length > 0) {
-    const customPoint = normDetails[0].trim();
-    if (customPoint && !actionPoints.includes(customPoint)) {
-      actionPoints.splice(1, 0, `Observar a orientação específica: ${customPoint}`);
-    }
-  }
-
-  return { message, actionPoints };
+  return buildDynamicPedagogicalFeedback({
+    userName,
+    normTitle,
+    rawContext,
+    normSection,
+    normDetails,
+  });
 }
 
 // Helper: Heurística Semântica Contextual no servidor para correspondência de normas no catálogo
@@ -738,39 +584,13 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
     const ai = getAIClient();
     if (ai) {
       try {
-        const prompt = `Você é um coordenador pedagógico experiente, acolhedor e empático do Colégio Crescer.
-Sua missão é redigir um feedback individual fundamentado estritamente na Comunicação Não-Violenta (CNV) para o(a) colaborador(a) ${userName}.
-
-Diretrizes Obrigatórias de Formatação e Linguagem:
-1. Saudação Inicial com Flexão de Gênero Estrita:
-   - Inicie a mensagem OBRIGATORIAMENTE com: "Olá, ${salutation} ${firstName}!"
-2. Destaques Obrigatórios em Negrito (**):
-   - Formate o fato ocorrido observado OBRIGATORIAMENTE em negrito com aspas e asteriscos duplos: **"${rawContext.trim()}"**
-   - Formate o título da norma institucional e sua seção OBRIGATORIAMENTE em negrito: **${normFullRef}**
-3. Pilares Obrigatórios da Comunicação Não-Violenta (CNV):
-   - Acolhimento e Valorização: Inicie com carinho e reconhecendo a dedicação no cuidado com as crianças.
-   - Observação Serena dos Fatos: Descreva o ocorrido de forma respeitosa e serena, sem julgamentos depreciativos ou tom punitivo.
-   - Significado Pedagógico e Proteção às Crianças: Enfatize que o objetivo supremo de nossas diretrizes no Colégio Crescer é a segurança física, o bem-estar emocional e o desenvolvimento das crianças.
-   - Pedido e Orientação Construtiva: Apresente o direcionamento de forma clara e encorajadora.
-   - Encerramento: Finalize exatamente com:
-Atenciosamente,
-Coordenação do Integral • Colégio Crescer
-
-Contexto:
-- Nome: ${userName}
-- Norma Institucional: ${normFullRef}
-- Fato Ocorrido: "${rawContext}"
-- Diretrizes da Norma: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Normas de conduta e rotina pedagógica do Colégio Crescer'}
-
-Gere uma resposta estritamente em JSON no seguinte formato:
-{
-  "message": "Texto completo da mensagem cordial iniciando em 'Olá, ${salutation} ${firstName}!' com os destaques em ** e finalizando em 'Coordenação do Integral • Colégio Crescer'...",
-  "actionPoints": [
-    "Ponto prático 1 de atenção e cuidado que a monitora deve seguir",
-    "Ponto prático 2 de alinhamento com a segurança das crianças",
-    "Ponto prático 3 de compromisso pedagógico institucional"
-  ]
-}`;
+        const prompt = buildGeminiFeedbackSystemPrompt({
+          userName,
+          normTitle,
+          rawContext,
+          normSection,
+          normDetails,
+        });
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
@@ -792,36 +612,12 @@ Gere uma resposta estritamente em JSON no seguinte formato:
         }
 
         if (parsed?.message) {
-          let messageText: string = parsed.message.trim();
-
-          // Pós-processamento de garantia: assegura saudação correta
-          if (!messageText.startsWith(`Olá, ${salutation}`)) {
-            messageText = messageText.replace(/^Olá,\s*(?:querid[oa]|colaborador[a]?|amig[oa])\s+[^!\n]+!/i, `Olá, ${salutation} ${firstName}!`);
-            if (!messageText.startsWith(`Olá, ${salutation}`)) {
-              messageText = `Olá, ${salutation} ${firstName}!\n\n${messageText}`;
-            }
-          }
-
-          // Pós-processamento de garantia: assegura negrito no fato e na norma
-          const rawTrimmed = rawContext.trim();
-          if (!messageText.includes(`**"${rawTrimmed}"**`) && messageText.includes(rawTrimmed)) {
-            messageText = messageText.replace(`"${rawTrimmed}"`, `**"${rawTrimmed}"**`);
-            if (!messageText.includes(`**"${rawTrimmed}"**`)) {
-              messageText = messageText.replace(rawTrimmed, `**"${rawTrimmed}"**`);
-            }
-          }
-
-          if (!messageText.includes(`**${normFullRef}**`) && messageText.includes(normTitle)) {
-            messageText = messageText.replace(`"${normTitle}"${sectionLabel}`, `**${normFullRef}**`);
-            if (!messageText.includes(`**${normFullRef}**`)) {
-              messageText = messageText.replace(`"${normTitle}"`, `**${normFullRef}**`);
-            }
-          }
-
-          // Pós-processamento de garantia: assinatura institucional estrita
-          messageText = messageText.replace(/\n+(?:Um abraço fraterno,?|Atenciosamente,?|Fraternalmente,?)\s*\n+.*$/is, '');
-          messageText = messageText.replace(/\n+\*?(?:Coordenação (?:do Integral|Pedagógica) • Colégio Crescer)\*?$/is, '');
-          messageText = `${messageText.trim()}\n\nAtenciosamente,\nCoordenação do Integral • Colégio Crescer`;
+          const messageText = sanitizeCordialMessageForWhatsApp(parsed.message, {
+            userName,
+            normTitle,
+            rawContext,
+            normSection,
+          });
 
           return res.json({
             success: true,

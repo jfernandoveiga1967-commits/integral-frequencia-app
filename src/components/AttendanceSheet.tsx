@@ -17,6 +17,8 @@ import { useConfirmedAction } from '../hooks/useConfirmedAction';
 import { SaveStatusBanner } from './SaveStatusBanner';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
 
+export type AttendanceFilterStatus = 'TODOS' | 'PRESENTE' | 'SEM_EQUIPAMENTO' | 'FALTA' | 'PENDENTE';
+
 interface AttendanceSheetProps {
   students: Student[];
   records: AttendanceRecord[];
@@ -237,6 +239,15 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     return 'TODAS';
   });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Estado de filtro de status interativo acionado pelos cards do Resumo do Dia
+  const [filterStatus, setFilterStatus] = useState<AttendanceFilterStatus>('TODOS');
+  const rosterListRef = React.useRef<HTMLDivElement>(null);
+
+  // Reseta o filtro de status caso o usuário alterne de turma, modalidade ou data
+  useEffect(() => {
+    setFilterStatus('TODOS');
+  }, [selectedTurma, selectedActivity, selectedDate]);
 
   // Mantém sincronizado caso o valor externo mude
   useEffect(() => {
@@ -564,6 +575,63 @@ function getCurrentHHMM(): string {
     return { presente, saidaAntecipada, falta, semEquipamento, pendente, total };
   }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
 
+  // Identifica o status atual de chamada do aluno para o filtro do Resumo do Dia
+  const getStudentAttendanceStatus = useCallback(
+    (student: Student): 'PRESENTE' | 'SEM_EQUIPAMENTO' | 'FALTA' | 'PENDENTE' => {
+      if (selectedActivity !== 'TODAS') {
+        const key = `${student.id}_${selectedActivity}_${selectedDate}`;
+        const rec = recordMap.get(key);
+        if (!rec || !rec.status) return 'PENDENTE';
+        if (rec.status === 'presente' || rec.status === 'saida_antecipada') return 'PRESENTE';
+        if (rec.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+        if (rec.status === 'falta') return 'FALTA';
+        return 'PENDENTE';
+      }
+
+      // Se modalidade for 'TODAS', verifica as modalidades permitidas do aluno
+      const isReforco = isStudentInReforcoVigency(student, selectedDate);
+      const studentAllActs = [
+        ...(student.activities || []),
+        ...(isReforco ? ['Reforço'] : []),
+      ];
+      const uniqueActs = Array.from(new Set(studentAllActs)).filter((a) =>
+        allowedActivityIds.includes(a as ActivityType)
+      );
+
+      if (uniqueActs.length === 0) return 'PENDENTE';
+
+      for (const act of uniqueActs) {
+        const rec = recordMap.get(`${student.id}_${act}_${selectedDate}`);
+        if (rec?.status === 'presente' || rec?.status === 'saida_antecipada') return 'PRESENTE';
+        if (rec?.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+        if (rec?.status === 'falta') return 'FALTA';
+      }
+      return 'PENDENTE';
+    },
+    [selectedActivity, selectedDate, recordMap, allowedActivityIds]
+  );
+
+  // Array de alunos visíveis na lista de frequência após aplicação do filtro interativo de status
+  const displayedStudents = useMemo(() => {
+    if (filterStatus === 'TODOS') return filteredStudents;
+    return filteredStudents.filter((student) => getStudentAttendanceStatus(student) === filterStatus);
+  }, [filteredStudents, filterStatus, getStudentAttendanceStatus]);
+
+  // Alterna o filtro de status selecionado e executa scroll suave até o topo da lista de chamada
+  const handleToggleStatusFilter = useCallback(
+    (targetStatus: AttendanceFilterStatus) => {
+      setFilterStatus((prev) => (prev === targetStatus ? 'TODOS' : targetStatus));
+      setTimeout(() => {
+        if (rosterListRef.current) {
+          rosterListRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          document.getElementById('daily-attendance-sheet')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
+    },
+    []
+  );
+
   // Handlers for status click
   const handleStatusClick = async (
     student: Student,
@@ -689,16 +757,18 @@ function getCurrentHHMM(): string {
   };
 
   const areAllMarkedPresent = useMemo(() => {
-    if (filteredStudents.length === 0) return false;
-    return filteredStudents.every((student) => {
+    const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
+    if (target.length === 0) return false;
+    return target.every((student) => {
       const key = `${student.id}_${selectedActivity}_${selectedDate}`;
       const rec = recordMap.get(key);
       return rec?.status === 'presente';
     });
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
+  }, [filterStatus, displayedStudents, filteredStudents, selectedActivity, selectedDate, recordMap]);
 
   const handleBatchMarkAllPresent = async () => {
-    const studentIds = filteredStudents.map((s) => s.id);
+    const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
+    const studentIds = target.map((s) => s.id);
     if (studentIds.length === 0) return;
 
     if (areAllMarkedPresent) {
@@ -1129,25 +1199,111 @@ function getCurrentHHMM(): string {
 
         {/* Batch Actions and Counters Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 bg-slate-50/70 p-3 rounded-xl">
-          {/* Status summary pills */}
+          {/* Status summary pills / Interactive Filter Buttons */}
           <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-            <span className="text-slate-500 font-semibold">Resumo do Dia:</span>
-            <span className="px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center space-x-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="text-slate-500 font-semibold flex items-center space-x-1 mr-0.5">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span>Resumo do Dia:</span>
+            </span>
+
+            {/* 1. Presentes */}
+            <button
+              type="button"
+              onClick={() => handleToggleStatusFilter('PRESENTE')}
+              className={`px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 font-bold transition-all cursor-pointer ${
+                filterStatus === 'PRESENTE'
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-md ring-2 ring-emerald-500 ring-offset-1 scale-105'
+                  : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border-emerald-300/80 hover:scale-102 shadow-2xs'
+              }`}
+              title={
+                filterStatus === 'PRESENTE'
+                  ? 'Filtro ativo: exibindo apenas Presentes. Clique para ver todos.'
+                  : 'Clique para filtrar apenas alunos Presentes'
+              }
+            >
+              <CheckCircle2 className={`w-3.5 h-3.5 ${filterStatus === 'PRESENTE' ? 'text-white' : 'text-emerald-600'}`} />
               <span>{stats.presente} Presentes</span>
-            </span>
-            <span className="px-2 py-1 rounded-md bg-orange-100 text-orange-900 border border-orange-200 flex items-center space-x-1">
-              <Shirt className="w-3.5 h-3.5 text-orange-600" />
+            </button>
+
+            {/* 2. Sem Equip. */}
+            <button
+              type="button"
+              onClick={() => handleToggleStatusFilter('SEM_EQUIPAMENTO')}
+              className={`px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 font-bold transition-all cursor-pointer ${
+                filterStatus === 'SEM_EQUIPAMENTO'
+                  ? 'bg-orange-600 text-white border-orange-700 shadow-md ring-2 ring-orange-500 ring-offset-1 scale-105'
+                  : 'bg-orange-100 hover:bg-orange-200 text-orange-900 border-orange-300/80 hover:scale-102 shadow-2xs'
+              }`}
+              title={
+                filterStatus === 'SEM_EQUIPAMENTO'
+                  ? 'Filtro ativo: exibindo apenas Sem Equipamento. Clique para ver todos.'
+                  : 'Clique para filtrar apenas alunos Sem Equipamento'
+              }
+            >
+              <Shirt className={`w-3.5 h-3.5 ${filterStatus === 'SEM_EQUIPAMENTO' ? 'text-white' : 'text-orange-600'}`} />
               <span>{stats.semEquipamento} Sem Equip.</span>
-            </span>
-            <span className="px-2 py-1 rounded-md bg-rose-100 text-rose-800 border border-rose-200 flex items-center space-x-1">
-              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+            </button>
+
+            {/* 3. Faltas */}
+            <button
+              type="button"
+              onClick={() => handleToggleStatusFilter('FALTA')}
+              className={`px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 font-bold transition-all cursor-pointer ${
+                filterStatus === 'FALTA'
+                  ? 'bg-rose-600 text-white border-rose-700 shadow-md ring-2 ring-rose-500 ring-offset-1 scale-105'
+                  : 'bg-rose-100 hover:bg-rose-200 text-rose-800 border-rose-300/80 hover:scale-102 shadow-2xs'
+              }`}
+              title={
+                filterStatus === 'FALTA'
+                  ? 'Filtro ativo: exibindo apenas Faltas. Clique para ver todos.'
+                  : 'Clique para filtrar apenas alunos com Falta'
+              }
+            >
+              <XCircle className={`w-3.5 h-3.5 ${filterStatus === 'FALTA' ? 'text-white' : 'text-rose-600'}`} />
               <span>{stats.falta} Faltas</span>
-            </span>
-            {stats.pendente > 0 && (
-              <span className="px-2 py-1 rounded-md bg-slate-200 text-slate-700 border border-slate-300">
-                {stats.pendente} Pendentes
-              </span>
+            </button>
+
+            {/* 4. Pendentes */}
+            {(stats.pendente > 0 || filterStatus === 'PENDENTE') && (
+              <button
+                type="button"
+                onClick={() => handleToggleStatusFilter('PENDENTE')}
+                className={`px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 font-bold transition-all cursor-pointer ${
+                  filterStatus === 'PENDENTE'
+                    ? 'bg-slate-700 text-white border-slate-800 shadow-md ring-2 ring-slate-500 ring-offset-1 scale-105'
+                    : 'bg-slate-200 hover:bg-slate-300 text-slate-700 border-slate-300 hover:scale-102 shadow-2xs'
+                }`}
+                title={
+                  filterStatus === 'PENDENTE'
+                    ? 'Filtro ativo: exibindo apenas Pendentes. Clique para ver todos.'
+                    : 'Clique para filtrar apenas alunos com Chamada Pendente'
+                }
+              >
+                <Clock className={`w-3.5 h-3.5 ${filterStatus === 'PENDENTE' ? 'text-white' : 'text-slate-600'}`} />
+                <span>{stats.pendente} Pendentes</span>
+              </button>
+            )}
+
+            {/* Botão Secundário [ 🔄 Ver Todos ] quando algum filtro estiver aplicado */}
+            {filterStatus !== 'TODOS' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterStatus('TODOS');
+                  setTimeout(() => {
+                    if (rosterListRef.current) {
+                      rosterListRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else {
+                      document.getElementById('daily-attendance-sheet')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 50);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold flex items-center space-x-1 transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95"
+                title="Limpar filtro e exibir todos os alunos"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                <span>🔄 Ver Todos</span>
+              </button>
             )}
           </div>
 
@@ -1402,7 +1558,7 @@ function getCurrentHHMM(): string {
             </div>
           )}
 
-          <div id="daily-attendance-sheet" className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div id="daily-attendance-sheet" ref={rosterListRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden scroll-mt-6">
           {/* Institutional Print Header */}
           <div className="print-only p-4 border-b-2 border-slate-900 text-center space-y-1">
             <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
@@ -1426,7 +1582,7 @@ function getCurrentHHMM(): string {
                 {selectedActivity !== 'TODAS' && <ActivityBadge activity={selectedActivity} size="sm" />}
               </h2>
               <p className="text-xs text-slate-400">
-                {filteredStudents.length} aluno(s) listado(s) • Clique nos botões para registrar a presença ou justificativa de ausência.
+                {displayedStudents.length} {filterStatus !== 'TODOS' ? `de ${filteredStudents.length}` : ''} aluno(s) listado(s) {filterStatus !== 'TODOS' ? `• Filtro ativo: ${filterStatus === 'PRESENTE' ? 'Presentes' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Faltas' : 'Pendentes'}` : ''} • Clique nos botões para registrar a presença ou justificativa de ausência.
               </p>
             </div>
             <div className="flex items-center space-x-2 print:hidden no-print">
@@ -1477,7 +1633,36 @@ function getCurrentHHMM(): string {
           </div>
 
           <div className="divide-y divide-slate-100">
-            {filteredStudents.map((student) => {
+            {displayedStudents.length === 0 && filterStatus !== 'TODOS' ? (
+              <div className="p-12 text-center text-slate-500 space-y-3">
+                <Filter className="w-10 h-10 text-slate-300 mx-auto" />
+                <h3 className="text-base font-bold text-slate-700">
+                  Nenhum aluno com status{' '}
+                  <span className="text-indigo-600 font-extrabold">
+                    "{filterStatus === 'PRESENTE' ? 'Presente' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Falta' : 'Pendente'}"
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  Não há alunos nesta lista com este status para {formatDateBR(selectedDate)}.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterStatus('TODOS');
+                    setTimeout(() => {
+                      if (rosterListRef.current) {
+                        rosterListRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }, 50);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer inline-flex items-center space-x-1.5 active:scale-95"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Ver Todos os Alunos</span>
+                </button>
+              </div>
+            ) : (
+              displayedStudents.map((student) => {
               const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
 
               // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
@@ -1763,7 +1948,8 @@ function getCurrentHHMM(): string {
                   </div>
                 </div>
               );
-            })}
+            })
+          )}
           </div>
 
           {/* Institutional Print Signatures Footer */}

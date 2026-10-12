@@ -5,6 +5,10 @@
  */
 
 import { getSalutationForName } from '../utils/genderUtils';
+import {
+  buildDynamicPedagogicalFeedback,
+  DynamicFeedbackParams,
+} from '../utils/feedbackPromptBuilder';
 
 export interface CordialFeedbackResult {
   message: string;
@@ -13,7 +17,8 @@ export interface CordialFeedbackResult {
 }
 
 /**
- * Heurística pedagógica de contingência (CNV) caso a API externa esteja indisponível
+ * Heurística pedagógica de contingência (CNV) caso a API externa esteja indisponível,
+ * estruturada nos 3 Pilares Pedagógicos Reflexivos e Markdown nativo do WhatsApp (*).
  */
 function buildFallbackCordialMessage(
   userName: string,
@@ -22,37 +27,13 @@ function buildFallbackCordialMessage(
   normSection?: string,
   normDetails?: string[]
 ): { message: string; actionPoints: string[] } {
-  const { salutation, firstName } = getSalutationForName(userName);
-  const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
-
-  const message = `Olá, ${salutation} ${firstName}!
-
-Esperamos que seu dia esteja sendo abençoado. Gostaríamos de começar expressando nosso sincero agradecimento pelo seu carinho, dedicação e energia investidos diariamente no acompanhamento dos nossos pequenos no Programa do Integral do Colégio Crescer. Seu papel é fundamental na vida de cada criança!
-
-No espírito de diálogo aberto e contínuo aprimoramento da nossa equipe, gostaríamos de compartilhar uma orientação construtiva sobre uma situação observada recentemente:
-**"${rawContext.trim()}"**
-
-Gostaríamos de revisitar com você a norma institucional **"${normTitle}"${sectionLabel}**. No Colégio Crescer, cada uma dessas diretrizes existe com um único propósito supremo: garantir a integridade física, o acolhimento emocional e a segurança permanente de todas as crianças sob nossa responsabilidade. Quando zelamos por esses detalhes da rotina, construímos um ambiente verdadeiramente protegido e sereno para que os alunos possam florescer.
-
-Contamos imensamente com a sua sensibilidade e parceria para mantermos esse alinhamento no dia a dia. Você faz a diferença em nosso colégio!
-
-Atenciosamente,
-Coordenação do Integral • Colégio Crescer`;
-
-  const actionPoints = [
-    `Revisar e praticar a diretriz institucional "${normTitle}"${sectionLabel} durante toda a rotina de atendimento.`,
-    'Manter foco prioritário e atenção constante na segurança física, bem-estar e integridade dos alunos.',
-    'Buscar proativamente o apoio da coordenação ou de colegas sempre que surgirem dúvidas ou desafios na condução da turma.',
-  ];
-
-  if (Array.isArray(normDetails) && normDetails.length > 0) {
-    const customPoint = normDetails[0].trim();
-    if (customPoint && !actionPoints.includes(customPoint)) {
-      actionPoints.splice(1, 0, `Observar a orientação específica: ${customPoint}`);
-    }
-  }
-
-  return { message, actionPoints };
+  return buildDynamicPedagogicalFeedback({
+    userName,
+    normTitle,
+    rawContext,
+    normSection,
+    normDetails,
+  });
 }
 
 /**
