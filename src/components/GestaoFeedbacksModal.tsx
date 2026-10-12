@@ -24,7 +24,8 @@ import { UserProfile } from '../types';
 import { ManualNorma, INITIAL_MANUAL_NORMAS } from '../types/manualNormas';
 import { subscribeManualNormas, subscribeUsers } from '../firebase';
 import { getLocalUsersList } from '../utils/authUtils';
-import { generateCordialFeedback } from '../services/feedbackAiService';
+import { generateCordialFeedback, identifyNormFromContext } from '../services/feedbackAiService';
+import { NormaSearchSelect } from './NormaSearchSelect';
 import {
   createPedagogicalFeedback,
   subscribeAllPedagogicalFeedbacks,
@@ -64,6 +65,8 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
   // Estados de Controle
   const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
+  const [isMatchingAi, setIsMatchingAi] = useState<boolean>(false);
+  const [autoMatchReason, setAutoMatchReason] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [selectedFeedbackDetails, setSelectedFeedbackDetails] = useState<PedagogicalFeedback | null>(null);
@@ -114,14 +117,37 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     return normasList.find((n) => n.id === selectedNormId) || null;
   }, [normasList, selectedNormId]);
 
+  // Ação: Sugestão Inteligente por IA baseada no Fato (AI Auto-Match)
+  const handleAutoMatchNorm = async () => {
+    if (!rawContext.trim()) {
+      alert('Descreva primeiro o fato ocorrido no campo abaixo para que a IA possa identificar a norma correspondente.');
+      return;
+    }
+
+    setIsMatchingAi(true);
+    try {
+      const matchResult = await identifyNormFromContext(rawContext, normasList);
+      if (matchResult.normId) {
+        setSelectedNormId(matchResult.normId);
+        setAutoMatchReason(matchResult.reason);
+        const matched = normasList.find((n) => n.id === matchResult.normId);
+        setSuccessToast(
+          `✨ Norma identificada com IA: "${matched?.title || 'Norma Vinculada'}"`
+        );
+        setTimeout(() => setSuccessToast(null), 4500);
+      }
+    } catch (err) {
+      console.error('Erro ao identificar norma com IA:', err);
+      alert('Não foi possível identificar a norma automaticamente. Selecione-a na busca.');
+    } finally {
+      setIsMatchingAi(false);
+    }
+  };
+
   // Ação 1: Gerar mensagem com IA / CNV
   const handleGenerateAi = async () => {
     if (!selectedUser) {
       alert('Selecione primeiro a monitora/colaboradora destinatária.');
-      return;
-    }
-    if (!selectedNorm) {
-      alert('Selecione a norma do Manual de Orientações vinculada ao fato.');
       return;
     }
     if (!rawContext.trim()) {
@@ -129,14 +155,37 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
       return;
     }
 
+    let targetNorm = selectedNorm;
+
+    // Se nenhuma norma foi selecionada ainda, identifica automaticamente com IA a partir do fato relatado
+    if (!targetNorm) {
+      setIsGeneratingAi(true);
+      try {
+        const matchResult = await identifyNormFromContext(rawContext, normasList);
+        if (matchResult.normId) {
+          setSelectedNormId(matchResult.normId);
+          setAutoMatchReason(matchResult.reason);
+          targetNorm = normasList.find((n) => n.id === matchResult.normId) || null;
+        }
+      } catch (err) {
+        console.warn('Aviso no auto-match durante geração:', err);
+      }
+    }
+
+    if (!targetNorm) {
+      alert('Selecione a norma vinculada ou clique em [ ✨ Identificar Norma no Texto ].');
+      setIsGeneratingAi(false);
+      return;
+    }
+
     setIsGeneratingAi(true);
     try {
       const result = await generateCordialFeedback(
         selectedUser.name,
-        selectedNorm.title,
+        targetNorm.title,
         rawContext,
-        selectedNorm.sectionNumber,
-        selectedNorm.details
+        targetNorm.sectionNumber,
+        targetNorm.details
       );
 
       setGeneratedMessage(result.message);
@@ -349,26 +398,19 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                   </select>
                 </div>
 
-                {/* Norma Vinculada */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Norma Institucional Vinculada:</span>
-                  </label>
-                  <select
-                    value={selectedNormId}
-                    onChange={(e) => setSelectedNormId(e.target.value)}
-                    className="w-full text-xs font-semibold px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-600 text-slate-800"
-                  >
-                    <option value="">Selecione a norma do Manual...</option>
-                    {normasList.map((norm) => (
-                      <option key={norm.id} value={norm.id}>
-                        {norm.sectionNumber ? `[Seção ${norm.sectionNumber}] ` : ''}
-                        {norm.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Norma Vinculada com Busca Instantânea, Autocomplete e Sugestão por IA */}
+                <NormaSearchSelect
+                  normas={normasList}
+                  selectedNormId={selectedNormId}
+                  onSelectNorm={(id) => {
+                    setSelectedNormId(id);
+                    setAutoMatchReason(null);
+                  }}
+                  onAutoMatchAi={handleAutoMatchNorm}
+                  isMatchingAi={isMatchingAi}
+                  hasContext={Boolean(rawContext.trim())}
+                  autoMatchReason={autoMatchReason}
+                />
               </div>
 
               {/* Fato Ocorrido (Contexto Bruto) */}
@@ -399,7 +441,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                 </div>
                 <button
                   type="button"
-                  disabled={isGeneratingAi || !selectedUserId || !selectedNormId || !rawContext.trim()}
+                  disabled={isGeneratingAi || isMatchingAi || !selectedUserId || !rawContext.trim()}
                   onClick={handleGenerateAi}
                   className="px-4 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
@@ -707,7 +749,16 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                     Mensagem Cordial Enviada:
                   </span>
                   <div className="p-3.5 bg-teal-50/50 rounded-xl border border-teal-100 text-slate-800 whitespace-pre-wrap leading-relaxed">
-                    {selectedFeedbackDetails.generatedMessage}
+                    {selectedFeedbackDetails.generatedMessage.split(/(\*\*.*?\*\*)/g).map((part, idx) => {
+                      if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+                        return (
+                          <strong key={idx} className="font-extrabold text-slate-900 bg-teal-100/50 px-1 py-0.5 rounded">
+                            {part.slice(2, -2)}
+                          </strong>
+                        );
+                      }
+                      return part;
+                    })}
                   </div>
                 </div>
 

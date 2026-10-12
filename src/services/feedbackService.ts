@@ -222,7 +222,66 @@ export async function acknowledgePedagogicalFeedback(
 }
 
 /**
+ * Converte a formatação markdown para o padrão nativo do WhatsApp:
+ * Transforma asteriscos duplos '**' em asteriscos simples '*' para negrito nativo sem marcadores residuais.
+ */
+export function formatWhatsAppMessage(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '*$1*')
+    .replace(/\*\*/g, '*');
+}
+
+/**
+ * Sanitiza o texto para envio via WhatsApp eliminando caracteres corrompidos (\uFFFD / )
+ * e garantindo a integridade dos emojis e símbolos em UTF-8.
+ */
+export function sanitizeWhatsAppText(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .normalize('NFC')
+    .replace(/\uFFFD/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .trim();
+}
+
+/**
+ * Limpa textos redundantes (cabeçalhos legados e rodapés duplicados),
+ * converte negritos para o padrão nativo do WhatsApp (*)
+ * e padroniza estritamente o encerramento da mensagem.
+ */
+export function cleanWhatsAppCordialMessage(raw: string): string {
+  if (!raw) return '';
+  let msg = raw.trim();
+
+  // Remove eventuais cabeçalhos legados repetitivos
+  msg = msg.replace(/^\*Colégio Crescer • Coordenação Pedagógica\*.*?\n+/is, '');
+  msg = msg.replace(/^Olá, [^!\n]+! Tudo bem\?\s*Compartilhamos uma orientação.*?\n+/is, '');
+  msg = msg.replace(/^Abaixo está a mensagem na íntegra:\s*\n+/is, '');
+  msg = msg.replace(/^---+\s*\n*/gm, '');
+
+  // Remove eventuais rodapés legados repetitivos
+  msg = msg.replace(/\n+Por gentileza, acesse o portal do Colégio Crescer.*$/is, '');
+
+  // Remove despedidas e assinaturas anteriores para garantir encerramento estrito
+  msg = msg.replace(/\n+(?:Um abraço fraterno,?|Atenciosamente,?|Fraternalmente,?|Com carinho,?)\s*\n+.*$/is, '');
+  msg = msg.replace(/\n+\*?(?:Coordenação (?:do Integral|Pedagógica) • Colégio Crescer)\*?$/is, '');
+
+  // Converte asteriscos duplos (**) para simples (*) para negrito nativo do WhatsApp
+  msg = formatWhatsAppMessage(msg);
+
+  // Aplica encerramento institucional estrito padronizado
+  const padraoEncerramento = 'Atenciosamente,\nCoordenação do Integral • Colégio Crescer';
+  msg = `${msg.trim()}\n\n${padraoEncerramento}`;
+
+  return sanitizeWhatsAppText(msg);
+}
+
+/**
  * Constrói link wa.me para acionamento direto via WhatsApp
+ * Transmite estritamente a mensagem cordial principal sem textos redundantes,
+ * com markdown nativo do WhatsApp (*negrito*) e sanitização completa de emojis/ícones em UTF-8.
  */
 export function buildWhatsAppFeedbackLink(
   rawPhone: string | undefined,
@@ -230,6 +289,7 @@ export function buildWhatsAppFeedbackLink(
     targetUserName: string;
     normTitle: string;
     generatedMessage: string;
+    actionPoints?: string[];
   }
 ): string {
   let cleanPhone = (rawPhone || '').replace(/\D/g, '');
@@ -239,25 +299,10 @@ export function buildWhatsAppFeedbackLink(
     cleanPhone = `55${cleanPhone}`;
   }
 
-  const firstName = feedback.targetUserName.split(' ')[0] || 'Colaboradora';
-  const text = `*Colégio Crescer • Coordenação Pedagógica* 🌿✨
+  // Transmite estritamente a mensagem cordial principal limpa com negritos nativos e assinatura padronizada
+  const messageText = cleanWhatsAppCordialMessage(feedback.generatedMessage);
+  const encoded = encodeURIComponent(messageText);
 
-Olá, ${firstName}! Tudo bem?
-
-Compartilhamos uma orientação pedagógica afetuosa no sistema com você sobre a norma *"${feedback.normTitle}"*.
-
-Abaixo está a mensagem na íntegra:
-
----
-${feedback.generatedMessage}
----
-
-Por gentileza, acesse o portal do Colégio Crescer para assinalar a leitura e registrar sua ciência institucional.
-
-Um abraço fraterno,
-*Coordenação do Integral • Colégio Crescer*`;
-
-  const encoded = encodeURIComponent(text);
   if (cleanPhone) {
     return `https://wa.me/${cleanPhone}?text=${encoded}`;
   }

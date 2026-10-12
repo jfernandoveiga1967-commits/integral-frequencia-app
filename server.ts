@@ -4,6 +4,7 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { getSalutationForName } from './src/utils/genderUtils';
 
 dotenv.config();
 
@@ -265,52 +266,74 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
         });
         break;
       } catch (err: any) {
-        if (attempts >= 2) throw err;
+        if (attempts >= 2) {
+          console.log('[Semanário IA] Ativando contingência pedagógica integrada (IA/créditos indisponíveis):', err?.status || 'indisponível');
+          response = null;
+          break;
+        }
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
 
     const responseText = response?.text || '';
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    if (responseText) {
       try {
-        parsed = JSON.parse(cleaned);
+        parsed = JSON.parse(responseText);
       } catch {
-        // Tenta extrair cada campo suportando tanto string quanto array ou objeto
+        const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
         try {
-          const extractRawValue = (key: string) => {
-            const regex = new RegExp(`"${key}"\\s*:\\s*(\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\}|"[\\s\\S]*?")`, 'i');
-            const match = cleaned.match(regex);
-            if (!match) return '';
-            try {
-              return JSON.parse(match[1]);
-            } catch {
-              return match[1].replace(/^"|"$/g, '').replace(/\\"/g, '"');
-            }
-          };
-
-          parsed = {
-            title: extractRawValue('title') || 'Vivência pedagógica integrada',
-            theme: extractRawValue('theme') || '',
-            suggestedAdi: extractRawValue('suggestedAdi') || '',
-            suggestedMonitor: extractRawValue('suggestedMonitor') || '',
-            category: extractRawValue('category') || normalizedCat,
-            livro: extractRawValue('livro') || '',
-            versiculo: extractRawValue('versiculo') || '',
-            proposta: extractRawValue('proposta') || extractRawValue('objectives') || '',
-            dinamica: extractRawValue('dinamica') || extractRawValue('development') || '',
-            atividades: extractRawValue('atividades') || extractRawValue('development') || '',
-            materials: extractRawValue('materials') || '',
-            importante: extractRawValue('importante') || extractRawValue('dicaMonitora') || '',
-            formattedDevelopment: extractRawValue('formattedDevelopment') || '',
-          };
+          parsed = JSON.parse(cleaned);
         } catch {
-          throw new Error('Falha na interpretação da resposta JSON');
+          // Tenta extrair cada campo suportando tanto string quanto array ou objeto
+          try {
+            const extractRawValue = (key: string) => {
+              const regex = new RegExp(`"${key}"\\s*:\\s*(\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\}|"[\\s\\S]*?")`, 'i');
+              const match = cleaned.match(regex);
+              if (!match) return '';
+              try {
+                return JSON.parse(match[1]);
+              } catch {
+                return match[1].replace(/^"|"$/g, '').replace(/\\"/g, '"');
+              }
+            };
+
+            parsed = {
+              title: extractRawValue('title') || 'Vivência pedagógica integrada',
+              theme: extractRawValue('theme') || '',
+              suggestedAdi: extractRawValue('suggestedAdi') || '',
+              suggestedMonitor: extractRawValue('suggestedMonitor') || '',
+              category: extractRawValue('category') || normalizedCat,
+              livro: extractRawValue('livro') || '',
+              versiculo: extractRawValue('versiculo') || '',
+              proposta: extractRawValue('proposta') || extractRawValue('objectives') || '',
+              dinamica: extractRawValue('dinamica') || extractRawValue('development') || '',
+              atividades: extractRawValue('atividades') || extractRawValue('development') || '',
+              materials: extractRawValue('materials') || '',
+              importante: extractRawValue('importante') || extractRawValue('dicaMonitora') || '',
+              formattedDevelopment: extractRawValue('formattedDevelopment') || '',
+            };
+          } catch {
+            parsed = null;
+          }
         }
       }
+    }
+
+    if (!parsed) {
+      parsed = {
+        title: cleanTheme ? `Vivência prática sobre ${cleanTheme}` : 'Vivência acolhedora integrada',
+        theme: cleanTheme || 'Vivência pedagógica integrada',
+        suggestedAdi: exactAdi || (staffList?.adis?.[0] || ''),
+        suggestedMonitor: exactMonitor || (staffList?.monitors?.length ? staffList.monitors.join(' e ') : ''),
+        category: normalizedCat,
+        livro: isContacao ? 'O Monstro das Cores, de Anna Llenas (Editora Aletria).' : '',
+        versiculo: isDevocional ? 'Lucas 6:31 - Como vocês querem que os outros lhes façam, façam também vocês a eles.' : '',
+        proposta: 'proporcionar uma vivência acolhedora, participativa e cooperativa, promovendo a integração afetiva e a autonomia das crianças no espaço coletivo.',
+        atividades: 'introduzir a proposta de forma lúdica e acolhedora, distribuindo os materiais e orientando as crianças passo a passo para que todas brinquem, colaborem e desfrutem juntas da dinâmica.',
+        materials: '• Materiais pedagógicos da sala',
+        importante: 'manter a atenção afetuosa a cada criança, acolhendo quem necessitar de mediação mais próxima e celebrando os avanços do grupo.',
+      };
     }
 
     // Normaliza campos para string caso a IA tenha gerado arrays ou objetos aninhados
@@ -580,6 +603,116 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem markdown, sem ** e sem #):
   }
 });
 
+// Helper: Gerador pedagógico oficial de contingência baseado em CNV e cuidado às crianças
+function buildServerFallbackCordialFeedback(
+  userName: string,
+  normTitle: string,
+  rawContext: string,
+  normSection?: string,
+  normDetails?: string[]
+): { message: string; actionPoints: string[] } {
+  const { salutation, firstName } = getSalutationForName(userName);
+  const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
+
+  const message = `Olá, ${salutation} ${firstName}!
+
+Esperamos que seu dia esteja sendo abençoado. Gostaríamos de começar expressando nosso sincero agradecimento pelo seu carinho, dedicação e energia investidos diariamente no acompanhamento dos nossos pequenos no Programa do Integral do Colégio Crescer. Seu papel é fundamental na vida de cada criança!
+
+No espírito de diálogo aberto e contínuo aprimoramento da nossa equipe, gostaríamos de compartilhar uma orientação construtiva sobre uma situação observada recentemente:
+**"${rawContext.trim()}"**
+
+Gostaríamos de revisitar com você a norma institucional **"${normTitle}"${sectionLabel}**. No Colégio Crescer, cada uma dessas diretrizes existe com um único propósito supremo: garantir a integridade física, o acolhimento emocional e a segurança permanente de todas as crianças sob nossa responsabilidade. Quando zelamos por esses detalhes da rotina, construímos um ambiente verdadeiramente protegido e sereno para que os alunos possam florescer.
+
+Contamos imensamente com a sua sensibilidade e parceria para mantermos esse alinhamento no dia a dia. Você faz a diferença em nosso colégio!
+
+Atenciosamente,
+Coordenação do Integral • Colégio Crescer`;
+
+  const actionPoints = [
+    `Revisar e praticar a diretriz institucional "${normTitle}"${sectionLabel} durante toda a rotina de atendimento.`,
+    'Manter foco prioritário e atenção constante na segurança física, bem-estar e integridade dos alunos.',
+    'Buscar proativamente o apoio da coordenação ou de colegas sempre que surgirem dúvidas ou desafios na condução da turma.',
+  ];
+
+  if (Array.isArray(normDetails) && normDetails.length > 0) {
+    const customPoint = normDetails[0].trim();
+    if (customPoint && !actionPoints.includes(customPoint)) {
+      actionPoints.splice(1, 0, `Observar a orientação específica: ${customPoint}`);
+    }
+  }
+
+  return { message, actionPoints };
+}
+
+// Helper: Heurística Semântica Contextual no servidor para correspondência de normas no catálogo
+function serverHeuristicMatchNorm(rawContext: string, condensedNorms: any[]): { normId: string; reason: string; confidence: 'high' | 'medium' | 'low' } {
+  if (!rawContext || !Array.isArray(condensedNorms) || condensedNorms.length === 0) {
+    return {
+      normId: condensedNorms?.[0]?.id || '',
+      reason: 'Norma institucional padrão do Manual',
+      confidence: 'low',
+    };
+  }
+
+  const text = rawContext.toLowerCase();
+  let bestScore = -1;
+  let bestNorm = condensedNorms[0];
+  let matchReason = 'Correspondência semântica e contextual com as normas do Manual';
+
+  const keywordsMap: Record<string, string[]> = {
+    celular: ['celular', 'telefone', 'zap', 'whatsapp', 'rede social', 'foto', 'filmagem', 'ligação'],
+    vestuario: ['uniforme', 'roupa', 'vestimenta', 'camisa', 'avental', 'calçado', 'tênis', 'chinelo', 'maiô', 'sunga'],
+    transporte: ['van', 'ônibus', 'transporte', 'rampa', 'portão', 'portaria', 'calçada', 'embarque', 'desembarque', 'fila'],
+    academia: ['academia', 'natação', 'piscina', 'judô', 'balé', 'deslocamento', 'vestiário'],
+    alimentacao: ['almoço', 'jantar', 'lanche', 'refeição', 'refeitório', 'comida', 'prato', 'talher', 'engasgo'],
+    sensivel: ['choro', 'mordida', 'birra', 'grito', 'conflito', 'briga', 'acolhimento', 'sono', 'fralda', 'machucou'],
+    parque: ['parque', 'parcão', 'brinquedo', 'escorregador', 'queda', 'segurança', 'balanço'],
+    culinaria: ['culinária', 'fogo', 'faca', 'cozinha', 'receita'],
+    licao: ['lição', 'dever', 'tarefa', 'caderno', 'estudo', 'reforço'],
+    pontualidade: ['horário', 'atraso', 'saída antecipada', 'ponto', 'falta', 'revezamento'],
+  };
+
+  condensedNorms.forEach((norm) => {
+    let score = 0;
+    const titleNorm = (norm.title || '').toLowerCase();
+    const summaryNorm = (norm.summary || '').toLowerCase();
+    const tagsNorm = (Array.isArray(norm.tags) ? norm.tags.join(' ') : '').toLowerCase();
+    const sectionNorm = (norm.section || '').toLowerCase();
+
+    if (sectionNorm && (text.includes(`seção ${sectionNorm}`) || text.includes(`secao ${sectionNorm}`) || text.includes(`item ${sectionNorm}`))) {
+      score += 50;
+      matchReason = `Identificada menção direta à Seção ${norm.section}`;
+    }
+
+    const words = text.split(/[\s,.;:!?()]+/).filter((w: string) => w.length > 3);
+    words.forEach((w: string) => {
+      if (titleNorm.includes(w)) score += 8;
+      if (tagsNorm.includes(w)) score += 6;
+      if (summaryNorm.includes(w)) score += 3;
+    });
+
+    Object.entries(keywordsMap).forEach(([theme, terms]) => {
+      const textMatchesTheme = terms.some((term) => text.includes(term));
+      const normMatchesTheme = terms.some((term) => titleNorm.includes(term) || tagsNorm.includes(term) || summaryNorm.includes(term));
+      if (textMatchesTheme && normMatchesTheme) {
+        score += 15;
+        matchReason = `Alinhamento com o tema "${theme}" (${norm.title})`;
+      }
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestNorm = norm;
+    }
+  });
+
+  return {
+    normId: bestNorm?.id || condensedNorms[0]?.id || '',
+    reason: matchReason,
+    confidence: bestScore >= 20 ? 'high' : bestScore >= 8 ? 'medium' : 'low',
+  };
+}
+
 // API Route: Gerador de Feedback Cordial por Norma com IA e CNV (Coordenação Pedagógica)
 app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
   try {
@@ -590,33 +723,48 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
       });
     }
 
+    const { salutation, firstName } = getSalutationForName(userName);
+    const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
+    const normFullRef = `"${normTitle}"${sectionLabel}`;
+
+    const fallback = buildServerFallbackCordialFeedback(
+      userName,
+      normTitle,
+      rawContext,
+      normSection,
+      normDetails
+    );
+
     const ai = getAIClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: 'Chave GEMINI_API_KEY não configurada no ambiente.',
-        useFallback: true,
-      });
-    }
+    if (ai) {
+      try {
+        const prompt = `Você é um coordenador pedagógico experiente, acolhedor e empático do Colégio Crescer.
+Sua missão é redigir um feedback individual fundamentado estritamente na Comunicação Não-Violenta (CNV) para o(a) colaborador(a) ${userName}.
 
-    const prompt = `Você é um coordenador pedagógico experiente, acolhedor e empático do Colégio Crescer.
-Sua missão é redigir um feedback individual fundamentado estritamente na Comunicação Não-Violenta (CNV) para a monitora/colaboradora ${userName}.
+Diretrizes Obrigatórias de Formatação e Linguagem:
+1. Saudação Inicial com Flexão de Gênero Estrita:
+   - Inicie a mensagem OBRIGATORIAMENTE com: "Olá, ${salutation} ${firstName}!"
+2. Destaques Obrigatórios em Negrito (**):
+   - Formate o fato ocorrido observado OBRIGATORIAMENTE em negrito com aspas e asteriscos duplos: **"${rawContext.trim()}"**
+   - Formate o título da norma institucional e sua seção OBRIGATORIAMENTE em negrito: **${normFullRef}**
+3. Pilares Obrigatórios da Comunicação Não-Violenta (CNV):
+   - Acolhimento e Valorização: Inicie com carinho e reconhecendo a dedicação no cuidado com as crianças.
+   - Observação Serena dos Fatos: Descreva o ocorrido de forma respeitosa e serena, sem julgamentos depreciativos ou tom punitivo.
+   - Significado Pedagógico e Proteção às Crianças: Enfatize que o objetivo supremo de nossas diretrizes no Colégio Crescer é a segurança física, o bem-estar emocional e o desenvolvimento das crianças.
+   - Pedido e Orientação Construtiva: Apresente o direcionamento de forma clara e encorajadora.
+   - Encerramento: Finalize exatamente com:
+Atenciosamente,
+Coordenação do Integral • Colégio Crescer
 
-Contexto da Situação:
-- Nome da Colaboradora: ${userName}
-- Norma do Manual Institucional: "${normTitle}" ${normSection ? `(Seção ${normSection})` : ''}
+Contexto:
+- Nome: ${userName}
+- Norma Institucional: ${normFullRef}
+- Fato Ocorrido: "${rawContext}"
 - Diretrizes da Norma: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Normas de conduta e rotina pedagógica do Colégio Crescer'}
-- Fato ocorrido relatado pela coordenação: "${rawContext}"
-
-Pilares Obrigatórios da Comunicação Não-Violenta (CNV):
-1. Acolhimento e Valorização: Inicie saudando a monitora pelo nome com carinho e reconhecendo sua dedicação no cuidado diário com os alunos.
-2. Observação Clara dos Fatos: Descreva o ocorrido de forma respeitosa e serena, sem tons punitivos, julgamentos depreciativos ou acusações.
-3. Significado Pedagógico e Proteção às Crianças: Explique o propósito da norma institucional "${normTitle}", evidenciando que nosso maior valor no Colégio Crescer é a segurança física, o bem-estar emocional e o desenvolvimento saudável das crianças.
-4. Pedido e Orientação Construtiva: Apresente o direcionamento de forma clara, colaborativa e encorajadora para que a conduta seja aprimorada daqui em diante.
-5. Tom Fraterno: Finalize com palavras de apoio e confiança mútua.
 
 Gere uma resposta estritamente em JSON no seguinte formato:
 {
-  "message": "Texto completo da mensagem cordial e acolhedora em parágrafos bem estruturados...",
+  "message": "Texto completo da mensagem cordial iniciando em 'Olá, ${salutation} ${firstName}!' com os destaques em ** e finalizando em 'Coordenação do Integral • Colégio Crescer'...",
   "actionPoints": [
     "Ponto prático 1 de atenção e cuidado que a monitora deve seguir",
     "Ponto prático 2 de alinhamento com a segurança das crianças",
@@ -624,37 +772,194 @@ Gere uma resposta estritamente em JSON no seguinte formato:
   ]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 2500,
-        temperature: 0.7,
-      },
-    });
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 2500,
+            temperature: 0.7,
+          },
+        });
 
-    const responseText = response?.text || '';
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
-      parsed = JSON.parse(cleaned);
+        const responseText = response?.text || '';
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(responseText);
+        } catch {
+          const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+          parsed = JSON.parse(cleaned);
+        }
+
+        if (parsed?.message) {
+          let messageText: string = parsed.message.trim();
+
+          // Pós-processamento de garantia: assegura saudação correta
+          if (!messageText.startsWith(`Olá, ${salutation}`)) {
+            messageText = messageText.replace(/^Olá,\s*(?:querid[oa]|colaborador[a]?|amig[oa])\s+[^!\n]+!/i, `Olá, ${salutation} ${firstName}!`);
+            if (!messageText.startsWith(`Olá, ${salutation}`)) {
+              messageText = `Olá, ${salutation} ${firstName}!\n\n${messageText}`;
+            }
+          }
+
+          // Pós-processamento de garantia: assegura negrito no fato e na norma
+          const rawTrimmed = rawContext.trim();
+          if (!messageText.includes(`**"${rawTrimmed}"**`) && messageText.includes(rawTrimmed)) {
+            messageText = messageText.replace(`"${rawTrimmed}"`, `**"${rawTrimmed}"**`);
+            if (!messageText.includes(`**"${rawTrimmed}"**`)) {
+              messageText = messageText.replace(rawTrimmed, `**"${rawTrimmed}"**`);
+            }
+          }
+
+          if (!messageText.includes(`**${normFullRef}**`) && messageText.includes(normTitle)) {
+            messageText = messageText.replace(`"${normTitle}"${sectionLabel}`, `**${normFullRef}**`);
+            if (!messageText.includes(`**${normFullRef}**`)) {
+              messageText = messageText.replace(`"${normTitle}"`, `**${normFullRef}**`);
+            }
+          }
+
+          // Pós-processamento de garantia: assinatura institucional estrita
+          messageText = messageText.replace(/\n+(?:Um abraço fraterno,?|Atenciosamente,?|Fraternalmente,?)\s*\n+.*$/is, '');
+          messageText = messageText.replace(/\n+\*?(?:Coordenação (?:do Integral|Pedagógica) • Colégio Crescer)\*?$/is, '');
+          messageText = `${messageText.trim()}\n\nAtenciosamente,\nCoordenação do Integral • Colégio Crescer`;
+
+          return res.json({
+            success: true,
+            feedback: {
+              message: messageText,
+              actionPoints: Array.isArray(parsed?.actionPoints) && parsed.actionPoints.length > 0
+                ? parsed.actionPoints
+                : fallback.actionPoints,
+            },
+            isAiGenerated: true,
+          });
+        }
+      } catch (geminiError: any) {
+        // Se a cota/crédito foi esgotado (402/429) ou serviço indisponível, ativamos o motor CNV sem erro 500
+        console.log('[Feedback CNV] Ativando motor pedagógico CNV integrado (contingência de IA/créditos):', geminiError?.status || 'indisponível');
+      }
+    }
+
+    // Retorna fallback pedagógico oficial de CNV com HTTP 200
+    return res.json({
+      success: true,
+      feedback: fallback,
+      isFallback: true,
+      isAiGenerated: false,
+      notice: 'Mensagem elaborada via Diretrizes Institucionais e Metodologia CNV.',
+    });
+  } catch (error: any) {
+    const fallback = buildServerFallbackCordialFeedback(
+      req.body?.userName || 'Colaboradora',
+      req.body?.normTitle || 'Norma Institucional',
+      req.body?.rawContext || '',
+      req.body?.normSection,
+      req.body?.normDetails
+    );
+    return res.json({
+      success: true,
+      feedback: fallback,
+      isFallback: true,
+      isAiGenerated: false,
+    });
+  }
+});
+
+// API Route: Identificação Inteligente da Norma no Texto do Fato (AI Auto-Match)
+app.post('/api/gemini/identify-norm', async (req, res) => {
+  try {
+    const { rawContext, norms } = req.body;
+    if (!rawContext) {
+      return res.status(400).json({ error: 'Parâmetro rawContext ausente.' });
+    }
+
+    const normsList = Array.isArray(norms) ? norms : [];
+    const condensedNorms = normsList.map((n: any) => ({
+      id: n.id,
+      section: n.sectionNumber || '',
+      title: n.title,
+      module: n.moduleTitle || n.moduleId || '',
+      type: n.type || '',
+      tags: Array.isArray(n.tags) ? n.tags.slice(0, 5) : [],
+      summary: (n.summary || '').slice(0, 140),
+    }));
+
+    const heuristicMatch = serverHeuristicMatchNorm(rawContext, condensedNorms);
+
+    const ai = getAIClient();
+    if (ai) {
+      try {
+        const prompt = `Você é o coordenador pedagógico e especialista em conformidade institucional do Colégio Crescer.
+Sua tarefa é analisar o relato de um fato ocorrido na rotina escolar e identificar com precisão qual norma institucional do Manual de Orientações se aplica diretamente à situação.
+
+Relato do Fato Ocorrido:
+"${rawContext}"
+
+Catálogo de Normas Disponíveis no Manual:
+${JSON.stringify(condensedNorms, null, 2)}
+
+Critérios de Seleção:
+1. Identifique a norma mais relevante e específica para o fato (ex: se fala de celular/redes sociais, selecione a norma de celular; se fala de transporte/academia/rampa/portaria, selecione a norma correspondente; se fala de vestuário/uniforme, selecione vestuário; se fala de mordida/choro/mediação sensível, selecione a norma correspondente).
+2. Se nenhuma for 100% exata, selecione a mais próxima pelo princípio do cuidado e segurança das crianças.
+
+Responda estritamente em formato JSON:
+{
+  "normId": "id_da_norma_selecionada",
+  "reason": "Explicação concisa (1 linha) de por que esta norma foi selecionada",
+  "confidence": "high" | "medium" | "low"
+}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 600,
+            temperature: 0.2,
+          },
+        });
+
+        const responseText = response?.text || '';
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(responseText);
+        } catch {
+          const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+          parsed = JSON.parse(cleaned);
+        }
+
+        if (parsed?.normId) {
+          const exists = condensedNorms.some((n: any) => n.id === parsed.normId);
+          if (exists) {
+            return res.json({
+              success: true,
+              normId: parsed.normId,
+              reason: parsed?.reason || 'Identificado por inteligência contextual',
+              confidence: parsed?.confidence || 'high',
+              isAiIdentified: true,
+            });
+          }
+        }
+      } catch (geminiError: any) {
+        console.log('[Identify Norm] Ativando heurística semântica integrada (contingência de IA/créditos):', geminiError?.status || 'indisponível');
+      }
     }
 
     return res.json({
       success: true,
-      feedback: {
-        message: parsed?.message || '',
-        actionPoints: Array.isArray(parsed?.actionPoints) ? parsed.actionPoints : [],
-      },
+      normId: heuristicMatch.normId,
+      reason: heuristicMatch.reason,
+      confidence: heuristicMatch.confidence,
+      isFallback: true,
+      isAiIdentified: false,
     });
   } catch (error: any) {
-    console.warn('Erro na rota /api/gemini/generate-cordial-feedback:', error?.message || error);
-    return res.status(500).json({
-      error: error?.message || 'Falha ao gerar feedback com IA',
-      useFallback: true,
+    return res.json({
+      success: true,
+      normId: '',
+      reason: 'Norma institucional',
+      confidence: 'low',
+      isFallback: true,
     });
   }
 });
