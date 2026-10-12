@@ -4331,6 +4331,7 @@ export function generateNominalListPDF({
 
   const isAllSpecialties = !specialty || specialty === 'TODAS' || specialty === 'TODOS';
   const isAllReforco = !isAllSpecialties && normalizeStr(specialty) === 'reforco';
+  const isRotina = !isAllSpecialties && normalizeStr(specialty) === 'rotina';
   const isAllTurmas = !turma || turma === 'TODAS' || turma === 'TODOS';
   const isAllDays = !dayOfWeek || dayOfWeek === 'todos' || dayOfWeek === 'TODOS';
 
@@ -4369,6 +4370,13 @@ export function generateNominalListPDF({
           (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
           (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
         if (!hasReforco) return false;
+      } else if (isRotina) {
+        const hasRotina =
+          (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
+          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
+          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
+          (!s.activities || s.activities.length === 0);
+        if (!hasRotina) return false;
       } else {
         const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(specialty));
         const hasSpec =
@@ -4397,6 +4405,8 @@ export function generateNominalListPDF({
   if (!docTitle) {
     if (isAllReforco) {
       docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — REFORÇO ESCOLAR';
+    } else if (isRotina) {
+      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — ROTINA';
     } else if (!isAllSpecialties) {
       docTitle = `RELAÇÃO NOMINAL DE ALUNOS — ${specialty.toUpperCase()}`;
     } else if (!isAllTurmas) {
@@ -4412,6 +4422,8 @@ export function generateNominalListPDF({
   const filterDetails: string[] = [];
   if (isAllReforco) {
     filterDetails.push('Modalidade: Reforço Escolar (Atendimento Paralelo)');
+  } else if (isRotina) {
+    filterDetails.push('Modalidade: Rotina');
   } else if (!isAllSpecialties) {
     filterDetails.push(`Modalidade: ${specialty}`);
   } else {
@@ -4527,7 +4539,7 @@ export function generateNominalListPDF({
   applyPageNumbersAndFooters(doc, 'portrait');
 
   // Gerar nome de arquivo amigável e higienizado
-  const cleanSpec = (isAllReforco ? 'Reforco' : !isAllSpecialties ? specialty : 'Geral').replace(/[\/\s]+/g, '_');
+  const cleanSpec = (isAllReforco ? 'Reforco' : isRotina ? 'Rotina' : !isAllSpecialties ? specialty : 'Geral').replace(/[\/\s]+/g, '_');
   const cleanTurma = (!isAllTurmas ? turma : 'TodasTurmas').replace(/[\/\s]+/g, '_');
   const cleanDay = (!isAllDays ? (dayShortMap[dayOfWeek] || dayOfWeek) : 'Semana').replace(/[\/\s]+/g, '_');
   const dateStr = new Date().toISOString().split('T')[0];

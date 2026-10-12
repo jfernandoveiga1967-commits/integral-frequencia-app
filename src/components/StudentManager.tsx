@@ -279,6 +279,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
     const isAllSpecialties = !nominalFilterSpecialty || nominalFilterSpecialty === 'TODAS' || nominalFilterSpecialty === 'TODOS';
     const isAllReforco = !isAllSpecialties && normalizeStr(nominalFilterSpecialty) === 'reforco';
+    const isRotina = !isAllSpecialties && normalizeStr(nominalFilterSpecialty) === 'rotina';
     const isAllTurmas = !nominalFilterTurma || nominalFilterTurma === 'TODAS' || nominalFilterTurma === 'TODOS';
     const isAllDays = !nominalFilterDay || nominalFilterDay === 'todos' || nominalFilterDay === 'TODOS';
     const search = normalizeStr(nominalSearchTerm);
@@ -301,6 +302,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
             (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
           if (!hasReforco) return false;
+        } else if (isRotina) {
+          const hasRotina =
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
+            (!s.activities || s.activities.length === 0);
+          if (!hasRotina) return false;
         } else {
           const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(nominalFilterSpecialty));
           const hasSpec =
@@ -3078,6 +3086,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   className="w-full px-3 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                 >
                   <option value="TODAS">Todas as Modalidades</option>
+                  <option value="Rotina">Rotina</option>
                   <option value="Reforço">⚡ Reforço Escolar (Modalidade Paralela)</option>
                   {extracurricularRollCallActivities
                     .filter((a) => a.id !== 'Reforço' && a.id !== 'Rotina')
