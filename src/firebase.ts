@@ -26,6 +26,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { ManualNorma, INITIAL_MANUAL_NORMAS, NormaAceite } from './types/manualNormas';
+import { NORMAS_DATA } from './data/normasData';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {
   normalizeStudent,
@@ -3408,14 +3409,14 @@ export function subscribeManualNormas(
     colRef,
     async (snap) => {
       clearFirestoreQuotaExceeded();
-      if (snap.empty || snap.size < 25) {
+      if (snap.empty || snap.size < 45) {
         try {
           const seeded = await seedInitialManualNormasIfEmpty();
           onData(seeded);
           return;
         } catch (e) {
           console.warn('Erro ao inicializar manual_normas padrão:', e);
-          onData(INITIAL_MANUAL_NORMAS);
+          onData(NORMAS_DATA);
           return;
         }
       }
@@ -3430,15 +3431,9 @@ export function subscribeManualNormas(
       });
 
       list.sort((a, b) => {
-        if (a.moduleId !== b.moduleId) {
-          const orderMap: Record<string, number> = {
-            normas_internas: 1,
-            academia_transporte: 2,
-            guia_sensivel: 3,
-          };
-          return (orderMap[a.moduleId] || 99) - (orderMap[b.moduleId] || 99);
-        }
-        return (a.order ?? 999) - (b.order ?? 999);
+        const orderA = a.order ?? 999;
+        const orderB = b.order ?? 999;
+        return orderA - orderB;
       });
 
       try {
@@ -3456,10 +3451,10 @@ export function subscribeManualNormas(
         if (cached) {
           onData(JSON.parse(cached));
         } else {
-          onData(INITIAL_MANUAL_NORMAS);
+          onData(NORMAS_DATA);
         }
       } catch {
-        onData(INITIAL_MANUAL_NORMAS);
+        onData(NORMAS_DATA);
       }
     }
   );
@@ -3493,7 +3488,7 @@ export async function getManualNormasFromFirestore(): Promise<ManualNorma[]> {
       const cached = localStorage.getItem('crescer_manual_normas_cache');
       if (cached) return JSON.parse(cached);
     } catch {}
-    return INITIAL_MANUAL_NORMAS;
+    return NORMAS_DATA;
   }
 }
 
@@ -3532,12 +3527,12 @@ export async function deleteManualNormaFromFirestore(normaId: string): Promise<v
 }
 
 /**
- * Inicializa a coleção manual_normas com o conteúdo padrão do Colégio Crescer
+ * Inicializa a coleção manual_normas com o acervo oficial de 50 normas do Colégio Crescer
  */
 export async function seedInitialManualNormasIfEmpty(): Promise<ManualNorma[]> {
   try {
     const batch = writeBatch(db);
-    INITIAL_MANUAL_NORMAS.forEach((norma) => {
+    NORMAS_DATA.forEach((norma) => {
       const docRef = doc(db, 'manual_normas', norma.id);
       batch.set(
         docRef,
@@ -3551,22 +3546,22 @@ export async function seedInitialManualNormasIfEmpty(): Promise<ManualNorma[]> {
     });
     await batch.commit();
     try {
-      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(INITIAL_MANUAL_NORMAS));
+      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(NORMAS_DATA));
     } catch {}
-    return INITIAL_MANUAL_NORMAS;
+    return NORMAS_DATA;
   } catch (err) {
     console.warn('Erro ao popular initial manual_normas:', err);
-    return INITIAL_MANUAL_NORMAS;
+    return NORMAS_DATA;
   }
 }
 
 /**
- * Força a sincronização das 32 normas oficiais dos documentos do Colégio Crescer no Firestore.
+ * Força a sincronização das 50 normas oficiais dos documentos do Colégio Crescer no Firestore.
  */
 export async function syncOfficialManualNormasToFirestore(): Promise<ManualNorma[]> {
   try {
     const batch = writeBatch(db);
-    INITIAL_MANUAL_NORMAS.forEach((norma) => {
+    NORMAS_DATA.forEach((norma) => {
       const docRef = doc(db, 'manual_normas', norma.id);
       batch.set(
         docRef,
@@ -3580,9 +3575,9 @@ export async function syncOfficialManualNormasToFirestore(): Promise<ManualNorma
     });
     await batch.commit();
     try {
-      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(INITIAL_MANUAL_NORMAS));
+      localStorage.setItem('crescer_manual_normas_cache', JSON.stringify(NORMAS_DATA));
     } catch {}
-    return INITIAL_MANUAL_NORMAS;
+    return NORMAS_DATA;
   } catch (err) {
     console.warn('Erro ao sincronizar manual_normas oficiais no Firestore:', err);
     throw err;

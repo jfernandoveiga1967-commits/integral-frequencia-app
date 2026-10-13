@@ -119,7 +119,26 @@ export function formatBirthDateToDisplay(isoDate: string): string {
 // ---------------------------------------------------------------------------
 
 export function isCoordenador(user?: UserProfile | null): boolean {
-  return user?.role === 'coordenador';
+  return isAdmin(user);
+}
+
+/**
+ * Verifica se o usuário possui perfil de Administrador / Coordenação Geral.
+ * Aceita role 'coordenador', 'admin', 'ADMIN', 'administrador', ou cargoLabel equivalente.
+ */
+export function isAdmin(user?: UserProfile | null): boolean {
+  if (!user) return false;
+  const role = String(user.role || '').trim().toLowerCase();
+  const label = String(user.cargoLabel || '').trim().toLowerCase();
+  return (
+    role === 'coordenador' ||
+    role === 'admin' ||
+    role === 'administrador' ||
+    label.includes('administrador') ||
+    label.includes('coordenador') ||
+    user.email === ADMIN_EMAIL ||
+    user.id === 'usr_coord_1'
+  );
 }
 
 /**

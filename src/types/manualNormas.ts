@@ -6,6 +6,7 @@ export interface ManualNorma {
   id: string;
   moduleId: ModuleCategory;
   moduleTitle?: string;
+  section?: string;
   sectionNumber?: string;
   sectionTitle?: string;
   title: string;

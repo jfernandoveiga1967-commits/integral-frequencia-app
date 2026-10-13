@@ -7,6 +7,7 @@
 
 import { Student, AttendanceRecord, ActivityType, TurmaType, UserProfile, ScheduleBlock } from '../types';
 import { INITIAL_MANUAL_NORMAS, ManualNorma } from '../types/manualNormas';
+import { NORMAS_DATA } from '../data/normasData';
 import { DEFAULT_SEPTEMBER_2026_MENU } from '../data/defaultCardapioData';
 import { formatDateBR, getDayOfWeekFromDate, toISODateString } from '../utils/dateUtils';
 
@@ -237,21 +238,30 @@ export function executeManualNormasVoiceAction(
     };
   }
 
-  // Busca por correspondência inteligente
-  const scored = INITIAL_MANUAL_NORMAS.map((norma) => {
+  // Busca por correspondência inteligente no acervo de 50 normas sequenciais
+  const scored = NORMAS_DATA.map((norma) => {
     let score = 0;
     const titleNorm = normalizeVoiceText(norma.title);
     const descNorm = normalizeVoiceText(norma.summary);
     const secNorm = normalizeVoiceText(norma.sectionTitle || norma.sectionNumber);
+    const secTag = normalizeVoiceText(norma.section || `secao ${norma.sectionNumber}`);
+    const tagsNorm = normalizeVoiceText(Array.isArray(norma.tags) ? norma.tags.join(' ') : '');
 
-    if (titleNorm.includes(normTerm)) score += 10;
-    if (descNorm.includes(normTerm)) score += 5;
-    if (secNorm.includes(normTerm)) score += 3;
+    // Correspondência direta à numeração de seção (ex: "seção 12", "seção 4", "12")
+    if (normTerm.includes(`secao ${norma.sectionNumber}`) || normTerm === norma.sectionNumber) {
+      score += 60;
+    }
+    if (secTag.includes(normTerm)) score += 30;
+    if (titleNorm.includes(normTerm)) score += 15;
+    if (tagsNorm.includes(normTerm)) score += 12;
+    if (descNorm.includes(normTerm)) score += 8;
+    if (secNorm.includes(normTerm)) score += 6;
 
     // Palavras individuais
     const words = normTerm.split(/\s+/).filter((w) => w.length > 2);
     words.forEach((w) => {
       if (titleNorm.includes(w)) score += 4;
+      if (tagsNorm.includes(w)) score += 3;
       if (descNorm.includes(w)) score += 2;
     });
 
@@ -263,7 +273,7 @@ export function executeManualNormasVoiceAction(
 
   if (!best || best.score === 0) {
     return {
-      text: `Não encontrei uma norma específica para "${termoOuTema}", mas você pode consultar os módulos de Segurança, Fardamento, Rotina ou Saúde no painel do Manual.`,
+      text: `Não encontrei uma norma específica para "${termoOuTema}", mas você pode consultar os 6 módulos do Manual no painel oficial de normas (Seções 1 a 50).`,
       action: {
         type: 'norma',
         title: 'Norma não localizada',
@@ -276,15 +286,16 @@ export function executeManualNormasVoiceAction(
 
   const norma = best.norma;
   const orientacao = norma.details?.[0] || norma.summary;
-  const text = `De acordo com a Norma ${norma.sectionNumber || ''}, sobre ${norma.title}: ${norma.summary} A diretriz prática recomenda que: ${orientacao}`;
+  const secLabel = norma.section || `Seção ${norma.sectionNumber}`;
+  const text = `De acordo com a ${secLabel}, sobre ${norma.title}: ${norma.summary} A diretriz orienta que: ${orientacao}`;
 
   return {
     text,
     action: {
       type: 'norma',
-      title: `Norma ${norma.sectionNumber || ''} — ${norma.title}`,
+      title: `${secLabel} — ${norma.title}`,
       details: norma.summary,
-      badge: `Seção ${norma.sectionNumber || ''}`,
+      badge: secLabel,
       success: true,
     },
   };
@@ -392,6 +403,26 @@ export async function processVoiceAgentQuery(
 ): Promise<VoiceResponsePayload> {
   const normInput = normalizeVoiceText(userInput);
 
+  // Verificação de segurança: Sofia é exclusiva para Administrador
+  const userRole = String(context.currentUser?.role || '').trim().toLowerCase();
+  const cargoLabel = String(context.currentUser?.cargoLabel || '').trim().toLowerCase();
+  const isAuthorizedAdmin =
+    Boolean(context.currentUser) &&
+    (userRole === 'coordenador' ||
+      userRole === 'admin' ||
+      userRole === 'administrador' ||
+      cargoLabel.includes('administrador') ||
+      cargoLabel.includes('coordenador') ||
+      context.currentUser?.email === 'fernando.veiga@crescercampinas.com.br' ||
+      context.currentUser?.id === 'usr_coord_1');
+
+  if (!isAuthorizedAdmin) {
+    return {
+      spokenText: 'Acesso negado. A assistente de voz Sofia é permitida apenas para o perfil Administrador.',
+      displayText: 'Acesso restrito ao perfil Administrador.',
+    };
+  }
+
   // 1. Tenta chamar o endpoint no backend
   try {
     const res = await fetch('/api/gemini/voice-agent', {
@@ -402,12 +433,22 @@ export async function processVoiceAgentQuery(
         context: {
           userName: context.currentUser?.name,
           userRole: context.currentUser?.role,
+          userEmail: context.currentUser?.email,
+          userCargoLabel: context.currentUser?.cargoLabel,
+          userId: context.currentUser?.id,
           selectedDate: context.selectedDate,
           selectedTurma: context.selectedTurma,
           selectedActivity: context.selectedActivity,
         },
       }),
     });
+
+    if (res.status === 403) {
+      return {
+        spokenText: 'Acesso negado. A assistente de voz Sofia é permitida apenas para o perfil Administrador.',
+        displayText: 'Acesso restrito ao perfil Administrador.',
+      };
+    }
 
     if (res.ok) {
       const data = await res.json();

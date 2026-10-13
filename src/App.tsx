@@ -36,7 +36,7 @@ import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribu
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
-import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador, isTabAllowed, getUserAllowedTabs } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador, isAdmin, isTabAllowed, getUserAllowedTabs } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { Footer } from './components/Footer';
 import { AttendanceSheet } from './components/AttendanceSheet';
@@ -2610,8 +2610,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Agente de IA por Voz — Sofia (Guia do Integral • Colégio Crescer) */}
-      {currentUser && (
+      {/* Agente de IA por Voz — Sofia (Exclusivo para perfil Administrador) */}
+      {currentUser && isAdmin(currentUser) && (
         <VoiceWidget
           students={students}
           records={records}

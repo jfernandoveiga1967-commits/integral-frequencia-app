@@ -11,7 +11,7 @@
  * Módulo 6 (Extracurriculares e Transições): Seções 43 a 50
  */
 
-import { ManualNorma, ModuleCategory, NormaType } from '../types/manualNormas';
+import type { ManualNorma, ModuleCategory, NormaType } from '../types/manualNormas';
 
 export interface NormaDataRecord extends ManualNorma {
   section: string; // Ex: 'Seção 1', 'Seção 2', ... 'Seção 50'
@@ -923,6 +923,7 @@ export const NORMAS_DATA: NormaDataRecord[] = [
     order: 50,
   },
 ];
+export const INITIAL_MANUAL_NORMAS: NormaDataRecord[] = NORMAS_DATA;
 
 /**
  * Utilitários de Busca e Indexação Rápida

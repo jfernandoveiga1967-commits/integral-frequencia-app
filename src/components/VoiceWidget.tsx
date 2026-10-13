@@ -25,6 +25,7 @@ import {
   TextToSpeechManager,
 } from '../services/voiceAiService';
 import { Student, AttendanceRecord, ScheduleBlock, UserProfile } from '../types';
+import { isAdmin } from '../utils/authUtils';
 
 interface VoiceMessage {
   id: string;
@@ -61,6 +62,8 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   onSelectTurma,
   onSelectDate,
 }) => {
+  const isUserAdmin = isAdmin(currentUser);
+
   const [isOpen, setIsOpen] = useState(false);
   const [agentState, setAgentState] = useState<VoiceAgentState>('Aguardando');
   const [transcript, setTranscript] = useState('');
@@ -364,6 +367,11 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     TextToSpeechManager.stop();
     setAgentState('Aguardando');
   };
+
+  // Proteção de visibilidade: exclusivo para Administrador
+  if (!isUserAdmin) {
+    return null;
+  }
 
   return (
     <>

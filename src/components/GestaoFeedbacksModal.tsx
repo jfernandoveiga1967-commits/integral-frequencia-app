@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ManualNorma, INITIAL_MANUAL_NORMAS } from '../types/manualNormas';
+import { NORMAS_DATA } from '../data/normasData';
 import { subscribeManualNormas, subscribeUsers } from '../firebase';
 import { getLocalUsersList } from '../utils/authUtils';
 import { generateCordialFeedback, identifyNormFromContext } from '../services/feedbackAiService';
@@ -52,7 +53,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   const [usersList, setUsersList] = useState<UserProfile[]>(() =>
     initialUsers && initialUsers.length > 0 ? initialUsers : getLocalUsersList()
   );
-  const [normasList, setNormasList] = useState<ManualNorma[]>(INITIAL_MANUAL_NORMAS);
+  const [normasList, setNormasList] = useState<ManualNorma[]>(NORMAS_DATA);
   const [feedbacksHistory, setFeedbacksHistory] = useState<PedagogicalFeedback[]>([]);
 
   // Formulário de Elaboração

@@ -48,6 +48,7 @@ import {
   compareNormasBySectionNumber,
   parseSectionNumber,
 } from '../types/manualNormas';
+import { NORMAS_DATA } from '../data/normasData';
 import {
   subscribeManualNormas,
   saveManualNormaToFirestore,
@@ -938,7 +939,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
       const cached = localStorage.getItem('crescer_manual_normas_cache');
       if (cached) return JSON.parse(cached);
     } catch {}
-    return INITIAL_MANUAL_NORMAS;
+    return NORMAS_DATA;
   });
 
   const [isLoading, setIsLoading] = useState(true);

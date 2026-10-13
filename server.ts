@@ -760,12 +760,37 @@ Responda estritamente em formato JSON:
   }
 });
 
-// API Route: Agente de Voz Sofia — Guia do Integral com Function Calling
+// API Route: Agente de Voz Sofia — Guia do Integral com Function Calling (Exclusivo Administrador)
 app.post('/api/gemini/voice-agent', async (req, res) => {
   try {
     const { prompt, context } = req.body;
     if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Comando de voz não fornecido.' });
+    }
+
+    // Validação de Segurança e Permissão: Acesso restrito exclusivo ao Administrador
+    const userRole = String(context?.userRole || '').trim().toLowerCase();
+    const userEmail = String(context?.userEmail || '').trim().toLowerCase();
+    const userCargo = String(context?.userCargoLabel || '').trim().toLowerCase();
+    const userId = String(context?.userId || '').trim().toLowerCase();
+
+    const isAuthorizedAdmin =
+      userRole === 'coordenador' ||
+      userRole === 'admin' ||
+      userRole === 'administrador' ||
+      userCargo.includes('administrador') ||
+      userCargo.includes('coordenador') ||
+      userEmail === 'fernando.veiga@crescercampinas.com.br' ||
+      userEmail === 'jfernandoveiga1967@gmail.com' ||
+      userEmail === 'coordenacao@crescer.edu.br' ||
+      userId === 'usr_coord_1';
+
+    if (!isAuthorizedAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso negado. A assistente de voz Sofia é de uso exclusivo de usuários com perfil de Administrador.',
+        code: 'FORBIDDEN_ADMIN_ONLY',
+      });
     }
 
     const ai = getAIClient();
@@ -778,7 +803,7 @@ Sua resposta será falada em voz alta através de Text-To-Speech (TTS), portanto
 - Evite listar caracteres especiais, asteriscos ou tabelas.
 - Identifique com precisão se a intenção do usuário requer o uso de uma das 3 funções disponíveis:
   1. consultar_ou_lancar_chamada: para verificar pendências, marcar presença ou falta de alunos.
-  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, procedimentos do Manual de 50 Normas.
+  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, postura e procedimentos do Manual de 50 Normas (Seções 1 a 50 organizadas em 6 Módulos Lógicos: M1 Postura 1-10, M2 Segurança 11-20, M3 Saúde 21-30, M4 Alimentação 31-35, M5 Afeto 36-42, M6 Extracurriculares 43-50).
   3. consultar_cardapio_ou_semanario: para consultar almoço, lanche, oficinas ou rotinas do Semanário.
 Retorne um JSON estrito no seguinte formato:
 {
