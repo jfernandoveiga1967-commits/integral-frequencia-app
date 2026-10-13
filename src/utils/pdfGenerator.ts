@@ -4375,6 +4375,7 @@ export function generateNominalListPDF({
           (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
           (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
           (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
+          Boolean((s as any).activity && normalizeStr((s as any).activity) === 'rotina') ||
           (!s.activities || s.activities.length === 0);
         if (!hasRotina) return false;
       } else {
