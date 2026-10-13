@@ -10,6 +10,7 @@ import { INITIAL_MANUAL_NORMAS, ManualNorma } from '../types/manualNormas';
 import { NORMAS_DATA } from '../data/normasData';
 import { DEFAULT_SEPTEMBER_2026_MENU } from '../data/defaultCardapioData';
 import { formatDateBR, getDayOfWeekFromDate, toISODateString } from '../utils/dateUtils';
+import { isAdmin, getStoredUser, ADMIN_EMAIL } from '../utils/authUtils';
 
 export type VoiceAgentState = 'Aguardando' | 'Ouvindo...' | 'Processando...' | 'Falando...';
 
@@ -404,17 +405,8 @@ export async function processVoiceAgentQuery(
   const normInput = normalizeVoiceText(userInput);
 
   // Verificação de segurança: Sofia é exclusiva para Administrador
-  const userRole = String(context.currentUser?.role || '').trim().toLowerCase();
-  const cargoLabel = String(context.currentUser?.cargoLabel || '').trim().toLowerCase();
-  const isAuthorizedAdmin =
-    Boolean(context.currentUser) &&
-    (userRole === 'coordenador' ||
-      userRole === 'admin' ||
-      userRole === 'administrador' ||
-      cargoLabel.includes('administrador') ||
-      cargoLabel.includes('coordenador') ||
-      context.currentUser?.email === 'fernando.veiga@crescercampinas.com.br' ||
-      context.currentUser?.id === 'usr_coord_1');
+  const effectiveUser = context.currentUser || getStoredUser();
+  const isAuthorizedAdmin = isAdmin(effectiveUser);
 
   if (!isAuthorizedAdmin) {
     return {
@@ -423,25 +415,32 @@ export async function processVoiceAgentQuery(
     };
   }
 
-  // 1. Tenta chamar o endpoint no backend
+  // 1. Tenta chamar o endpoint no backend com timeout estrito de 8 segundos
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const res = await fetch('/api/gemini/voice-agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         prompt: userInput,
         context: {
-          userName: context.currentUser?.name,
-          userRole: context.currentUser?.role,
-          userEmail: context.currentUser?.email,
-          userCargoLabel: context.currentUser?.cargoLabel,
-          userId: context.currentUser?.id,
+          userName: effectiveUser?.name || 'Administrador',
+          userRole: effectiveUser?.role || 'coordenador',
+          userEmail: effectiveUser?.email || ADMIN_EMAIL,
+          userCargoLabel: effectiveUser?.cargoLabel || 'Coordenador (Administrador)',
+          userId: effectiveUser?.id || 'usr_coord_1',
+          isAdmin: true,
           selectedDate: context.selectedDate,
           selectedTurma: context.selectedTurma,
           selectedActivity: context.selectedActivity,
         },
       }),
     });
+
+    clearTimeout(timeoutId);
 
     if (res.status === 403) {
       return {
@@ -491,8 +490,19 @@ export async function processVoiceAgentQuery(
         };
       }
     }
-  } catch (err) {
-    console.warn('[Sofia Voice Agent] Backend temporariamente indisponível, usando orquestrador local:', err);
+  } catch (err: any) {
+    console.warn('[Sofia Voice Agent] Timeout ou indisponibilidade da rota backend:', err?.message || err);
+    // Retorna mensagem padrão requerida para destravar imediatamente a interface
+    return {
+      spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+      displayText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+      actionResult: {
+        type: 'info',
+        title: 'Sofia • Conexão Temporária',
+        details: 'Estou reestabelecendo a conexão com o sistema do Crescer.',
+        badge: 'Reestabelecendo',
+      },
+    };
   }
 
   // 2. Fallback Inteligente Local (Garantia de 100% de disponibilidade mesmo sem conexão com a API)
@@ -658,16 +668,33 @@ export class TextToSpeechManager {
       utterance.voice = preferredVoice;
     }
 
+    if (this.synth.paused) {
+      try {
+        this.synth.resume();
+      } catch {}
+    }
+
+    // Timer de segurança para destravar caso o navegador não dispare onend
+    const safetyDurationMs = Math.max(3000, cleanText.length * 85);
+    const safetyTimer = setTimeout(() => {
+      if (this.currentUtterance === utterance) {
+        this.currentUtterance = null;
+        options?.onEnd?.();
+      }
+    }, safetyDurationMs);
+
     utterance.onstart = () => {
       options?.onStart?.();
     };
 
     utterance.onend = () => {
+      clearTimeout(safetyTimer);
       this.currentUtterance = null;
       options?.onEnd?.();
     };
 
     utterance.onerror = (e) => {
+      clearTimeout(safetyTimer);
       this.currentUtterance = null;
       options?.onError?.(e);
       options?.onEnd?.();

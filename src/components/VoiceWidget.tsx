@@ -25,7 +25,7 @@ import {
   TextToSpeechManager,
 } from '../services/voiceAiService';
 import { Student, AttendanceRecord, ScheduleBlock, UserProfile } from '../types';
-import { isAdmin } from '../utils/authUtils';
+import { isAdmin, getStoredUser } from '../utils/authUtils';
 
 interface VoiceMessage {
   id: string;
@@ -62,11 +62,13 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   onSelectTurma,
   onSelectDate,
 }) => {
-  const isUserAdmin = isAdmin(currentUser);
+  const effectiveUser = currentUser || getStoredUser();
+  const isUserAdmin = isAdmin(effectiveUser);
 
   const [isOpen, setIsOpen] = useState(false);
   const [agentState, setAgentState] = useState<VoiceAgentState>('Aguardando');
   const [transcript, setTranscript] = useState('');
+  const currentTranscriptRef = useRef('');
   const [messages, setMessages] = useState<VoiceMessage[]>([
     {
       id: 'welcome',
@@ -93,7 +95,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
 
   // Context bundle
   const voiceContext: VoiceAgentContext = {
-    currentUser,
+    currentUser: effectiveUser,
     selectedDate,
     selectedTurma,
     selectedActivity,
@@ -221,6 +223,25 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     };
   }, [agentState]);
 
+  // Redefinição e recuperação resiliente do AudioContext
+  const resetAudioContext = async () => {
+    try {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        await audioContextRef.current.close().catch(() => {});
+      }
+      audioContextRef.current = null;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        audioContextRef.current = new AudioCtx();
+        if (audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume();
+        }
+      }
+    } catch (err) {
+      console.warn('[VoiceWidget] Aviso ao redefinir AudioContext:', err);
+    }
+  };
+
   // Envio e processamento de consulta para Sofia
   const handleProcessUserText = async (textToSend: string) => {
     const trimmed = textToSend.trim();
@@ -239,6 +260,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
 
     setMessages((prev) => [...prev, userMsg]);
     setTranscript('');
+    currentTranscriptRef.current = '';
     setAgentState('Processando...');
 
     try {
@@ -255,7 +277,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       setMessages((prev) => [...prev, sofiaMsg]);
       setAgentState('Falando...');
 
-      // Síntese de Voz (TTS)
+      // Síntese de Voz (TTS) com destravamento garantido
       TextToSpeechManager.speak(response.spokenText, {
         onStart: () => setAgentState('Falando...'),
         onEnd: () => setAgentState('Aguardando'),
@@ -263,20 +285,32 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       });
     } catch (error) {
       console.error('[VoiceWidget] Erro ao processar:', error);
+      const fallbackText = 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.';
       const errorMsg: VoiceMessage = {
         id: `err-${Date.now()}`,
         sender: 'sofia',
-        text: 'Desculpe, tive uma dificuldade momentânea para processar seu comando. Você pode tentar novamente?',
+        text: fallbackText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
-      setAgentState('Aguardando');
+      setAgentState('Falando...');
+      TextToSpeechManager.speak(fallbackText, {
+        onEnd: () => setAgentState('Aguardando'),
+        onError: () => setAgentState('Aguardando'),
+      });
     }
   };
 
   // Inicia captura de voz
-  const startListening = () => {
+  const startListening = async () => {
     TextToSpeechManager.stop();
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.resume();
+      } catch {}
+    }
+    await resetAudioContext();
+
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -287,7 +321,10 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
 
     try {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+        recognitionRef.current = null;
       }
 
       const recognition = new SpeechRecognition();
@@ -298,6 +335,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       recognition.onstart = () => {
         setAgentState('Ouvindo...');
         setTranscript('');
+        currentTranscriptRef.current = '';
         startAudioVisualizer();
       };
 
@@ -306,6 +344,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
         for (let i = event.resultIndex; i < event.results.length; i++) {
           currentTranscript += event.results[i][0].transcript;
         }
+        currentTranscriptRef.current = currentTranscript;
         setTranscript(currentTranscript);
 
         // Se for o resultado final
@@ -323,9 +362,9 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
 
       recognition.onend = () => {
         stopAudioVisualizer();
-        // Se capturou algo mas não finalizou
-        if (transcript.trim() && agentState === 'Ouvindo...') {
-          handleProcessUserText(transcript);
+        const pending = currentTranscriptRef.current.trim();
+        if (pending && agentState === 'Ouvindo...') {
+          handleProcessUserText(pending);
         } else if (agentState === 'Ouvindo...') {
           setAgentState('Aguardando');
         }
@@ -350,15 +389,19 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     stopAudioVisualizer();
   };
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
     if (agentState === 'Ouvindo...') {
+      const captured = currentTranscriptRef.current.trim() || transcript.trim();
       stopListening();
-      if (transcript.trim()) {
-        handleProcessUserText(transcript);
+      if (captured) {
+        handleProcessUserText(captured);
       } else {
         setAgentState('Aguardando');
       }
     } else {
+      // Se estava Processando..., Falando... ou Aguardando, destrava, redefine AudioContext e inicia
+      TextToSpeechManager.stop();
+      await resetAudioContext();
       startListening();
     }
   };
