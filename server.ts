@@ -806,7 +806,7 @@ Sua resposta será falada em voz alta através de Text-To-Speech (TTS), portanto
 - Evite listar caracteres especiais, asteriscos ou tabelas.
 - Identifique com precisão se a intenção do usuário requer o uso de uma das 3 funções disponíveis:
   1. consultar_ou_lancar_chamada: para verificar pendências, marcar presença ou falta de alunos.
-  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, postura e procedimentos do Manual de 50 Normas (Seções 1 a 50 organizadas em 6 Módulos Lógicos: M1 Postura 1-10, M2 Segurança 11-20, M3 Saúde 21-30, M4 Alimentação 31-35, M5 Afeto 36-42, M6 Extracurriculares 43-50).
+  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, postura e procedimentos do Manual Oficial de 51 Normas do Período Integral (Seções 1 a 51 organizadas em 4 Módulos: Módulo 1 Rotina Operacional 1-16, Módulo 2 Segurança 17-27, Módulo 3 Postura e Fardamento 28-38, Módulo 4 Guia Socioemocional 39-51).
   3. consultar_cardapio_ou_semanario: para consultar almoço, lanche, oficinas ou rotinas do Semanário.
 Retorne um JSON estrito no seguinte formato:
 {
@@ -818,14 +818,26 @@ Retorne um JSON estrito no seguinte formato:
 }
 Se nenhuma função for estritamente necessária, omita "functionCall" e apenas responda com "spokenText".`;
 
-        // Manipulador de Timeout estrito de no máximo 8 segundos
+        // Manipulador de Timeout resiliente ajustado para 20 segundos
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('TIMEOUT_EXCEEDED')), 8000);
+          setTimeout(() => reject(new Error('TIMEOUT_EXCEEDED')), 20000);
         });
+
+        // Montagem do payload multi-modal (suporte a áudio otimizado e texto)
+        const contentsPayload: any[] = [];
+        if (req.body.audioBase64) {
+          contentsPayload.push({
+            inlineData: {
+              mimeType: req.body.mimeType || 'audio/webm',
+              data: req.body.audioBase64,
+            },
+          });
+        }
+        contentsPayload.push(`Comando do usuário: "${prompt}". Contexto atual: Data: ${context?.selectedDate || 'hoje'}, Turma: ${context?.selectedTurma || 'todas'}, Usuário: ${context?.userName || 'colaborador'}.`);
 
         const geminiCall = ai.models.generateContent({
           model: 'gemini-3.8-flash',
-          contents: `Comando do usuário: "${prompt}". Contexto atual: Data: ${context?.selectedDate || 'hoje'}, Turma: ${context?.selectedTurma || 'todas'}, Usuário: ${context?.userName || 'colaborador'}.`,
+          contents: contentsPayload,
           config: {
             systemInstruction,
             responseMimeType: 'application/json',
@@ -852,10 +864,51 @@ Se nenhuma função for estritamente necessária, omita "functionCall" e apenas 
           });
         }
       } catch (geminiError: any) {
-        console.warn('[Sofia Voice Agent] Fallback por erro/cota/timeout no Gemini:', geminiError?.message || geminiError);
-        // Resposta vocal padrão resiliente para destravar a interface imediatamente
+        const errorMsg = geminiError?.message || String(geminiError || '');
+        const isRateLimit =
+          geminiError?.status === 429 ||
+          errorMsg.includes('429') ||
+          errorMsg.includes('RESOURCE_EXHAUSTED') ||
+          errorMsg.includes('Resource has been exhausted') ||
+          errorMsg.includes('quota') ||
+          errorMsg.includes('Quota exceeded');
+
+        const isTimeout = errorMsg.includes('TIMEOUT_EXCEEDED');
+
+        console.warn(`[Sofia Voice Agent] ${isRateLimit ? 'Rate Limit (429)' : isTimeout ? 'Timeout (20s)' : 'Erro'} no Gemini:`, errorMsg);
+
+        // Tratamento específico de erro HTTP 429 (Resource Exhausted / Rate Limit)
+        if (isRateLimit) {
+          return res.status(429).json({
+            success: false,
+            status: 'RATE_LIMIT_EXCEEDED',
+            code: 'RATE_LIMIT_EXCEEDED',
+            error: 'Limite de requisições do Gemini atingido (Rate limit/429). Aguarde alguns instantes.',
+            spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+            functionCall: null,
+            isFallback: true,
+            isQuotaOrTimeout: true,
+          });
+        }
+
+        // Tratamento específico de Timeout (20s)
+        if (isTimeout) {
+          return res.status(504).json({
+            success: false,
+            status: 'TIMEOUT_EXCEEDED',
+            code: 'TIMEOUT_EXCEEDED',
+            error: 'Tempo limite de resposta de 20 segundos excedido.',
+            spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+            functionCall: null,
+            isFallback: true,
+            isQuotaOrTimeout: true,
+          });
+        }
+
+        // Resposta vocal padrão resiliente para qualquer outro erro
         return res.json({
           success: true,
+          status: 'FALLBACK',
           spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
           functionCall: null,
           isFallback: true,

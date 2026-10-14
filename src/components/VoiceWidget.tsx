@@ -69,6 +69,27 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   const [agentState, setAgentState] = useState<VoiceAgentState>('Aguardando');
   const [transcript, setTranscript] = useState('');
   const currentTranscriptRef = useRef('');
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Gatilho de Cooldown resiliente para quebrar loops de reconexão e proteger cotas do Gemini
+  const triggerCooldown = useCallback((seconds = 5) => {
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+    }
+    setCooldownSeconds(seconds);
+    cooldownTimerRef.current = setInterval(() => {
+      setCooldownSeconds((prev) => {
+        if (prev <= 1) {
+          if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+          cooldownTimerRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   const [messages, setMessages] = useState<VoiceMessage[]>([
     {
       id: 'welcome',
@@ -122,6 +143,10 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   // Cleanup Web Audio & Speech on unmount
   useEffect(() => {
     return () => {
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
       stopListening();
       TextToSpeechManager.stop();
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
@@ -242,11 +267,16 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     }
   };
 
-  // Envio e processamento de consulta para Sofia
+  // Envio e processamento de consulta para Sofia com quebra estrita de loop
   const handleProcessUserText = async (textToSend: string) => {
     const trimmed = textToSend.trim();
     if (!trimmed) {
       setAgentState('Aguardando');
+      return;
+    }
+
+    // Se estiver em período de cooldown (proteção contra loop/cota), bloqueia execução
+    if (cooldownSeconds > 0) {
       return;
     }
 
@@ -266,6 +296,12 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     try {
       const response = await processVoiceAgentQuery(trimmed, voiceContext);
 
+      const isContingencyOrRateLimit =
+        response.isQuotaOrTimeout ||
+        response.status === 'RATE_LIMIT_EXCEEDED' ||
+        response.status === 'TIMEOUT_EXCEEDED' ||
+        (response.spokenText && response.spokenText.includes('reestabelecendo minha conexão'));
+
       const sofiaMsg: VoiceMessage = {
         id: `sofia-${Date.now()}`,
         sender: 'sofia',
@@ -275,9 +311,26 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       };
 
       setMessages((prev) => [...prev, sofiaMsg]);
+
+      if (isContingencyOrRateLimit) {
+        // QUEBRA DEFINITIVA DO LOOP DE RECONEXÃO:
+        // 1. Para imediatamente qualquer escuta
+        stopListening();
+        // 2. Dispara cooldown de 5 segundos
+        triggerCooldown(5);
+        // 3. Emite a fala de contingência e garante transição direta para 'Aguardando'
+        setAgentState('Falando...');
+        TextToSpeechManager.speak(response.spokenText, {
+          onStart: () => setAgentState('Falando...'),
+          onEnd: () => setAgentState('Aguardando'),
+          onError: () => setAgentState('Aguardando'),
+        });
+        return;
+      }
+
       setAgentState('Falando...');
 
-      // Síntese de Voz (TTS) com destravamento garantido
+      // Síntese de Voz (TTS) normal
       TextToSpeechManager.speak(response.spokenText, {
         onStart: () => setAgentState('Falando...'),
         onEnd: () => setAgentState('Aguardando'),
@@ -285,6 +338,10 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       });
     } catch (error) {
       console.error('[VoiceWidget] Erro ao processar:', error);
+      // Quebra de loop em caso de exceção não tratada
+      stopListening();
+      triggerCooldown(5);
+
       const fallbackText = 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.';
       const errorMsg: VoiceMessage = {
         id: `err-${Date.now()}`,
@@ -301,8 +358,13 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     }
   };
 
-  // Inicia captura de voz
+  // Inicia captura de voz (bloqueado durante cooldown)
   const startListening = async () => {
+    if (cooldownSeconds > 0) {
+      setAgentState('Aguardando');
+      return;
+    }
+
     TextToSpeechManager.stop();
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
@@ -363,7 +425,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       recognition.onend = () => {
         stopAudioVisualizer();
         const pending = currentTranscriptRef.current.trim();
-        if (pending && agentState === 'Ouvindo...') {
+        if (pending && agentState === 'Ouvindo...' && cooldownSeconds === 0) {
           handleProcessUserText(pending);
         } else if (agentState === 'Ouvindo...') {
           setAgentState('Aguardando');
@@ -390,6 +452,10 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   };
 
   const toggleListening = async () => {
+    if (cooldownSeconds > 0) {
+      return;
+    }
+
     if (agentState === 'Ouvindo...') {
       const captured = currentTranscriptRef.current.trim() || transcript.trim();
       stopListening();
@@ -422,31 +488,52 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
       <div className="fixed bottom-6 right-6 z-40 print:hidden no-print">
         <button
           type="button"
+          disabled={cooldownSeconds > 0}
           onClick={() => {
             setIsOpen(true);
-            // Começa ouvindo ao abrir se estiver ociosa
-            if (agentState === 'Aguardando') {
-              setTimeout(() => startListening(), 300);
+            // Começa ouvindo ao abrir somente se estiver ociosa e SEM cooldown ativo
+            if (agentState === 'Aguardando' && cooldownSeconds === 0) {
+              setTimeout(() => {
+                if (cooldownSeconds === 0) {
+                  startListening();
+                }
+              }, 300);
             }
           }}
-          className="relative group p-3.5 sm:p-4 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-xl shadow-indigo-500/25 border border-indigo-400/30 transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
-          title="Abrir Sofia — Guia do Integral por Voz"
+          className={`relative group p-3.5 sm:p-4 rounded-2xl transition-all duration-300 shadow-xl border flex items-center justify-center ${
+            cooldownSeconds > 0
+              ? 'bg-slate-700 text-slate-400 border-slate-600 cursor-not-allowed opacity-80'
+              : 'bg-gradient-to-tr from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25 border-indigo-400/30 hover:scale-105 active:scale-95 cursor-pointer'
+          }`}
+          title={cooldownSeconds > 0 ? `Aguarde ${cooldownSeconds}s (estabilização)...` : "Abrir Sofia — Guia do Integral por Voz"}
         >
-          {/* Anel de Pulso Animado */}
-          <span className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 opacity-30 group-hover:opacity-75 blur-xs animate-pulse transition duration-500" />
+          {/* Anel de Pulso Animado (somente quando ativo) */}
+          {cooldownSeconds === 0 && (
+            <span className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 opacity-30 group-hover:opacity-75 blur-xs animate-pulse transition duration-500" />
+          )}
 
           {/* Ícone com mini visualizer */}
           <div className="relative flex items-center space-x-2">
-            <Mic className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            {cooldownSeconds > 0 ? (
+              <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 animate-spin" />
+            ) : (
+              <Mic className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            )}
             <span className="hidden md:inline-block font-extrabold text-xs tracking-wide">
-              Sofia • Voz
+              {cooldownSeconds > 0 ? `Sofia (${cooldownSeconds}s)` : 'Sofia • Voz'}
             </span>
           </div>
 
           {/* Badge de status */}
           <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
+            {cooldownSeconds > 0 ? (
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500 border-2 border-white" />
+            ) : (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
+              </>
+            )}
           </span>
         </button>
       </div>
@@ -553,6 +640,19 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
               </div>
             </div>
 
+            {/* Banner de Cooldown Ativo contra Loops e Rate Limits */}
+            {cooldownSeconds > 0 && (
+              <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs font-bold flex items-center justify-between shrink-0 animate-in fade-in">
+                <div className="flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Estabilizando conexão com o sistema do Crescer...</span>
+                </div>
+                <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-950 font-black border border-amber-300">
+                  {cooldownSeconds}s
+                </span>
+              </div>
+            )}
+
             {/* Área de Histórico de Diálogo */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/60">
               {messages.map((msg) => (
@@ -648,8 +748,9 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
                   <button
                     key={i}
                     type="button"
+                    disabled={cooldownSeconds > 0}
                     onClick={() => handleProcessUserText(sug)}
-                    className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 border border-slate-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {sug}
                   </button>
@@ -660,7 +761,9 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
             {/* Painel de Controle Principal do Microfone */}
             <div className="p-4 sm:p-5 bg-white border-t border-slate-200 flex items-center justify-between shrink-0">
               <div className="text-xs text-slate-500 font-medium">
-                {agentState === 'Ouvindo...'
+                {cooldownSeconds > 0
+                  ? `Aguarde ${cooldownSeconds}s para novo comando...`
+                  : agentState === 'Ouvindo...'
                   ? 'Fale com clareza... (toque no botão para finalizar)'
                   : agentState === 'Falando...'
                   ? 'Sofia está respondendo...'
@@ -681,17 +784,25 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
                   </button>
                 ) : null}
 
-                {/* Botão de Gravação Principal */}
+                {/* Botão de Gravação Principal com Proteção de Cooldown */}
                 <button
                   type="button"
+                  disabled={cooldownSeconds > 0}
                   onClick={toggleListening}
-                  className={`px-5 py-3 rounded-2xl font-black text-xs transition-all shadow-lg cursor-pointer flex items-center space-x-2 ${
-                    agentState === 'Ouvindo...'
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30 scale-105 ring-4 ring-rose-400/40 animate-pulse'
-                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25'
+                  className={`px-5 py-3 rounded-2xl font-black text-xs transition-all shadow-lg flex items-center space-x-2 ${
+                    cooldownSeconds > 0
+                      ? 'bg-slate-200 text-slate-500 border border-slate-300 shadow-none cursor-not-allowed'
+                      : agentState === 'Ouvindo...'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30 scale-105 ring-4 ring-rose-400/40 animate-pulse cursor-pointer'
+                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25 cursor-pointer'
                   }`}
                 >
-                  {agentState === 'Ouvindo...' ? (
+                  {cooldownSeconds > 0 ? (
+                    <>
+                      <RotateCcw className="w-4 h-4 animate-spin text-amber-600" />
+                      <span>Aguarde {cooldownSeconds}s...</span>
+                    </>
+                  ) : agentState === 'Ouvindo...' ? (
                     <>
                       <MicOff className="w-4 h-4 animate-bounce" />
                       <span>Concluir Fala</span>

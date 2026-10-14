@@ -28,6 +28,9 @@ export interface VoiceResponsePayload {
   functionCalled?: string;
   functionArgs?: Record<string, any>;
   actionResult?: VoiceActionResult;
+  isQuotaOrTimeout?: boolean;
+  status?: string;
+  isRateLimit?: boolean;
 }
 
 export interface VoiceAgentContext {
@@ -396,13 +399,142 @@ export function executeCardapioSemanarioVoiceAction(
 }
 
 /**
- * 4. DISPATCHER GERAL DO AGENTE DE VOZ (Processa intenção do usuário)
+ * 4. OTIMIZAÇÃO E COMPRESSÃO DE PAYLOAD DE ÁUDIO
+ * Reduz a taxa de amostragem para 16kHz mono (padrão de voz Google Gemini)
+ * e gera um payload ultraleve, otimizado para transmissões móveis (3G/4G).
+ */
+export async function optimizeAudioPayload(
+  audioInput: Blob | ArrayBuffer
+): Promise<{ audioBase64: string; mimeType: string; originalBytes: number; compressedBytes: number }> {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) {
+      const blob = audioInput instanceof Blob ? audioInput : new Blob([audioInput], { type: 'audio/webm' });
+      const base64 = await blobToBase64(blob);
+      return {
+        audioBase64: base64,
+        mimeType: blob.type || 'audio/webm',
+        originalBytes: blob.size,
+        compressedBytes: blob.size,
+      };
+    }
+
+    const audioCtx = new AudioCtx();
+    const arrayBuffer =
+      audioInput instanceof ArrayBuffer
+        ? audioInput
+        : await audioInput.arrayBuffer();
+
+    const originalBytes = arrayBuffer.byteLength;
+    const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+
+    // Resample para 16kHz mono (qualidade ideal para reconhecimento de voz humana com compressão máxima)
+    const targetSampleRate = 16000;
+    const duration = Math.min(decodedBuffer.duration, 25); // Limite máximo de 25s de áudio
+    const offlineCtx = new OfflineAudioContext(
+      1,
+      Math.ceil(duration * targetSampleRate),
+      targetSampleRate
+    );
+
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decodedBuffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+
+    const resampledBuffer = await offlineCtx.startRendering();
+    await audioCtx.close().catch(() => {});
+
+    // Codifica em WAV PCM 16-bit Mono compacto
+    const wavBlob = encodeWAV16BitMono(resampledBuffer);
+    const base64 = await blobToBase64(wavBlob);
+
+    return {
+      audioBase64: base64,
+      mimeType: 'audio/wav',
+      originalBytes,
+      compressedBytes: wavBlob.size,
+    };
+  } catch (err) {
+    console.warn('[Sofia Voice Agent] Falha na compressão do áudio, transmitindo formato original:', err);
+    const blob = audioInput instanceof Blob ? audioInput : new Blob([audioInput], { type: 'audio/webm' });
+    const base64 = await blobToBase64(blob);
+    return {
+      audioBase64: base64,
+      mimeType: blob.type || 'audio/webm',
+      originalBytes: blob.size,
+      compressedBytes: blob.size,
+    };
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function encodeWAV16BitMono(buffer: AudioBuffer): Blob {
+  const channelData = buffer.getChannelData(0);
+  const sampleRate = buffer.sampleRate;
+  const numSamples = channelData.length;
+  const arrayBuffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(arrayBuffer);
+
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // 1 canal (mono)
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // bytes por segundo
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // 16 bits
+  writeStr(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, channelData[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+export type VoiceQueryInput =
+  | string
+  | {
+      prompt: string;
+      audioBlob?: Blob;
+      audioBase64?: string;
+      mimeType?: string;
+    };
+
+/**
+ * 5. DISPATCHER GERAL DO AGENTE DE VOZ (Processa intenção do usuário com Function Calling e Resiliência)
  */
 export async function processVoiceAgentQuery(
-  userInput: string,
+  userInput: VoiceQueryInput,
   context: VoiceAgentContext
 ): Promise<VoiceResponsePayload> {
-  const normInput = normalizeVoiceText(userInput);
+  const rawPrompt = typeof userInput === 'string' ? userInput : userInput.prompt;
+  const normInput = normalizeVoiceText(rawPrompt);
 
   // Verificação de segurança: Sofia é exclusiva para Administrador
   const effectiveUser = context.currentUser || getStoredUser();
@@ -415,17 +547,33 @@ export async function processVoiceAgentQuery(
     };
   }
 
-  // 1. Tenta chamar o endpoint no backend com timeout estrito de 8 segundos
+  // Prepara payload de áudio otimizado se disponível
+  let audioBase64: string | undefined;
+  let audioMimeType: string | undefined;
+  if (typeof userInput !== 'string') {
+    if (userInput.audioBlob) {
+      const optimized = await optimizeAudioPayload(userInput.audioBlob);
+      audioBase64 = optimized.audioBase64;
+      audioMimeType = optimized.mimeType;
+    } else if (userInput.audioBase64) {
+      audioBase64 = userInput.audioBase64;
+      audioMimeType = userInput.mimeType || 'audio/webm';
+    }
+  }
+
+  // 1. Tenta chamar o endpoint no backend com timeout estrito de 20 segundos
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const res = await fetch('/api/gemini/voice-agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        prompt: userInput,
+        prompt: rawPrompt,
+        audioBase64,
+        mimeType: audioMimeType,
         context: {
           userName: effectiveUser?.name || 'Administrador',
           userRole: effectiveUser?.role || 'coordenador',
@@ -449,8 +597,54 @@ export async function processVoiceAgentQuery(
       };
     }
 
+    // Tratamento específico de erro HTTP 429 (Rate Limit / Quota Exceeded)
+    if (res.status === 429) {
+      let data: any = null;
+      try { data = await res.json(); } catch {}
+      return {
+        spokenText: data?.spokenText || 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+        displayText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+        status: 'RATE_LIMIT_EXCEEDED',
+        isQuotaOrTimeout: true,
+        isRateLimit: true,
+        actionResult: {
+          type: 'info',
+          title: 'Sofia • Conexão Temporária',
+          details: 'Limite de requisições do Gemini atingido (Rate limit/429). Aguarde alguns instantes.',
+          badge: 'Rate Limit',
+        },
+      };
+    }
+
+    // Tratamento específico de Timeout (HTTP 504)
+    if (res.status === 504) {
+      return {
+        spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+        displayText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+        status: 'TIMEOUT_EXCEEDED',
+        isQuotaOrTimeout: true,
+        actionResult: {
+          type: 'info',
+          title: 'Sofia • Conexão Temporária',
+          details: 'Tempo de resposta de 20 segundos excedido.',
+          badge: 'Timeout',
+        },
+      };
+    }
+
     if (res.ok) {
       const data = await res.json();
+
+      if (data && data.isQuotaOrTimeout) {
+        return {
+          spokenText: data.spokenText || 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+          displayText: data.spokenText || 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+          status: data.status || 'RATE_LIMIT_EXCEEDED',
+          isQuotaOrTimeout: true,
+          isRateLimit: data.status === 'RATE_LIMIT_EXCEEDED',
+        };
+      }
+
       if (data && data.success && data.functionCall) {
         const { name, args } = data.functionCall;
         if (name === 'consultar_ou_lancar_chamada') {
@@ -463,7 +657,7 @@ export async function processVoiceAgentQuery(
             actionResult: result.action,
           };
         } else if (name === 'consultar_manual_normas') {
-          const result = executeManualNormasVoiceAction(args.termoOuTema || userInput);
+          const result = executeManualNormasVoiceAction(args.termoOuTema || rawPrompt);
           return {
             spokenText: data.spokenText || result.text,
             displayText: result.text,
@@ -491,11 +685,14 @@ export async function processVoiceAgentQuery(
       }
     }
   } catch (err: any) {
+    const isAbort = err?.name === 'AbortError';
     console.warn('[Sofia Voice Agent] Timeout ou indisponibilidade da rota backend:', err?.message || err);
-    // Retorna mensagem padrão requerida para destravar imediatamente a interface
+    // Retorna mensagem padrão requerida para destravar imediatamente a interface e ativar cooldown
     return {
       spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
       displayText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+      status: isAbort ? 'TIMEOUT_EXCEEDED' : 'NETWORK_ERROR',
+      isQuotaOrTimeout: true,
       actionResult: {
         type: 'info',
         title: 'Sofia • Conexão Temporária',
@@ -564,7 +761,7 @@ export async function processVoiceAgentQuery(
     normInput.includes('seguranca') ||
     normInput.includes('atestado')
   ) {
-    const result = executeManualNormasVoiceAction(userInput);
+    const result = executeManualNormasVoiceAction(rawPrompt);
     return {
       spokenText: result.text,
       displayText: result.text,
