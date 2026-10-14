@@ -3527,7 +3527,7 @@ export async function deleteManualNormaFromFirestore(normaId: string): Promise<v
 }
 
 /**
- * Inicializa a coleção manual_normas com o acervo oficial de 50 normas do Colégio Crescer
+ * Inicializa a coleção manual_normas com o acervo oficial de 51 normas do Colégio Crescer
  */
 export async function seedInitialManualNormasIfEmpty(): Promise<ManualNorma[]> {
   try {
@@ -3556,7 +3556,7 @@ export async function seedInitialManualNormasIfEmpty(): Promise<ManualNorma[]> {
 }
 
 /**
- * Força a sincronização das 50 normas oficiais dos documentos do Colégio Crescer no Firestore.
+ * Força a sincronização das 51 normas oficiais dos documentos do Colégio Crescer no Firestore.
  */
 export async function syncOfficialManualNormasToFirestore(): Promise<ManualNorma[]> {
   try {

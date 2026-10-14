@@ -229,17 +229,17 @@ export function executeManualNormasVoiceAction(
 
   if (!normTerm) {
     return {
-      text: 'O Manual de Orientações do Colégio Crescer possui 50 normas que regem a segurança, postura pedagógica e bem-estar das crianças. Sobre qual assunto você gostaria de saber?',
+      text: 'O Manual de Orientações do Colégio Crescer possui 51 normas que regem a segurança, postura pedagógica e bem-estar das crianças. Sobre qual assunto você gostaria de saber?',
       action: {
         type: 'norma',
-        title: 'Manual de 50 Normas do Crescer',
+        title: 'Manual de 51 Normas do Crescer',
         details: 'Diretrizes pedagógicas e funcionais completas.',
         badge: 'Manual Oficial',
       },
     };
   }
 
-  // Busca por correspondência inteligente no acervo de 50 normas sequenciais
+  // Busca por correspondência inteligente no acervo de 51 normas sequenciais (Seções 1 a 51)
   const scored = NORMAS_DATA.map((norma) => {
     let score = 0;
     const titleNorm = normalizeVoiceText(norma.title);
@@ -274,7 +274,7 @@ export function executeManualNormasVoiceAction(
 
   if (!best || best.score === 0) {
     return {
-      text: `Não encontrei uma norma específica para "${termoOuTema}", mas você pode consultar os 6 módulos do Manual no painel oficial de normas (Seções 1 a 50).`,
+      text: `Não encontrei uma norma específica para "${termoOuTema}", mas você pode consultar os 4 módulos do Manual no painel oficial de normas (Seções 1 a 51).`,
       action: {
         type: 'norma',
         title: 'Norma não localizada',
@@ -601,7 +601,7 @@ export async function processVoiceAgentQuery(
 
   // Saudação padrão e ajuda
   const defaultText =
-    'Olá! Eu sou Sofia, sua assistente por voz do Integral. Posso ajudar você a registrar presença, verificar pendências de chamada, consultar o Manual de 50 Normas ou conferir o cardápio e o semanário do dia. O que você gostaria de fazer?';
+    'Olá! Eu sou Sofia, sua assistente por voz do Integral. Posso ajudar você a registrar presença, verificar pendências de chamada, consultar o Manual de 51 Normas ou conferir o cardápio e o semanário do dia. O que você gostaria de fazer?';
 
   return {
     spokenText: defaultText,

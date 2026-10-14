@@ -886,15 +886,18 @@ function getCurrentHHMM(): string {
     setIsFinalizingCall(false);
   };
 
-  const handleExportDailyPDF = (saveImmediately = false) => {
+  // Exporta relatório geral diário com TODOS os alunos cadastrados (botão do painel superior)
+  const handleExportGeneralDailyPDF = (saveImmediately = false) => {
     try {
       const result = generateAttendanceDailyPDFReport({
         date: selectedDate,
-        activityName: selectedActivity,
+        activityName: 'TODAS',
         turma: selectedTurma,
-        students: filteredStudents,
+        students: students,
         records,
         teacherName: currentUser?.name,
+        documentTitle: 'RELATÓRIO GERAL DE FREQUÊNCIA DIÁRIA',
+        onlyProvidedStudents: false,
         saveImmediately,
       });
 
@@ -904,37 +907,112 @@ function getCurrentHHMM(): string {
         dataUrl: result.dataUrl || result.dataUri,
         blobUrl: result.blobUrl,
         filename: result.filename,
-        title: `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`,
+        title: `Relatório Geral de Frequência Diária — (${formatDateBR(selectedDate)})`,
         onDownload: result.download,
       });
     } catch (e) {
-      console.error('Erro ao gerar relatório diário:', e);
-      alert('Ocorreu um erro ao gerar o PDF da chamada.');
+      console.error('Erro ao gerar relatório geral diário:', e);
+      alert('Ocorreu um erro ao gerar o PDF da chamada geral.');
     }
   };
 
+  // Imprime espelho de frequência diária geral (botão do painel superior)
   const handlePrintAttendanceDaily = () => {
     try {
       const pdf = generateAttendanceDailyPDFReport({
         date: selectedDate,
-        activityName: selectedActivity,
+        activityName: 'TODAS',
         turma: selectedTurma,
-        students: filteredStudents,
+        students: students,
         records,
         teacherName: currentUser?.name,
+        documentTitle: 'RELATÓRIO GERAL DE FREQUÊNCIA DIÁRIA',
+        onlyProvidedStudents: false,
         saveImmediately: false,
       });
 
       directPrint({
         elementId: 'daily-attendance-sheet',
-        title: `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`,
+        title: `Relatório Geral de Frequência Diária — (${formatDateBR(selectedDate)})`,
         blobUrl: pdf.blobUrl,
         doc: pdf.doc,
       });
     } catch (e) {
-      safeWindowPrint('daily-attendance-sheet', `Lista de Chamada Diária — ${selectedActivity} (${formatDateBR(selectedDate)})`);
+      safeWindowPrint('daily-attendance-sheet', `Relatório Geral de Frequência Diária — (${formatDateBR(selectedDate)})`);
     }
   };
+
+  // Exporta PDF contendo EXCLUSIVAMENTE os alunos da lista filtrada no momento (botão do cabeçalho da Lista de Chamada)
+  const handleExportFilteredDailyPDF = (saveImmediately = false) => {
+    try {
+      const targetStudents = displayedStudents.length > 0 ? displayedStudents : filteredStudents;
+      const actTitle = selectedActivity && selectedActivity !== 'TODAS'
+        ? `LISTA DE CHAMADA — ${selectedActivity.toUpperCase()}`
+        : 'LISTA DE CHAMADA & FREQUÊNCIA DIÁRIA';
+
+      const result = generateAttendanceDailyPDFReport({
+        date: selectedDate,
+        activityName: selectedActivity,
+        turma: selectedTurma,
+        students: targetStudents,
+        records,
+        teacherName: currentUser?.name,
+        documentTitle: actTitle,
+        onlyProvidedStudents: true,
+        saveImmediately,
+      });
+
+      setPdfPreviewState({
+        isOpen: true,
+        doc: result.doc,
+        dataUrl: result.dataUrl || result.dataUri,
+        blobUrl: result.blobUrl,
+        filename: result.filename,
+        title: `${actTitle} (${formatDateBR(selectedDate)})`,
+        onDownload: result.download,
+      });
+    } catch (e) {
+      console.error('Erro ao gerar relatório filtrado da chamada:', e);
+      alert('Ocorreu um erro ao gerar o PDF da lista de chamada filtrada.');
+    }
+  };
+
+  // Imprime lista de chamada filtrada (botão "Imprimir" no cabeçalho da Lista de Chamada)
+  const handlePrintFilteredAttendanceDaily = () => {
+    try {
+      const targetStudents = displayedStudents.length > 0 ? displayedStudents : filteredStudents;
+      const actTitle = selectedActivity && selectedActivity !== 'TODAS'
+        ? `LISTA DE CHAMADA — ${selectedActivity.toUpperCase()}`
+        : 'LISTA DE CHAMADA & FREQUÊNCIA DIÁRIA';
+
+      const pdf = generateAttendanceDailyPDFReport({
+        date: selectedDate,
+        activityName: selectedActivity,
+        turma: selectedTurma,
+        students: targetStudents,
+        records,
+        teacherName: currentUser?.name,
+        documentTitle: actTitle,
+        onlyProvidedStudents: true,
+        saveImmediately: false,
+      });
+
+      directPrint({
+        elementId: 'daily-attendance-sheet',
+        title: `${actTitle} (${formatDateBR(selectedDate)})`,
+        blobUrl: pdf.blobUrl,
+        doc: pdf.doc,
+      });
+    } catch (e) {
+      const actTitle = selectedActivity && selectedActivity !== 'TODAS'
+        ? `LISTA DE CHAMADA — ${selectedActivity.toUpperCase()}`
+        : 'LISTA DE CHAMADA & FREQUÊNCIA DIÁRIA';
+      safeWindowPrint('daily-attendance-sheet', `${actTitle} (${formatDateBR(selectedDate)})`);
+    }
+  };
+
+  // Fallback alias para compatibilidade
+  const handleExportDailyPDF = handleExportFilteredDailyPDF;
 
   return (
     <div className="space-y-6">
@@ -1320,12 +1398,12 @@ function getCurrentHHMM(): string {
               <span>Imprimir Espelho</span>
             </button>
 
-            {/* Save PDF / Send DP */}
+            {/* Save PDF / Send DP (Geral) */}
             <button
               type="button"
-              onClick={() => handleExportDailyPDF(false)}
+              onClick={() => handleExportGeneralDailyPDF(false)}
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs active:scale-95"
-              title="Salvar espelho diário em PDF e enviar ao DP"
+              title="Salvar relatório geral diário em PDF com todos os alunos e enviar ao DP"
             >
               <FileText className="w-3.5 h-3.5 text-indigo-600" />
               <span>Salvar PDF / Enviar DP</span>
@@ -1588,18 +1666,18 @@ function getCurrentHHMM(): string {
             <div className="flex items-center space-x-2 print:hidden no-print">
               <button
                 type="button"
-                onClick={handlePrintAttendanceDaily}
+                onClick={handlePrintFilteredAttendanceDaily}
                 className="px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all cursor-pointer flex items-center space-x-1 active:scale-95"
-                title="Imprimir lista de chamada em formato A4"
+                title={`Imprimir lista de chamada filtrada (${selectedActivity}) em formato A4`}
               >
                 <Printer className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Imprimir</span>
               </button>
               <button
                 type="button"
-                onClick={() => handleExportDailyPDF(false)}
+                onClick={() => handleExportFilteredDailyPDF(false)}
                 className="px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 transition-all cursor-pointer flex items-center space-x-1 active:scale-95"
-                title="Salvar lista de chamada em PDF"
+                title={`Salvar lista de chamada filtrada (${selectedActivity}) em PDF`}
               >
                 <FileText className="w-3.5 h-3.5" />
                 <span>Salvar PDF</span>

@@ -21,7 +21,7 @@ import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
-import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStudentsForCard } from './semanarioUtils';
+import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStudentsForCard, isStudentInReforcoVigency } from './semanarioUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
 import {
@@ -2542,6 +2542,8 @@ export interface GenerateAttendanceDailyPDFOptions {
   records: AttendanceRecord[];
   teacherName?: string;
   saveImmediately?: boolean;
+  documentTitle?: string;
+  onlyProvidedStudents?: boolean;
 }
 
 export function generateAttendanceDailyPDFReport({
@@ -2552,6 +2554,8 @@ export function generateAttendanceDailyPDFReport({
   records,
   teacherName,
   saveImmediately = false,
+  documentTitle,
+  onlyProvidedStudents = false,
 }: GenerateAttendanceDailyPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -2561,20 +2565,30 @@ export function generateAttendanceDailyPDFReport({
 
   const dateFormatted = formatDate(date);
 
-  // Filter students for this activity/turma and scheduled for this date
-  const relevantStudents = students
-    .filter((st) => {
-      const acts = Array.isArray(st.activities) ? st.activities : [];
-      const matchAct = activityName === 'TODAS' || acts.includes(activityName as ActivityType);
-      const matchTurma = turma === 'TODAS' || st.turma === turma;
-      const matchSchedule = isStudentScheduledForDate(st, date);
-      return matchAct && matchTurma && matchSchedule;
-    })
-    .sort((a, b) => {
-      const turmaComp = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
-      if (turmaComp !== 0) return turmaComp;
-      return a.name.localeCompare(b.name, 'pt-BR');
-    });
+  // If pre-filtered students are provided (or onlyProvidedStudents is true), use them directly
+  const relevantStudents = onlyProvidedStudents
+    ? [...students].sort((a, b) => {
+        const turmaComp = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
+        if (turmaComp !== 0) return turmaComp;
+        return a.name.localeCompare(b.name, 'pt-BR');
+      })
+    : students
+        .filter((st) => {
+          const acts = Array.isArray(st.activities) ? st.activities : [];
+          const matchAct =
+            activityName === 'TODAS' ||
+            activityName === 'Rotina' ||
+            acts.includes(activityName as ActivityType) ||
+            (isReforcoActivity(activityName) && isStudentInReforcoVigency(st, date));
+          const matchTurma = turma === 'TODAS' || st.turma === turma;
+          const matchSchedule = isStudentScheduledForDate(st, date);
+          return matchAct && matchTurma && matchSchedule;
+        })
+        .sort((a, b) => {
+          const turmaComp = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
+          if (turmaComp !== 0) return turmaComp;
+          return a.name.localeCompare(b.name, 'pt-BR');
+        });
 
   // Calculate stats
   let pres = 0;
@@ -2584,7 +2598,7 @@ export function generateAttendanceDailyPDFReport({
   let pendente = 0;
 
   relevantStudents.forEach((st) => {
-    const rec = records.find((r) => r.studentId === st.id && r.date === date);
+    const rec = records.find((r) => r.studentId === st.id && r.date === date && (activityName === 'TODAS' || !r.activity || r.activity === activityName));
     if (!rec) {
       pendente++;
     } else {
@@ -2598,10 +2612,17 @@ export function generateAttendanceDailyPDFReport({
   const total = relevantStudents.length;
   const presenceRate = total > 0 ? Math.round(((pres + saidaAnt) / total) * 100) : 100;
 
+  // Header Title: formal title reflecting the activity or custom title
+  const formalTitle = documentTitle || (
+    activityName && activityName !== 'TODAS'
+      ? `LISTA DE CHAMADA — ${activityName.toUpperCase()}`
+      : 'LISTA DE CHAMADA & FREQUÊNCIA DIÁRIA'
+  );
+
   // Header
   drawOfficialHeader(
     doc,
-    'Lista de Chamada & Frequência Diária',
+    formalTitle,
     `Controle de Frequência do Programa Integral - Data: ${dateFormatted}`,
     [`Atividade: ${activityName}`, `Turma: ${turma}`, `Data: ${dateFormatted}`],
     'portrait'
@@ -2643,7 +2664,7 @@ export function generateAttendanceDailyPDFReport({
 
   // Table Data
   const tableData = relevantStudents.map((st, index) => {
-    const rec = records.find((r) => r.studentId === st.id && r.date === date);
+    const rec = records.find((r) => r.studentId === st.id && r.date === date && (activityName === 'TODAS' || !r.activity || r.activity === activityName));
     let statusText = 'Pendente';
     if (rec) {
       if (rec.status === 'saida_antecipada') {
@@ -4629,7 +4650,26 @@ export function generateManualNormasPDF(
   currentY += 23;
 
   // Group by module in pedagogical order with strict numerical section sorting
-  const modulesOrder = ['normas_internas', 'academia_transporte', 'guia_sensivel'];
+  const modulesOrder = [
+    'rotina_operacional',
+    'seguranca_cuidados',
+    'postura_fardamento',
+    'guia_socioemocional',
+    'normas_internas',
+    'academia_transporte',
+    'guia_sensivel',
+  ];
+
+  const modulesTitlesMap: Record<string, string> = {
+    rotina_operacional: 'MÓDULO 1: ROTINA OPERACIONAL (SEÇÕES 1 A 16)',
+    seguranca_cuidados: 'MÓDULO 2: SEGURANÇA, ESPAÇOS, ACADEMIA E TRANSPORTE (SEÇÕES 17 A 27)',
+    postura_fardamento: 'MÓDULO 3: POSTURA, FARDAMENTO E PROIBIÇÕES (SEÇÕES 28 A 38)',
+    guia_socioemocional: 'MÓDULO 4: GUIA SOCIOEMOCIONAL E ABORDAGEM SENSÍVEL (SEÇÕES 39 A 51)',
+    normas_internas: 'MÓDULO 1: ROTINA OPERACIONAL (SEÇÕES 1 A 16)',
+    academia_transporte: 'MÓDULO 2: SEGURANÇA, ESPAÇOS, ACADEMIA E TRANSPORTE (SEÇÕES 17 A 27)',
+    guia_sensivel: 'MÓDULO 4: GUIA SOCIOEMOCIONAL E ABORDAGEM SENSÍVEL (SEÇÕES 39 A 51)',
+  };
+
   const grouped = new Map<string, ManualNorma[]>();
 
   modulesOrder.forEach((modId) => {
@@ -4653,7 +4693,7 @@ export function generateManualNormasPDF(
 
   grouped.forEach((normasList, modId) => {
     const meta = MODULE_METADATA[modId as keyof typeof MODULE_METADATA];
-    const modTitle = meta ? meta.title : `Módulo: ${modId}`;
+    const modTitle = modulesTitlesMap[modId] || (meta ? meta.title : `Módulo: ${modId}`);
 
     if (currentY > pageHeight - 35) {
       doc.addPage();
@@ -4697,14 +4737,16 @@ export function generateManualNormasPDF(
       doc.setTextColor(255, 255, 255);
       doc.text(badgeLabel, marginX + 17, currentY + 3.2, { align: 'center' });
 
-      // Title
+      // Title com numeração de seção única e explícita (ex: SEÇÃO 1 • ..., SEÇÃO 17 • ...)
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(15, 23, 42);
-      const titleWithSec = norma.sectionNumber ? `${norma.sectionNumber} • ${norma.title}` : norma.title;
-      doc.text(titleWithSec, marginX + 37, currentY + 3.5);
+      const secNum = String(norma.sectionNumber || norma.section || '').replace(/^seção\s*/i, '').trim();
+      const titleWithSec = secNum ? `SEÇÃO ${secNum} • ${norma.title}` : norma.title;
+      const splitTitle = doc.splitTextToSize(titleWithSec, contentWidth - 40);
+      doc.text(splitTitle, marginX + 37, currentY + 3.5);
 
-      currentY += 6.5;
+      currentY += Math.max(splitTitle.length * 4.2, 6.5);
 
       // Summary
       if (norma.summary) {

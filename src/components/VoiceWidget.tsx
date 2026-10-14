@@ -73,7 +73,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     {
       id: 'welcome',
       sender: 'sofia',
-      text: 'Olá! Sou Sofia, sua assistente por voz do Integral. Posso consultar pendências de chamada, registrar presença, buscar no Manual de 50 Normas ou conferir o cardápio e semanário. Toque no microfone ou fale comigo!',
+      text: 'Olá! Sou Sofia, sua assistente por voz do Integral. Posso consultar pendências de chamada, registrar presença, buscar no Manual de 51 Normas ou conferir o cardápio e semanário. Toque no microfone ou fale comigo!',
       timestamp: 'Agora',
       actionResult: {
         type: 'info',
@@ -472,7 +472,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Colégio Crescer • Chamada, Manual de 50 Normas e Cardápio
+                    Colégio Crescer • Chamada, Manual de 51 Normas e Cardápio
                   </p>
                 </div>
               </div>

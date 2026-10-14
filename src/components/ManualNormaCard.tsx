@@ -201,9 +201,9 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                 </span>
               )}
 
-              {norma.sectionNumber && (
-                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                  Seção {norma.sectionNumber}
+              {(norma.sectionNumber || norma.section) && (
+                <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-900 text-white border border-slate-700 shadow-2xs">
+                  SEÇÃO {String(norma.sectionNumber || norma.section).replace(/^seção\s*/i, '')}
                 </span>
               )}
               <span className="text-[11px] font-bold text-slate-400">

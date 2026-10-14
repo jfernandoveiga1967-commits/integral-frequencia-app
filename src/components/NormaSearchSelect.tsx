@@ -165,9 +165,9 @@ export const NormaSearchSelect: React.FC<NormaSearchSelectProps> = ({
               })()}
 
               {/* Seção */}
-              {selectedNorm.sectionNumber && (
-                <span className="px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700 text-[10.5px] font-black shrink-0">
-                  Seção {selectedNorm.sectionNumber}
+              {(selectedNorm.sectionNumber || selectedNorm.section) && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10.5px] font-black shrink-0 shadow-2xs">
+                  SEÇÃO {String(selectedNorm.sectionNumber || selectedNorm.section).replace(/^seção\s*/i, '')}
                 </span>
               )}
 
@@ -265,9 +265,9 @@ export const NormaSearchSelect: React.FC<NormaSearchSelectProps> = ({
                         </span>
 
                         {/* Código da Seção */}
-                        {norm.sectionNumber && (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10.5px] font-black border border-slate-200 shrink-0">
-                            Seção {norm.sectionNumber}
+                        {(norm.sectionNumber || norm.section) && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10.5px] font-black border border-slate-700 shrink-0 shadow-2xs">
+                            SEÇÃO {String(norm.sectionNumber || norm.section).replace(/^seção\s*/i, '')}
                           </span>
                         )}
 

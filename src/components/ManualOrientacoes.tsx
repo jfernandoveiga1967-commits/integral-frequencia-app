@@ -106,9 +106,9 @@ export interface ThematicCategoryMeta {
 export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   {
     id: 'rotina_operacional',
-    title: 'Categoria 1: Rotina Operacional do Integral',
-    subtitle: 'Ponto Eletrônico, Rádio Frequência 2, Refeitório, Caderno Vai e Volta, Acolhimento e Lições',
-    badgeLabel: 'Rotina & Fluxos',
+    title: 'Módulo 1: Rotina Operacional',
+    subtitle: 'Objetivos, Direitos, Deveres, Ponto, Rádio Frequência 2, Refeitório, Acolhimento, Soninho, Lições e Caderno Vai e Volta (Seções 1 a 16)',
+    badgeLabel: 'Rotina Operacional • Seções 1 a 16',
     theme: 'blue',
     borderClass: 'border-blue-200/90 hover:border-blue-300',
     headerBgClass: 'bg-gradient-to-r from-blue-900 to-slate-900 text-white',
@@ -116,9 +116,9 @@ export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   },
   {
     id: 'seguranca_cuidados',
-    title: 'Categoria 2: Segurança, Espaços e Cuidados',
-    subtitle: 'Parque/Parcão, Brinquedão, Banheiros, Troca de Fraldas e Luvas, Alergias, Culinária e Academia',
-    badgeLabel: 'Segurança & Cuidados',
+    title: 'Módulo 2: Segurança, Espaços, Academia e Transporte',
+    subtitle: 'Vigilância Ativa, Parque/Parcão, Banheiros, Portões, Portaria, Emergência, Academia e Culinária (Seções 17 a 27)',
+    badgeLabel: 'Segurança & Academia • Seções 17 a 27',
     theme: 'amber',
     borderClass: 'border-amber-200/90 hover:border-amber-300',
     headerBgClass: 'bg-gradient-to-r from-amber-900 to-slate-900 text-white',
@@ -126,9 +126,9 @@ export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   },
   {
     id: 'postura_fardamento',
-    title: 'Categoria 3: Postura, Fardamento e Proibições',
-    subtitle: 'Vestuário/Sem Bijuterias, Celular Proibido, Conversas Paralelas, Proibições Gerais e ECA',
-    badgeLabel: 'Conduta & Fardamento',
+    title: 'Módulo 3: Postura, Fardamento e Proibições',
+    subtitle: 'Fardamento, Proibição de Celular, Ética, Hierarquia, Alergias, Remédios, Enfermaria, ECA e Penalidades (Seções 28 a 38)',
+    badgeLabel: 'Postura & Proibições • Seções 28 a 38',
     theme: 'purple',
     borderClass: 'border-purple-200/90 hover:border-purple-300',
     headerBgClass: 'bg-gradient-to-r from-purple-950 to-slate-900 text-white',
@@ -136,9 +136,9 @@ export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   },
   {
     id: 'guia_socioemocional',
-    title: 'Categoria 4: Guia Socioemocional e Abordagem Sensível',
-    subtitle: 'Não Gritar, Não Puxar, Não Pegar com Força, Paciência e Mediação de Conflitos em 3 Passos',
-    badgeLabel: 'Abordagem Sensível',
+    title: 'Módulo 4: Guia Socioemocional e Abordagem Sensível',
+    subtitle: 'Comunicação Acolhedora, Não Gritar, Não Puxar, Empatia, Paciência, Mediação de Conflitos e Cuidados Infantis (Seções 39 a 51)',
+    badgeLabel: 'Abordagem Sensível • Seções 39 a 51',
     theme: 'rose',
     borderClass: 'border-rose-200/90 hover:border-rose-300',
     headerBgClass: 'bg-gradient-to-r from-rose-950 to-slate-900 text-white',
@@ -146,65 +146,37 @@ export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   },
 ];
 
-// Helper para mapear norma para sua categoria temática
+// Helper para mapear norma para sua categoria temática oficial baseada na numeração contínua única (1 a 51)
 export function getThematicCategory(norma: ManualNorma): ThematicCategoryId {
-  const normId = (norma.id || '').toLowerCase();
-  const title = (norma.title || '').toLowerCase();
-  const sec = (norma.sectionNumber || '').toLowerCase();
+  const secNum = parseSectionNumber(norma.sectionNumber || norma.section);
 
-  // 4. Guia Socioemocional
-  if (
-    norma.moduleId === 'guia_sensivel' ||
-    normId.includes('sensivel') ||
-    title.includes('gritar') ||
-    title.includes('puxar') ||
-    title.includes('força') ||
-    title.includes('aspereza') ||
-    title.includes('paciência') ||
-    title.includes('ameaçar') ||
-    title.includes('conflito') ||
-    sec.includes('7')
-  ) {
+  if (secNum >= 1 && secNum <= 16) {
+    return 'rotina_operacional';
+  }
+  if (secNum >= 17 && secNum <= 27) {
+    return 'seguranca_cuidados';
+  }
+  if (secNum >= 28 && secNum <= 38) {
+    return 'postura_fardamento';
+  }
+  if (secNum >= 39 && secNum <= 51) {
     return 'guia_socioemocional';
   }
 
-  // 3. Postura e Fardamento
-  if (
-    normId.includes('vestuario') ||
-    normId.includes('celular') ||
-    normId.includes('comunicacao_respeitosa') ||
-    normId.includes('proibicoes_gerais') ||
-    normId.includes('penalidades') ||
-    normId.includes('chinelos') ||
-    title.includes('vestuário') ||
-    title.includes('celular') ||
-    title.includes('conversas paralelas') ||
-    title.includes('penalidades') ||
-    title.includes('comentário inadequado') ||
-    title.includes('fardamento')
-  ) {
-    return 'postura_fardamento';
+  // Fallback seguro por identificador de módulo caso sectionNumber não esteja presente
+  if (norma.moduleId === 'rotina_operacional' || norma.moduleId === 'normas_internas') {
+    return 'rotina_operacional';
   }
-
-  // 2. Segurança e Cuidados
-  if (
-    normId.includes('parque') ||
-    normId.includes('cuidados_bebes') ||
-    normId.includes('academia') ||
-    normId.includes('culinaria') ||
-    title.includes('parque') ||
-    title.includes('parcão') ||
-    title.includes('maternal') ||
-    title.includes('fralda') ||
-    title.includes('academia') ||
-    title.includes('culinária') ||
-    title.includes('banheiro') ||
-    title.includes('alimentos')
-  ) {
+  if (norma.moduleId === 'seguranca_cuidados' || norma.moduleId === 'academia_transporte') {
     return 'seguranca_cuidados';
   }
+  if (norma.moduleId === 'postura_fardamento') {
+    return 'postura_fardamento';
+  }
+  if (norma.moduleId === 'guia_socioemocional' || norma.moduleId === 'guia_sensivel') {
+    return 'guia_socioemocional';
+  }
 
-  // 1. Rotina Operacional (Ponto, Rádio, Refeitório, Vai e Volta, Lições, Acolhimento)
   return 'rotina_operacional';
 }
 
