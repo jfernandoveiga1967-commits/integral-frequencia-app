@@ -10,6 +10,7 @@ import {
   ActivityItem,
   ActivityType,
   UserProfile,
+  User,
   PontoRecord,
   PontoMonthClosing,
   HolidayItem,
@@ -24,6 +25,8 @@ import { sortTurmasPedagogical } from './turmaUtils';
 import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStudentsForCard, isStudentInReforcoVigency } from './semanarioUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
+import { formatPhoneDisplay } from './whatsappUtils';
+import { isUserActive, isUserDismissed } from './authUtils';
 import {
   formatCurrencyBR,
   getMonthNameBR,
@@ -4986,6 +4989,237 @@ export function generateRelatorioConformidadeAceitesPDF(
 
   const dateStr = new Date().toISOString().split('T')[0];
   const filename = `Relatorio_Conformidade_Aceites_Integral_${dateStr}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+/**
+ * Gera o Relatório Cadastral de Colaboradores em PDF com Timbre Oficial do Colégio Crescer.
+ * Respeita estritamente a lista de usuários filtrados na interface (busca, cargo, status).
+ */
+export function generateUsersReportPDF(
+  users: User[],
+  filtersApplied: string,
+  saveImmediately = true
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const marginX = 14;
+  const contentWidth = pageWidth - marginX * 2;
+
+  const total = users.length;
+  const totalAtivos = users.filter((u) => isUserActive(u)).length;
+  const totalInativos = total - totalAtivos;
+
+  const docTitle = 'Relatório Cadastral de Colaboradores';
+  const subtitle = 'Colégio Crescer • Programa do Integral — Gestão de Pessoas';
+  const filterDetails = [
+    filtersApplied ? `Filtros: ${filtersApplied}` : 'Filtro: Todos os Colaboradores',
+    `Total: ${total} colaborador(es)`,
+  ];
+
+  // Cabeçalho Institucional com logotipo oficial
+  drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
+
+  // Cards de Resumo Executivo (KPIs)
+  const currentY = 36;
+  const boxWidth = (contentWidth - 6) / 3;
+  const boxHeight = 13;
+
+  // Box 1: Total
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(203, 213, 225); // slate-300
+  doc.roundedRect(marginX, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105); // slate-600
+  doc.text('TOTAL DE COLABORADORES', marginX + 3.5, currentY + 4.5);
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text(`${total}`, marginX + 3.5, currentY + 10);
+
+  // Box 2: Ativos
+  const box2X = marginX + boxWidth + 3;
+  doc.setFillColor(240, 253, 244); // green-50
+  doc.setDrawColor(187, 247, 208); // green-200
+  doc.roundedRect(box2X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(22, 101, 52); // green-800
+  doc.text('COLABORADORES ATIVOS', box2X + 3.5, currentY + 4.5);
+  doc.setFontSize(11);
+  doc.setTextColor(21, 128, 61); // green-700
+  doc.text(`${totalAtivos}`, box2X + 3.5, currentY + 10);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  const percAtivos = total > 0 ? Math.round((totalAtivos / total) * 100) : 0;
+  doc.text(`${percAtivos}% da lista`, box2X + 22, currentY + 10);
+
+  // Box 3: Inativos / Desligados
+  const box3X = box2X + boxWidth + 3;
+  doc.setFillColor(254, 242, 242); // red-50
+  doc.setDrawColor(254, 202, 202); // red-200
+  doc.roundedRect(box3X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(153, 27, 27); // red-800
+  doc.text('INATIVOS / DESLIGADOS', box3X + 3.5, currentY + 4.5);
+  doc.setFontSize(11);
+  doc.setTextColor(185, 28, 28); // red-700
+  doc.text(`${totalInativos}`, box3X + 3.5, currentY + 10);
+
+  // Mapear dados para as linhas da tabela
+  const tableRows = users.map((user, idx) => {
+    const num = String(idx + 1).padStart(2, '0');
+    const name = user.name || '—';
+    const email = user.email || '—';
+    
+    // Cargo / Função
+    let cargo = user.cargoLabel || '';
+    if (!cargo.trim()) {
+      switch (user.role) {
+        case 'coordenador':
+          cargo = 'Coordenador(a)';
+          break;
+        case 'nutricionista':
+          cargo = 'Nutricionista';
+          break;
+        case 'auxiliar':
+          cargo = 'Monitora / Auxiliar';
+          break;
+        case 'professor':
+          cargo = 'Professor(a)';
+          break;
+        default:
+          cargo = user.role || 'Colaborador(a)';
+      }
+    }
+
+    // Telefone
+    const phone = user.phone ? formatPhoneDisplay(user.phone) : '—';
+
+    // Status
+    const active = isUserActive(user);
+    const dismissed = isUserDismissed(user);
+    const status = active ? 'Ativo' : dismissed ? 'Desligado' : 'Inativo';
+
+    // Data de Cadastro / Admissão
+    let dataCadastro = '—';
+    if (user.dataAdmissao) {
+      const clean = user.dataAdmissao.trim();
+      if (clean.includes('/')) {
+        dataCadastro = clean;
+      } else if (clean.includes('-')) {
+        const parts = clean.split('T')[0].split('-');
+        if (parts.length === 3) {
+          dataCadastro = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+    } else if ((user as any).createdAt) {
+      const cleanCreated = String((user as any).createdAt).trim();
+      if (cleanCreated.includes('/')) {
+        dataCadastro = cleanCreated;
+      } else if (cleanCreated.includes('-')) {
+        const parts = cleanCreated.split('T')[0].split('-');
+        if (parts.length === 3) {
+          dataCadastro = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+    }
+
+    return [num, name, email, cargo, phone, status, dataCadastro];
+  });
+
+  // Renderizar AutoTable
+  autoTable(doc, {
+    startY: 52,
+    head: [['Nº', 'NOME DO COLABORADOR', 'E-MAIL', 'CARGO / FUNÇÃO', 'TELEFONE', 'STATUS', 'DATA CADASTRO']],
+    body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum colaborador encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
+    theme: 'striped',
+    headStyles: {
+      fillColor: [15, 23, 42], // slate-900
+      textColor: [255, 255, 255],
+      fontSize: 7.5,
+      fontStyle: 'bold',
+      halign: 'left',
+      cellPadding: 2.6,
+    },
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 2.2,
+      textColor: [30, 41, 59],
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+      overflow: 'ellipsize',
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252], // slate-50
+    },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center', fontStyle: 'bold', textColor: [100, 116, 139] },
+      1: { cellWidth: 44, fontStyle: 'bold', textColor: [15, 23, 42] },
+      2: { cellWidth: 44, textColor: [51, 65, 85] },
+      3: { cellWidth: 36, textColor: [51, 65, 85] },
+      4: { cellWidth: 22, halign: 'center', textColor: [51, 65, 85] },
+      5: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+      6: { cellWidth: 14, halign: 'center', textColor: [71, 85, 105] },
+    },
+    margin: { left: 14, right: 14, top: 52, bottom: 14 },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 5) {
+        const val = String(data.cell.raw || '');
+        if (val.startsWith('Ativo')) {
+          data.cell.styles.textColor = [22, 101, 52]; // green-800
+          data.cell.styles.fillColor = [240, 253, 244]; // green-50
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val.startsWith('Desligado')) {
+          data.cell.styles.textColor = [153, 27, 27]; // red-800
+          data.cell.styles.fillColor = [254, 242, 242]; // red-50
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val.startsWith('Inativo')) {
+          data.cell.styles.textColor = [71, 85, 105]; // slate-600
+          data.cell.styles.fillColor = [241, 245, 249]; // slate-100
+        }
+      }
+    },
+    didDrawPage: (data) => {
+      if (data.pageNumber > 1) {
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, pageWidth, 12, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(255, 255, 255);
+        doc.text('RELATÓRIO CADASTRAL DE COLABORADORES — (Continuação)', 14, 8);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(203, 213, 225);
+        doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+      }
+    },
+  });
+
+  // Aplicar rodapés institucionais e numeração de páginas
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  // Nome do arquivo amigável e higienizado
+  const cleanFilter = (filtersApplied || 'Todos').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
+  const dateStr = new Date().toISOString().split('T')[0];
+  const filename = `Relatorio_Cadastral_Colaboradores_${cleanFilter}_${dateStr}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);

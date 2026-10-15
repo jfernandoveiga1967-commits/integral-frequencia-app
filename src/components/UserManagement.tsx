@@ -19,6 +19,7 @@ import {
 import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { generateUsersReportPDF } from '../utils/pdfGenerator';
 import {
   calculateDailyHoursFromSchedule,
   formatMinutesToTime,
@@ -85,6 +86,7 @@ import {
   X,
   RefreshCw,
   MapPin,
+  FileText,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -349,6 +351,41 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
       });
   }, [users, searchTerm, roleFilter, statusFilter]);
+
+  // Exportar relatório cadastral oficial em PDF da lista de colaboradores filtrada
+  const handleExportUsersPDF = () => {
+    const filterParts: string[] = [];
+
+    // Filtro de Status
+    if (statusFilter === 'ATIVOS') {
+      filterParts.push('Status: Ativos');
+    } else if (statusFilter === 'INATIVOS') {
+      filterParts.push('Status: Inativos / Desligados');
+    } else {
+      filterParts.push('Status: Todos');
+    }
+
+    // Filtro de Cargo
+    if (roleFilter !== 'TODOS') {
+      const roleLabels: Record<string, string> = {
+        coordenador: 'Coordenação',
+        professor: 'Monitoras / Prof.',
+        auxiliar: 'Auxiliares',
+        nutricionista: 'Nutricionista',
+      };
+      filterParts.push(`Cargo: ${roleLabels[roleFilter] || roleFilter}`);
+    } else {
+      filterParts.push('Cargos: Todos');
+    }
+
+    // Busca por termo
+    if (searchTerm.trim()) {
+      filterParts.push(`Busca: "${searchTerm.trim()}"`);
+    }
+
+    const filtersDescription = filterParts.join(' | ');
+    generateUsersReportPDF(filteredUsers, filtersDescription);
+  };
 
   // Filtered Activities / Modalidades
   const filteredActivities = useMemo(() => {
@@ -1592,6 +1629,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-amber-700 ${isReloadingUsers ? 'animate-spin' : ''}`} />
                   <span>{isReloadingUsers ? 'Sincronizando...' : 'Sincronizar Lista'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportUsersPDF}
+                  disabled={filteredUsers.length === 0}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Exportar lista de colaboradores filtrada em PDF oficial"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>📄 Exportar PDF</span>
                 </button>
 
                 <button
