@@ -113,31 +113,8 @@ export const NormaSearchSelect: React.FC<NormaSearchSelectProps> = ({
       <div className="flex items-center justify-between">
         <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
           <BookOpen className="w-3.5 h-3.5 text-teal-600" />
-          <span>Norma Institucional Vinculada:</span>
+          <span>Seletor de Norma Institucional (ex: Seção 17):</span>
         </label>
-
-        {/* Atalho Inteligente de IA: Auto-Match no Texto */}
-        {onAutoMatchAi && (
-          <button
-            type="button"
-            onClick={onAutoMatchAi}
-            disabled={isMatchingAi || !hasContext}
-            className="text-[11px] font-black text-teal-800 bg-teal-50 hover:bg-teal-100 hover:text-teal-900 border border-teal-300/80 px-2.5 py-1 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
-            title="Identificar e vincular a norma automaticamente a partir do fato relatado com IA"
-          >
-            {isMatchingAi ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin text-teal-600" />
-                <span>Identificando com IA...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3 h-3 text-amber-500" />
-                <span>[ ✨ Identificar Norma no Texto ]</span>
-              </>
-            )}
-          </button>
-        )}
       </div>
 
       {/* Caixa do Campo / Seletor */}
@@ -173,7 +150,10 @@ export const NormaSearchSelect: React.FC<NormaSearchSelectProps> = ({
 
               {/* Título */}
               <span className="text-xs font-bold text-slate-900 truncate">
-                {selectedNorm.title}
+                {(() => {
+                  const secClean = String(selectedNorm.sectionNumber || selectedNorm.section || '').replace(/^seção\s*/i, '').trim();
+                  return secClean ? `SEÇÃO ${secClean} • ${selectedNorm.title}` : selectedNorm.title;
+                })()}
               </span>
             </div>
 
@@ -281,7 +261,10 @@ export const NormaSearchSelect: React.FC<NormaSearchSelectProps> = ({
 
                       {/* Título da Norma */}
                       <p className="text-xs font-bold text-slate-900 leading-snug">
-                        {norm.title}
+                        {(() => {
+                          const secClean = String(norm.sectionNumber || norm.section || '').replace(/^seção\s*/i, '').trim();
+                          return secClean ? `SEÇÃO ${secClean} • ${norm.title}` : norm.title;
+                        })()}
                       </p>
 
                       {/* Resumo / Tags */}

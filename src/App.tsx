@@ -1,6 +1,6 @@
 // Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock } from 'lucide-react';
+import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock, HeartHandshake } from 'lucide-react';
 import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings, UserNotification } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import {
@@ -53,6 +53,8 @@ import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { UserNotificationBanner } from './components/UserNotificationBanner';
 import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal';
+import { UserProfileModal } from './components/UserProfile';
+import { subscribePendingFeedbacksForUser } from './services/feedbackService';
 import { VoiceWidget } from './components/VoiceWidget';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
@@ -170,6 +172,26 @@ export default function App() {
     lastSyncTime: Date.now(),
     pendingOutboxCount: 0,
   });
+
+  // Modal de Perfil e Orientações da Colaboradora (Meus Feedbacks e Orientações)
+  const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
+  const [pendingFeedbacksCount, setPendingFeedbacksCount] = useState<number>(0);
+
+  // Escuta contagem de feedbacks pendentes da colaboradora em tempo real
+  useEffect(() => {
+    if (!currentUser) {
+      setPendingFeedbacksCount(0);
+      return;
+    }
+    const unsub = subscribePendingFeedbacksForUser(
+      currentUser.id || currentUser.uid || '',
+      currentUser.email,
+      (list) => {
+        setPendingFeedbacksCount(list.length);
+      }
+    );
+    return () => unsub();
+  }, [currentUser]);
 
   // Keep a stable ref of currentUser for real-time listener updates
   const currentUserRef = useRef<UserProfile | null>(currentUser);
@@ -2100,10 +2122,47 @@ export default function App() {
         onLogout={handleLogout}
         connectionState={connectionState}
         onForceSync={handleForceSync}
+        onOpenUserProfile={() => setShowUserProfileModal(true)}
+        pendingFeedbacksCount={pendingFeedbacksCount}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
+        {/* Banner de Orientações e Feedbacks Pedagógicos Pendentes de Assinatura */}
+        {pendingFeedbacksCount > 0 && (
+          <div className="bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-rose-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-start space-x-3.5">
+              <div className="p-2.5 bg-white/20 rounded-xl shrink-0 mt-0.5 shadow-inner">
+                <HeartHandshake className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-white/30 text-white px-2.5 py-0.5 rounded-full border border-white/20">
+                    🔴 PENDENTE DE ASSINATURA
+                  </span>
+                  <span className="text-xs font-bold text-rose-100">
+                    Atenção Colaboradora: {currentUser.name}
+                  </span>
+                </div>
+                <h4 className="text-sm sm:text-base font-black text-white mt-1">
+                  Você possui {pendingFeedbacksCount} {pendingFeedbacksCount === 1 ? 'orientação pedagógica cordial com ciência pendente' : 'orientações pedagógicas cordiais com ciência pendente'}.
+                </h4>
+                <p className="text-xs text-rose-100/95 mt-0.5">
+                  Por favor, revise o checklist de compromissos no seu perfil e confirme sua assinatura digital.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUserProfileModal(true)}
+              className="px-5 py-2.5 rounded-xl text-xs font-black text-rose-900 bg-white hover:bg-rose-50 shadow-md hover:scale-[1.02] transition-all cursor-pointer flex items-center justify-center space-x-2 shrink-0 self-start sm:self-auto"
+            >
+              <HeartHandshake className="w-4 h-4 text-rose-600" />
+              <span>Ver e Assinar Orientações ({pendingFeedbacksCount})</span>
+            </button>
+          </div>
+        )}
+
         {/* Banner de Notificação e Lembrete Direto no App (user_notifications) */}
         <UserNotificationBanner
           currentUser={currentUser}
@@ -2374,7 +2433,17 @@ export default function App() {
         connectionState={connectionState}
         onForceSync={handleForceSync}
         firebaseConnected={firebaseConnected}
+        onOpenUserProfile={() => setShowUserProfileModal(true)}
       />
+
+      {/* Modal de Perfil da Colaboradora (Meus Feedbacks e Orientações) */}
+      {currentUser && (
+        <UserProfileModal
+          currentUser={currentUser}
+          isOpen={showUserProfileModal}
+          onClose={() => setShowUserProfileModal(false)}
+        />
+      )}
 
       {/* Modal de Auditoria de Alunos com Chamada Pendente */}
       {showPendingAuditModal && (

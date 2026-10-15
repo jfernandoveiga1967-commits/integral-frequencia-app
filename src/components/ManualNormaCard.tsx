@@ -201,18 +201,25 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                 </span>
               )}
 
-              {(norma.sectionNumber || norma.section) && (
-                <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-900 text-white border border-slate-700 shadow-2xs">
-                  SEÇÃO {String(norma.sectionNumber || norma.section).replace(/^seção\s*/i, '')}
-                </span>
-              )}
+              {(() => {
+                const secClean = String(norma.sectionNumber || norma.section || '').replace(/^seção\s*/i, '').trim();
+                if (!secClean) return null;
+                return (
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-900 text-white border border-slate-700 shadow-2xs">
+                    SEÇÃO {secClean}
+                  </span>
+                );
+              })()}
               <span className="text-[11px] font-bold text-slate-400">
                 {moduleMeta ? moduleMeta.title : norma.moduleTitle}
               </span>
             </div>
 
             <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
-              {norma.title}
+              {(() => {
+                const secClean = String(norma.sectionNumber || norma.section || '').replace(/^seção\s*/i, '').trim();
+                return secClean ? `SEÇÃO ${secClean} • ${norma.title}` : norma.title;
+              })()}
             </h4>
             {norma.summary && (
               <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">

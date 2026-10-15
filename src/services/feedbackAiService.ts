@@ -23,14 +23,14 @@ export interface CordialFeedbackResult {
 function buildFallbackCordialMessage(
   userName: string,
   normTitle: string,
-  rawContext: string,
+  rawContext?: string,
   normSection?: string,
   normDetails?: string[]
 ): { message: string; actionPoints: string[] } {
   return buildDynamicPedagogicalFeedback({
     userName,
     normTitle,
-    rawContext,
+    rawContext: rawContext || '',
     normSection,
     normDetails,
   });
@@ -43,7 +43,7 @@ function buildFallbackCordialMessage(
 export async function generateCordialFeedback(
   userName: string,
   normTitle: string,
-  rawContext: string,
+  rawContext?: string,
   normSection?: string,
   normDetails?: string[]
 ): Promise<CordialFeedbackResult> {

@@ -419,6 +419,10 @@
     "/relatoriosConsolidados/{dateId}": {
       "schema": "RelatorioConsolidadoDia",
       "description": "Daily consolidated attendance records and meal count metrics"
+    },
+    "/feedbacks_pedagogicos/{feedbackId}": {
+      "schema": "FeedbackPedagogico",
+      "description": "Collection of pedagogical feedbacks, IA messages, checklist items and monitor digital signatures"
     }
   }
 }

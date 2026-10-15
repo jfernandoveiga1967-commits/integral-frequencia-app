@@ -28,6 +28,7 @@ export interface FooterProps {
   connectionState?: ConnectionState;
   onForceSync?: () => void;
   firebaseConnected?: boolean;
+  onOpenUserProfile?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -36,6 +37,7 @@ export const Footer: React.FC<FooterProps> = ({
   connectionState,
   onForceSync,
   firebaseConnected,
+  onOpenUserProfile,
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
 
@@ -186,26 +188,33 @@ export const Footer: React.FC<FooterProps> = ({
           {/* 3. Logged User Badge & Logout */}
           {currentUser && roleStyle && (
             <div className="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 shadow-sm">
-              <div
-                className={`w-6 h-6 rounded-lg ${
-                  currentUser.avatarColor || 'bg-indigo-600'
-                } flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-inner`}
+              <button
+                type="button"
+                onClick={onOpenUserProfile}
+                className="flex items-center space-x-2 hover:opacity-90 transition-opacity cursor-pointer text-left"
+                title="Abrir Meu Perfil e Orientações"
               >
-                {currentUser.name.charAt(0)}
-              </div>
-              <div className="min-w-0 text-left">
-                <div className="text-xs font-bold text-white truncate max-w-[130px] sm:max-w-[180px] leading-tight">
-                  {currentUser.name}
+                <div
+                  className={`w-6 h-6 rounded-lg ${
+                    currentUser.avatarColor || 'bg-indigo-600'
+                  } flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-inner`}
+                >
+                  {currentUser.name.charAt(0)}
                 </div>
-                <div className="flex items-center space-x-1 mt-0.5">
-                  {renderRoleIcon()}
-                  <span
-                    className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}
-                  >
-                    {roleStyle.label}
-                  </span>
+                <div className="min-w-0 text-left">
+                  <div className="text-xs font-bold text-white truncate max-w-[130px] sm:max-w-[180px] leading-tight">
+                    {currentUser.name}
+                  </div>
+                  <div className="flex items-center space-x-1 mt-0.5">
+                    {renderRoleIcon()}
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}
+                    >
+                      {roleStyle.label}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </button>
 
               <button
                 type="button"

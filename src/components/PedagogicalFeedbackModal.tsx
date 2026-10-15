@@ -303,12 +303,12 @@ export const PedagogicalFeedbackModal: React.FC<PedagogicalFeedbackModalProps> =
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Registrando Ciência...</span>
+                <span>Registrando Assinatura...</span>
               </>
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                <span>[ ✍️ Entendido e De Acordo ]</span>
+                <span>Assinar e Confirmar Ciência</span>
               </>
             )}
           </button>

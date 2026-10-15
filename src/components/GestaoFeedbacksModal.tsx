@@ -25,7 +25,7 @@ import { ManualNorma, INITIAL_MANUAL_NORMAS } from '../types/manualNormas';
 import { NORMAS_DATA } from '../data/normasData';
 import { subscribeManualNormas, subscribeUsers } from '../firebase';
 import { getLocalUsersList } from '../utils/authUtils';
-import { generateCordialFeedback, identifyNormFromContext } from '../services/feedbackAiService';
+import { generateCordialFeedback } from '../services/feedbackAiService';
 import { NormaSearchSelect } from './NormaSearchSelect';
 import {
   createPedagogicalFeedback,
@@ -56,18 +56,15 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   const [normasList, setNormasList] = useState<ManualNorma[]>(NORMAS_DATA);
   const [feedbacksHistory, setFeedbacksHistory] = useState<PedagogicalFeedback[]>([]);
 
-  // Formulário de Elaboração
+  // Formulário Essencial de Elaboração (Colaborador + Norma)
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [selectedNormId, setSelectedNormId] = useState<string>('');
-  const [rawContext, setRawContext] = useState<string>('');
   const [generatedMessage, setGeneratedMessage] = useState<string>('');
   const [actionPoints, setActionPoints] = useState<string[]>([]);
   const [newActionPoint, setNewActionPoint] = useState<string>('');
 
   // Estados de Controle
   const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
-  const [isMatchingAi, setIsMatchingAi] = useState<boolean>(false);
-  const [autoMatchReason, setAutoMatchReason] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [selectedFeedbackDetails, setSelectedFeedbackDetails] = useState<PedagogicalFeedback | null>(null);
@@ -118,64 +115,14 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     return normasList.find((n) => n.id === selectedNormId) || null;
   }, [normasList, selectedNormId]);
 
-  // Ação: Sugestão Inteligente por IA baseada no Fato (AI Auto-Match)
-  const handleAutoMatchNorm = async () => {
-    if (!rawContext.trim()) {
-      alert('Descreva primeiro o fato ocorrido no campo abaixo para que a IA possa identificar a norma correspondente.');
-      return;
-    }
-
-    setIsMatchingAi(true);
-    try {
-      const matchResult = await identifyNormFromContext(rawContext, normasList);
-      if (matchResult.normId) {
-        setSelectedNormId(matchResult.normId);
-        setAutoMatchReason(matchResult.reason);
-        const matched = normasList.find((n) => n.id === matchResult.normId);
-        setSuccessToast(
-          `✨ Norma identificada com IA: "${matched?.title || 'Norma Vinculada'}"`
-        );
-        setTimeout(() => setSuccessToast(null), 4500);
-      }
-    } catch (err) {
-      console.error('Erro ao identificar norma com IA:', err);
-      alert('Não foi possível identificar a norma automaticamente. Selecione-a na busca.');
-    } finally {
-      setIsMatchingAi(false);
-    }
-  };
-
-  // Ação 1: Gerar mensagem com IA / CNV
+  // Ação 1: Gerar Feedback com IA (Modelo estrito de CNV da coordenação)
   const handleGenerateAi = async () => {
     if (!selectedUser) {
-      alert('Selecione primeiro a monitora/colaboradora destinatária.');
+      alert('Selecione primeiro o colaborador(a) destinatário (ex: Amanda).');
       return;
     }
-    if (!rawContext.trim()) {
-      alert('Descreva brevemente o fato ocorrido observado pela coordenação.');
-      return;
-    }
-
-    let targetNorm = selectedNorm;
-
-    // Se nenhuma norma foi selecionada ainda, identifica automaticamente com IA a partir do fato relatado
-    if (!targetNorm) {
-      setIsGeneratingAi(true);
-      try {
-        const matchResult = await identifyNormFromContext(rawContext, normasList);
-        if (matchResult.normId) {
-          setSelectedNormId(matchResult.normId);
-          setAutoMatchReason(matchResult.reason);
-          targetNorm = normasList.find((n) => n.id === matchResult.normId) || null;
-        }
-      } catch (err) {
-        console.warn('Aviso no auto-match durante geração:', err);
-      }
-    }
-
-    if (!targetNorm) {
-      alert('Selecione a norma vinculada ou clique em [ ✨ Identificar Norma no Texto ].');
-      setIsGeneratingAi(false);
+    if (!selectedNorm) {
+      alert('Selecione a norma institucional correspondente (ex: Seção 17).');
       return;
     }
 
@@ -183,10 +130,10 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     try {
       const result = await generateCordialFeedback(
         selectedUser.name,
-        targetNorm.title,
-        rawContext,
-        targetNorm.sectionNumber,
-        targetNorm.details
+        selectedNorm.title,
+        '',
+        selectedNorm.sectionNumber || selectedNorm.section,
+        selectedNorm.details
       );
 
       setGeneratedMessage(result.message);
@@ -194,8 +141,8 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
       setSuccessToast(
         result.isAiGenerated
-          ? '✨ Mensagem cordial elaborada com IA (CNV) com sucesso!'
-          : '🌿 Mensagem acolhedora estruturada pela metodologia CNV com sucesso!'
+          ? '✨ Feedback pedagógico gerado com IA (CNV) com sucesso!'
+          : '🌿 Feedback estruturado no modelo de Comunicação Não Violenta com sucesso!'
       );
       setTimeout(() => setSuccessToast(null), 4000);
     } catch (err: any) {
@@ -219,10 +166,10 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     setActionPoints((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Ação 2: Enviar no Sistema (Firestore)
+  // Ação 2: Enviar no Sistema (Firestore - feedbacks_pedagogicos)
   const handleSendInApp = async () => {
     if (!selectedUser || !selectedNorm) {
-      alert('Selecione a monitora e a norma correspondente.');
+      alert('Selecione a colaboradora e a norma correspondente.');
       return;
     }
     if (!generatedMessage.trim()) {
@@ -231,32 +178,36 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     }
 
     const finalPoints = actionPoints.length > 0 ? actionPoints : [
-      `Alinhamento e cumprimento da norma "${selectedNorm.title}"`,
-      'Zelo contínuo pela segurança e bem-estar das crianças',
+      `Alinhamento rigoroso com a norma "${selectedNorm.title}"`,
+      'Zelo contínuo pela segurança física e bem-estar das crianças',
+      'Cumprimento dos protocolos operacionais do Colégio Crescer',
     ];
+
+    const employeeId = selectedUser.id || selectedUser.uid || '';
 
     setIsSaving(true);
     try {
       await createPedagogicalFeedback({
-        targetUserId: selectedUser.id || selectedUser.uid || '',
+        employee_id: employeeId,
+        user_id: employeeId,
+        targetUserId: employeeId,
         targetUserName: selectedUser.name || 'Colaboradora',
         targetUserEmail: selectedUser.email || '',
         targetUserPhone: selectedUser.phone || '',
         normId: selectedNorm.id,
         normTitle: selectedNorm.title,
         normSection: selectedNorm.sectionNumber || undefined,
-        rawContext: rawContext.trim(),
+        rawContext: selectedNorm.summary || selectedNorm.title,
         generatedMessage: generatedMessage.trim(),
         actionPoints: finalPoints,
         createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
         createdByUserName: currentUser?.name || 'Coordenação Pedagógica',
       });
 
-      setSuccessToast('✅ Feedback cordial registrado no sistema com sucesso!');
+      setSuccessToast('✅ Feedback cordial registrado no sistema com sucesso na coleção feedbacks_pedagogicos!');
       setTimeout(() => setSuccessToast(null), 4000);
 
-      // Limpa campos
-      setRawContext('');
+      // Limpa formulário e vai para histórico
       setGeneratedMessage('');
       setActionPoints([]);
       setSelectedUserId('');
@@ -270,8 +221,8 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     }
   };
 
-  // Ação 3: Enviar via WhatsApp Direct
-  const handleSendWhatsApp = () => {
+  // Ação 3: Enviar via WhatsApp Direct (Garante gravação prévia no Firestore)
+  const handleSendWhatsApp = async () => {
     if (!selectedUser) {
       alert('Selecione a colaboradora destinatária.');
       return;
@@ -283,6 +234,42 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     if (!generatedMessage.trim()) {
       alert('Gere ou escreva a mensagem antes de acionar o WhatsApp.');
       return;
+    }
+
+    const finalPoints = actionPoints.length > 0 ? actionPoints : [
+      `Alinhamento rigoroso com a norma "${selectedNorm.title}"`,
+      'Zelo contínuo pela segurança e bem-estar das crianças',
+    ];
+
+    const employeeId = selectedUser.id || selectedUser.uid || '';
+
+    // Salva no Firestore obrigatoriamente para não anular a persistência
+    setIsSaving(true);
+    let savedFeedback: PedagogicalFeedback | null = null;
+    try {
+      savedFeedback = await createPedagogicalFeedback({
+        employee_id: employeeId,
+        user_id: employeeId,
+        targetUserId: employeeId,
+        targetUserName: selectedUser.name || 'Colaboradora',
+        targetUserEmail: selectedUser.email || '',
+        targetUserPhone: selectedUser.phone || '',
+        normId: selectedNorm.id,
+        normTitle: selectedNorm.title,
+        normSection: selectedNorm.sectionNumber || undefined,
+        rawContext: selectedNorm.summary || selectedNorm.title,
+        generatedMessage: generatedMessage.trim(),
+        actionPoints: finalPoints,
+        createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
+        createdByUserName: currentUser?.name || 'Coordenação Pedagógica',
+        whatsappSentAt: new Date().toISOString(),
+      });
+      setSuccessToast('✅ Feedback gravado no banco de dados e preparando WhatsApp...');
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (e) {
+      console.warn('Gravação prévia em fallback:', e);
+    } finally {
+      setIsSaving(false);
     }
 
     const link = buildWhatsAppFeedbackLink(selectedUser.phone, {
@@ -376,20 +363,20 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1">
           {activeTab === 'elaborate' && (
             <div className="space-y-5">
-              {/* Seleção de Monitora e Norma */}
+              {/* Seleção Essencial de Colaborador e Norma */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Colaboradora Destinatária */}
+                {/* Colaborador Destinatário */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Monitora / Colaboradora Destinatária:</span>
+                    <span>Colaborador (ex: Amanda):</span>
                   </label>
                   <select
                     value={selectedUserId}
                     onChange={(e) => setSelectedUserId(e.target.value)}
                     className="w-full text-xs font-semibold px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-600 text-slate-800"
                   >
-                    <option value="">Selecione a colaboradora...</option>
+                    <option value="">Selecione o colaborador...</option>
                     {eligibleRecipients.map((u) => (
                       <option key={u.id || u.uid} value={u.id || u.uid}>
                         {u.name} ({u.cargoLabel || u.role || 'Monitora'})
@@ -399,62 +386,35 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                   </select>
                 </div>
 
-                {/* Norma Vinculada com Busca Instantânea, Autocomplete e Sugestão por IA */}
+                {/* Seletor de Norma */}
                 <NormaSearchSelect
                   normas={normasList}
                   selectedNormId={selectedNormId}
-                  onSelectNorm={(id) => {
-                    setSelectedNormId(id);
-                    setAutoMatchReason(null);
-                  }}
-                  onAutoMatchAi={handleAutoMatchNorm}
-                  isMatchingAi={isMatchingAi}
-                  hasContext={Boolean(rawContext.trim())}
-                  autoMatchReason={autoMatchReason}
+                  onSelectNorm={(id) => setSelectedNormId(id)}
                 />
               </div>
 
-              {/* Fato Ocorrido (Contexto Bruto) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <Edit3 className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Fato Ocorrido (Relato da Coordenação):</span>
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    Descreva o fato com objetividade e respeito
-                  </span>
-                </div>
-                <textarea
-                  value={rawContext}
-                  onChange={(e) => setRawContext(e.target.value)}
-                  rows={3}
-                  placeholder="Ex: Durante a saída para a academia, a turma ficou aguardando na rampa sem acompanhamento direto por alguns minutos, o que gera risco à segurança das crianças pequenas."
-                  className="w-full text-xs p-3 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-600 text-slate-800 placeholder-slate-400 resize-y"
-                />
-              </div>
-
-              {/* Botão de Geração com IA */}
+              {/* Botão de Ação: Gerar Feedback com IA */}
               <div className="flex items-center justify-between pt-1">
                 <div className="flex items-center gap-2 text-[11px] text-slate-500">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>A IA aplicará acolhimento, escuta e princípios de CNV com foco no cuidado às crianças.</span>
+                  <span>A IA gerará a mensagem seguindo estritamente o modelo cordial de Comunicação Não Violenta (CNV).</span>
                 </div>
                 <button
                   type="button"
-                  disabled={isGeneratingAi || isMatchingAi || !selectedUserId || !rawContext.trim()}
+                  disabled={isGeneratingAi || !selectedUserId || !selectedNormId}
                   onClick={handleGenerateAi}
-                  className="px-4 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isGeneratingAi ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Elaborando Mensagem com IA...</span>
+                      <span>Gerando Feedback com IA...</span>
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span>[ ✨ Gerar Mensagem Cordial com IA ]</span>
+                      <span>[ ✨ Gerar Feedback com IA ]</span>
                     </>
                   )}
                 </button>
@@ -633,16 +593,16 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                               {fb.targetUserName}
                             </span>
                             <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                 isPending
-                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                                  : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                               }`}
                             >
-                              {isPending ? '🟡 Pendente de Ciência' : '🟢 Ciente e De Acordo'}
+                              {isPending ? '🔴 PENDENTE DE ASSINATURA' : '🟢 CIENTE E ASSINADO'}
                             </span>
                             <span className="text-[11px] text-slate-400">
-                              {dateFormatted} às {timeFormatted}
+                              Enviado em {dateFormatted} às {timeFormatted}
                             </span>
                           </div>
 
@@ -659,15 +619,15 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                           </p>
 
                           {!isPending && fb.acknowledgedAt && (
-                            <div className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <div className="text-[11px] text-emerald-700 font-bold flex items-center gap-1 mt-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60 w-fit">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               <span>
-                                Ciência assinada em{' '}
-                                {new Date(fb.acknowledgedAt).toLocaleDateString('pt-BR')} às{' '}
-                                {new Date(fb.acknowledgedAt).toLocaleTimeString('pt-BR', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                Ciente em{' '}
+                                {fb.acknowledgedFormatted ||
+                                  `${new Date(fb.acknowledgedAt).toLocaleDateString('pt-BR')} às ${new Date(fb.acknowledgedAt).toLocaleTimeString('pt-BR', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}`}
                                 {fb.acknowledgedIp ? ` • IP: ${fb.acknowledgedIp}` : ''}
                               </span>
                             </div>

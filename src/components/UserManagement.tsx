@@ -162,7 +162,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
-  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('ATIVOS');
   const [isReloadingUsers, setIsReloadingUsers] = useState(false);
 
   // User Editing state

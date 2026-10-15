@@ -563,12 +563,13 @@ function serverHeuristicMatchNorm(rawContext: string, condensedNorms: any[]): { 
 app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
   try {
     const { userName, normTitle, normSection, rawContext, normDetails } = req.body;
-    if (!userName || !normTitle || !rawContext) {
+    if (!userName || !normTitle) {
       return res.status(400).json({
-        error: 'Campos obrigatórios ausentes (userName, normTitle, rawContext).',
+        error: 'Campos obrigatórios ausentes (userName, normTitle).',
       });
     }
 
+    const safeContext = (rawContext || '').trim();
     const { salutation, firstName } = getSalutationForName(userName);
     const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
     const normFullRef = `"${normTitle}"${sectionLabel}`;
@@ -576,7 +577,7 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
     const fallback = buildServerFallbackCordialFeedback(
       userName,
       normTitle,
-      rawContext,
+      safeContext,
       normSection,
       normDetails
     );
