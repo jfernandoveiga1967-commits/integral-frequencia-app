@@ -2355,6 +2355,7 @@ export default function App() {
             turmas={turmas}
             activitiesList={activitiesList}
             holidays={holidays}
+            schedules={schedules}
             currentWeek={currentWeek}
             currentUser={currentUser}
             users={users}

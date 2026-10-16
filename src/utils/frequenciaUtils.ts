@@ -1,6 +1,7 @@
-import { Student, AttendanceRecord, HolidayItem, AttendanceStatus, UserProfile, DayOfWeek } from '../types';
+import { Student, AttendanceRecord, HolidayItem, AttendanceStatus, UserProfile, DayOfWeek, ScheduleBlock } from '../types';
 import { isStudentScheduledForDate, isStudentActiveOnDate, getEffectiveSchoolDays, formatDateBR, getDayOfWeekLabel, getDayOfWeekFromDate, isHolidayOrRecess } from './dateUtils';
 export { isStudentInReforcoVigency, isStudentInReforco } from './semanarioUtils';
+import { calculateDemonstrativoPJ } from '../services/DemonstrativoService';
 
 /**
  * Status Categorization for Attendance Calculations
@@ -599,23 +600,22 @@ export interface AulaEfetivaItem {
 export interface ApuracaoAulasEfetivasResult {
   itens: AulaEfetivaItem[];
   totalAulasDadas: number;
+  totalAulasExtrasPendentes?: number;
   aulasNaoMinistradas: number;
   aulasForaGrade?: number;
   valorHoraAula: number;
   valorTotalAulasDadas: number;
   ajudaDeCusto: number;
   valorTotalLiquidoAPagar: number;
+  cargaHorariaSemanalEsperada?: number;
   tetoSemanal?: number;
+  diasGradeSemanal?: DayOfWeek[];
   atingiuTeto?: boolean;
 }
 
 /**
  * Apuração de Aulas Dadas para Prestador por Aula Efetiva (PJ / Horista Efetivo).
- * Diretrizes:
- * 1. Vincula diretamente as chamadas finalizadas nos dias 05/10 e 06/10 (e chamadas realizadas de Flauta/Oficinas)
- *    à apuração de "Aulas Dadas" do prestador.
- * 2. Aplica a regra estrita de feriado/recesso: dias marcados como feriado no calendário escolar
- *    ZERAM o valor creditado (R$ 0,00), impedindo que constem como dias pagos.
+ * Sincronizado diretamente com a Grade Horária cadastrada do docente via DemonstrativoService.
  */
 export function calculateApuracaoAulasEfetivasPrestador({
   prestador,
@@ -623,6 +623,7 @@ export function calculateApuracaoAulasEfetivasPrestador({
   endDate,
   holidays,
   records,
+  schedules,
   prestadorActivities = ['Flauta'],
 }: {
   prestador: UserProfile | null;
@@ -630,243 +631,18 @@ export function calculateApuracaoAulasEfetivasPrestador({
   endDate: string;
   holidays: HolidayItem[];
   records: AttendanceRecord[];
+  schedules?: ScheduleBlock[];
   prestadorActivities?: string[];
 }): ApuracaoAulasEfetivasResult {
-  if (!prestador) {
-    return {
-      itens: [],
-      totalAulasDadas: 0,
-      aulasNaoMinistradas: 0,
-      aulasForaGrade: 0,
-      valorHoraAula: 0,
-      valorTotalAulasDadas: 0,
-      ajudaDeCusto: 0,
-      valorTotalLiquidoAPagar: 0,
-    };
-  }
-
-  const isDanyel =
-    prestador.id === 'usr_danyelpereira' ||
-    Boolean(prestador.name && prestador.name.toLowerCase().includes('danyel'));
-
-  // Valor da hora-aula contratual (ex: R$ 33,06 para o professor Danyel)
-  const valorHora =
-    prestador.valorHoraAula !== undefined && prestador.valorHoraAula !== null && Number(prestador.valorHoraAula) > 0
-      ? Number(prestador.valorHoraAula)
-      : (isDanyel ? 33.06 : 33.06);
-
-  const ajudaCusto = Number(prestador.ajudaDeCusto) || 0;
-
-  // Dias autorizados na escala contratual (ex: Segunda-feira e Terça-feira para o professor Danyel)
-  const diasAutorizados: DayOfWeek[] =
-    Array.isArray(prestador.diasGradeAutorizados) && prestador.diasGradeAutorizados.length > 0
-      ? prestador.diasGradeAutorizados
-      : isDanyel
-      ? ['segunda', 'terca']
-      : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
-
-  // Teto semanal máximo de aulas contratadas (ex: 8 aulas semanais para Danyel)
-  const tetoSemanal =
-    prestador.tetoSemanalAulas !== undefined && Number(prestador.tetoSemanalAulas) > 0
-      ? Number(prestador.tetoSemanalAulas)
-      : isDanyel
-      ? 8
-      : 8;
-
-  const effectiveActivities = isDanyel
-    ? Array.from(new Set(['Flauta', ...prestadorActivities]))
-    : prestadorActivities.length > 0
-    ? prestadorActivities
-    : ['Flauta'];
-
-  const items: AulaEfetivaItem[] = [];
-
-  const startObj = new Date(startDate + 'T12:00:00');
-  const endObj = new Date(endDate + 'T12:00:00');
-  const curr = new Date(startObj);
-
-  let totalAulasDadas = 0;
-  let aulasNaoMinistradas = 0;
-  let aulasForaGrade = 0;
-
-  while (curr <= endObj) {
-    const dateStr = curr.toISOString().split('T')[0];
-    const dayOfWeekNum = curr.getDay(); // 0 = Dom, 6 = Sab
-    const dayOfWeekId = getDayOfWeekFromDate(dateStr);
-    const dayOfWeekLabel = getDayOfWeekLabel(dayOfWeekId);
-    const holidayItem = isHolidayOrRecess(dateStr, holidays);
-
-    if (dayOfWeekNum === 0 || dayOfWeekNum === 6) {
-      curr.setDate(curr.getDate() + 1);
-      continue;
-    }
-
-    // Validação de Dias da Grade Contratual:
-    const isDiaAutorizadoGrade = diasAutorizados.includes(dayOfWeekId);
-
-    // 1. REGRA ESTRITA DE FERIADO / RECESSO:
-    if (holidayItem) {
-      if (isDiaAutorizadoGrade) {
-        aulasNaoMinistradas++;
-        items.push({
-          date: dateStr,
-          dayOfWeekLabel,
-          activity: effectiveActivities[0] || 'Flauta',
-          turma: 'Todas as turmas',
-          status: 'feriado',
-          statusLabel: 'Feriado / Recesso Escolar',
-          motivo: `${holidayItem.name} (${holidayItem.type === 'feriado' ? 'Feriado Nacional/Oficial' : 'Recesso Escolar'}) — R$ 0,00 creditado`,
-          qtdAlunosComChamada: 0,
-          valorUnitario: 0,
-          valorTotal: 0,
-        });
-      }
-      curr.setDate(curr.getDate() + 1);
-      continue;
-    }
-
-    // 2. DIA LETIVO:
-    // Filtro estrito: chamadas onde instructorId === prestador.id OU onde a modalidade seja a oficina do professor
-    const dateRecords = records.filter((r) => {
-      if (!r || r.date !== dateStr) return false;
-      const matchInstructor = r.instructorId && (r.instructorId === prestador.id || (prestador.uid && r.instructorId === prestador.uid));
-      const matchActivity = effectiveActivities.includes(r.activity);
-      return matchInstructor || matchActivity;
-    });
-
-    // Se houver chamadas registradas nesta data:
-    if (dateRecords.length > 0) {
-      // 2.c Agrupamento por Bloco de Horário/Sessão:
-      // Agrupa chamadas simultâneas de sub-turmas (ex: do 1º ao 6º ano) para gerar APENAS 1 crédito por bloco
-      const blockGroups = new Map<string, AttendanceRecord[]>();
-
-      dateRecords.forEach((r) => {
-        const timeSlotKey = r.timeSlot ? r.timeSlot.trim() : (r.turma || 'Bloco Único');
-        const blockKey = `${r.activity}:::${timeSlotKey}`;
-        const list = blockGroups.get(blockKey) || [];
-        list.push(r);
-        blockGroups.set(blockKey, list);
-      });
-
-      // Limite diário por segurança caso haja sub-turmas sem timeSlot (ex: máx 4 blocos/dia na escala de 4 aulas)
-      const maxBlocosNoDia = isDanyel ? 4 : 8;
-      let blocosContabilizadosNoDia = 0;
-
-      blockGroups.forEach((recsInBlock, blockKey) => {
-        const [act, blockLabel] = blockKey.split(':::');
-        const turmasUnicas = Array.from(new Set(recsInBlock.map((r) => r.turma).filter(Boolean)));
-        const turmasDesc = turmasUnicas.length > 1 ? `${turmasUnicas.length} turmas agrupadas (${turmasUnicas.join(', ')})` : (turmasUnicas[0] || blockLabel);
-
-        if (isDiaAutorizadoGrade) {
-          // Dia autorizado na grade (ex: Segunda / Terça)
-          if (blocosContabilizadosNoDia < maxBlocosNoDia && totalAulasDadas < tetoSemanal) {
-            totalAulasDadas++;
-            blocosContabilizadosNoDia++;
-            items.push({
-              date: dateStr,
-              dayOfWeekLabel,
-              activity: act,
-              turma: turmasDesc,
-              timeSlot: recsInBlock[0]?.timeSlot,
-              status: 'realizada',
-              statusLabel: '🟢 Aula Ministrada',
-              motivo: `Bloco de aula efetiva ministrado (50 min) • ${recsInBlock.length} aluno(s) registrados`,
-              qtdAlunosComChamada: recsInBlock.length,
-              valorUnitario: valorHora,
-              valorTotal: valorHora,
-            });
-          } else {
-            // Atingiu o teto diário ou teto semanal contratado
-            items.push({
-              date: dateStr,
-              dayOfWeekLabel,
-              activity: act,
-              turma: turmasDesc,
-              timeSlot: recsInBlock[0]?.timeSlot,
-              status: 'fora_da_grade',
-              statusLabel: '⚪ Registro Didático / Teto Atingido',
-              motivo: `Chamada registrada, mas limite de teto semanal de ${tetoSemanal} aulas já atingido (R$ 0,00)`,
-              qtdAlunosComChamada: recsInBlock.length,
-              valorUnitario: 0,
-              valorTotal: 0,
-            });
-          }
-        } else {
-          // 2.b Dia fora da grade (ex: Quarta, Quinta, Sexta para Danyel)
-          // Conforme diretriz sênior: omite dias fora da grade contratual da tabela
-          aulasForaGrade++;
-        }
-      });
-    } else {
-      // Sem chamada registrada no dia letivo
-      // Se for dia autorizado da grade e for a data especial do demonstrativo (05/10 ou 06/10)
-      const isTargetSpecialDate = dateStr === '2026-10-05' || dateStr === '2026-10-06';
-      const hasGeneralCalls = records.some((r) => r && r.date === dateStr);
-
-      if (isDiaAutorizadoGrade && (isTargetSpecialDate || (isDanyel && hasGeneralCalls))) {
-        // Gera os 4 blocos de 50 min do dia contratual (4 na segunda, 4 na terça = 8 aulas)
-        const blocosPadrao = [
-          { slot: '13:30 - 14:20', turmas: '3º Ano Azul / Vermelho (Bloco 1)' },
-          { slot: '14:20 - 15:10', turmas: '4º Ano Azul / Vermelho (Bloco 2)' },
-          { slot: '15:30 - 16:20', turmas: '5º Ano Azul / Vermelho (Bloco 3)' },
-          { slot: '16:20 - 17:10', turmas: '6º Ano / Fundamental (Bloco 4)' },
-        ];
-
-        blocosPadrao.forEach((bloco) => {
-          if (totalAulasDadas < tetoSemanal) {
-            totalAulasDadas++;
-            items.push({
-              date: dateStr,
-              dayOfWeekLabel,
-              activity: 'Flauta',
-              turma: bloco.turmas,
-              timeSlot: bloco.slot,
-              status: 'realizada',
-              statusLabel: '🟢 Aula Ministrada',
-              motivo: `Bloco contratual de 50 min ministrado com chamada finalizada (${bloco.slot})`,
-              qtdAlunosComChamada: 12,
-              valorUnitario: valorHora,
-              valorTotal: valorHora,
-            });
-          }
-        });
-      } else if (isDiaAutorizadoGrade) {
-        // Registra como não ministrada APENAS se o dia fizer parte da grade contratual do docente
-        aulasNaoMinistradas++;
-        items.push({
-          date: dateStr,
-          dayOfWeekLabel,
-          activity: effectiveActivities[0] || 'Flauta',
-          turma: 'Geral',
-          status: 'cancelada',
-          statusLabel: 'Aula Não Ministrada / Sem Chamada',
-          motivo: 'Sem registro de chamada/frequência no dia da grade contratual',
-          qtdAlunosComChamada: 0,
-          valorUnitario: 0,
-          valorTotal: 0,
-        });
-      }
-      // Se não for dia autorizado da grade, é completamente omitido da listagem da tabela
-    }
-
-    curr.setDate(curr.getDate() + 1);
-  }
-
-  // 3. Trava de Teto Semanal e Recálculo Automático
-  const totalAulasEfetivasFinal = Math.min(totalAulasDadas, tetoSemanal);
-  const valorTotalAulasDadas = Math.round(totalAulasEfetivasFinal * valorHora * 100) / 100;
-  const valorTotalLiquidoAPagar = Math.round((valorTotalAulasDadas + ajudaCusto) * 100) / 100;
-
-  return {
-    itens: items,
-    totalAulasDadas: totalAulasEfetivasFinal,
-    aulasNaoMinistradas,
-    aulasForaGrade,
-    valorHoraAula: valorHora,
-    valorTotalAulasDadas,
-    ajudaDeCusto: ajudaCusto,
-    valorTotalLiquidoAPagar,
-    tetoSemanal,
-    atingiuTeto: totalAulasEfetivasFinal >= tetoSemanal,
-  };
+  // Executa o motor oficial e sincronizado do DemonstrativoService
+  return calculateDemonstrativoPJ({
+    prestador,
+    startDate,
+    endDate,
+    holidays,
+    records,
+    schedules,
+    prestadorActivities,
+  });
 }
+

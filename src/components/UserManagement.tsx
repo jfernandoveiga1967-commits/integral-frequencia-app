@@ -20,6 +20,7 @@ import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateUsersReportPDF } from '../utils/pdfGenerator';
+import { calculateDynamicTetoPrestador } from '../services/DemonstrativoService';
 import {
   calculateDailyHoursFromSchedule,
   formatMinutesToTime,
@@ -87,6 +88,7 @@ import {
   RefreshCw,
   MapPin,
   FileText,
+  CheckSquare,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -171,6 +173,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+
+  // Modal de Personalização de Colunas do Relatório em PDF
+  const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState(false);
+  const [selectedPdfColumns, setSelectedPdfColumns] = useState<string[]>([
+    'nome',
+    'telefone',
+    'email',
+    'cargo',
+    'status',
+    'dataCadastro',
+    'horario',
+  ]);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   // Confirmed Action Hooks para gravação resiliente com feedback em tempo real
   const userAction = useConfirmedAction();
@@ -352,39 +367,120 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       });
   }, [users, searchTerm, roleFilter, statusFilter]);
 
-  // Exportar relatório cadastral oficial em PDF da lista de colaboradores filtrada
-  const handleExportUsersPDF = () => {
-    const filterParts: string[] = [];
+  // Definição das colunas disponíveis para personalização do relatório em PDF
+  const PDF_AVAILABLE_COLUMNS = [
+    {
+      id: 'nome',
+      label: 'Nome Completo',
+      desc: 'Nome civil do colaborador e identificação principal',
+      required: true,
+      icon: Users,
+    },
+    {
+      id: 'telefone',
+      label: 'Telefone / WhatsApp',
+      desc: 'Número de contato com DDD e link de comunicação',
+      required: false,
+      icon: Phone,
+    },
+    {
+      id: 'email',
+      label: 'E-mail',
+      desc: 'E-mail institucional ou endereço de acesso ao sistema',
+      required: false,
+      icon: Mail,
+    },
+    {
+      id: 'cargo',
+      label: 'Cargo / Função',
+      desc: 'Atribuição pedagógica, administrativa ou operacional',
+      required: false,
+      icon: Briefcase,
+    },
+    {
+      id: 'status',
+      label: 'Status (Ativo / Inativo)',
+      desc: 'Situação cadastral: Ativo, Desligado ou Inativo',
+      required: false,
+      icon: ShieldCheck,
+    },
+    {
+      id: 'dataCadastro',
+      label: 'Data de Cadastro',
+      desc: 'Data de admissão ou data de início de registro',
+      required: false,
+      icon: Calendar,
+    },
+    {
+      id: 'horario',
+      label: 'Horário / Carga Horária',
+      desc: 'Jornada contratual e horas diárias homologadas',
+      required: false,
+      icon: Clock,
+    },
+  ];
 
-    // Filtro de Status
-    if (statusFilter === 'ATIVOS') {
-      filterParts.push('Status: Ativos');
-    } else if (statusFilter === 'INATIVOS') {
-      filterParts.push('Status: Inativos / Desligados');
-    } else {
-      filterParts.push('Status: Todos');
+  const handleOpenExportPdfModal = () => {
+    setIsExportPdfModalOpen(true);
+  };
+
+  const handleTogglePdfColumn = (colId: string) => {
+    if (colId === 'nome') return; // Obrigatório
+    setSelectedPdfColumns((prev) =>
+      prev.includes(colId) ? prev.filter((id) => id !== colId) : [...prev, colId]
+    );
+  };
+
+  const handleSelectAllPdfColumns = () => {
+    setSelectedPdfColumns(['nome', 'telefone', 'email', 'cargo', 'status', 'dataCadastro', 'horario']);
+  };
+
+  const handleSelectOnlyContactsPdfColumns = () => {
+    setSelectedPdfColumns(['nome', 'telefone']);
+  };
+
+  // Gerar e exportar relatório cadastral oficial em PDF com as colunas selecionadas
+  const handleConfirmExportPdf = async () => {
+    try {
+      setIsGeneratingPdf(true);
+      const filterParts: string[] = [];
+
+      // Filtro de Status
+      if (statusFilter === 'ATIVOS') {
+        filterParts.push('Status: Ativos');
+      } else if (statusFilter === 'INATIVOS') {
+        filterParts.push('Status: Inativos / Desligados');
+      } else {
+        filterParts.push('Status: Todos');
+      }
+
+      // Filtro de Cargo
+      if (roleFilter !== 'TODOS') {
+        const roleLabels: Record<string, string> = {
+          coordenador: 'Coordenação',
+          professor: 'Monitoras / Prof.',
+          auxiliar: 'Auxiliares',
+          nutricionista: 'Nutricionista',
+        };
+        filterParts.push(`Cargo: ${roleLabels[roleFilter] || roleFilter}`);
+      } else {
+        filterParts.push('Cargos: Todos');
+      }
+
+      // Busca por termo
+      if (searchTerm.trim()) {
+        filterParts.push(`Busca: "${searchTerm.trim()}"`);
+      }
+
+      const filtersDescription = filterParts.join(' | ');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      generateUsersReportPDF(filteredUsers, filtersDescription, selectedPdfColumns);
+      setIsExportPdfModalOpen(false);
+    } catch (err) {
+      console.error('Erro ao gerar relatório em PDF:', err);
+    } finally {
+      setIsGeneratingPdf(false);
     }
-
-    // Filtro de Cargo
-    if (roleFilter !== 'TODOS') {
-      const roleLabels: Record<string, string> = {
-        coordenador: 'Coordenação',
-        professor: 'Monitoras / Prof.',
-        auxiliar: 'Auxiliares',
-        nutricionista: 'Nutricionista',
-      };
-      filterParts.push(`Cargo: ${roleLabels[roleFilter] || roleFilter}`);
-    } else {
-      filterParts.push('Cargos: Todos');
-    }
-
-    // Busca por termo
-    if (searchTerm.trim()) {
-      filterParts.push(`Busca: "${searchTerm.trim()}"`);
-    }
-
-    const filtersDescription = filterParts.join(' | ');
-    generateUsersReportPDF(filteredUsers, filtersDescription);
   };
 
   // Filtered Activities / Modalidades
@@ -1633,10 +1729,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleExportUsersPDF}
+                  onClick={handleOpenExportPdfModal}
                   disabled={filteredUsers.length === 0}
                   className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Exportar lista de colaboradores filtrada em PDF oficial"
+                  title="Personalizar colunas e exportar lista de colaboradores em PDF oficial"
                 >
                   <FileText className="w-3.5 h-3.5" />
                   <span>📄 Exportar PDF</span>
@@ -1901,9 +1997,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             <div className="flex items-center space-x-1.5 font-bold">
                               <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
                               {user.regimeTrabalho === 'prestador_aula_efetiva' ? (
-                                <span>
-                                  Regime: <strong className="text-emerald-950 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">Prestador por Aula Efetiva (PJ/Horista Efetivo)</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula efetiva) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                </span>
+                                (() => {
+                                  const dynTeto = calculateDynamicTetoPrestador(user, schedules);
+                                  return (
+                                    <span>
+                                      Regime: <strong className="text-emerald-950 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">Prestador por Aula Efetiva (PJ/Horista Efetivo)</strong> (R$ {Number(user.valorHoraAula || 33.06).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula efetiva) • <span className="text-emerald-800 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Grade: {dynTeto.cargaHorariaSemanalEsperada} aulas/sem (Teto: R$ {dynTeto.tetoFinanceiroSemanal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span> • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    </span>
+                                  );
+                                })()
                               ) : user.regimeTrabalho === 'professor_horista' ? (
                                 <span>
                                   Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
@@ -3015,16 +3116,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           Regras de Medição de Prestação de Serviços (Aula Efetiva):
                         </div>
                         <p>
-                          • <strong>Aulas Realizadas:</strong> Remuneração exclusiva por aula com chamada/frequência concluída pela monitoria ou docente.
+                          • <strong>Sincronização com a Grade Horária:</strong> O teto semanal e a carga horária esperada são derivados DINAMICAMENTE dos horários ativos cadastrados na Grade Horária Semanal (sem travas manuais de teto na ficha de cadastro).
+                        </p>
+                        <p>
+                          • <strong>Aulas Realizadas na Grade:</strong> Remuneração integral (ex: R$ 33,06) por aula com chamada concluída que conste na Grade Horária ('🟢 Aula Efetiva Ministrada').
+                        </p>
+                        <p>
+                          • <strong>Aulas Fora da Grade:</strong> Chamadas realizadas fora da grade ficam como 'Aguardando Validação de Aula Extra/Substituição'.
                         </p>
                         <p>
                           • <strong>Feriados e Recessos:</strong> Aulas não ocorridas em feriados NÃO geram crédito (R$ 0,00).
                         </p>
                         <p>
-                          • <strong>Aulas Não Ministradas / Canceladas:</strong> Faltas ou cancelamentos não são contabilizados.
-                        </p>
-                        <p>
-                          • <strong>Valor Líquido:</strong> Total de Aulas Dadas × Valor da Hora-Aula (sem reflexo de DSR ou hora-atividade).
+                          • <strong>Valor Líquido:</strong> Total de Aulas Efetivas Ministradas × Valor da Hora-Aula (sem reflexo de DSR ou hora-atividade).
                         </p>
                       </div>
                     </div>
@@ -3999,6 +4103,157 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer text-xs shadow-md shadow-rose-600/20"
               >
                 Sim, Excluir Modalidade
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Personalização de Colunas do Relatório em PDF */}
+      {isExportPdfModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-5 animate-fade-in text-left">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-2xl flex items-center justify-center shadow-xs">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900">Personalizar Relatório em PDF</h3>
+                  <p className="text-xs text-slate-500">
+                    Selecione as colunas que devem constar no relatório cadastral de colaboradores.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExportPdfModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Fechar modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Informações de Filtro Ativo */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-slate-600">Alvo do Relatório:</span>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-xs bg-indigo-100 text-indigo-800 border border-indigo-200">
+                  {filteredUsers.length} colaborador(es)
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500 font-medium">
+                {statusFilter === 'ATIVOS' && 'Filtrado: Apenas Ativos'}
+                {statusFilter === 'INATIVOS' && 'Filtrado: Inativos / Desligados'}
+                {statusFilter === 'TODOS' && 'Filtrado: Todos os Status'}
+                {roleFilter !== 'TODOS' && ` • Cargo: ${roleFilter}`}
+                {searchTerm.trim() && ` • Busca: "${searchTerm.trim()}"`}
+              </div>
+            </div>
+
+            {/* Atalhos de Seleção Rápida */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Colunas Disponíveis ({selectedPdfColumns.length} de {PDF_AVAILABLE_COLUMNS.length} selecionadas):
+                </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllPdfColumns}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer flex items-center space-x-1"
+                  >
+                    <CheckSquare className="w-3 h-3" />
+                    <span>Marcar Todas</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectOnlyContactsPdfColumns}
+                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold border border-amber-200 transition-colors cursor-pointer flex items-center space-x-1"
+                  >
+                    <Phone className="w-3 h-3 text-amber-600" />
+                    <span>Apenas Contatos (Nome + Telefone)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de Colunas com Checkboxes Estilizados */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 max-h-72 overflow-y-auto pr-1">
+                {PDF_AVAILABLE_COLUMNS.map((col) => {
+                  const isSelected = selectedPdfColumns.includes(col.id);
+                  const Icon = col.icon;
+                  const isRequired = col.required;
+
+                  return (
+                    <div
+                      key={col.id}
+                      onClick={() => !isRequired && handleTogglePdfColumn(col.id)}
+                      className={`flex items-start space-x-3 p-3 rounded-2xl border transition-all ${
+                        isRequired
+                          ? 'bg-slate-50 border-slate-200 cursor-not-allowed opacity-90'
+                          : isSelected
+                          ? 'bg-indigo-50/70 border-indigo-200 shadow-2xs cursor-pointer hover:bg-indigo-50'
+                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60 cursor-pointer'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={isRequired}
+                        onChange={() => {}}
+                        className="mt-0.5 w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer disabled:cursor-not-allowed accent-indigo-600"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-1.5">
+                          <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-indigo-600' : 'text-slate-400'}`} />
+                          <span className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-950' : 'text-slate-700'}`}>
+                            {col.label}
+                          </span>
+                          {isRequired && (
+                            <span className="text-[10px] bg-slate-200/90 text-slate-700 px-1.5 py-0.2 rounded font-semibold shrink-0">
+                              Obrigatório
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-tight mt-0.5 line-clamp-1">
+                          {col.desc}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsExportPdfModalOpen(false)}
+                disabled={isGeneratingPdf}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-100 cursor-pointer text-xs transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExportPdf}
+                disabled={isGeneratingPdf || selectedPdfColumns.length === 0}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20 cursor-pointer transition-all flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGeneratingPdf ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Gerando PDF...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>📄 Exportar Relatório em PDF</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

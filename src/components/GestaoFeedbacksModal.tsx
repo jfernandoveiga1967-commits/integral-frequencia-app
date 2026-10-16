@@ -131,7 +131,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
       const result = await generateCordialFeedback(
         selectedUser.name,
         selectedNorm.title,
-        '',
+        selectedNorm.summary || '',
         selectedNorm.sectionNumber || selectedNorm.section,
         selectedNorm.details
       );

@@ -5005,11 +5005,13 @@ export function generateRelatorioConformidadeAceitesPDF(
 
 /**
  * Gera o Relatório Cadastral de Colaboradores em PDF com Timbre Oficial do Colégio Crescer.
- * Respeita estritamente a lista de usuários filtrados na interface (busca, cargo, status).
+ * Respeita estritamente a lista de usuários filtrados na interface (busca, cargo, status)
+ * e as colunas personalizadas selecionadas pelo usuário.
  */
 export function generateUsersReportPDF(
   users: User[],
   filtersApplied: string,
+  selectedColumns: string[] = ['nome', 'email', 'cargo', 'telefone', 'status', 'dataCadastro', 'horario'],
   saveImmediately = true
 ): PDFGenerationResult {
   const doc = new jsPDF({
@@ -5083,13 +5085,16 @@ export function generateUsersReportPDF(
   doc.setTextColor(185, 28, 28); // red-700
   doc.text(`${totalInativos}`, box3X + 3.5, currentY + 10);
 
-  // Mapear dados para as linhas da tabela
-  const tableRows = users.map((user, idx) => {
-    const num = String(idx + 1).padStart(2, '0');
-    const name = user.name || '—';
-    const email = user.email || '—';
-    
-    // Cargo / Função
+  // Definições de todas as colunas possíveis
+  interface UserColDef {
+    id: string;
+    header: string;
+    weight: number;
+    style: any;
+    getValue: (u: User) => string;
+  }
+
+  const getCargo = (user: User) => {
     let cargo = user.cargoLabel || '';
     if (!cargo.trim()) {
       switch (user.role) {
@@ -5109,52 +5114,158 @@ export function generateUsersReportPDF(
           cargo = user.role || 'Colaborador(a)';
       }
     }
+    return cargo;
+  };
 
-    // Telefone
-    const phone = user.phone ? formatPhoneDisplay(user.phone) : '—';
-
-    // Status
+  const getStatus = (user: User) => {
     const active = isUserActive(user);
     const dismissed = isUserDismissed(user);
-    const status = active ? 'Ativo' : dismissed ? 'Desligado' : 'Inativo';
+    return active ? 'Ativo' : dismissed ? 'Desligado' : 'Inativo';
+  };
 
-    // Data de Cadastro / Admissão
-    let dataCadastro = '—';
+  const getDataCadastro = (user: User) => {
     if (user.dataAdmissao) {
       const clean = user.dataAdmissao.trim();
-      if (clean.includes('/')) {
-        dataCadastro = clean;
-      } else if (clean.includes('-')) {
+      if (clean.includes('/')) return clean;
+      if (clean.includes('-')) {
         const parts = clean.split('T')[0].split('-');
-        if (parts.length === 3) {
-          dataCadastro = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        }
-      }
-    } else if ((user as any).createdAt) {
-      const cleanCreated = String((user as any).createdAt).trim();
-      if (cleanCreated.includes('/')) {
-        dataCadastro = cleanCreated;
-      } else if (cleanCreated.includes('-')) {
-        const parts = cleanCreated.split('T')[0].split('-');
-        if (parts.length === 3) {
-          dataCadastro = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        }
+        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
       }
     }
+    if ((user as any).createdAt) {
+      const cleanCreated = String((user as any).createdAt).trim();
+      if (cleanCreated.includes('/')) return cleanCreated;
+      if (cleanCreated.includes('-')) {
+        const parts = cleanCreated.split('T')[0].split('-');
+        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+    return '—';
+  };
 
-    return [num, name, email, cargo, phone, status, dataCadastro];
+  const getHorario = (user: User) => {
+    const sched = (user.contractSchedule || '').trim();
+    const hours = user.contractDailyHoursFormatted || (user.contractDailyHours ? `${user.contractDailyHours}h/dia` : '');
+    if (sched && hours) {
+      return `${sched} (${hours})`;
+    }
+    if (sched) return sched;
+    if (hours) return hours;
+    return '—';
+  };
+
+  const ALL_COLUMNS: Record<string, UserColDef> = {
+    nome: {
+      id: 'nome',
+      header: 'NOME DO COLABORADOR',
+      weight: 4.5,
+      style: { fontStyle: 'bold', textColor: [15, 23, 42] },
+      getValue: (u) => u.name || '—',
+    },
+    telefone: {
+      id: 'telefone',
+      header: 'TELEFONE',
+      weight: 2.8,
+      style: { halign: 'center', textColor: [51, 65, 85] },
+      getValue: (u) => (u.phone ? formatPhoneDisplay(u.phone) : '—'),
+    },
+    email: {
+      id: 'email',
+      header: 'E-MAIL',
+      weight: 4.2,
+      style: { textColor: [51, 65, 85] },
+      getValue: (u) => u.email || '—',
+    },
+    cargo: {
+      id: 'cargo',
+      header: 'CARGO / FUNÇÃO',
+      weight: 3.5,
+      style: { textColor: [51, 65, 85] },
+      getValue: (u) => getCargo(u),
+    },
+    status: {
+      id: 'status',
+      header: 'STATUS',
+      weight: 1.8,
+      style: { halign: 'center', fontStyle: 'bold' },
+      getValue: (u) => getStatus(u),
+    },
+    dataCadastro: {
+      id: 'dataCadastro',
+      header: 'DATA CADASTRO',
+      weight: 2.2,
+      style: { halign: 'center', textColor: [71, 85, 105] },
+      getValue: (u) => getDataCadastro(u),
+    },
+    horario: {
+      id: 'horario',
+      header: 'HORÁRIO / JORNADA',
+      weight: 3.4,
+      style: { halign: 'center', textColor: [51, 65, 85] },
+      getValue: (u) => getHorario(u),
+    },
+  };
+
+  // Normalizar seleção garantindo que ao menos 'nome' esteja presente
+  const rawSelection = (selectedColumns && selectedColumns.length > 0)
+    ? selectedColumns
+    : ['nome', 'email', 'cargo', 'telefone', 'status', 'dataCadastro', 'horario'];
+
+  const normalizedSelection = rawSelection.includes('nome') ? rawSelection : ['nome', ...rawSelection];
+
+  const activeColumns: UserColDef[] = normalizedSelection
+    .map((id) => ALL_COLUMNS[id])
+    .filter(Boolean);
+
+  // Largura proporcional dinâmica das colunas
+  const numColWidth = 8;
+  const availableWidth = contentWidth - numColWidth; // 174mm
+  const totalWeight = activeColumns.reduce((acc, col) => acc + col.weight, 0);
+
+  let allocatedWidth = 0;
+  const colWidths = activeColumns.map((col, idx) => {
+    if (idx === activeColumns.length - 1) {
+      return Math.max(12, availableWidth - allocatedWidth);
+    }
+    const w = Math.round((col.weight / totalWeight) * availableWidth);
+    allocatedWidth += w;
+    return w;
   });
+
+  const headers = ['Nº', ...activeColumns.map((c) => c.header)];
+  const columnStyles: Record<number, any> = {
+    0: { cellWidth: numColWidth, halign: 'center', fontStyle: 'bold', textColor: [100, 116, 139] },
+  };
+
+  activeColumns.forEach((col, idx) => {
+    columnStyles[idx + 1] = {
+      cellWidth: colWidths[idx],
+      ...col.style,
+    };
+  });
+
+  // Mapear dados para as linhas da tabela
+  const tableRows = users.map((user, idx) => {
+    const num = String(idx + 1).padStart(2, '0');
+    const cols = activeColumns.map((c) => c.getValue(user));
+    return [num, ...cols];
+  });
+
+  const emptyRow = ['—', 'Nenhum colaborador encontrado para os filtros selecionados.', ...Array(Math.max(0, headers.length - 2)).fill('—')];
+
+  // Índice da coluna de status para customização de badge
+  const statusColumnIndex = activeColumns.findIndex((c) => c.id === 'status');
 
   // Renderizar AutoTable
   autoTable(doc, {
     startY: 52,
-    head: [['Nº', 'NOME DO COLABORADOR', 'E-MAIL', 'CARGO / FUNÇÃO', 'TELEFONE', 'STATUS', 'DATA CADASTRO']],
-    body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum colaborador encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
+    head: [headers],
+    body: tableRows.length > 0 ? tableRows : [emptyRow],
     theme: 'striped',
     headStyles: {
       fillColor: [15, 23, 42], // slate-900
       textColor: [255, 255, 255],
-      fontSize: 7.5,
+      fontSize: 7.3,
       fontStyle: 'bold',
       halign: 'left',
       cellPadding: 2.6,
@@ -5170,18 +5281,10 @@ export function generateUsersReportPDF(
     alternateRowStyles: {
       fillColor: [248, 250, 252], // slate-50
     },
-    columnStyles: {
-      0: { cellWidth: 8, halign: 'center', fontStyle: 'bold', textColor: [100, 116, 139] },
-      1: { cellWidth: 44, fontStyle: 'bold', textColor: [15, 23, 42] },
-      2: { cellWidth: 44, textColor: [51, 65, 85] },
-      3: { cellWidth: 36, textColor: [51, 65, 85] },
-      4: { cellWidth: 22, halign: 'center', textColor: [51, 65, 85] },
-      5: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
-      6: { cellWidth: 14, halign: 'center', textColor: [71, 85, 105] },
-    },
+    columnStyles,
     margin: { left: 14, right: 14, top: 52, bottom: 14 },
     didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 5) {
+      if (statusColumnIndex !== -1 && data.section === 'body' && data.column.index === statusColumnIndex + 1) {
         const val = String(data.cell.raw || '');
         if (val.startsWith('Ativo')) {
           data.cell.styles.textColor = [22, 101, 52]; // green-800

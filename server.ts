@@ -17,6 +17,11 @@ import {
   format4PilaresDevelopment,
   Semanario4Pilares,
 } from './src/services/semanarioAiService';
+import {
+  calculateDemonstrativoPJ,
+  calculateDynamicTetoPrestador,
+  getPrestadorWeeklyGradeBlocks,
+} from './src/services/DemonstrativoService';
 
 dotenv.config();
 
@@ -55,6 +60,74 @@ function getAIClient(): GoogleGenAI | null {
 // API Health Check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// API Route: Apuração do Demonstrativo PJ Sincronizado com a Grade Horária
+app.post('/api/demonstrativo/apuracao', (req, res) => {
+  try {
+    const {
+      prestador,
+      startDate,
+      endDate,
+      holidays = [],
+      records = [],
+      schedules = [],
+      prestadorActivities,
+    } = req.body;
+
+    if (!prestador || !startDate || !endDate) {
+      return res.status(400).json({
+        error: 'Os parâmetros prestador, startDate e endDate são obrigatórios.',
+      });
+    }
+
+    const resultado = calculateDemonstrativoPJ({
+      prestador,
+      startDate,
+      endDate,
+      holidays,
+      records,
+      schedules,
+      prestadorActivities,
+    });
+
+    return res.json({
+      success: true,
+      demonstrativo: resultado,
+    });
+  } catch (error: any) {
+    console.error('Erro na apuração do demonstrativo PJ no servidor:', error);
+    return res.status(500).json({
+      error: error.message || 'Erro interno na apuração do demonstrativo PJ.',
+    });
+  }
+});
+
+// API Route: Consulta da Grade Horária e Teto Semanal Dinâmico do Prestador PJ
+app.get('/api/demonstrativo/teto-grade/:prestadorId', (req, res) => {
+  try {
+    const { prestadorId } = req.params;
+    const isDanyel = prestadorId === 'usr_danyelpereira' || prestadorId.toLowerCase().includes('danyel');
+    const dummyUser: any = {
+      id: prestadorId,
+      name: isDanyel ? 'Danyel Pereira' : 'Professor Prestador',
+      regimeTrabalho: 'prestador_aula_efetiva',
+      valorHoraAula: 33.06,
+      assignedActivities: ['Flauta'],
+      specialtyActivity: 'Flauta',
+    };
+
+    const tetoInfo = calculateDynamicTetoPrestador(dummyUser);
+    return res.json({
+      success: true,
+      prestadorId,
+      ...tetoInfo,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: error.message || 'Erro ao consultar teto da grade horária.',
+    });
+  }
 });
 
 // API Route: Gerador de Propostas Pedagógicas com Gemini (Equipe Pedagógica e Coordenadores)

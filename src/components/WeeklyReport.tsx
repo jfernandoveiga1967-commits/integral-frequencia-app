@@ -8,6 +8,7 @@ import {
   ActivityItem,
   UserProfile,
   HolidayItem,
+  ScheduleBlock,
 } from '../types';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
@@ -53,6 +54,7 @@ import {
   DollarSign,
   GraduationCap,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 
 export const SPECIALIST_WORKSHOPS: ActivityType[] = [
@@ -74,6 +76,7 @@ interface WeeklyReportProps {
   turmas?: string[];
   activitiesList?: ActivityItem[];
   holidays?: HolidayItem[];
+  schedules?: ScheduleBlock[];
   currentWeek: WeekInfo;
   currentUser?: UserProfile | null;
   users?: UserProfile[];
@@ -87,6 +90,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   turmas,
   activitiesList = ACTIVITIES_LIST,
   holidays = [],
+  schedules = [],
   currentWeek,
   currentUser,
   users = [],
@@ -581,9 +585,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       endDate: effectiveEndDate,
       holidays,
       records,
+      schedules,
       prestadorActivities,
     });
-  }, [selectedPrestador, effectiveStartDate, effectiveEndDate, holidays, records, prestadorActivities]);
+  }, [selectedPrestador, effectiveStartDate, effectiveEndDate, holidays, records, schedules, prestadorActivities]);
 
   const [copiedDemonstrativo, setCopiedDemonstrativo] = useState(false);
 
@@ -592,8 +597,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       `Colaborador(a): ${selectedPrestador?.name || 'Professor'}\n` +
       `Período: ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}\n` +
       `Regime: Prestador por Aula Efetiva (PJ/Horista Efetivo)\n` +
+      `Carga Horária Semanal (Grade): ${apuracaoAulasEfetivas.cargaHorariaSemanalEsperada || 8} aula(s)/semana\n` +
       `----------------------------------------\n` +
-      `• Total de Aulas Dadas: ${apuracaoAulasEfetivas.totalAulasDadas} aula(s) realizadas\n` +
+      `• 🟢 Aulas Efetivas Ministradas: ${apuracaoAulasEfetivas.totalAulasDadas} aula(s)\n` +
+      (apuracaoAulasEfetivas.totalAulasExtrasPendentes && apuracaoAulasEfetivas.totalAulasExtrasPendentes > 0
+        ? `• 🟡 Aulas Extras/Substituição (Aguardando Validação): ${apuracaoAulasEfetivas.totalAulasExtrasPendentes} aula(s) (R$ 0,00)\n`
+        : '') +
       `• Aulas Não Ministradas / Feriados: ${apuracaoAulasEfetivas.aulasNaoMinistradas} aula(s) (R$ 0,00)\n` +
       `• Valor da Hora-Aula: ${formatCurrencyBR(apuracaoAulasEfetivas.valorHoraAula)}/aula\n` +
       `• Valor Total de Aulas Dadas: ${formatCurrencyBR(apuracaoAulasEfetivas.valorTotalAulasDadas)}\n` +
@@ -1081,7 +1090,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               <span>Demonstrativo de Aulas Efetivas (Professores PJ / Horistas Efetivos)</span>
             </h3>
             <p className="text-xs text-slate-500">
-              Cálculo baseado exclusivamente nos blocos ministrados nos dias da grade contratual do docente. Dias fora da escala contratual são omitidos da listagem de cobrança.
+              Sincronização Direta com a Grade Horária: Cálculo baseado exclusivamente nos blocos cadastrados na Grade Horária Semanal do docente. Aulas previstas na grade são validadas como '🟢 Aula Efetiva Ministrada'. Aulas fora da grade ficam 'Aguardando Validação de Aula Extra/Substituição'.
             </p>
           </div>
 
@@ -1134,9 +1143,23 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           <div className="flex items-center space-x-3 text-slate-600">
             <span>Oficina(s): <strong className="text-slate-800">{prestadorActivities.join(', ')}</strong></span>
             <span>•</span>
+            <span>Grade Semanal: <strong className="text-slate-800">{apuracaoAulasEfetivas.cargaHorariaSemanalEsperada || 8} aula(s)/sem</strong></span>
+            <span>•</span>
             <span>Período: <strong className="text-slate-800">{formatDateBR(effectiveStartDate)} a {formatDateBR(effectiveEndDate)}</strong></span>
           </div>
         </div>
+
+        {/* Banner de Aviso de Aulas Extras / Fora da Grade aguardando validação */}
+        {Boolean(apuracaoAulasEfetivas.totalAulasExtrasPendentes && apuracaoAulasEfetivas.totalAulasExtrasPendentes > 0) && (
+          <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between text-xs text-amber-950">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Há <strong>{apuracaoAulasEfetivas.totalAulasExtrasPendentes} aula(s) com chamada realizada fora da Grade Horária</strong>. Estão com status <em>Aguardando Validação de Aula Extra/Substituição</em> (R$ 0,00 creditado até aprovação da Coordenação).
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* 3 CARDS OBRIGATÓRIOS DO PROMPT + HORA-AULA E AJUDA DE CUSTO */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1266,6 +1289,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   apuracaoAulasEfetivas.itens.map((item, idx) => {
                     const isRealizada = item.status === 'realizada';
                     const isFeriado = item.status === 'feriado';
+                    const isForaDaGrade = item.status === 'fora_da_grade';
 
                     return (
                       <tr
@@ -1275,7 +1299,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                             ? 'bg-white hover:bg-emerald-50/40'
                             : isFeriado
                             ? 'bg-rose-50/30 hover:bg-rose-50/60'
-                            : 'bg-amber-50/20 hover:bg-amber-50/40'
+                            : isForaDaGrade
+                            ? 'bg-amber-50/30 hover:bg-amber-50/60'
+                            : 'bg-slate-50/40 hover:bg-slate-50/80'
                         }`}
                       >
                         <td className="px-3.5 py-2.5 whitespace-nowrap">
@@ -1290,11 +1316,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                           {isRealizada ? (
                             <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>🟢 Aula Ministrada</span>
+                              <span>🟢 Aula Efetiva Ministrada</span>
                             </span>
-                          ) : item.status === 'fora_da_grade' ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300" title="Registro pedagógico de presença mantido, sem crédito financeiro">
-                              <span>⚪ Registro Didático</span>
+                          ) : isForaDaGrade ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300" title="Chamada realizada fora da Grade Horária — Aguardando validação para aula extra/substituição">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Aguardando Validação de Aula Extra/Substituição</span>
                             </span>
                           ) : isFeriado ? (
                             <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">
@@ -1302,9 +1329,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                               <span>Feriado / Recesso</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
-                              <XCircle className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Não Ministrada</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300">
+                              <XCircle className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Aula Não Ministrada / Sem Chamada</span>
                             </span>
                           )}
                         </td>

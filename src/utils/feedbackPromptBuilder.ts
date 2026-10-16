@@ -1,18 +1,20 @@
 /**
  * Utilitário de Geração de Prompts e Mensagens de Feedback Pedagógico Cordial
- * Estruturado nos 3 Pilares Pedagógicos Reflexivos (Contexto, Razão da Norma, Benefício)
- * com Comunicação Não-Violenta (CNV), flexão estrita de gênero e formatação nativa para WhatsApp (*).
+ * Motor Universal e 100% Dinâmico com foco estrito na norma institucional selecionada,
+ * fundamentado nos princípios da Comunicação Não-Violenta (CNV), flexão de gênero
+ * e formatação nativa para WhatsApp (*).
  */
 
 import { getSalutationForName } from './genderUtils';
 
 export type FeedbackNormTheme =
-  | 'alimentacao'
   | 'fardamento'
-  | 'celular_radio'
-  | 'parque_seguranca'
-  | 'sensivel_acolhimento'
   | 'transporte_portao'
+  | 'celular_radio'
+  | 'alimentacao'
+  | 'parque_seguranca'
+  | 'postura_pontualidade'
+  | 'sensivel_acolhimento'
   | 'licao_estudo'
   | 'geral';
 
@@ -30,7 +32,7 @@ export interface DynamicFeedbackResult {
 }
 
 /**
- * Detecta a categoria temática central da norma e do contexto para adaptação de vocabulário e tom
+ * Detecta a categoria temática central da norma selecionada para contextualização dinâmica e vocabulário estrito
  */
 export function detectNormTheme(
   normTitle: string,
@@ -38,56 +40,92 @@ export function detectNormTheme(
   normSection?: string,
   normDetails?: string[]
 ): FeedbackNormTheme {
+  const titleLower = (normTitle || '').toLowerCase();
+  const contextLower = (rawContext || '').toLowerCase();
   const combined = [
-    normTitle || '',
-    rawContext || '',
+    titleLower,
+    contextLower,
     normSection || '',
     Array.isArray(normDetails) ? normDetails.join(' ') : '',
   ]
     .join(' ')
     .toLowerCase();
 
-  if (
-    /almoço|jantar|lanche|refeição|refeitório|comida|prato|talher|engasgo|mastigação|alérgeno|nutri/i.test(
-      combined
-    )
-  ) {
+  // 1. Verificação prioritária pelo título da norma selecionada
+  if (/uniforme|fardamento|vestimenta|vestuário|crachá|apresentação pessoal/i.test(titleLower)) {
+    return 'fardamento';
+  }
+  if (/pontualidade|carga horária|horário|horários|assiduidade|postura|conduta|ética|atraso/i.test(titleLower)) {
+    return 'postura_pontualidade';
+  }
+  if (/celular|telefone|rádio|comunicador|eletrônico/i.test(titleLower)) {
+    return 'celular_radio';
+  }
+  if (/alimentação|almoço|jantar|lanche|refeição|refeitório|nutri/i.test(titleLower)) {
     return 'alimentacao';
   }
+  if (/deslocamento|transporte|van|ônibus|trajeto|embarque|catraca|transição|portão/i.test(titleLower)) {
+    return 'transporte_portao';
+  }
+  if (/parque|brinquedo|área externa|pátio|quadra/i.test(titleLower)) {
+    return 'parque_seguranca';
+  }
+  if (/socioemocional|acolhimento|conflito|choro|mordida|sensível/i.test(titleLower)) {
+    return 'sensivel_acolhimento';
+  }
+  if (/lição|estudo|tarefa|dever/i.test(titleLower)) {
+    return 'licao_estudo';
+  }
+
+  // 2. Verificação secundária pelo texto combinado (sem termos ambíguos como "saída" isolada)
   if (
-    /uniforme|fardamento|roupa|vestimenta|camisa|avental|calçado|tênis|chinelo|crachá|maiô|sunga/i.test(
+    /uniforme|fardamento|vestimenta|vestuário|roupa|crachá|camisa|avental|calçado|tênis|chinelo|identificação funcional|apresentação pessoal/i.test(
       combined
     )
   ) {
     return 'fardamento';
   }
   if (
-    /celular|telefone|zap|whatsapp|rádio|comunicador|fone|rede social|foto|filmagem|dispersão/i.test(
+    /pontualidade|carga horária|horário de entrada|atraso|atrasos|assiduidade|postura|comportamento|linguagem|ética|compromisso|revezamento|registro de ponto/i.test(
+      combined
+    )
+  ) {
+    return 'postura_pontualidade';
+  }
+  if (
+    /celular|telefone|zap|whatsapp|rádio|comunicador|fone|rede social|foto|filmagem|gravação|distração|dispersão/i.test(
       combined
     )
   ) {
     return 'celular_radio';
   }
   if (
-    /parque|parcão|brinquedo|escorregador|balanço|queda|pátio|área externa|quadra|desnível/i.test(
+    /almoço|jantar|lanche|refeição|refeitório|comida|prato|talher|engasgo|mastigação|alérgeno|nutri|dieta/i.test(
+      combined
+    )
+  ) {
+    return 'alimentacao';
+  }
+  if (
+    /van|ônibus|transporte|rampa|portão|portaria|calçada|embarque|desembarque|catraca|academia|deslocamento|deslocamentos|transição|transicoes|trajeto|trajetos|fila/i.test(
+      combined
+    )
+  ) {
+    return 'transporte_portao';
+  }
+  if (
+    /parque|parcão|brinquedo|escorregador|balanço|queda|quedas|pátio|área externa|quadra|desnível/i.test(
       combined
     )
   ) {
     return 'parque_seguranca';
   }
   if (
-    /choro|mordida|birra|grito|conflito|briga|acolhimento|sono|fralda|machucou|desfralde|abraço|emoção/i.test(
+    /choro|mordida|birra|grito|conflito|briga|acolhimento|sono|fralda|machucou|desfralde|abraço|emoção|mediação/i.test(
       combined
     )
   ) {
     return 'sensivel_acolhimento';
-  }
-  if (
-    /van|ônibus|transporte|rampa|portão|portaria|calçada|embarque|desembarque|saída|catraca|academia|deslocamento|transição|transicoes/i.test(
-      combined
-    )
-  ) {
-    return 'transporte_portao';
   }
   if (/lição|dever|tarefa|caderno|estudo|reforço|sala de estudos/i.test(combined)) {
     return 'licao_estudo';
@@ -97,11 +135,14 @@ export function detectNormTheme(
 }
 
 /**
- * Constrói a mensagem pedagógica fundamentada nos 3 Pilares Reflexivos:
- * - Pilar 1 (Contexto): Situação observada acolhida no dinamismo da rotina escolar diária.
- * - Pilar 2 (A Razão da Norma): Justificativa pedagógica e operacional profunda da diretriz.
- * - Pilar 3 (O Benefício): Ganhos concretos para as crianças, para a monitora e para o colégio.
- * Formatação: WhatsApp Markdown nativo com asterisco simples (*) e flexão rigorosa de gênero.
+ * Constrói a mensagem pedagógica universal fundamentada nos princípios da CNV:
+ * - Saudação afetuosa (*Querida [Nome]!* / *Querido [Nome]!*)
+ * - Agradecimento pelo empenho e dedicação no Programa do Integral
+ * - Retomada cordial da situação observada referente estritamente à norma específica
+ * - A razão pedagógica/institucional e de segurança daquele procedimento (100% dinâmico)
+ * - Destaque formatado da norma: *“[Título da Norma]” (Seção [Número])* com a orientação preventiva
+ * - Reconhecimento da responsabilidade coletiva e compromisso preventivo
+ * - Encerramento afetuoso e assinatura institucional padrão
  */
 export function buildDynamicPedagogicalFeedback({
   userName,
@@ -119,25 +160,60 @@ export function buildDynamicPedagogicalFeedback({
 
   const theme = detectNormTheme(cleanNormTitle, cleanContext, normSection, normDetails);
 
-  // Síntese cordial da situação vinculada à norma
   let situacaoResumo = '';
+  let razaoProcedimento = '';
   let acaoOrientativa = '';
   let actionPoints: string[] = [];
 
   switch (theme) {
-    case 'transporte_portao':
-      situacaoResumo = cleanContext || 'a condução e supervisão atenta dos alunos durante as transições de espaços e atividades da academia';
-      acaoOrientativa = 'a conferência nominal contínua e a condução atenta dos alunos em fila organizada, assegurando a supervisão integral em todos os deslocamentos';
+    case 'fardamento':
+      situacaoResumo = cleanContext || 'a utilização correta do vestuário institucional e do crachá de identificação funcional durante as atividades da rotina';
+      razaoProcedimento = 'seguirmos rigorosamente o padrão de vestuário institucional e o uso do crachá, assegurando a imediata identificação da equipe, a salvaguarda de toda a comunidade escolar e a segurança das crianças';
+      acaoOrientativa = 'o uso diário obrigatório do uniforme completo, limpo e alinhado, acompanhado do crachá funcional visível em todos os momentos de atendimento aos alunos';
       actionPoints = [
-        'Conferir nominalmente todas as crianças antes e depois de cada transição ou deslocamento.',
-        'Manter os alunos em fila organizada e segura durante as passagens por rampas, escadas e portões.',
-        'Garantir vigilância visual constante e cobertura dos pontos cegos durante a locomoção do grupo.',
+        'Utilizar o uniforme completo e o crachá funcional em todos os momentos de atendimento aos alunos.',
+        'Reconhecer o fardamento institucional como medida indispensável de segurança, identificação e salvaguarda escolar.',
+        'Comunicar a coordenação preventivamente caso haja necessidade de reposição ou ajuste em qualquer peça.',
+      ];
+      break;
+
+    case 'transporte_portao':
+      situacaoResumo = cleanContext || 'a condução atenta dos alunos, a contagem nominal contínua e a organização durante os deslocamentos e transições de espaços';
+      razaoProcedimento = 'seguirmos rigorosamente os procedimentos de contagem nominal, formação de fila organizada e vigilância atenta em todos os deslocamentos e trajetos';
+      acaoOrientativa = 'a conferência nominal contínua das crianças, a condução em fila organizada e a supervisão ativa de todos os pontos cegos e passagens';
+      actionPoints = [
+        'Conferir nominalmente todas as crianças antes do início e ao término de cada deslocamento ou transição.',
+        'Conduzir os alunos em fila segura e organizada pelas rampas, escadas, calçadas e portões.',
+        'Manter vigilância visual constante de 360°, garantindo que nenhuma criança fique desacompanhada.',
+      ];
+      break;
+
+    case 'postura_pontualidade':
+      situacaoResumo = cleanContext || 'o cumprimento pontual dos horários contratuais de entrada, intervalos e a manutenção de uma postura profissional exemplar';
+      razaoProcedimento = 'zelarmos pela pontualidade britânica, assiduidade e conduta ética profissional, fortalecendo a harmonia da rotina e a confiança da comunidade escolar';
+      acaoOrientativa = 'a pontualidade nos horários contratuais, o registro tempestivo do ponto e a manutenção de uma postura afetuosa, ética e profissional';
+      actionPoints = [
+        'Cumprir rigorosamente os horários contratuais de início de turno, intervalos de almoço e saída programada.',
+        'Registrar os horários de ponto com fidelidade e transparência nos sistemas do colégio.',
+        'Cultivar postura acolhedora, linguagem respeitosa e ética profissional em todas as interações com alunos e famílias.',
+      ];
+      break;
+
+    case 'celular_radio':
+      situacaoResumo = cleanContext || 'a atenção visual ininterrupta com as crianças e o uso dos canais oficiais de comunicação interna do colégio';
+      razaoProcedimento = 'mantermos o foco visual de 360° permanentemente voltado aos alunos, sem dispersões com aparelhos particulares e com escuta atenta no rádio comunicador';
+      acaoOrientativa = 'a guarda dos celulares particulares durante o atendimento às crianças e a prontidão constante no canal oficial do rádio comunicador institucional';
+      actionPoints = [
+        'Manter a atenção 100% voltada aos alunos durante todo o turno de monitoria, sem dispersões com telas pessoais.',
+        'Guardar o aparelho celular pessoal em local adequado, utilizando-o apenas nos intervalos regulamentares.',
+        'Manter o rádio comunicador ligado no canal oficial e em volume adequado para pronto suporte com a coordenação.',
       ];
       break;
 
     case 'alimentacao':
-      situacaoResumo = cleanContext || 'o acompanhamento próximo e atencioso dos alunos durante os momentos de refeições e lanches';
-      acaoOrientativa = 'a vigilância ativa para prevenção de engasgos, a atenção a restrições alimentares e o estímulo afetuoso aos bons hábitos à mesa';
+      situacaoResumo = cleanContext || 'o acompanhamento próximo, a supervisão ativa e o acolhimento afetuoso durante as refeições e lanches dos alunos';
+      razaoProcedimento = 'seguirmos com rigor os protocolos de supervisão durante as refeições, prevenindo riscos de engasgo e respeitando todas as restrições alimentares';
+      acaoOrientativa = 'a vigilância ativa na mastigação, o respeito absoluto a restrições e alergias e o estímulo afetuoso aos bons hábitos à mesa';
       actionPoints = [
         'Acompanhar de perto a mastigação e postura das crianças durante as refeições, prevenindo riscos de engasgo.',
         'Verificar rigorosamente os registros de restrições alimentares e alergias antes da oferta de qualquer alimento.',
@@ -145,29 +221,10 @@ export function buildDynamicPedagogicalFeedback({
       ];
       break;
 
-    case 'fardamento':
-      situacaoResumo = cleanContext || 'a utilização completa do fardamento institucional e crachá de identificação durante os atendimentos';
-      acaoOrientativa = 'a identificação visual imediata de toda a equipe para garantir a proteção institucional e a segurança das crianças';
-      actionPoints = [
-        'Utilizar o uniforme completo e o crachá funcional em todos os momentos de atendimento aos alunos.',
-        'Reconhecer o fardamento como salvaguarda institucional e barreira de segurança escolar.',
-        'Comunicar a coordenação previamente caso haja necessidade de reposição ou ajuste em qualquer peça.',
-      ];
-      break;
-
-    case 'celular_radio':
-      situacaoResumo = cleanContext || 'a atenção visual ininterrupta com as crianças e o uso do rádio comunicador institucional';
-      acaoOrientativa = 'a presença integral de 360° voltada ao cuidado das crianças e a prontidão no canal oficial do rádio comunicador';
-      actionPoints = [
-        'Manter o foco visual contínuo e a atenção 100% voltada aos alunos durante todo o turno de monitoria.',
-        'Utilizar o rádio comunicador como canal oficial de suporte imediato com a coordenação e equipe.',
-        'Guardar aparelhos celulares pessoais durante o período com as crianças, utilizando-os apenas nos intervalos regulamentares.',
-      ];
-      break;
-
     case 'parque_seguranca':
-      situacaoResumo = cleanContext || 'o acompanhamento preventivo e posicionamento estratégico durante as brincadeiras e atividades no parque';
-      acaoOrientativa = 'a supervisão atenta em brinquedos elevados e a intervenção preventiva amorosa para evitar acidentes';
+      situacaoResumo = cleanContext || 'o acompanhamento preventivo e o posicionamento estratégico durante as brincadeiras e atividades no parque e áreas externas';
+      razaoProcedimento = 'mantermos o posicionamento estratégico com visão panorâmica de todos os brinquedos, prevenindo quedas e colisões nas brincadeiras';
+      acaoOrientativa = 'a intervenção preventiva e afetuosa diante de riscos, a supervisão atenta em brinquedos elevados e a vistoria prévia dos espaços';
       actionPoints = [
         'Posicionar-se estrategicamente no parque com visão panorâmica de todos os brinquedos e pontos de maior altura.',
         'Intervir de forma preventiva e afetuosa diante de comportamentos que ofereçam risco de queda ou colisão.',
@@ -176,8 +233,9 @@ export function buildDynamicPedagogicalFeedback({
       break;
 
     case 'sensivel_acolhimento':
-      situacaoResumo = cleanContext || 'a mediação paciente, o acolhimento afetuoso e a escuta atenta em momentos sensíveis das crianças';
-      acaoOrientativa = 'a abordagem acolhedora na altura dos olhos, sem rótulos ou repreensões punitivas, ensinando a regulação emocional';
+      situacaoResumo = cleanContext || 'a mediação afetuosa, a escuta paciente e a abordagem compreensiva em situações sensíveis e de regulação emocional dos alunos';
+      razaoProcedimento = 'adotarmos uma abordagem acolhedora na altura dos olhos da criança, mediando conflitos com empatia e sem repreensões punitivas';
+      acaoOrientativa = 'o acolhimento afetuoso dos sentimentos infantis, o diálogo sereno para resolução pacífica de conflitos e o suporte socioemocional empático';
       actionPoints = [
         'Acolher os momentos de choro ou frustração na altura dos olhos da criança, com tom sereno e escuta paciente.',
         'Mediar conflitos entre alunos incentivando a empatia, o diálogo fraterno e o respeito mútuo.',
@@ -186,8 +244,9 @@ export function buildDynamicPedagogicalFeedback({
       break;
 
     case 'licao_estudo':
-      situacaoResumo = cleanContext || 'a mediação paciente e o incentivo ao foco durante os momentos de estudo e lição de casa';
-      acaoOrientativa = 'a organização de um ambiente silencioso, motivador e propício ao desenvolvimento da autonomia nos estudos';
+      situacaoResumo = cleanContext || 'a mediação pedagógica paciente e o estímulo à autonomia durante os momentos dedicados ao estudo e lição de casa';
+      razaoProcedimento = 'oferecermos um ambiente calmo, organizado e incentivador para o desenvolvimento da autonomia nos estudos e cumprimento das tarefas';
+      acaoOrientativa = 'a mediação paciente estimulando a reflexão da criança na resolução das tarefas, zelando pelo capricho e organização dos materiais';
       actionPoints = [
         'Organizar o ambiente de estudo garantindo tranquilidade, iluminação e recursos necessários.',
         'Auxiliar os alunos a tirarem dúvidas estimulando a reflexão autônoma e o capricho com os cadernos.',
@@ -196,8 +255,9 @@ export function buildDynamicPedagogicalFeedback({
       break;
 
     default:
-      situacaoResumo = cleanContext || 'o acompanhamento preventivo e o cuidado dedicado às crianças durante as atividades da rotina do Integral';
-      acaoOrientativa = 'o seguimento rigoroso aos procedimentos institucionais para resguardar a integridade física e o bem-estar dos alunos';
+      situacaoResumo = cleanContext || `a observância atenta e o alinhamento diário aos procedimentos institucionais previstos em "${cleanNormTitle}"`;
+      razaoProcedimento = `seguirmos rigorosamente as diretrizes e procedimentos homologados para ${cleanNormTitle}, resguardando a organização e a segurança integral dos alunos`;
+      acaoOrientativa = 'a aplicação consistente e preventiva dos procedimentos institucionais em todas as ações da rotina escolar';
       actionPoints = [
         `Revisar e praticar a orientação prevista na norma "${cleanNormTitle}"${sectionLabel}.`,
         'Manter a prioridade absoluta na segurança física e proteção socioemocional dos alunos.',
@@ -206,7 +266,7 @@ export function buildDynamicPedagogicalFeedback({
       break;
   }
 
-  // Se houver detalhes específicos da norma, incorpora no checklist se não estiver presente
+  // Incorpora detalhes específicos do manual no checklist se existirem
   if (Array.isArray(normDetails) && normDetails.length > 0) {
     const customPoint = normDetails[0].trim();
     if (customPoint && !actionPoints.some((p) => p.includes(customPoint))) {
@@ -215,18 +275,21 @@ export function buildDynamicPedagogicalFeedback({
   }
 
   const saudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
+  const cleanSituacaoResumo = situacaoResumo.replace(/[\.\s]+$/, '').trim();
+  const cleanRazao = razaoProcedimento.replace(/[\.\s]+$/, '').trim();
+  const cleanAcao = acaoOrientativa.replace(/[\.\s]+$/, '').trim();
 
   const message = `${saudacao}
 
 Esperamos que você esteja bem. Gostaríamos de começar agradecendo pelo seu empenho e pela dedicação diária aos nossos alunos no Programa do Integral do Colégio Crescer.
 
-Gostaríamos de retomar uma situação ocorrida durante a rotina: ${situacaoResumo}.
+Gostaríamos de retomar uma situação ocorrida durante a rotina: ${cleanSituacaoResumo}.
 
-Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de seguirmos rigorosamente os procedimentos de segurança em todos os deslocamentos.
+Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de ${cleanRazao}.
 
-Por isso, retomamos a orientação prevista na norma institucional ${normFullRef}, destacando ${acaoOrientativa}.
+Por isso, retomamos a orientação prevista na norma institucional ${normFullRef}, destacando ${cleanAcao}.
 
-Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança e responsabilidade coletiva. A atenção a esse procedimento contribui diretamente para a proteção e o bem-estar das crianças sob nossos cuidados.
+Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança, alinhamento institucional e responsabilidade coletiva. A atenção a essa conduta contribui diretamente para a proteção, o acolhimento e o bem-estar das crianças sob nossos cuidados.
 
 Contamos com seu compromisso para reforçar essa prática em todos os momentos, mantendo a atenção necessária para que situações semelhantes sejam prevenidas.
 
@@ -249,7 +312,8 @@ Colégio Crescer`;
 
 /**
  * Constrói o System Prompt refinado para o Gemini (Flash)
- * seguindo ESTRITAMENTE o modelo obrigatório de saída de Comunicação Não-Violenta (CNV)
+ * com FOCO ESTRITO E RESTRITO AO ASSUNTO DA NORMA SELECIONADA
+ * e eliminação completa de frases genéricas inadequadas (deslocamento, academia, etc.)
  */
 export function buildGeminiFeedbackSystemPrompt({
   userName,
@@ -266,24 +330,38 @@ export function buildGeminiFeedbackSystemPrompt({
   const saudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
 
   return `Você é a Coordenação do Programa do Período Integral do Colégio Crescer.
-Sua missão é gerar um Feedback Pedagógico Cordial individual para o(a) colaborador(a) ${userName}, fundamentado estritamente nos princípios da Comunicação Não-Violenta (CNV), tom acolhedor, respeito mútuo e compromisso inegociável com a segurança e bem-estar das crianças.
+Sua missão é gerar um Feedback Pedagógico Cordial individual para o(a) colaborador(a) ${userName}, fundamentado estritamente nos princípios da Comunicação Não-Violenta (CNV), tom acolhedor, respeito mútuo e compromisso inegociável com a segurança, o bem-estar dos alunos e as diretrizes institucionais.
 
-DIRETRIZ CRÍTICA: Você DEVE SEGUIR RIGOROSAMENTE A ESTRUTURA E OS PARÁGRAFOS DO MODELO OBRIGATÓRIO DE SAÍDA ABAIXO:
+==================================================
+DIRETRIZ DE FOCO ESTRITO E CONTEXTUALIZAÇÃO DINÂMICA (REGRA CRÍTICA):
+1. O texto gerado deve ser 100% DINÂMICO e RESTRITO AO TEMA DA NORMA SELECIONADA:
+   - Norma: "${cleanNormTitle}"${sectionLabel}
+   - Detalhes do Manual: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Manual de Normas e Conduta do Colégio Crescer'}
+   ${cleanContext ? `- Contexto do Fato / Resumo: "${cleanContext}"` : ''}
 
---------------------------------------------------
-MODELO OBRIGATÓRIO DE SAÍDA:
+2. ELIMINE TOTALMENTE QUALQUER FRASE GENÉRICA FIXA OU DESLOCADA DO ASSUNTO:
+   - NUNCA mencione "deslocamento", "trajetos", "transporte", "fila" ou "academia" se a norma NÃO for sobre deslocamento/transporte!
+   - Se a norma for sobre UNIFORME / FARDAMENTO (ex: Seção 28): o texto deve tratar EXCLUSIVAMENTE de vestuário institucional completo, crachá, padronização visual, salvaguarda institucional e identificação imediata perante famílias e crianças. JAMAIS mencione trânsito ou deslocamento!
+   - Se a norma for sobre DESLOCAMENTO / TRANSPORTE (ex: Seção 17): o texto deve tratar da contagem nominal contínua de alunos, embarque, desembarque, organização da fila e segurança durante os trajetos.
+   - Se a norma for sobre POSTURA / PONTUALIDADE (ex: Seção 5 ou Seção 30): o texto deve tratar de assiduidade, cumprimento da carga horária, registro de ponto, conduta ética e postura exemplar para as crianças.
+   - Se a norma for sobre USO DE CELULAR (ex: Seção 12): o texto deve tratar da atenção visual contínua de 360°, eliminação de dispersões visuais com aparelhos particulares e uso do rádio comunicador institucional.
+   - Se a norma for sobre ALIMENTAÇÃO (ex: Seção 15): o texto deve tratar do acompanhamento de refeições, prevenção de engasgos e observância rigorosa a restrições e alergias.
+   - Se a norma for sobre OUTROS TEMAS (Parque, Lição de Casa, Abordagem Socioemocional, etc.): o texto deve focar estritamente na razão pedagógica e institucional daquele assunto.
+
+==================================================
+MODELO OBRIGATÓRIO DE SAÍDA (ESTRUTURA UNIVERSAL CNV):
 
 ${saudacao}
 
 Esperamos que você esteja bem. Gostaríamos de começar agradecendo pelo seu empenho e pela dedicação diária aos nossos alunos no Programa do Integral do Colégio Crescer.
 
-Gostaríamos de retomar uma situação ocorrida durante a rotina: [Resumo cordial da situação vinculada à norma selecionada].
+Gostaríamos de retomar uma situação ocorrida durante a rotina: [Resumo cordial da situação observada referente estritamente ao tema da norma selecionada].
 
-Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de seguirmos rigorosamente os procedimentos de segurança em todos os deslocamentos.
+Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de [A razão pedagógica, institucional e de segurança específica desta norma, sem usar palavras genéricas de outros temas].
 
-Por isso, retomamos a orientação prevista na norma institucional *“${cleanNormTitle}”${sectionLabel}*, destacando [Ação orientativa e preventiva esperada da norma].
+Por isso, retomamos a orientação prevista na norma institucional *“${cleanNormTitle}”${sectionLabel}*, destacando [Ação orientativa e preventiva específica e esperada da colaboradora com base na norma].
 
-Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança e responsabilidade coletiva. A atenção a esse procedimento contribui diretamente para a proteção e o bem-estar das crianças sob nossos cuidados.
+Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança, alinhamento institucional e responsabilidade coletiva. A atenção a essa conduta contribui diretamente para a proteção, o acolhimento e o bem-estar das crianças sob nossos cuidados.
 
 Contamos com seu compromisso para reforçar essa prática em todos os momentos, mantendo a atenção necessária para que situações semelhantes sejam prevenidas.
 
@@ -292,31 +370,28 @@ Agradecemos sua compreensão e parceria na construção de uma rotina cada vez m
 *Atenciosamente*,
 Coordenação do Integral
 Colégio Crescer
---------------------------------------------------
+==================================================
 
 INSTRUÇÕES DE PREENCHIMENTO DOS CAMPOS ENTRE COLCHETES:
 1. Saudação: DEVE ser exatamente "${saudacao}" em negrito com asterisco (*).
-2. [Resumo cordial da situação vinculada à norma selecionada]:
-   ${cleanContext ? `Integre o seguinte fato com cordialidade e acolhimento: "${cleanContext}"` : `Sintetize cordialmente uma situação típica da rotina escolar referente à norma "${cleanNormTitle}"${sectionLabel}, mantendo tom afetuoso e acolhedor.`}
-3. [Ação orientativa e preventiva esperada da norma]:
-   Explique de maneira clara, orientativa e construtiva a ação esperada da colaboradora com base na norma institucional "${cleanNormTitle}"${sectionLabel}.
-4. Encerramento: Finalize ESTRITAMENTE com:
+2. [Resumo cordial da situação observada...]:
+   ${cleanContext ? `Integre o seguinte fato com cordialidade e acolhimento: "${cleanContext}"` : `Sintetize cordialmente uma situação típica da rotina escolar referente estritamente à norma "${cleanNormTitle}"${sectionLabel}, mantendo tom afetuoso e acolhedor.`}
+3. [A razão pedagógica, institucional e de segurança...]:
+   Apresente a justificativa pedagógica e institucional genuína do tema da norma "${cleanNormTitle}"${sectionLabel}. Não use frases genéricas de outros temas.
+4. [Ação orientativa e preventiva esperada...]:
+   Explique com clareza e acolhimento a ação prática orientativa esperada da colaboradora.
+5. Encerramento: Finalize ESTRITAMENTE com:
 *Atenciosamente*,
 Coordenação do Integral
 Colégio Crescer
-
-Dados da Norma Selecionada:
-- Colaborador(a): ${userName}
-- Norma: "${cleanNormTitle}"${sectionLabel}
-- Detalhes do Manual: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Manual de Normas e Conduta do Colégio Crescer'}
 
 Gere a resposta estritamente em formato JSON com o seguinte schema:
 {
   "message": "Texto completo da mensagem exatamente nos parágrafos do modelo obrigatório, mantendo os destaques em *",
   "actionPoints": [
-    "Item 1 prático do checklist de ciência da monitora para assinar no app",
-    "Item 2 prático do checklist de ciência da monitora para assinar no app",
-    "Item 3 prático do checklist de ciência da monitora para assinar no app"
+    "Item 1 prático do checklist de ciência da colaboradora para assinar no app",
+    "Item 2 prático do checklist de ciência da colaboradora para assinar no app",
+    "Item 3 prático do checklist de ciência da colaboradora para assinar no app"
   ]
 }`;
 }
@@ -342,8 +417,6 @@ export function sanitizeCordialMessageForWhatsApp(
 
   const { salutation, firstName } = getSalutationForName(params.userName);
   const cleanSection = params.normSection ? String(params.normSection).replace(/[^0-9]/g, '') || String(params.normSection) : '';
-  const sectionLabel = cleanSection ? ` (Seção ${cleanSection})` : '';
-  const cleanTitle = (params.normTitle || '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   const expectedSaudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
 
   // 1. Converte asteriscos duplos (**) para simples (*)
@@ -351,7 +424,6 @@ export function sanitizeCordialMessageForWhatsApp(
 
   // 2. Garante saudação estrita do modelo
   if (!msg.startsWith(expectedSaudacao)) {
-    // Se começou com outro tipo de saudação (ex: "Olá, querida Amanda!", "Querida Amanda!"), ajusta
     msg = msg.replace(
       /^(?:\*?Olá,?\s*)?(?:\*?Querid[oa]\s+[A-Za-zÀ-ÿ]+!?\*?|\*?[A-Za-zÀ-ÿ]+!?\*?)\s*\n+/i,
       ''
@@ -379,4 +451,3 @@ export function sanitizeCordialMessageForWhatsApp(
     .replace(/\u00A0/g, ' ')
     .trim();
 }
-

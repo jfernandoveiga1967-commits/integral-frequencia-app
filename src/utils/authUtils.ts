@@ -403,9 +403,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         diasGradeAutorizados: isDanyel
           ? (Array.isArray(raw.diasGradeAutorizados) && raw.diasGradeAutorizados.length > 0 ? raw.diasGradeAutorizados : ['segunda', 'terca'])
           : (raw.diasGradeAutorizados || existing.diasGradeAutorizados),
-        tetoSemanalAulas: isDanyel
-          ? (raw.tetoSemanalAulas !== undefined && Number(raw.tetoSemanalAulas) > 0 ? Number(raw.tetoSemanalAulas) : 8)
-          : (raw.tetoSemanalAulas || existing.tetoSemanalAulas),
+        tetoSemanalAulas: raw.tetoSemanalAulas !== undefined ? Number(raw.tetoSemanalAulas) : existing.tetoSemanalAulas,
         ajudaDeCusto: raw.ajudaDeCusto !== undefined ? Number(raw.ajudaDeCusto) : existing.ajudaDeCusto,
         company: raw.company || raw.empresa || existing.company,
         empresa: raw.empresa || raw.company || existing.empresa,

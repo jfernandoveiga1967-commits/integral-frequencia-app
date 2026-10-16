@@ -228,9 +228,10 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
   },
   '3º Ano Azul': {
     segunda: [
-      { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Ano' },
-      { activity: 'Dança', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Grande' },
+      { activity: 'Acolhimento', startTime: '13:00', endTime: '13:30', location: 'Sala 3º Ano' },
+      { activity: 'Flauta', startTime: '13:30', endTime: '14:20', location: 'Sala de Música' },
+      { activity: 'Dança', startTime: '14:20', endTime: '15:10', location: 'Sala de Dança' },
+      { activity: 'Natação', startTime: '15:30', endTime: '16:20', location: 'Piscina Grande' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Ano' },
@@ -260,9 +261,10 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
       { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Grande' },
     ],
     terca: [
-      { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Vermelho' },
-      { activity: 'Balé', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
+      { activity: 'Devocional', startTime: '13:00', endTime: '13:30', location: 'Sala 3º Vermelho' },
+      { activity: 'Flauta', startTime: '13:30', endTime: '14:20', location: 'Sala de Música' },
+      { activity: 'Balé', startTime: '14:20', endTime: '15:10', location: 'Sala de Dança' },
+      { activity: 'Robótica', startTime: '15:30', endTime: '16:20', location: 'Laboratório Maker' },
     ],
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 3º Vermelho' },
@@ -283,8 +285,8 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
   '4º Ano Azul': {
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Ano' },
-      { activity: 'Dança', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Grande' },
+      { activity: 'Flauta', startTime: '14:20', endTime: '15:10', location: 'Sala de Música' },
+      { activity: 'Natação', startTime: '15:30', endTime: '16:20', location: 'Piscina Grande' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Ano' },
@@ -315,8 +317,8 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Vermelho' },
-      { activity: 'Balé', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
+      { activity: 'Flauta', startTime: '14:20', endTime: '15:10', location: 'Sala de Música' },
+      { activity: 'Robótica', startTime: '15:30', endTime: '16:20', location: 'Laboratório Maker' },
     ],
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 4º Vermelho' },
@@ -338,12 +340,13 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 5º Ano' },
       { activity: 'Dança', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Grande' },
+      { activity: 'Flauta', startTime: '15:30', endTime: '16:20', location: 'Sala de Música' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 5º Ano' },
       { activity: 'Balé', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
+      { activity: 'Flauta', startTime: '15:30', endTime: '16:20', location: 'Sala de Música' },
+      { activity: 'Robótica', startTime: '16:20', endTime: '17:10', location: 'Laboratório Maker' },
     ],
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 5º Ano' },
@@ -365,12 +368,12 @@ export const OFFICIAL_SCHEDULE_TEMPLATES: Record<string, Record<DayOfWeek, Array
     segunda: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 6º Ano' },
       { activity: 'Dança', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Natação', startTime: '15:00', endTime: '15:50', location: 'Piscina Grande' },
+      { activity: 'Flauta', startTime: '16:20', endTime: '17:10', location: 'Sala de Música' },
     ],
     terca: [
       { activity: 'Devocional', startTime: '13:00', endTime: '13:40', location: 'Sala 6º Ano' },
       { activity: 'Balé', startTime: '13:40', endTime: '14:40', location: 'Sala de Dança' },
-      { activity: 'Robótica', startTime: '15:00', endTime: '15:50', location: 'Laboratório Maker' },
+      { activity: 'Flauta', startTime: '16:20', endTime: '17:10', location: 'Sala de Música' },
     ],
     quarta: [
       { activity: 'Acolhimento', startTime: '13:00', endTime: '13:40', location: 'Sala 6º Ano' },
