@@ -976,7 +976,17 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
   const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [selectedNormIdForFeedback, setSelectedNormIdForFeedback] = useState<string>('');
   const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});
+
+  const handleOpenFeedbackModal = (normaId?: string) => {
+    if (normaId) {
+      setSelectedNormIdForFeedback(normaId);
+    } else if (filteredNormas.length > 0) {
+      setSelectedNormIdForFeedback(filteredNormas[0].id);
+    }
+    setIsFeedbackModalOpen(true);
+  };
 
   // Novo mecanismo de dois níveis: Checklist por Norma + Trava do Termo Geral
   const [normIdsCompleted, setNormIdsCompleted] = useState<string[]>([]);
@@ -1455,12 +1465,12 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => setIsFeedbackModalOpen(true)}
+                onClick={() => handleOpenFeedbackModal(selectedNormIdForFeedback || filteredNormas[0]?.id)}
                 className="px-3.5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-teal-700/30 transition-all flex items-center space-x-1.5 cursor-pointer"
                 title="Abrir módulo de Feedback Pedagógico Cordial Por Norma com IA (CNV)"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>Feedback Cordial (IA)</span>
+                <span>[ ✨ Elaborar Feedback com IA ]</span>
               </button>
             )}
 
@@ -1729,24 +1739,38 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
           </div>
         </div>
 
-        {/* Global Search Bar */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por palavras-chave (ex: celular, rádio, frequência 2, brinquedão, banheiros, vai e volta, uniforme)..."
-            className="w-full pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-          />
-          {searchTerm && (
+        {/* Global Search Bar & Feedback Action */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por palavras-chave (ex: celular, rádio, frequência 2, brinquedão, banheiros, vai e volta, uniforme)..."
+              className="w-full pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                title="Limpar busca"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {isAdmin && (
             <button
               type="button"
-              onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-              title="Limpar busca"
+              onClick={() => handleOpenFeedbackModal(selectedNormIdForFeedback || filteredNormas[0]?.id)}
+              className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-md shadow-teal-700/25 hover:shadow-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
+              title="Elaborar feedback pedagógico cordial com inteligência artificial (CNV) integrado às normas"
             >
-              <X className="w-4 h-4" />
+              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+              <span>[ ✨ Elaborar Feedback com IA ]</span>
             </button>
           )}
         </div>
@@ -1941,6 +1965,9 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
                           onDeleteNorma={(n) => {
                             setNormaDeleting(n);
                           }}
+                          onOpenFeedback={(n) => {
+                            handleOpenFeedbackModal(n.id);
+                          }}
                         />
                       );
                     })}
@@ -2075,9 +2102,13 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
       {isFeedbackModalOpen && (
         <GestaoFeedbacksModal
           isOpen={isFeedbackModalOpen}
-          onClose={() => setIsFeedbackModalOpen(false)}
+          onClose={() => {
+            setIsFeedbackModalOpen(false);
+            setSelectedNormIdForFeedback('');
+          }}
           currentUser={currentUser}
           users={allUsers}
+          initialNormId={selectedNormIdForFeedback}
         />
       )}
     </div>

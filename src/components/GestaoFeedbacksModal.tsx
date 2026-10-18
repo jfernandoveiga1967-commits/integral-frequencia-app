@@ -39,6 +39,7 @@ interface GestaoFeedbacksModalProps {
   onClose: () => void;
   currentUser?: UserProfile | null;
   users?: UserProfile[];
+  initialNormId?: string;
 }
 
 export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
@@ -46,6 +47,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   onClose,
   currentUser,
   users: initialUsers,
+  initialNormId,
 }) => {
   const [activeTab, setActiveTab] = useState<'elaborate' | 'history'>('elaborate');
 
@@ -58,7 +60,13 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
   // Formulário Essencial de Elaboração (Colaborador + Norma)
   const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [selectedNormId, setSelectedNormId] = useState<string>('');
+  const [selectedNormId, setSelectedNormId] = useState<string>(() => initialNormId || '');
+
+  useEffect(() => {
+    if (initialNormId) {
+      setSelectedNormId(initialNormId);
+    }
+  }, [initialNormId]);
   const [generatedMessage, setGeneratedMessage] = useState<string>('');
   const [actionPoints, setActionPoints] = useState<string[]>([]);
   const [newActionPoint, setNewActionPoint] = useState<string>('');

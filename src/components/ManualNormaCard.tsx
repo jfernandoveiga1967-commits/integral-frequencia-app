@@ -30,6 +30,7 @@ export interface ManualNormaCardProps {
   onConfirmNormaScience: (normaId: string) => Promise<void> | void;
   onEditNorma?: (norma: ManualNorma) => void;
   onDeleteNorma?: (norma: ManualNorma) => void;
+  onOpenFeedback?: (norma: ManualNorma) => void;
 }
 
 export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
@@ -43,6 +44,7 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
   onConfirmNormaScience,
   onEditNorma,
   onDeleteNorma,
+  onOpenFeedback,
 }) => {
   // Estado local dos checkboxes de cada ponto de atenção/detalhe da norma
   // Para normas já concluídas no Firestore, todos os pontos começam marcados
@@ -255,6 +257,20 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
+              {onOpenFeedback && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenFeedback(norma);
+                  }}
+                  className="px-2 py-1 text-teal-800 hover:text-teal-950 bg-teal-100 hover:bg-teal-200 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-[11px] font-bold border border-teal-300"
+                  title={`Elaborar feedback com IA vinculado à norma "${norma.title}"`}
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">Feedback IA</span>
+                </button>
+              )}
             </div>
           )}
 
