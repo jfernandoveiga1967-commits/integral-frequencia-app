@@ -38,6 +38,7 @@ import {
   Navigation,
   Wifi,
   WifiOff,
+  Copy,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -48,8 +49,10 @@ import {
   RegimeTrabalho,
   WorkLocation,
   AttendanceRecord,
+  ScheduleBlock,
 } from '../types';
 import { calculateApuracaoAulasEfetivasPrestador } from '../utils/frequenciaUtils';
+import { calculateFolhaProfessorHorista, FolhaApuracaoProfessorHoristaResult } from '../services/FolhaService';
 import {
   isCoordenador,
   getRoleBadgeStyle,
@@ -146,6 +149,7 @@ interface LivroPontoProps {
   pontoRecords: PontoRecord[];
   pontoClosings: PontoMonthClosing[];
   attendanceRecords?: AttendanceRecord[];
+  schedules?: ScheduleBlock[];
   onSavePontoRecord: (record: PontoRecord) => Promise<any> | void;
   onBatchSavePontoRecords: (records: PontoRecord[]) => Promise<any> | void;
   onSavePontoClosing: (closing: PontoMonthClosing) => Promise<any> | void;
@@ -162,6 +166,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   pontoRecords = [],
   pontoClosings = [],
   attendanceRecords = [],
+  schedules = [],
   onSavePontoRecord,
   onBatchSavePontoRecords,
   onSavePontoClosing,
@@ -702,6 +707,51 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     });
   }, [regimeTrabalho, targetUser, selectedYear, selectedMonth, daysInMonth, holidays, effectiveAttendanceRecords]);
 
+  // Apuração da Folha do Professor Horista CLT (Sincronizado com a Grade Horária)
+  const professorHoristaFolha = useMemo(() => {
+    if (regimeTrabalho !== 'professor_horista' || !targetUser) return null;
+    const padMonth = String(selectedMonth).padStart(2, '0');
+    const startDate = `${selectedYear}-${padMonth}-01`;
+    const endDate = `${selectedYear}-${padMonth}-${String(daysInMonth).padStart(2, '0')}`;
+    const activities = Array.isArray(targetUser.assignedActivities) && targetUser.assignedActivities.length > 0
+      ? targetUser.assignedActivities
+      : (targetUser.specialtyActivity ? [targetUser.specialtyActivity] : ['Balé', 'Dança']);
+
+    return calculateFolhaProfessorHorista({
+      professor: targetUser,
+      startDate,
+      endDate,
+      holidays,
+      records: effectiveAttendanceRecords,
+      pontoRecords: monthUserRecords,
+      schedules,
+      professorActivities: activities,
+      manualAddition,
+      manualAdditionNote,
+      manualDiscount,
+      manualDiscountNote,
+      ajudaDeCusto,
+    });
+  }, [
+    regimeTrabalho,
+    targetUser,
+    selectedYear,
+    selectedMonth,
+    daysInMonth,
+    holidays,
+    effectiveAttendanceRecords,
+    monthUserRecords,
+    schedules,
+    manualAddition,
+    manualAdditionNote,
+    manualDiscount,
+    manualDiscountNote,
+    ajudaDeCusto,
+  ]);
+
+  const [copiedEspelhoFolha, setCopiedEspelhoFolha] = useState(false);
+  const [showEspelhoGrade, setShowEspelhoGrade] = useState(false);
+
   // Financial Calculations
   const financials = useMemo(() => {
     return calculateMonthlyPontoFinancials({
@@ -714,6 +764,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       valorHoraAula,
       duracaoAulaMinutos,
       customTotalAulas: prestadorApuracao ? prestadorApuracao.totalAulasDadas : undefined,
+      customFolhaHorista: professorHoristaFolha || undefined,
       divisorHours,
       divisorDays: 30,
       ajudaDeCusto,
@@ -735,6 +786,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     valorHoraAula,
     duracaoAulaMinutos,
     prestadorApuracao,
+    professorHoristaFolha,
     divisorHours,
     ajudaDeCusto,
     contractDailyHours,
@@ -2516,7 +2568,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   </p>
                 ) : financials.regimeTrabalho === 'professor_horista' ? (
                   <p className="text-xs text-slate-500">
-                    Regime: <strong className="text-indigo-700">Professor Horista</strong> • Hora-Aula: <strong>{formatCurrencyBR(financials.valorHoraAula || 0)}</strong> ({financials.duracaoAulaMinutos}min) • Aulas no Mês: <strong>{financials.totalAulas}</strong> • Hora-Atividade: <strong>5%</strong> • DSR: <strong>1/6</strong>
+                    Regime: <strong className="text-indigo-700">Professor Horista (CLT)</strong> • Carga da Grade: <strong>{financials.aulasSemanaisGrade ?? 15} aulas/sem</strong> • Carga Mensal CLT: <strong>{financials.aulasMensaisContratadas ?? 67.5} aulas</strong> (4,5 sem) • Salário Base: <strong>{formatCurrencyBR(financials.salarioAulas || 0)}</strong> • Hora-Atividade: <strong>5%</strong> • DSR: <strong>1/6</strong> • Hora-Aula: <strong>{formatCurrencyBR(financials.valorHoraAula || 35)}</strong>
                   </p>
                 ) : (
                   <p className="text-xs text-slate-500">
@@ -2608,87 +2660,292 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </div>
             </div>
           ) : financials.regimeTrabalho === 'professor_horista' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-indigo-800 font-bold block truncate text-[11px]">Aulas Ministradas:</span>
-                  <span className="text-[10px] text-indigo-600 block truncate">Aulas Reais do Mês</span>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-xs">
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-2xs">
+                  <div>
+                    <span className="text-indigo-950 font-bold block truncate text-[11px]">Carga da Grade:</span>
+                    <span className="text-[10px] text-indigo-700 block truncate font-medium">CLT (4,5 sem)</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-sm sm:text-base font-black text-indigo-950 truncate block">
+                      {financials.aulasSemanaisGrade ?? 15} aulas/sem
+                    </span>
+                    <span className="text-[9px] text-indigo-600 block">
+                      {financials.aulasMensaisContratadas ?? 67.5} aulas no mês
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-1">
-                  <span className="text-sm sm:text-base font-black text-indigo-900 truncate block">
-                    {financials.totalAulas} aulas
-                  </span>
-                  <span className="text-[9px] text-indigo-500 block">{financials.duracaoAulaMinutos} min / aula</span>
-                </div>
-              </div>
 
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-slate-600 font-bold block truncate text-[11px]">Salário de Aulas:</span>
-                  <span className="text-[10px] text-slate-400 block truncate">Aulas × {formatCurrencyBR(financials.valorHoraAula || 0)}</span>
-                </div>
-                <span className="text-sm sm:text-base font-black text-slate-900 truncate mt-1">
-                  {formatCurrencyBR(financials.salarioAulas)}
-                </span>
-              </div>
-
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-blue-700 font-bold block truncate text-[11px]">(+) Hora-Atividade (5%):</span>
-                  <span className="text-[9px] text-blue-500 block">5% s/ Salário de Aulas</span>
-                </div>
-                <span className="text-sm sm:text-base font-black text-blue-900 truncate mt-1">
-                  {formatCurrencyBR(financials.horaAtividade || 0)}
-                </span>
-              </div>
-
-              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-purple-700 font-bold block truncate text-[11px]">(+) DSR (1/6):</span>
-                  <span className="text-[9px] text-purple-500 block">Descanso Semanal (1/6)</span>
-                </div>
-                <span className="text-sm sm:text-base font-black text-purple-900 truncate mt-1">
-                  {formatCurrencyBR(financials.dsr || 0)}
-                </span>
-              </div>
-
-              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
-                <div>
-                  <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
-                </div>
-                <div className="mt-1">
-                  <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
-                    {formatCurrencyBR(financials.ajudaDeCusto)}
-                  </span>
-                  <span className="text-[9px] text-emerald-600 block">Sem descontos</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-indigo-700 font-medium block truncate text-[11px]">Horas Extras:</span>
-                  <span className="text-[9px] text-indigo-500 block truncate">
-                    {financials.totalExtraMinutes100 > 0
-                      ? `50%: ${financials.extraHours50Formatted} | 100%: ${financials.extraHours100Formatted}`
-                      : '(Hora × 1,5) × Excedentes'}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                  <div>
+                    <span className="text-slate-700 font-bold block truncate text-[11px]">Salário Base Aulas:</span>
+                    <span className="text-[10px] text-slate-500 block truncate">Regra CLT 4,5 semanas</span>
+                  </div>
+                  <span className="text-sm sm:text-base font-black text-slate-900 truncate mt-1">
+                    {formatCurrencyBR(financials.salarioAulas || 0)}
                   </span>
                 </div>
-                <span className="text-xs sm:text-sm font-black text-indigo-900 break-words mt-1 leading-snug font-mono">
-                  {financials.extraHoursFormatted} ({formatCurrencyBR(financials.extraHoursAmount)})
-                </span>
+
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                  <div>
+                    <span className="text-blue-800 font-bold block truncate text-[11px]">(+) Hora-Atividade (5%):</span>
+                    <span className="text-[9px] text-blue-600 block">5% s/ Salário Base</span>
+                  </div>
+                  <span className="text-sm sm:text-base font-black text-blue-950 truncate mt-1">
+                    {formatCurrencyBR(financials.horaAtividade || 0)}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                  <div>
+                    <span className="text-purple-800 font-bold block truncate text-[11px]">(+) DSR (1/6):</span>
+                    <span className="text-[9px] text-purple-600 block">Descanso Remunerado</span>
+                  </div>
+                  <span className="text-sm sm:text-base font-black text-purple-950 truncate mt-1">
+                    {formatCurrencyBR(financials.dsr || 0)}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                  <div>
+                    <span className="text-indigo-800 font-bold block truncate text-[11px]">(+) Horas Extras (+50%):</span>
+                    <span className="text-[9px] text-indigo-600 block truncate">Fora da grade c/ HA+DSR</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xs sm:text-sm font-black text-indigo-950 block truncate">
+                      +{formatCurrencyBR(financials.extraHoursAmount || 0)}
+                    </span>
+                    <span className="text-[9px] text-indigo-600 block">
+                      {financials.totalAulasExtras || 0} aula(s) extra(s)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
+                  <div>
+                    <span className="text-rose-800 font-bold block truncate text-[11px]">(-) Faltas Injustificadas:</span>
+                    <span className="text-[9px] text-rose-600 block truncate">Desconto Aula + HA + DSR</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xs sm:text-sm font-black text-rose-900 block truncate">
+                      {financials.unjustifiedAbsencesDiscount
+                        ? formatCurrencyBR(-financials.unjustifiedAbsencesDiscount)
+                        : 'R$ 0,00'}
+                    </span>
+                    <span className="text-[9px] text-rose-600 block">
+                      {financials.unjustifiedAbsencesCount || 0} falta(s)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <span className="text-emerald-800 font-bold block truncate text-[11px]">(+) Ajuda de Custo:</span>
+                    <span className="text-[9px] text-emerald-600 block">100% líquida</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-sm sm:text-base font-black text-emerald-700 block truncate">
+                      {formatCurrencyBR(financials.ajudaDeCusto)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-indigo-100/90 border-2 border-indigo-500 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <span className="text-indigo-950 font-black block truncate text-[11px]">Total Líquido a Pagar:</span>
+                    <span className="text-[10px] text-indigo-800 block truncate font-bold">Folha CLT Fechada</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-base sm:text-lg font-black text-indigo-950 truncate block">
+                      {formatCurrencyBR(financials.netTotal)}
+                    </span>
+                    <span className="text-[9px] text-indigo-800 font-bold block">Base + HA + DSR + Ajuda</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl overflow-hidden min-w-0 flex flex-col justify-between">
-                <div>
-                  <span className="text-rose-700 font-medium block truncate text-[11px]">Faltas / Atrasos:</span>
-                  <span className="text-[9px] text-rose-500 block">Descontos proporcionais</span>
+              {/* Painel do Espelho da Grade e Chamada de Frequência do Professor Horista */}
+              {financials.folhaHoristaResult && (
+                <div className="mt-4 p-4 bg-slate-50 border border-indigo-200 rounded-2xl space-y-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-2 border-b border-indigo-100">
+                    <div className="flex items-center space-x-2">
+                      <GraduationCap className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span className="text-xs font-black text-indigo-950 uppercase tracking-wide">
+                        Espelho de Aulas & Frequência CLT — {financials.folhaHoristaResult.professorName}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => {
+                          const folha = financials.folhaHoristaResult;
+                          if (!folha) return;
+                          const text =
+                            `*ESPELHO DA FOLHA DE PAGAMENTO — PROFESSOR HORISTA CLT*\n` +
+                            `Docente: ${folha.professorName}\n` +
+                            `Cargo: ${folha.cargoLabel}\n` +
+                            `Competência: ${folha.competencia}\n` +
+                            `Regime: Professor Horista (CLT / Convenção Coletiva de Professores)\n\n` +
+                            `1. CARGA DA GRADE HORÁRIA & SALÁRIO BASE CONTRATUAL:\n` +
+                            `• Carga Semanal Fixa da Grade: ${folha.aulasSemanaisGrade} aulas/semana\n` +
+                            `• Multiplicador Mensal CLT (art. 320 § 1º): 4,5 semanas\n` +
+                            `• Carga Mensal Contratada: ${folha.aulasMensaisContratadas} aulas/mês\n` +
+                            `• Valor da Hora-Aula: ${formatCurrencyBR(folha.valorHoraAula)}\n` +
+                            `• Salário Base Mensal de Aulas: ${formatCurrencyBR(folha.salarioBaseAulas)}\n\n` +
+                            `2. REFLEXOS LEGAIS OBRIGATÓRIOS:\n` +
+                            `• (+) Hora-Atividade (5%): ${formatCurrencyBR(folha.valorHoraAtividade)}\n` +
+                            `• (+) DSR (1/6 sobre Base + HA): ${formatCurrencyBR(folha.valorDsr)}\n` +
+                            `• Subtotal Salarial Base Contratado: ${formatCurrencyBR(folha.subtotalSalarioContratado)}\n\n` +
+                            `3. FREQUÊNCIA, FERIADOS E EXCEÇÕES DO MÊS:\n` +
+                            `• 🟢 Aulas da Grade Ministradas (Chamada Confirmada): ${folha.totalAulasCumpridasGrade} aula(s)\n` +
+                            `• 🌴 Feriados / Recessos Escolares (Remuneração Garantida): ${folha.totalFeriadosRecessos} aula(s) (R$ 0,00 descontado)\n` +
+                            `• 🔴 Faltas Injustificadas: ${folha.totalFaltasInjustificadas} aula(s) (${folha.totalDescontoFaltas > 0 ? formatCurrencyBR(-folha.totalDescontoFaltas) : 'R$ 0,00'})\n` +
+                            `• ⭐ Horas Extras / Substituições (+50% c/ reflexos): ${folha.totalAulasExtras} aula(s) (+${formatCurrencyBR(folha.totalHorasExtrasGeral)})\n\n` +
+                            `4. BENEFÍCIOS & FECHAMENTO FINAL:\n` +
+                            `• (+) Ajuda de Custo (100% líquida): ${formatCurrencyBR(folha.ajudaDeCusto)}\n` +
+                            (folha.manualAddition > 0 ? `• (+) Adicional Manual: ${formatCurrencyBR(folha.manualAddition)}\n` : '') +
+                            (folha.manualDiscount > 0 ? `• (-) Desconto Manual: ${formatCurrencyBR(-folha.manualDiscount)}\n` : '') +
+                            `----------------------------------------\n` +
+                            `*TOTAL LÍQUIDO A PAGAR: ${formatCurrencyBR(folha.totalLiquidoAPagar)}*\n\n` +
+                            `Colégio Crescer • Apuração Financeira da Folha`;
+
+                          navigator.clipboard.writeText(text);
+                          setCopiedEspelhoFolha(true);
+                          setTimeout(() => setCopiedEspelhoFolha(false), 2500);
+                        }}
+                        className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-xl text-xs font-bold transition shadow-xs ${
+                          copiedEspelhoFolha
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-white hover:bg-slate-100 text-indigo-700 border border-indigo-300'
+                        }`}
+                        title="Copiar espelho detalhado da folha CLT com cálculo das 4,5 semanas, reflexos e chamadas"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{copiedEspelhoFolha ? 'Copiado!' : 'Copiar Espelho da Folha'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => setShowEspelhoGrade(!showEspelhoGrade)}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold transition"
+                      >
+                        <span>{showEspelhoGrade ? 'Ocultar Detalhes Aula a Aula' : 'Ver Detalhes Aula a Aula'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumo visual dos cruzamentos da chamada */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                      <div className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider">
+                        🟢 Carga da Grade Cumprida
+                      </div>
+                      <div className="text-sm font-black text-emerald-950 mt-0.5">
+                        {financials.folhaHoristaResult.totalAulasCumpridasGrade} aulas confirmadas
+                      </div>
+                      <div className="text-[9px] text-emerald-700">Chamadas de frequência validadas</div>
+                    </div>
+
+                    <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+                      <div className="text-[10px] text-blue-800 font-bold uppercase tracking-wider">
+                        🌴 Feriados / Recessos
+                      </div>
+                      <div className="text-sm font-black text-blue-950 mt-0.5">
+                        {financials.folhaHoristaResult.totalFeriadosRecessos} aulas garantidas
+                      </div>
+                      <div className="text-[9px] text-blue-700">100% pagas por lei (sem descontos)</div>
+                    </div>
+
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl">
+                      <div className="text-[10px] text-rose-800 font-bold uppercase tracking-wider">
+                        🔴 Faltas Injustificadas
+                      </div>
+                      <div className="text-sm font-black text-rose-950 mt-0.5">
+                        {financials.folhaHoristaResult.totalFaltasInjustificadas} faltas
+                      </div>
+                      <div className="text-[9px] text-rose-700">
+                        {financials.folhaHoristaResult.totalDescontoFaltas > 0
+                          ? `Desconto: -${formatCurrencyBR(financials.folhaHoristaResult.totalDescontoFaltas)}`
+                          : 'R$ 0,00'}
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+                      <div className="text-[10px] text-indigo-800 font-bold uppercase tracking-wider">
+                        ⭐ Horas Extras (+50%)
+                      </div>
+                      <div className="text-sm font-black text-indigo-950 mt-0.5">
+                        {financials.folhaHoristaResult.totalAulasExtras} aulas excedentes
+                      </div>
+                      <div className="text-[9px] text-indigo-700">
+                        +{formatCurrencyBR(financials.folhaHoristaResult.totalHorasExtrasGeral)} (c/ HA e DSR)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tabela detalhada aula a aula */}
+                  {showEspelhoGrade && (
+                    <div className="mt-3 overflow-x-auto max-h-80 overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-2xs">
+                      <table className="w-full text-left text-[11px]">
+                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[9px] sticky top-0 border-b border-slate-200">
+                          <tr>
+                            <th className="py-2 px-3">Data / Dia</th>
+                            <th className="py-2 px-3">Turma</th>
+                            <th className="py-2 px-3">Modalidade</th>
+                            <th className="py-2 px-3">Horário</th>
+                            <th className="py-2 px-3 text-center">Status no Espelho</th>
+                            <th className="py-2 px-3">Motivo / Apuração Legal</th>
+                            <th className="py-2 px-3 text-right">Impacto na Folha</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {financials.folhaHoristaResult.itens.map((it, idx) => (
+                            <tr key={`${it.date}_${it.turma}_${it.activity}_${idx}`} className="hover:bg-slate-50 transition">
+                              <td className="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
+                                {formatDateBR(it.date)} <span className="text-[10px] text-slate-500 font-normal">({it.dayOfWeekLabel})</span>
+                              </td>
+                              <td className="py-2 px-3 font-bold text-slate-800">{it.turma}</td>
+                              <td className="py-2 px-3 font-semibold text-indigo-900">{it.activity}</td>
+                              <td className="py-2 px-3 font-mono text-slate-600">{it.timeSlot || '—'}</td>
+                              <td className="py-2 px-3 text-center whitespace-nowrap">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    it.status === 'prevista_cumprida'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                      : it.status === 'feriado_recesso'
+                                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                      : it.status === 'aula_extra_substituicao'
+                                      ? 'bg-indigo-100 text-indigo-900 border border-indigo-300 font-black'
+                                      : it.status === 'falta_injustificada'
+                                      ? 'bg-rose-100 text-rose-900 border border-rose-300 font-bold'
+                                      : it.status === 'falta_justificada'
+                                      ? 'bg-amber-100 text-amber-900 border border-amber-200 font-semibold'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  {it.statusLabel}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-slate-600 text-[10px] max-w-xs truncate" title={it.motivo}>
+                                {it.motivo}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono font-bold whitespace-nowrap">
+                                {it.status === 'aula_extra_substituicao' ? (
+                                  <span className="text-indigo-700">+{formatCurrencyBR(it.valorTotalItem)}</span>
+                                ) : it.status === 'falta_injustificada' ? (
+                                  <span className="text-rose-600">{formatCurrencyBR(it.valorTotalItem)}</span>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">Incluso na Base</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs sm:text-sm font-black text-rose-900 break-words mt-1 leading-snug">
-                  {financials.unjustifiedAbsencesCount > 0 || (financials.totalMissingMinutes && financials.totalMissingMinutes > 0)
-                    ? formatCurrencyBR(-(financials.unjustifiedAbsencesDiscount + financials.missingHoursDiscount))
-                    : 'R$ 0,00'}
-                </span>
-              </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">

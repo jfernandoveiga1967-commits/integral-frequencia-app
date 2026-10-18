@@ -21,6 +21,7 @@ import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils'
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { generateUsersReportPDF } from '../utils/pdfGenerator';
 import { calculateDynamicTetoPrestador } from '../services/DemonstrativoService';
+import { calculateCargaSemanalFixa } from '../services/FolhaService';
 import {
   calculateDailyHoursFromSchedule,
   formatMinutesToTime,
@@ -179,11 +180,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [selectedPdfColumns, setSelectedPdfColumns] = useState<string[]>([
     'nome',
     'telefone',
-    'email',
-    'cargo',
-    'status',
-    'dataCadastro',
-    'horario',
   ]);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
@@ -412,11 +408,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       icon: Calendar,
     },
     {
-      id: 'horario',
-      label: 'Horário / Carga Horária',
-      desc: 'Jornada contratual e horas diárias homologadas',
+      id: 'empresa',
+      label: 'Empresa / CNPJ',
+      desc: 'Empresa conveniada ou razão social vinculada',
       required: false,
-      icon: Clock,
+      icon: Building2,
+    },
+    {
+      id: 'pix',
+      label: 'Chave PIX / Dados Bancários',
+      desc: 'Chave PIX para pagamento de salário / honorários (pixKey ou bankData)',
+      required: false,
+      icon: DollarSign,
     },
   ];
 
@@ -425,18 +428,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleTogglePdfColumn = (colId: string) => {
-    if (colId === 'nome') return; // Obrigatório
+    if (colId === 'nome') return; // Obrigatório / Fixo
     setSelectedPdfColumns((prev) =>
       prev.includes(colId) ? prev.filter((id) => id !== colId) : [...prev, colId]
     );
   };
 
   const handleSelectAllPdfColumns = () => {
-    setSelectedPdfColumns(['nome', 'telefone', 'email', 'cargo', 'status', 'dataCadastro', 'horario']);
+    setSelectedPdfColumns(['nome', 'telefone', 'email', 'cargo', 'status', 'dataCadastro', 'empresa', 'pix']);
   };
 
   const handleSelectOnlyContactsPdfColumns = () => {
     setSelectedPdfColumns(['nome', 'telefone']);
+  };
+
+  const handleSelectBasicRegistrationPdfColumns = () => {
+    setSelectedPdfColumns(['nome', 'cargo', 'status']);
   };
 
   // Gerar e exportar relatório cadastral oficial em PDF com as colunas selecionadas
@@ -2006,9 +2013,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                                   );
                                 })()
                               ) : user.regimeTrabalho === 'professor_horista' ? (
-                                <span>
-                                  Regime: <strong className="text-indigo-900">{user.regimeContratual || 'Prof. Horista'}</strong> (R$ {Number(user.valorHoraAula || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                </span>
+                                (() => {
+                                  const cargaInfo = calculateCargaSemanalFixa(user, schedules);
+                                  return (
+                                    <span>
+                                      Regime: <strong className="text-indigo-950 bg-indigo-100 px-1.5 py-0.5 rounded border border-indigo-300">{user.regimeContratual || 'Professor Horista (CLT)'}</strong> (R$ {Number(user.valorHoraAula || 35).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/aula) • <span className="text-indigo-800 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Grade: {cargaInfo.aulasSemanaisGrade} aulas/sem (CLT 4,5 sem: {cargaInfo.aulasMensaisContratadas} aulas/mês — Base: R$ {cargaInfo.salarioBaseAulas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span> • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    </span>
+                                  );
+                                })()
                               ) : (
                                 <span>
                                   Regime: <strong className="text-slate-900">{user.regimeContratual || 'Mensalista (220h)'}</strong> — R$ {Number(user.baseSalary !== undefined ? user.baseSalary : 1200).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • <span className="text-emerald-700">Ajuda: R$ {Number(user.ajudaDeCusto !== undefined ? user.ajudaDeCusto : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
@@ -3176,16 +3188,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       <div className="p-2.5 bg-indigo-50/60 rounded-lg text-[10px] text-indigo-900 space-y-0.5">
                         <div className="font-bold flex items-center gap-1 text-indigo-950">
                           <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          Regras de Apuração do Professor Horista:
+                          Regras CLT do Professor Horista (Sincronizado com a Grade Horária):
                         </div>
                         <p>
-                          • <strong>Salário de Aulas:</strong> Aulas Reais dadas no mês (N) × Valor da Hora-Aula.
+                          • <strong>Carga Semanal Fixa da Grade:</strong> calculada dinamicamente dos horários ativos da semana.
                         </p>
                         <p>
-                          • <strong>Hora-Atividade (5%):</strong> Salário de Aulas × 0,05 (preparação e correção).
+                          • <strong>Salário Base CLT (4,5 semanas):</strong> (Aulas Semanais da Grade × 4,5) × Valor da Hora-Aula (Art. 320 § 1º CLT).
                         </p>
                         <p>
-                          • <strong>DSR (1/6):</strong> (Salário de Aulas + Hora-Atividade) ÷ 6 (Lei 605/49 / Súmula 351 TST).
+                          • <strong>Hora-Atividade (5%):</strong> Salário Base de Aulas × 0,05 (preparação de aulas e planejamento).
+                        </p>
+                        <p>
+                          • <strong>DSR (1/6):</strong> (Salário Base + Hora-Atividade) ÷ 6 (Lei 605/49 e Súmula 351 TST).
+                        </p>
+                        <p>
+                          • <strong>Frequência & Exceções:</strong> Feriados mantêm remuneração integral garantida; faltas injustificadas geram desconto proporcional direto de Aula + HA + DSR; aulas fora da grade entram como Horas Extras (+50%).
                         </p>
                       </div>
                     </div>
@@ -4120,7 +4138,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   <FileText className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-extrabold text-slate-900">Personalizar Relatório em PDF</h3>
+                  <h3 className="text-lg font-extrabold text-slate-900">Personalizar Relatório de Colaboradores em PDF</h3>
                   <p className="text-xs text-slate-500">
                     Selecione as colunas que devem constar no relatório cadastral de colaboradores.
                   </p>
@@ -4154,12 +4172,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             </div>
 
             {/* Atalhos de Seleção Rápida */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Colunas Disponíveis ({selectedPdfColumns.length} de {PDF_AVAILABLE_COLUMNS.length} selecionadas):
+                  Colunas ({selectedPdfColumns.length} de {PDF_AVAILABLE_COLUMNS.length} selecionadas):
                 </span>
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={handleSelectAllPdfColumns}
@@ -4175,6 +4193,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   >
                     <Phone className="w-3 h-3 text-amber-600" />
                     <span>Apenas Contatos (Nome + Telefone)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectBasicRegistrationPdfColumns}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200 transition-colors cursor-pointer flex items-center space-x-1"
+                  >
+                    <Briefcase className="w-3 h-3 text-emerald-600" />
+                    <span>Apenas Cadastro Básico (Nome + Cargo + Status)</span>
                   </button>
                 </div>
               </div>
@@ -4213,7 +4239,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           </span>
                           {isRequired && (
                             <span className="text-[10px] bg-slate-200/90 text-slate-700 px-1.5 py-0.2 rounded font-semibold shrink-0">
-                              Obrigatório
+                              Obrigatório / Fixo
                             </span>
                           )}
                         </div>
@@ -4246,12 +4272,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 {isGeneratingPdf ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span>Gerando PDF...</span>
+                    <span>Gerando e Baixando PDF...</span>
                   </>
                 ) : (
                   <>
                     <FileText className="w-4 h-4" />
-                    <span>📄 Exportar Relatório em PDF</span>
+                    <span>📄 Gerar e Baixar PDF</span>
                   </>
                 )}
               </button>

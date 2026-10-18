@@ -1,5 +1,6 @@
 import { PontoRecord, PontoMonthClosing, HolidayItem, UserProfile, PontoStatus, RegimeTrabalho } from '../types';
 import { isWeekend, isSaturday, isSunday, isHolidayOrRecess, toISODateString } from './dateUtils';
+import { FolhaApuracaoProfessorHoristaResult } from '../services/FolhaService';
 export * from './calculosHoras';
 import {
   DIVISOR_MENSAL_PADRAO,
@@ -1216,6 +1217,7 @@ export function calculateMonthlyPontoFinancials({
   manualAddition = 0,
   manualDiscount = 0,
   dataAdmissao,
+  customFolhaHorista,
 }: {
   records: PontoRecord[];
   holidays: HolidayItem[];
@@ -1225,6 +1227,7 @@ export function calculateMonthlyPontoFinancials({
   valorHoraAula?: number;
   duracaoAulaMinutos?: number;
   customTotalAulas?: number;
+  customFolhaHorista?: FolhaApuracaoProfessorHoristaResult;
   baseSalary?: number;
   divisorHours?: number;
   divisorDays?: number;
@@ -1242,6 +1245,12 @@ export function calculateMonthlyPontoFinancials({
   valorHoraAula?: number;
   duracaoAulaMinutos?: number;
   totalAulas?: number;
+  aulasSemanaisGrade?: number;
+  aulasMensaisContratadas?: number;
+  totalAulasCumpridasGrade?: number;
+  totalAulasExtras?: number;
+  totalHorasExtrasGeral?: number;
+  folhaHoristaResult?: FolhaApuracaoProfessorHoristaResult;
   aulasNaoMinistradas?: number;
   salarioAulas?: number;
   horaAtividade?: number;
@@ -1504,8 +1513,69 @@ export function calculateMonthlyPontoFinancials({
 
   if (isProfessor) {
     // =========================================================================
-    // REGIME PROFESSOR HORISTA (POR AULAS DADAS)
+    // REGIME PROFESSOR HORISTA (CLT) - SINCRONIZADO COM A GRADE HORÁRIA
     // =========================================================================
+    if (customFolhaHorista) {
+      const folha = customFolhaHorista;
+      const subtotalSalarial = folha.totalProventosSalarial;
+      const netTotal = folha.totalLiquidoAPagar;
+
+      return {
+        regimeTrabalho: 'professor_horista',
+        valorHoraAula: folha.valorHoraAula,
+        duracaoAulaMinutos: safeDuracaoAula,
+        totalAulas: folha.aulasMensaisContratadas,
+        aulasSemanaisGrade: folha.aulasSemanaisGrade,
+        aulasMensaisContratadas: folha.aulasMensaisContratadas,
+        totalAulasCumpridasGrade: folha.totalAulasCumpridasGrade,
+        totalAulasExtras: folha.totalAulasExtras,
+        totalHorasExtrasGeral: folha.totalHorasExtrasGeral,
+        folhaHoristaResult: folha,
+        salarioAulas: folha.salarioBaseAulas,
+        horaAtividade: folha.valorHoraAtividade,
+        dsr: folha.valorDsr,
+        baseSalary: folha.salarioBaseAulas,
+        divisorHours: safeDivisorHours,
+        divisorDays: safeDivisorDays,
+        contractDailyHours: Number(safeHours.toFixed(2)),
+        contractDailyMinutes: safeMinutes,
+        contractDailyHoursFormatted: formattedContractHours,
+        diariaRate: 0,
+        hourlyRate: folha.valorHoraAula,
+        minuteRate: folha.valorHoraAula / 60,
+        ajudaDeCusto: folha.ajudaDeCusto,
+        extraHoursRateMultiplier: safeExtraMultiplier,
+        unjustifiedAbsencesCount: folha.totalFaltasInjustificadas,
+        unjustifiedAbsencesDiscount: folha.totalDescontoFaltas,
+        totalWorkedMinutes,
+        totalWorkedFormatted,
+        totalExtraMinutes,
+        extraHoursDecimal,
+        extraHoursFormatted,
+        extraHoursAmount: folha.totalHorasExtrasGeral,
+        totalExtraMinutes50,
+        extraHours50Decimal,
+        extraHours50Formatted,
+        extraHours50Amount: folha.valorHoraExtraAulas,
+        totalExtraMinutes100,
+        extraHours100Decimal,
+        extraHours100Formatted,
+        extraHours100Amount: 0,
+        restDaysWorkedCount,
+        totalMissingMinutes: 0,
+        missingHoursFormatted: '0h00min',
+        missingHoursDiscount: 0,
+        paidHolidaysCount: folha.totalFeriadosRecessos,
+        paidRecessDaysCount: 0,
+        workedDaysCount: folha.totalAulasCumpridasGrade,
+        manualAddition: folha.manualAddition,
+        manualDiscount: folha.manualDiscount,
+        totalDescontos: folha.totalDescontosGeral,
+        subtotalSalarial: Math.round(subtotalSalarial * 100) / 100,
+        netTotal: Math.round(netTotal * 100) / 100,
+      };
+    }
+
     // Total de Aulas Reais (N): apurado pelas batidas validadas (ou informado manualmente)
     const totalAulas = customTotalAulas !== undefined && customTotalAulas !== null
       ? Math.max(0, Math.round(Number(customTotalAulas)))

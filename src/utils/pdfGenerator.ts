@@ -5011,7 +5011,7 @@ export function generateRelatorioConformidadeAceitesPDF(
 export function generateUsersReportPDF(
   users: User[],
   filtersApplied: string,
-  selectedColumns: string[] = ['nome', 'email', 'cargo', 'telefone', 'status', 'dataCadastro', 'horario'],
+  selectedColumns: string[] = ['nome', 'telefone'],
   saveImmediately = true
 ): PDFGenerationResult {
   const doc = new jsPDF({
@@ -5154,6 +5154,11 @@ export function generateUsersReportPDF(
     return '—';
   };
 
+  const getPixKey = (user: User) => {
+    const raw = (user.pixKey || (user as any).bankData?.pix || (user as any).pix || '').trim();
+    return raw || '—';
+  };
+
   const ALL_COLUMNS: Record<string, UserColDef> = {
     nome: {
       id: 'nome',
@@ -5197,6 +5202,34 @@ export function generateUsersReportPDF(
       style: { halign: 'center', textColor: [71, 85, 105] },
       getValue: (u) => getDataCadastro(u),
     },
+    empresa: {
+      id: 'empresa',
+      header: 'EMPRESA / CNPJ',
+      weight: 3.6,
+      style: { textColor: [51, 65, 85] },
+      getValue: (u) => {
+        const emp = (u.empresa || u.company || '').trim();
+        const cnpj = (u as any).cnpj ? `CNPJ: ${(u as any).cnpj}` : '';
+        if (emp && cnpj) return `${emp} (${cnpj})`;
+        if (emp) return emp;
+        if (cnpj) return cnpj;
+        return 'GADAL - Gestão e Apoio';
+      },
+    },
+    pix: {
+      id: 'pix',
+      header: 'CHAVE PIX',
+      weight: 3.5,
+      style: { textColor: [30, 41, 59] },
+      getValue: (u) => getPixKey(u),
+    },
+    pixKey: {
+      id: 'pixKey',
+      header: 'CHAVE PIX',
+      weight: 3.5,
+      style: { textColor: [30, 41, 59] },
+      getValue: (u) => getPixKey(u),
+    },
     horario: {
       id: 'horario',
       header: 'HORÁRIO / JORNADA',
@@ -5209,7 +5242,7 @@ export function generateUsersReportPDF(
   // Normalizar seleção garantindo que ao menos 'nome' esteja presente
   const rawSelection = (selectedColumns && selectedColumns.length > 0)
     ? selectedColumns
-    : ['nome', 'email', 'cargo', 'telefone', 'status', 'dataCadastro', 'horario'];
+    : ['nome', 'telefone', 'email', 'cargo', 'status', 'dataCadastro', 'empresa'];
 
   const normalizedSelection = rawSelection.includes('nome') ? rawSelection : ['nome', ...rawSelection];
 
@@ -5265,14 +5298,14 @@ export function generateUsersReportPDF(
     headStyles: {
       fillColor: [15, 23, 42], // slate-900
       textColor: [255, 255, 255],
-      fontSize: 7.3,
+      fontSize: activeColumns.length > 6 ? 6.7 : 7.3,
       fontStyle: 'bold',
       halign: 'left',
-      cellPadding: 2.6,
+      cellPadding: activeColumns.length > 6 ? 2.0 : 2.6,
     },
     styles: {
-      fontSize: 7.2,
-      cellPadding: 2.2,
+      fontSize: activeColumns.length > 6 ? 6.7 : 7.2,
+      cellPadding: activeColumns.length > 6 ? 1.8 : 2.2,
       textColor: [30, 41, 59],
       lineColor: [226, 232, 240],
       lineWidth: 0.2,

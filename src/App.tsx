@@ -2406,6 +2406,7 @@ export default function App() {
             pontoRecords={pontoRecords}
             pontoClosings={pontoClosings}
             attendanceRecords={records}
+            schedules={schedules}
             onSavePontoRecord={handleSavePontoRecord}
             onBatchSavePontoRecords={handleBatchSavePontoRecords}
             onSavePontoClosing={handleSavePontoClosing}

@@ -26,6 +26,7 @@ import { MealReportModal } from './MealReportModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isHolidayOrRecess, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics, calculateRelatorioConsolidado, calculateApuracaoAulasEfetivasPrestador, AulaEfetivaItem } from '../utils/frequenciaUtils';
+import { calculateFolhaProfessorHorista, FolhaApuracaoProfessorHoristaResult } from '../services/FolhaService';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
 import {
@@ -510,16 +511,19 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   });
 
   // -------------------------------------------------------------------------
-  // 6. Apuração de Aulas Efetivas (Prestadores de Serviço / Professores PJ)
+  // 6. Apuração de Aulas Efetivas (Prestadores PJ & Professores Horistas CLT)
   // -------------------------------------------------------------------------
   const prestadorUsers = useMemo(() => {
     const list = (users || []).filter(
       (u) =>
         u.regimeTrabalho === 'prestador_aula_efetiva' ||
-        (u.regimeContratual && u.regimeContratual.toLowerCase().includes('efetiv')) ||
-        (u.name && u.name.toLowerCase().includes('danyel'))
+        u.regimeTrabalho === 'professor_horista' ||
+        (u.regimeContratual && (u.regimeContratual.toLowerCase().includes('efetiv') || u.regimeContratual.toLowerCase().includes('horista'))) ||
+        (u.name && (u.name.toLowerCase().includes('danyel') || u.name.toLowerCase().includes('leticia')))
     );
-    if (list.length === 0) {
+
+    // Garante presença do Professor Danyel Pereira (Prestador PJ)
+    if (!list.some((u) => u.id === 'usr_danyelpereira' || (u.name && u.name.toLowerCase().includes('danyel')))) {
       const danyelFromUsers = (users || []).find((u) => u.name && u.name.toLowerCase().includes('danyel'));
       if (danyelFromUsers) {
         list.push({
@@ -552,6 +556,40 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         } as UserProfile);
       }
     }
+
+    // Garante presença da Professora Letícia (Professor Horista CLT)
+    if (!list.some((u) => u.id === 'usr_leticia' || (u.name && u.name.toLowerCase().includes('leticia')))) {
+      const leticiaFromUsers = (users || []).find((u) => u.name && u.name.toLowerCase().includes('leticia'));
+      if (leticiaFromUsers) {
+        list.push({
+          ...leticiaFromUsers,
+          regimeTrabalho: 'professor_horista',
+          regimeContratual: 'Professor Horista (CLT)',
+          valorHoraAula: leticiaFromUsers.valorHoraAula && Number(leticiaFromUsers.valorHoraAula) > 0 ? Number(leticiaFromUsers.valorHoraAula) : 35.0,
+          duracaoAulaMinutos: leticiaFromUsers.duracaoAulaMinutos || 50,
+          diasGradeAutorizados: leticiaFromUsers.diasGradeAutorizados || ['segunda', 'terca'],
+          assignedActivities: Array.from(new Set(['Balé', 'Dança', ...(leticiaFromUsers.assignedActivities || [])])),
+          specialtyActivity: 'Balé',
+        });
+      } else {
+        list.push({
+          id: 'usr_leticia',
+          name: 'Letícia (Balé e Dança)',
+          email: 'leticia.danca@crescercampinas.com.br',
+          role: 'professor',
+          cargoLabel: 'Professora de Balé e Dança',
+          avatarColor: 'bg-purple-600',
+          regimeTrabalho: 'professor_horista',
+          regimeContratual: 'Professor Horista (CLT)',
+          valorHoraAula: 35.0,
+          duracaoAulaMinutos: 50,
+          diasGradeAutorizados: ['segunda', 'terca'],
+          assignedActivities: ['Balé', 'Dança'],
+          specialtyActivity: 'Balé',
+        } as UserProfile);
+      }
+    }
+
     return list;
   }, [users]);
 
@@ -578,6 +616,21 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     return Array.from(acts);
   }, [selectedPrestador]);
 
+  const isHoristaCLT = selectedPrestador?.regimeTrabalho === 'professor_horista';
+
+  const folhaHoristaResult = useMemo(() => {
+    if (!isHoristaCLT) return null;
+    return calculateFolhaProfessorHorista({
+      professor: selectedPrestador,
+      startDate: effectiveStartDate,
+      endDate: effectiveEndDate,
+      holidays,
+      records,
+      schedules,
+      professorActivities: prestadorActivities,
+    });
+  }, [isHoristaCLT, selectedPrestador, effectiveStartDate, effectiveEndDate, holidays, records, schedules, prestadorActivities]);
+
   const apuracaoAulasEfetivas = useMemo(() => {
     return calculateApuracaoAulasEfetivasPrestador({
       prestador: selectedPrestador,
@@ -593,6 +646,41 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const [copiedDemonstrativo, setCopiedDemonstrativo] = useState(false);
 
   const handleCopyDemonstrativo = () => {
+    if (isHoristaCLT && folhaHoristaResult) {
+      const folha = folhaHoristaResult;
+      const text =
+        `*ESPELHO DA FOLHA DE PAGAMENTO — PROFESSOR HORISTA CLT*\n` +
+        `Docente: ${folha.professorName}\n` +
+        `Cargo: ${folha.cargoLabel}\n` +
+        `Período: ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}\n` +
+        `Regime: Professor Horista (CLT / Convenção Coletiva)\n\n` +
+        `1. CARGA DA GRADE & SALÁRIO BASE CONTRATUAL:\n` +
+        `• Carga Semanal Fixa da Grade: ${folha.aulasSemanaisGrade} aulas/semana\n` +
+        `• Multiplicador Mensal CLT: 4,5 semanas\n` +
+        `• Carga Mensal Contratada: ${folha.aulasMensaisContratadas} aulas/mês\n` +
+        `• Valor da Hora-Aula: ${formatCurrencyBR(folha.valorHoraAula)}\n` +
+        `• Salário Base Mensal de Aulas: ${formatCurrencyBR(folha.salarioBaseAulas)}\n\n` +
+        `2. REFLEXOS LEGAIS OBRIGATÓRIOS:\n` +
+        `• (+) Hora-Atividade (5%): ${formatCurrencyBR(folha.valorHoraAtividade)}\n` +
+        `• (+) DSR (1/6 sobre Base + HA): ${formatCurrencyBR(folha.valorDsr)}\n` +
+        `• Subtotal Salarial Base Contratado: ${formatCurrencyBR(folha.subtotalSalarioContratado)}\n\n` +
+        `3. FREQUÊNCIA, FERIADOS E EXCEÇÕES:\n` +
+        `• 🟢 Aulas da Grade Ministradas: ${folha.totalAulasCumpridasGrade} aula(s)\n` +
+        `• 🌴 Feriados / Recessos Escolares (Remuneração Garantida): ${folha.totalFeriadosRecessos} aula(s) (sem descontos)\n` +
+        `• 🔴 Faltas Injustificadas: ${folha.totalFaltasInjustificadas} aula(s) (${folha.totalDescontoFaltas > 0 ? formatCurrencyBR(-folha.totalDescontoFaltas) : 'R$ 0,00'})\n` +
+        `• ⭐ Horas Extras (+50% c/ reflexos): ${folha.totalAulasExtras} aula(s) (+${formatCurrencyBR(folha.totalHorasExtrasGeral)})\n\n` +
+        `4. BENEFÍCIOS & FECHAMENTO:\n` +
+        `• (+) Ajuda de Custo (100% líquida): ${formatCurrencyBR(folha.ajudaDeCusto)}\n` +
+        `----------------------------------------\n` +
+        `*TOTAL LÍQUIDO A PAGAR: ${formatCurrencyBR(folha.totalLiquidoAPagar)}*\n\n` +
+        `Colégio Crescer • Apuração Financeira da Folha`;
+
+      navigator.clipboard.writeText(text);
+      setCopiedDemonstrativo(true);
+      setTimeout(() => setCopiedDemonstrativo(false), 2500);
+      return;
+    }
+
     const text = `*DEMONSTRATIVO DE PRESTAÇÃO DE SERVIÇOS — AULAS EFETIVAS*\n` +
       `Colaborador(a): ${selectedPrestador?.name || 'Professor'}\n` +
       `Período: ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}\n` +
@@ -1078,26 +1166,36 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full border border-emerald-300">
-                Medição de Prestação de Serviços
+              <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                isHoristaCLT
+                  ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                  : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+              }`}>
+                {isHoristaCLT ? 'Apuração da Folha CLT' : 'Medição de Prestação de Serviços'}
               </span>
               <span className="text-xs text-slate-400 font-medium">
-                Apuração por Aula Dada / Efetiva com Chamada
+                {isHoristaCLT ? 'Sincronização da Grade Horária & Chamada CLT (4,5 sem)' : 'Apuração por Aula Dada / Efetiva com Chamada'}
               </span>
             </div>
             <h3 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2 mt-1">
-              <Award className="w-5 h-5 text-emerald-600" />
-              <span>Demonstrativo de Aulas Efetivas (Professores PJ / Horistas Efetivos)</span>
+              <Award className={`w-5 h-5 ${isHoristaCLT ? 'text-indigo-600' : 'text-emerald-600'}`} />
+              <span>
+                {isHoristaCLT
+                  ? 'Apuração Financeira da Folha — Professor Horista CLT'
+                  : 'Demonstrativo de Aulas Efetivas (Professores PJ / Horistas Efetivos)'}
+              </span>
             </h3>
             <p className="text-xs text-slate-500">
-              Sincronização Direta com a Grade Horária: Cálculo baseado exclusivamente nos blocos cadastrados na Grade Horária Semanal do docente. Aulas previstas na grade são validadas como '🟢 Aula Efetiva Ministrada'. Aulas fora da grade ficam 'Aguardando Validação de Aula Extra/Substituição'.
+              {isHoristaCLT
+                ? 'Sincronização Direta com a Grade Horária: Carga Semanal Fixa da Grade, Salário Base CLT (4,5 semanas), Hora-Atividade (5%), DSR (1/6), Aulas Confirmadas na Chamada de Frequência e Horas Extras (+50%).'
+                : "Sincronização Direta com a Grade Horária: Cálculo baseado exclusivamente nos blocos cadastrados na Grade Horária Semanal do docente. Aulas previstas na grade são validadas como '🟢 Aula Efetiva Ministrada'. Aulas fora da grade ficam 'Aguardando Validação de Aula Extra/Substituição'."}
             </p>
           </div>
 
           {/* Seleção do Prestador / Professor */}
           <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
             <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-2xl">
-              <GraduationCap className="w-4 h-4 text-emerald-600 shrink-0" />
+              <GraduationCap className={`w-4 h-4 ${isHoristaCLT ? 'text-indigo-600' : 'text-emerald-600'} shrink-0`} />
               <label className="text-xs font-bold text-slate-700">Colaborador(a):</label>
               <select
                 value={selectedPrestadorId}
@@ -1106,7 +1204,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               >
                 {prestadorUsers.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name} {u.regimeTrabalho === 'prestador_aula_efetiva' ? '(PJ Efetivo)' : ''}
+                    {u.name} {u.regimeTrabalho === 'professor_horista' ? '(CLT Horista)' : '(PJ Efetivo)'}
                   </option>
                 ))}
               </select>
@@ -1118,12 +1216,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
               className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 copiedDemonstrativo
                   ? 'bg-emerald-600 text-white shadow-2xs'
+                  : isHoristaCLT
+                  ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300'
                   : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300'
               }`}
-              title="Copiar resumo do demonstrativo para envio via WhatsApp ou e-mail"
+              title="Copiar resumo do demonstrativo/espelho da folha para envio via WhatsApp ou e-mail"
             >
               {copiedDemonstrativo ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedDemonstrativo ? 'Copiado!' : 'Copiar Demonstrativo'}</span>
+              <span>{copiedDemonstrativo ? 'Copiado!' : isHoristaCLT ? 'Copiar Espelho da Folha' : 'Copiar Demonstrativo'}</span>
             </button>
           </div>
         </div>
@@ -1135,27 +1235,42 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             <span className="text-slate-400">•</span>
             <span className="text-slate-600">{selectedPrestador?.cargoLabel || 'Professor(a)'}</span>
             <span className="text-slate-400">•</span>
-            <span className="font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300 text-[11px]">
-              {selectedPrestador?.regimeContratual || 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'}
+            <span className={`font-bold px-2 py-0.5 rounded-md border text-[11px] ${
+              isHoristaCLT
+                ? 'text-indigo-800 bg-indigo-100/80 border-indigo-300'
+                : 'text-emerald-700 bg-emerald-100/80 border-emerald-300'
+            }`}>
+              {selectedPrestador?.regimeContratual || (isHoristaCLT ? 'Professor Horista (CLT)' : 'Prestador por Aula Efetiva (PJ/Horista Efetivo)')}
             </span>
           </div>
 
           <div className="flex items-center space-x-3 text-slate-600">
             <span>Oficina(s): <strong className="text-slate-800">{prestadorActivities.join(', ')}</strong></span>
             <span>•</span>
-            <span>Grade Semanal: <strong className="text-slate-800">{apuracaoAulasEfetivas.cargaHorariaSemanalEsperada || 8} aula(s)/sem</strong></span>
+            <span>Grade Semanal: <strong className="text-slate-800">{isHoristaCLT ? (folhaHoristaResult?.aulasSemanaisGrade || 15) : (apuracaoAulasEfetivas.cargaHorariaSemanalEsperada || 8)} aula(s)/sem</strong></span>
             <span>•</span>
             <span>Período: <strong className="text-slate-800">{formatDateBR(effectiveStartDate)} a {formatDateBR(effectiveEndDate)}</strong></span>
           </div>
         </div>
 
-        {/* Banner de Aviso de Aulas Extras / Fora da Grade aguardando validação */}
-        {Boolean(apuracaoAulasEfetivas.totalAulasExtrasPendentes && apuracaoAulasEfetivas.totalAulasExtrasPendentes > 0) && (
+        {/* Banner de Aviso de Aulas Extras / Fora da Grade */}
+        {!isHoristaCLT && Boolean(apuracaoAulasEfetivas.totalAulasExtrasPendentes && apuracaoAulasEfetivas.totalAulasExtrasPendentes > 0) && (
           <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between text-xs text-amber-950">
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
                 Há <strong>{apuracaoAulasEfetivas.totalAulasExtrasPendentes} aula(s) com chamada realizada fora da Grade Horária</strong>. Estão com status <em>Aguardando Validação de Aula Extra/Substituição</em> (R$ 0,00 creditado até aprovação da Coordenação).
+              </span>
+            </div>
+          </div>
+        )}
+
+        {isHoristaCLT && folhaHoristaResult && Boolean(folhaHoristaResult.totalAulasExtras > 0) && (
+          <div className="p-3.5 bg-indigo-50 border border-indigo-300 rounded-2xl flex items-center justify-between text-xs text-indigo-950">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>
+                Identificadas <strong>{folhaHoristaResult.totalAulasExtras} aula(s) ministradas fora da Grade regular</strong>. Apuradas automaticamente como <strong>Horas Extras (+50%)</strong> com reflexos de Hora-Atividade (5%) e DSR (+{formatCurrencyBR(folhaHoristaResult.totalHorasExtrasGeral)}).
               </span>
             </div>
           </div>

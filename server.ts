@@ -22,6 +22,11 @@ import {
   calculateDynamicTetoPrestador,
   getPrestadorWeeklyGradeBlocks,
 } from './src/services/DemonstrativoService';
+import {
+  calculateFolhaProfessorHorista,
+  calculateCargaSemanalFixa,
+  getProfessorWeeklyGradeBlocks,
+} from './src/services/FolhaService';
 
 dotenv.config();
 
@@ -126,6 +131,88 @@ app.get('/api/demonstrativo/teto-grade/:prestadorId', (req, res) => {
   } catch (error: any) {
     return res.status(500).json({
       error: error.message || 'Erro ao consultar teto da grade horária.',
+    });
+  }
+});
+
+// API Route: Apuração da Folha do Professor Horista CLT Sincronizada com a Grade Horária
+app.post('/api/folha/apuracao-horista', (req, res) => {
+  try {
+    const {
+      professor,
+      startDate,
+      endDate,
+      holidays = [],
+      records = [],
+      pontoRecords = [],
+      schedules = [],
+      professorActivities,
+      manualAddition = 0,
+      manualAdditionNote = '',
+      manualDiscount = 0,
+      manualDiscountNote = '',
+      ajudaDeCusto = 150,
+    } = req.body;
+
+    if (!professor || !startDate || !endDate) {
+      return res.status(400).json({
+        error: 'Os parâmetros professor, startDate e endDate são obrigatórios.',
+      });
+    }
+
+    const resultado = calculateFolhaProfessorHorista({
+      professor,
+      startDate,
+      endDate,
+      holidays,
+      records,
+      pontoRecords,
+      schedules,
+      professorActivities,
+      manualAddition,
+      manualAdditionNote,
+      manualDiscount,
+      manualDiscountNote,
+      ajudaDeCusto,
+    });
+
+    return res.json({
+      success: true,
+      folha: resultado,
+    });
+  } catch (error: any) {
+    console.error('Erro na apuração da folha do professor horista no servidor:', error);
+    return res.status(500).json({
+      error: error.message || 'Erro interno na apuração da folha do professor horista.',
+    });
+  }
+});
+
+// API Route: Consulta da Grade Horária e Carga Semanal Fixa CLT do Professor Horista
+app.get('/api/folha/grade-horista/:professorId', (req, res) => {
+  try {
+    const { professorId } = req.params;
+    const isLeticia = professorId === 'usr_leticia' || professorId.toLowerCase().includes('leticia');
+    const dummyUser: any = {
+      id: professorId,
+      name: isLeticia ? 'Professora Letícia' : 'Professor Horista CLT',
+      regimeTrabalho: 'professor_horista',
+      regimeContratual: 'Professor Horista (CLT)',
+      valorHoraAula: 35.0,
+      assignedActivities: ['Balé', 'Dança'],
+      specialtyActivity: 'Balé',
+      diasGradeAutorizados: ['segunda', 'terca'],
+    };
+
+    const cargaInfo = calculateCargaSemanalFixa(dummyUser);
+    return res.json({
+      success: true,
+      professorId,
+      ...cargaInfo,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: error.message || 'Erro ao consultar carga da grade horária do professor horista.',
     });
   }
 });
