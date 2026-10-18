@@ -80,6 +80,8 @@ import {
 
 export interface ManualOrientacoesProps {
   currentUser?: UserProfile | null;
+  onOpenUserProfile?: () => void;
+  pendingFeedbacksCount?: number;
 }
 
 // Tipos para Filtro Rápido por Alerta
@@ -902,7 +904,11 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
   );
 };
 
-export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUser }) => {
+export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
+  currentUser,
+  onOpenUserProfile,
+  pendingFeedbacksCount = 0,
+}) => {
   const isAdmin = isCoordenador(currentUser);
 
   // Dynamic Normas State from Firestore
@@ -1483,6 +1489,36 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({ currentUse
               <Printer className="w-4 h-4 text-amber-300" />
               <span>Baixar Manual em PDF</span>
             </button>
+
+            {/* Botão de Perfil do Colaborador (Meus Feedbacks e Orientações) */}
+            {currentUser && onOpenUserProfile && (
+              <button
+                type="button"
+                onClick={onOpenUserProfile}
+                title="Abrir Meu Perfil e Meus Feedbacks Pedagógicos"
+                className="flex items-center space-x-2 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 hover:border-indigo-400/50 px-3 py-1.5 rounded-2xl transition-all cursor-pointer shadow-md group shrink-0 text-left"
+              >
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                  {currentUser.name.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="text-left hidden sm:block">
+                  <div className="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
+                    <span className="truncate max-w-[110px]">{currentUser.name}</span>
+                    {pendingFeedbacksCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white animate-pulse">
+                        🔴 {pendingFeedbacksCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium truncate max-w-[110px]">
+                    {currentUser.cargoLabel || currentUser.role || 'Monitora'}
+                  </div>
+                </div>
+                {pendingFeedbacksCount > 0 && (
+                  <span className="sm:hidden w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                )}
+              </button>
+            )}
           </div>
         </div>
 

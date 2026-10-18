@@ -2424,7 +2424,11 @@ export default function App() {
 
         {/* Tab 10: Manual de Orientações e Normas */}
         {activeTab === 'manual' && isTabAllowed('manual', currentUser) && (
-          <ManualOrientacoes currentUser={currentUser} />
+          <ManualOrientacoes
+            currentUser={currentUser}
+            onOpenUserProfile={() => setShowUserProfileModal(true)}
+            pendingFeedbacksCount={pendingFeedbacksCount}
+          />
         )}
       </main>
 

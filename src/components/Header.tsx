@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(() => isAudioNotificationsEnabled());
   const [isAudioReady, setIsAudioReady] = useState<boolean>(() => isAudioContextReady());
   const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
-  const [showToastFeedback, setShowToastFeedback] = useState<string | null>(null);
+  const [showToastAudioStatus, setShowToastAudioStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const handleAudioStateChange = (e: Event) => {
@@ -102,8 +102,8 @@ export const Header: React.FC<HeaderProps> = ({
     const success = await unlockAudioContextAndPlayTest();
     setIsAudioEnabled(true);
     setIsAudioReady(success);
-    setShowToastFeedback('Alertas sonoros de chamada liberados com sucesso!');
-    setTimeout(() => setShowToastFeedback(null), 3500);
+    setShowToastAudioStatus('Alertas sonoros de chamada liberados com sucesso!');
+    setTimeout(() => setShowToastAudioStatus(null), 3500);
   };
 
   // Determine if audio needs activation banner (either disabled in preferences or blocked/not yet unlocked by browser gesture)
@@ -138,11 +138,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       )}
 
-      {/* Floating Action Feedback Toast */}
-      {showToastFeedback && (
+      {/* Floating Audio Activation Toast */}
+      {showToastAudioStatus && (
         <div className="absolute top-12 right-4 z-50 bg-slate-950/95 border border-indigo-500/40 text-indigo-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>{showToastFeedback}</span>
+          <BellRing className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{showToastAudioStatus}</span>
         </div>
       )}
 
@@ -183,46 +183,18 @@ export const Header: React.FC<HeaderProps> = ({
             isSyncing={isSyncing}
           />
 
-          {/* User Profile Pill & Quick Actions */}
-          {currentUser && (
+          {/* Quick Actions (Sair / Logout) */}
+          {currentUser && onLogout && (
             <div className="flex items-center space-x-2 shrink-0 self-end md:self-auto">
               <button
                 type="button"
-                onClick={onOpenUserProfile}
-                title="Abrir Meu Perfil e Orientações"
-                className="flex items-center space-x-2 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 hover:border-indigo-400/50 px-2.5 py-1.5 rounded-xl transition-all cursor-pointer shadow-xs group"
+                onClick={onLogout}
+                title="Sair / Trocar Usuário"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-slate-700 hover:border-rose-400/30 transition-colors cursor-pointer text-xs font-semibold"
               >
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                  {currentUser.name.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="text-left hidden sm:block">
-                  <div className="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
-                    <span className="truncate max-w-[100px]">{currentUser.name}</span>
-                    {pendingFeedbacksCount > 0 && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white animate-pulse">
-                        🔴 {pendingFeedbacksCount}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium truncate max-w-[100px]">
-                    {currentUser.cargoLabel || currentUser.role || 'Monitora'}
-                  </div>
-                </div>
-                {pendingFeedbacksCount > 0 && (
-                  <span className="sm:hidden w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                )}
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span>Sair</span>
               </button>
-
-              {onLogout && (
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  title="Sair / Trocar Usuário"
-                  className="p-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-400/30 transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              )}
             </div>
           )}
         </div>

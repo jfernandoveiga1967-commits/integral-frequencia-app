@@ -402,6 +402,21 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                   )}
                 </button>
               )}
+
+              {isAdmin && onOpenFeedback && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenFeedback(norma);
+                  }}
+                  className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
+                  title={`Abrir módulo para elaborar feedback pedagógico cordial com IA para a norma "${norma.title}"`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>[ ✨ Elaborar Feedback com IA ]</span>
+                </button>
+              )}
             </div>
           </div>
 
