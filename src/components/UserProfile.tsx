@@ -31,12 +31,16 @@ import {
   formatFeedbackDateTimeBR,
 } from '../services/feedbackService';
 
-interface UserProfileProps {
+import { FeedbackMarkdown } from './FeedbackMarkdown';
+
+export interface UserProfileProps {
   currentUser: UserProfileType;
   isOpen?: boolean;
   onClose?: () => void;
   defaultTab?: 'feedbacks' | 'details';
 }
+
+export type UserProfileModalProps = UserProfileProps;
 
 export const UserProfileModal: React.FC<UserProfileProps> = ({
   currentUser,
@@ -389,20 +393,11 @@ export const UserProfileModal: React.FC<UserProfileProps> = ({
                             <Sparkles className="w-3.5 h-3.5 text-teal-600" />
                             Orientação Pedagógica Cordial (CNV):
                           </span>
-                          <div className="p-4 bg-teal-50/60 rounded-xl border border-teal-200/70 text-xs sm:text-sm text-slate-800 whitespace-pre-wrap leading-relaxed shadow-2xs">
-                            {fb.generatedMessage.split(/(\*\*.*?\*\*)/g).map((part, idx) => {
-                              if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-                                return (
-                                  <strong
-                                    key={idx}
-                                    className="font-black text-slate-900 bg-teal-100/60 px-1 py-0.5 rounded"
-                                  >
-                                    {part.slice(2, -2)}
-                                  </strong>
-                                );
-                              }
-                              return part;
-                            })}
+                          <div className="p-4 bg-teal-50/60 rounded-xl border border-teal-200/70 text-xs sm:text-sm text-slate-800 shadow-2xs">
+                            <FeedbackMarkdown
+                              content={fb.generatedMessage}
+                              highlightVariant="teal"
+                            />
                           </div>
                         </div>
 

@@ -33,6 +33,7 @@ import {
   buildWhatsAppFeedbackLink,
   PedagogicalFeedback,
 } from '../services/feedbackService';
+import { FeedbackMarkdown } from './FeedbackMarkdown';
 
 interface GestaoFeedbacksModalProps {
   isOpen: boolean;
@@ -444,10 +445,19 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                 <textarea
                   value={generatedMessage}
                   onChange={(e) => setGeneratedMessage(e.target.value)}
-                  rows={8}
-                  placeholder="Clique em '[ ✨ Gerar Mensagem Cordial com IA ]' para criar o texto acolhedor, ou digite manualmente a orientação aqui..."
+                  rows={7}
+                  placeholder="Clique em '[ ✨ Gerar Feedback com IA ]' para criar o texto acolhedor, ou digite manualmente a orientação aqui..."
                   className="w-full text-xs p-3.5 bg-white border border-slate-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-teal-600 text-slate-800 placeholder-slate-400 font-sans leading-relaxed resize-y shadow-2xs"
                 />
+                {generatedMessage && (
+                  <div className="p-3.5 bg-teal-50/60 rounded-2xl border border-teal-200/70 text-xs text-slate-800 space-y-1.5 shadow-2xs">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-teal-800 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                      Visualização Formatada (Como a colaboradora verá no app, sem asteriscos):
+                    </span>
+                    <FeedbackMarkdown content={generatedMessage} highlightVariant="teal" />
+                  </div>
+                )}
               </div>
 
               {/* Checklist de Pontos da Orientação */}
@@ -717,17 +727,11 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                   <span className="font-bold text-slate-600 block mb-1">
                     Mensagem Cordial Enviada:
                   </span>
-                  <div className="p-3.5 bg-teal-50/50 rounded-xl border border-teal-100 text-slate-800 whitespace-pre-wrap leading-relaxed">
-                    {selectedFeedbackDetails.generatedMessage.split(/(\*\*.*?\*\*)/g).map((part, idx) => {
-                      if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-                        return (
-                          <strong key={idx} className="font-extrabold text-slate-900 bg-teal-100/50 px-1 py-0.5 rounded">
-                            {part.slice(2, -2)}
-                          </strong>
-                        );
-                      }
-                      return part;
-                    })}
+                  <div className="p-3.5 bg-teal-50/50 rounded-xl border border-teal-100 text-xs text-slate-800 shadow-2xs">
+                    <FeedbackMarkdown
+                      content={selectedFeedbackDetails.generatedMessage}
+                      highlightVariant="teal"
+                    />
                   </div>
                 </div>
 

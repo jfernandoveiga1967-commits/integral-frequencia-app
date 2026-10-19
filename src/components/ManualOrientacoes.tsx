@@ -1393,175 +1393,139 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
         </div>
       )}
 
-      {/* Top Hero Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-7 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+      {/* Top Hero Banner Enxuto */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-3.5 sm:p-4.5 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden space-y-3">
         <div className="absolute right-0 top-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/25 text-indigo-300 border border-indigo-400/30">
-                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                <span>Manual & Normas do Integral</span>
-              </span>
-              {isAdmin && (
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                  Modo Admin / Coordenação Ativo
-                </span>
-              )}
-              <span className="text-xs text-slate-400 font-medium">
-                Vigência 2026/2027 • Colégio Crescer
-              </span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Manual de Normas e Abordagem Sensível
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Diretrizes de conduta interna, segurança externa no transporte e academia, e guia socioemocional de mediação respeitosa para monitoras e equipe pedagógica.
-            </p>
+        
+        {/* Título Principal */}
+        <div className="relative z-10 flex items-center space-x-2.5 shrink-0">
+          <div className="p-2 bg-indigo-500/20 text-indigo-300 rounded-xl border border-indigo-400/30 shrink-0">
+            <BookOpen className="w-5 h-5 text-indigo-300" />
           </div>
+          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight whitespace-nowrap">
+            Manual e Normas
+          </h2>
+        </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => {
-                  setNormaEditing(null);
-                  setIsEditModalOpen(true);
-                }}
-                className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-700/30 transition-all flex items-center space-x-2 cursor-pointer"
-                title="Cadastrar uma nova norma no banco de dados"
-              >
-                <Plus className="w-4 h-4 text-emerald-200" />
-                <span>+ Nova Norma</span>
-              </button>
-            )}
-
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={handleSyncOfficialDocuments}
-                disabled={isSyncingOfficial}
-                className="px-3.5 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-2xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60"
-                title="Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer no Firestore"
-              >
-                {isSyncingOfficial ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                ) : (
-                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                )}
-                <span>Sincronizar Oficiais</span>
-              </button>
-            )}
-
-            {/* Admin Action: Status de Aceite da Equipe */}
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setIsStatusAceiteModalOpen(true)}
-                className="px-3.5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-blue-700/30 transition-all flex items-center space-x-1.5 cursor-pointer"
-                title="Abrir painel de auditoria de aceite digital da equipe"
-              >
-                <ClipboardCheck className="w-4 h-4 text-emerald-300" />
-                <span>Status de Aceite ({totalCientesCount}/{eligibleUsers.length})</span>
-              </button>
-            )}
-
-            {/* Admin Action: Gestão de Feedback Cordial Por Norma com IA e CNV */}
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => handleOpenFeedbackModal(selectedNormIdForFeedback || filteredNormas[0]?.id)}
-                className="px-3.5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-teal-700/30 transition-all flex items-center space-x-1.5 cursor-pointer"
-                title="Abrir módulo de Feedback Pedagógico Cordial Por Norma com IA (CNV)"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>[ ✨ Elaborar Feedback com IA ]</span>
-              </button>
-            )}
-
+        {/* Linha de Botões de Ação Diretamente Abaixo do Título */}
+        <div className="relative z-10 flex flex-wrap items-center gap-2 pt-0.5">
+          {isAdmin && (
             <button
               type="button"
-              onClick={handleGeneratePDF}
-              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-2xl text-xs font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center space-x-2 cursor-pointer"
-              title="Gerar e visualizar PDF oficial com timbre do Colégio Crescer"
+              onClick={() => {
+                setNormaEditing(null);
+                setIsEditModalOpen(true);
+              }}
+              className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-700/25 transition-all flex items-center space-x-1.5 cursor-pointer"
+              title="Cadastrar uma nova norma no banco de dados"
             >
-              <Printer className="w-4 h-4 text-amber-300" />
-              <span>Baixar Manual em PDF</span>
+              <Plus className="w-3.5 h-3.5 text-emerald-200" />
+              <span>+ Nova Norma</span>
             </button>
+          )}
 
-            {/* Botão de Perfil do Colaborador (Meus Feedbacks e Orientações) */}
-            {currentUser && onOpenUserProfile && (
-              <button
-                type="button"
-                onClick={onOpenUserProfile}
-                title="Abrir Meu Perfil e Meus Feedbacks Pedagógicos"
-                className="flex items-center space-x-2 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 hover:border-indigo-400/50 px-3 py-1.5 rounded-2xl transition-all cursor-pointer shadow-md group shrink-0 text-left"
-              >
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                  {currentUser.name.slice(0, 2).toUpperCase()}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleSyncOfficialDocuments}
+              disabled={isSyncingOfficial}
+              className="px-3 py-2 bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60"
+              title="Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer no Firestore"
+            >
+              {isSyncingOfficial ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+              ) : (
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              <span>Sincronizar Oficiais</span>
+            </button>
+          )}
+
+          {/* Admin Action: Status de Aceite da Equipe */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setIsStatusAceiteModalOpen(true)}
+              className="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white rounded-xl text-xs font-black shadow-md shadow-blue-700/25 transition-all flex items-center space-x-1.5 cursor-pointer"
+              title="Abrir painel de auditoria de aceite digital da equipe"
+            >
+              <ClipboardCheck className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Status de Aceite ({totalCientesCount}/{eligibleUsers.length})</span>
+            </button>
+          )}
+
+          {/* Admin Action: Gestão de Feedback Cordial Por Norma com IA e CNV */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => handleOpenFeedbackModal(selectedNormIdForFeedback || filteredNormas[0]?.id)}
+              className="px-3 py-2 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md shadow-teal-700/25 transition-all flex items-center space-x-1.5 cursor-pointer"
+              title="Abrir módulo de Feedback Pedagógico Cordial Por Norma com IA (CNV)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>[ ✨ Elaborar Feedback com IA ]</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleGeneratePDF}
+            className="px-3 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-600/25 transition-all flex items-center space-x-1.5 cursor-pointer"
+            title="Gerar e visualizar PDF oficial com timbre do Colégio Crescer"
+          >
+            <Printer className="w-3.5 h-3.5 text-amber-300" />
+            <span>Baixar Manual em PDF</span>
+          </button>
+
+          {/* Botão de Perfil do Colaborador (Meus Feedbacks e Orientações) */}
+          {currentUser && onOpenUserProfile && (
+            <button
+              type="button"
+              onClick={onOpenUserProfile}
+              title="Abrir Meu Perfil e Meus Feedbacks Pedagógicos"
+              className="flex items-center space-x-2 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 hover:border-indigo-400/50 px-2.5 py-1.5 rounded-xl transition-all cursor-pointer shadow-md group shrink-0 text-left"
+            >
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                {currentUser.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
+                  <span className="truncate max-w-[100px]">{currentUser.name}</span>
+                  {pendingFeedbacksCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white animate-pulse">
+                      🔴 {pendingFeedbacksCount}
+                    </span>
+                  )}
                 </div>
-                <div className="text-left hidden sm:block">
-                  <div className="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
-                    <span className="truncate max-w-[110px]">{currentUser.name}</span>
-                    {pendingFeedbacksCount > 0 && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white animate-pulse">
-                        🔴 {pendingFeedbacksCount}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium truncate max-w-[110px]">
-                    {currentUser.cargoLabel || currentUser.role || 'Monitora'}
-                  </div>
+                <div className="text-[10px] text-slate-400 font-medium truncate max-w-[100px]">
+                  {currentUser.cargoLabel || currentUser.role || 'Monitora'}
                 </div>
-                {pendingFeedbacksCount > 0 && (
-                  <span className="sm:hidden w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                )}
-              </button>
-            )}
-          </div>
+              </div>
+              {pendingFeedbacksCount > 0 && (
+                <span className="sm:hidden w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              )}
+            </button>
+          )}
         </div>
 
-        {/* Counters */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-slate-800/80">
-          <div className="bg-slate-800/60 p-3 rounded-2xl border border-slate-700/60">
+        {/* Counters Compactos */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3 pt-3 border-t border-slate-800/80">
+          <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Acervo Total</span>
-            <span className="text-base sm:text-lg font-black text-white">{totalCount} normas oficiais</span>
+            <span className="text-sm sm:text-base font-black text-white">{totalCount} normas oficiais</span>
           </div>
-          <div className="bg-rose-950/40 p-3 rounded-2xl border border-rose-800/40">
+          <div className="bg-rose-950/40 p-2.5 rounded-2xl border border-rose-800/40">
             <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider block">Proibições / Alertas</span>
-            <span className="text-base sm:text-lg font-black text-rose-400">{countProibicoes} regras</span>
+            <span className="text-sm sm:text-base font-black text-rose-400">{countProibicoes} regras</span>
           </div>
-          <div className="bg-emerald-950/40 p-3 rounded-2xl border border-emerald-800/40">
+          <div className="bg-emerald-950/40 p-2.5 rounded-2xl border border-emerald-800/40">
             <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">Boas Práticas</span>
-            <span className="text-base sm:text-lg font-black text-emerald-400">{countRecomendadas} condutas</span>
+            <span className="text-sm sm:text-base font-black text-emerald-400">{countRecomendadas} condutas</span>
           </div>
-          <div className="bg-indigo-950/40 p-3 rounded-2xl border border-indigo-800/40">
+          <div className="bg-indigo-950/40 p-2.5 rounded-2xl border border-indigo-800/40">
             <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">Diretrizes Sensíveis</span>
-            <span className="text-base sm:text-lg font-black text-indigo-300">{countDiretrizes} diretrizes</span>
+            <span className="text-sm sm:text-base font-black text-indigo-300">{countDiretrizes} diretrizes</span>
           </div>
-        </div>
-      </div>
-
-      {/* Tarja Oficial de Orientação Institucional */}
-      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 p-3.5 sm:p-4 rounded-3xl border border-indigo-500/30 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        <div className="flex items-center space-x-2.5">
-          <div className="p-2 rounded-xl bg-indigo-500/20 text-amber-400">
-            <Sparkles className="w-4 h-4" />
-          </div>
-          <div>
-            <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-indigo-100 block">
-              ORIENTAÇÃO INSTITUCIONAL - PROGRAMA DO INTEGRAL
-            </span>
-            <span className="text-[11px] text-slate-400 block">
-              Diretrizes oficiais aplicáveis a toda a equipe de monitoria e pedagógica do Colégio Crescer
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center space-x-1.5 shrink-0">
-          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-            Normas Oficiais 2026/2027
-          </span>
         </div>
       </div>
 
@@ -1691,122 +1655,26 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
         </div>
       </div>
 
-      {/* 2. BARRA DE CONTROLE: Módulos, Busca e Filtros Rápidos de Alerta */}
+      {/* 2. BARRA DE BUSCA E FILTROS RÁPIDOS DE ALERTA */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-        {/* Seletor por Módulos Oficiais */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+        {/* Barra de Busca por Palavra-Chave */}
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por palavras-chave (ex: celular, rádio, frequência 2, brinquedão, banheiros, vai e volta, uniforme)..."
+            className="w-full pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+          />
+          {searchTerm && (
             <button
               type="button"
-              onClick={() => setSelectedModule('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
-                selectedModule === 'all'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              title="Limpar busca"
             >
-              <Layers className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Todos os Módulos ({normas.length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedModule('normas_internas')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
-                selectedModule === 'normas_internas'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Award className="w-3.5 h-3.5 text-amber-300" />
-              <span>1. Normas Internas ({normas.filter((n) => n.moduleId === 'normas_internas').length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedModule('academia_transporte')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
-                selectedModule === 'academia_transporte'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Bus className="w-3.5 h-3.5 text-amber-200" />
-              <span>2. Academia & Transporte ({normas.filter((n) => n.moduleId === 'academia_transporte').length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedModule('guia_sensivel')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
-                selectedModule === 'guia_sensivel'
-                  ? 'bg-rose-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <HeartHandshake className="w-3.5 h-3.5 text-rose-200" />
-              <span>3. Abordagem Sensível ({normas.filter((n) => n.moduleId === 'guia_sensivel').length})</span>
-            </button>
-          </div>
-
-          {/* Controles Globais de Expansão */}
-          <div className="flex flex-wrap items-center gap-1.5 self-end md:self-auto">
-            <button
-              type="button"
-              onClick={handleExpandAllCategories}
-              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
-            >
-              Expandir Categorias
-            </button>
-            <button
-              type="button"
-              onClick={handleCollapseAllCategories}
-              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
-            >
-              Recolher Categorias
-            </button>
-            <button
-              type="button"
-              onClick={handleExpandAllNormas}
-              className="px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer"
-            >
-              Expandir Todas as Normas
-            </button>
-          </div>
-        </div>
-
-        {/* Global Search Bar & Feedback Action */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-          <div className="relative flex-1 min-w-0">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por palavras-chave (ex: celular, rádio, frequência 2, brinquedão, banheiros, vai e volta, uniforme)..."
-              className="w-full pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-                title="Limpar busca"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => handleOpenFeedbackModal(selectedNormIdForFeedback || filteredNormas[0]?.id)}
-              className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-2xl text-xs font-black shadow-md shadow-teal-700/25 hover:shadow-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
-              title="Elaborar feedback pedagógico cordial com inteligência artificial (CNV) integrado às normas"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-              <span>[ ✨ Elaborar Feedback com IA ]</span>
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>

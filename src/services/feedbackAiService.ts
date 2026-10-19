@@ -12,8 +12,24 @@ import {
 
 export interface CordialFeedbackResult {
   message: string;
+  plainMessage: string;
   actionPoints: string[];
   isAiGenerated: boolean;
+}
+
+/**
+ * Remove toda formatação de asteriscos (*texto*, **texto**, ***texto***) de uma mensagem
+ * para exibição segura em componentes de texto simples sem parser de Markdown
+ * ou pré-sanitização antes de persistência.
+ */
+export function sanitizePlainFeedbackText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\*/g, '')
+    .trim();
 }
 
 /**
@@ -77,8 +93,10 @@ export async function generateCordialFeedback(
               'Prática constante da escuta atenta e do acolhimento na rotina',
             ];
 
+        const rawMessage = data.feedback.message;
         return {
-          message: data.feedback.message,
+          message: rawMessage,
+          plainMessage: sanitizePlainFeedbackText(rawMessage),
           actionPoints,
           isAiGenerated: data.isAiGenerated !== false && !data.isFallback,
         };
@@ -92,6 +110,7 @@ export async function generateCordialFeedback(
   const fallback = buildFallbackCordialMessage(cleanName, cleanNorm, cleanContext, normSection, normDetails);
   return {
     message: fallback.message,
+    plainMessage: sanitizePlainFeedbackText(fallback.message),
     actionPoints: fallback.actionPoints,
     isAiGenerated: false,
   };
