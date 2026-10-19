@@ -981,16 +981,17 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
   const [isConfirmingAceite, setIsConfirmingAceite] = useState(false);
   const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
-  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [selectedNormIdForFeedback, setSelectedNormIdForFeedback] = useState<string>('');
+  const [selectedChecklistItemForFeedback, setSelectedChecklistItemForFeedback] = useState<string>('');
   const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});
 
-  const handleOpenFeedbackModal = (normaId?: string) => {
+  const handleOpenFeedbackModal = (normaId?: string, checklistItem?: string) => {
     if (normaId) {
       setSelectedNormIdForFeedback(normaId);
     } else if (filteredNormas.length > 0) {
       setSelectedNormIdForFeedback(filteredNormas[0].id);
     }
+    setSelectedChecklistItemForFeedback(checklistItem || '');
     setIsFeedbackModalOpen(true);
   };
 
@@ -1869,8 +1870,8 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
                           onDeleteNorma={(n) => {
                             setNormaDeleting(n);
                           }}
-                          onOpenFeedback={(n) => {
-                            handleOpenFeedbackModal(n.id);
+                          onOpenFeedback={(n, item) => {
+                            handleOpenFeedbackModal(n.id, item);
                           }}
                         />
                       );
@@ -2009,10 +2010,12 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
           onClose={() => {
             setIsFeedbackModalOpen(false);
             setSelectedNormIdForFeedback('');
+            setSelectedChecklistItemForFeedback('');
           }}
           currentUser={currentUser}
           users={allUsers}
           initialNormId={selectedNormIdForFeedback}
+          initialChecklistItem={selectedChecklistItemForFeedback}
         />
       )}
     </div>

@@ -639,7 +639,8 @@ function buildServerFallbackCordialFeedback(
   normTitle: string,
   rawContext: string,
   normSection?: string,
-  normDetails?: string[]
+  normDetails?: string[],
+  selectedChecklistItem?: string
 ): { message: string; actionPoints: string[] } {
   return buildDynamicPedagogicalFeedback({
     userName,
@@ -647,6 +648,7 @@ function buildServerFallbackCordialFeedback(
     rawContext,
     normSection,
     normDetails,
+    selectedChecklistItem,
   });
 }
 
@@ -722,7 +724,7 @@ function serverHeuristicMatchNorm(rawContext: string, condensedNorms: any[]): { 
 // API Route: Gerador de Feedback Cordial por Norma com IA e CNV (Coordenação Pedagógica)
 app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
   try {
-    const { userName, normTitle, normSection, rawContext, normDetails } = req.body;
+    const { userName, normTitle, normSection, rawContext, normDetails, selectedChecklistItem } = req.body;
     if (!userName || !normTitle) {
       return res.status(400).json({
         error: 'Campos obrigatórios ausentes (userName, normTitle).',
@@ -730,6 +732,7 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
     }
 
     const safeContext = (rawContext || '').trim();
+    const safeCheckItem = (selectedChecklistItem || '').trim();
     const { salutation, firstName } = getSalutationForName(userName);
     const sectionLabel = normSection ? ` (Seção ${normSection})` : '';
     const normFullRef = `"${normTitle}"${sectionLabel}`;
@@ -739,7 +742,8 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
       normTitle,
       safeContext,
       normSection,
-      normDetails
+      normDetails,
+      safeCheckItem
     );
 
     const ai = getAIClient();
@@ -751,6 +755,7 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
           rawContext,
           normSection,
           normDetails,
+          selectedChecklistItem: safeCheckItem,
         });
 
         const response = await ai.models.generateContent({

@@ -30,7 +30,7 @@ export interface ManualNormaCardProps {
   onConfirmNormaScience: (normaId: string) => Promise<void> | void;
   onEditNorma?: (norma: ManualNorma) => void;
   onDeleteNorma?: (norma: ManualNorma) => void;
-  onOpenFeedback?: (norma: ManualNorma) => void;
+  onOpenFeedback?: (norma: ManualNorma, selectedChecklistItem?: string) => void;
 }
 
 export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
@@ -328,24 +328,43 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                 norma.details.map((detail, dIdx) => {
                   const isChecked = Boolean(checkedItems[dIdx]);
                   return (
-                    <label
+                    <div
                       key={dIdx}
-                      className={`flex items-start space-x-2.5 p-2 rounded-xl border transition-all cursor-pointer ${
+                      className={`flex items-start justify-between gap-2 p-2.5 rounded-xl border transition-all ${
                         isChecked
                           ? 'bg-emerald-50/60 border-emerald-200 text-slate-900'
                           : 'bg-slate-50/70 border-slate-200 hover:bg-white text-slate-700'
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleCheck(dIdx)}
-                        className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
-                      />
-                      <span className="text-xs leading-relaxed select-none">
-                        {detail}
-                      </span>
-                    </label>
+                      <label className="flex items-start space-x-2.5 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleCheck(dIdx)}
+                          className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
+                        />
+                        <span className="text-xs leading-relaxed select-none">
+                          {detail}
+                        </span>
+                      </label>
+
+                      {isAdmin && onOpenFeedback && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onOpenFeedback(norma, detail);
+                          }}
+                          className="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 hover:border-teal-300 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer flex items-center space-x-1 shrink-0 group/itemBtn shadow-2xs"
+                          title={`Elaborar feedback por IA focado estritamente neste item: "${detail}"`}
+                        >
+                          <Sparkles className="w-3 h-3 text-amber-500 group-hover/itemBtn:scale-110 transition-transform" />
+                          <span className="hidden sm:inline">Feedback deste item</span>
+                          <span className="sm:hidden">Feedback</span>
+                        </button>
+                      )}
+                    </div>
                   );
                 })
               ) : (
@@ -408,7 +427,10 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onOpenFeedback(norma);
+                    const firstCheckedDetail = Array.isArray(norma.details)
+                      ? norma.details.find((_, idx) => Boolean(checkedItems[idx]))
+                      : undefined;
+                    onOpenFeedback(norma, firstCheckedDetail);
                   }}
                   className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md transition-all flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
                   title={`Abrir módulo para elaborar feedback pedagógico cordial com IA para a norma "${norma.title}"`}

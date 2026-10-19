@@ -24,6 +24,7 @@ export interface DynamicFeedbackParams {
   rawContext: string;
   normSection?: string;
   normDetails?: string[];
+  selectedChecklistItem?: string;
 }
 
 export interface DynamicFeedbackResult {
@@ -150,6 +151,7 @@ export function buildDynamicPedagogicalFeedback({
   rawContext,
   normSection,
   normDetails,
+  selectedChecklistItem,
 }: DynamicFeedbackParams): DynamicFeedbackResult {
   const { salutation, firstName } = getSalutationForName(userName);
   const cleanSection = normSection ? String(normSection).replace(/[^0-9]/g, '') || String(normSection) : '';
@@ -157,8 +159,9 @@ export function buildDynamicPedagogicalFeedback({
   const cleanNormTitle = (normTitle || '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   const normFullRef = `*“${cleanNormTitle}”${sectionLabel}*`;
   const cleanContext = (rawContext || '').trim();
+  const cleanItem = (selectedChecklistItem || '').trim().replace(/^[-•*]\s*/, '');
 
-  const theme = detectNormTheme(cleanNormTitle, cleanContext, normSection, normDetails);
+  const theme = detectNormTheme(cleanNormTitle, cleanItem || cleanContext, normSection, normDetails);
 
   let situacaoResumo = '';
   let razaoProcedimento = '';
@@ -266,8 +269,18 @@ export function buildDynamicPedagogicalFeedback({
       break;
   }
 
-  // Incorpora detalhes específicos do manual no checklist se existirem
-  if (Array.isArray(normDetails) && normDetails.length > 0) {
+  // Se houver um item específico do checklist selecionado, o foco é 100% nele
+  if (cleanItem) {
+    situacaoResumo = `o ponto específico observado referente a "${cleanItem}"`;
+    razaoProcedimento = `a atenção rigorosa e o cuidado preventivo quanto a "${cleanItem}", resguardando a integridade das crianças e o alinhamento institucional`;
+    acaoOrientativa = `a observância pontual e permanente quanto a "${cleanItem}" em todos os momentos de atendimento aos alunos`;
+    actionPoints = [
+      `Cumprir integralmente o procedimento: "${cleanItem}"`,
+      `Alinhamento e compromisso com a norma "${cleanNormTitle}"${sectionLabel}`,
+      'Zelo contínuo pela segurança, organização e bem-estar das crianças',
+    ];
+  } else if (Array.isArray(normDetails) && normDetails.length > 0) {
+    // Incorpora detalhes específicos do manual no checklist se existirem
     const customPoint = normDetails[0].trim();
     if (customPoint && !actionPoints.some((p) => p.includes(customPoint))) {
       actionPoints.splice(1, 0, `Observar a orientação específica: ${customPoint}`);
@@ -321,12 +334,14 @@ export function buildGeminiFeedbackSystemPrompt({
   rawContext,
   normSection,
   normDetails,
+  selectedChecklistItem,
 }: DynamicFeedbackParams): string {
   const { salutation, firstName } = getSalutationForName(userName);
   const cleanSection = normSection ? String(normSection).replace(/[^0-9]/g, '') || String(normSection) : '';
   const sectionLabel = cleanSection ? ` (Seção ${cleanSection})` : '';
   const cleanNormTitle = (normTitle || '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   const cleanContext = (rawContext || '').trim();
+  const cleanCheckItem = (selectedChecklistItem || '').trim().replace(/^[-•*]\s*/, '');
   const saudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
 
   return `Você é a Coordenação do Programa do Período Integral do Colégio Crescer.
@@ -337,16 +352,24 @@ DIRETRIZ DE FOCO ESTRITO E CONTEXTUALIZAÇÃO DINÂMICA (REGRA CRÍTICA):
 1. O texto gerado deve ser 100% DINÂMICO e RESTRITO AO TEMA DA NORMA SELECIONADA:
    - Norma: "${cleanNormTitle}"${sectionLabel}
    - Detalhes do Manual: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Manual de Normas e Conduta do Colégio Crescer'}
-   ${cleanContext ? `- Contexto do Fato / Resumo: "${cleanContext}"` : ''}
+   ${cleanCheckItem ? `- ITEM ESPECÍFICO DO CHECKLIST OBSERVADO: "${cleanCheckItem}"` : ''}
+   ${cleanContext ? `- Contexto do Fato / Resumo Adicional: "${cleanContext}"` : ''}
 
-2. ELIMINE TOTALMENTE QUALQUER FRASE GENÉRICA FIXA OU DESLOCADA DO ASSUNTO:
+${cleanCheckItem ? `==================================================
+DIRETRIZ DE FOCO EXCLUSIVO NO ITEM DO CHECKLIST SELECIONADO (REGRA MÁXIMA):
+Se um 'item do checklist' específico for fornecido, a mensagem DEVE se concentrar 100% nessa situação pontual. NÃO adicione contextos genéricos ou outros pontos da norma que não foram o foco da observação. Mantenha a Comunicação Não Violenta (CNV), abordando o motivo pedagógico/de segurança focado estritamente nesse item selecionado.
+- Item focado: "${cleanCheckItem}"
+- Na retomada cordial da situação observada, cite explicitamente esse item específico ("${cleanCheckItem}").
+- Na razão pedagógica/de segurança, aborde exclusivamente a justificativa protetiva e de conformidade referente a esse item específico.
+- No checklist de ciência ('actionPoints'), o Item 1 DEVE ser o cumprimento prático pontual deste item ("${cleanCheckItem}").
+==================================================` : `2. ELIMINE TOTALMENTE QUALQUER FRASE GENÉRICA FIXA OU DESLOCADA DO ASSUNTO:
    - NUNCA mencione "deslocamento", "trajetos", "transporte", "fila" ou "academia" se a norma NÃO for sobre deslocamento/transporte!
    - Se a norma for sobre UNIFORME / FARDAMENTO (ex: Seção 28): o texto deve tratar EXCLUSIVAMENTE de vestuário institucional completo, crachá, padronização visual, salvaguarda institucional e identificação imediata perante famílias e crianças. JAMAIS mencione trânsito ou deslocamento!
    - Se a norma for sobre DESLOCAMENTO / TRANSPORTE (ex: Seção 17): o texto deve tratar da contagem nominal contínua de alunos, embarque, desembarque, organização da fila e segurança durante os trajetos.
    - Se a norma for sobre POSTURA / PONTUALIDADE (ex: Seção 5 ou Seção 30): o texto deve tratar de assiduidade, cumprimento da carga horária, registro de ponto, conduta ética e postura exemplar para as crianças.
    - Se a norma for sobre USO DE CELULAR (ex: Seção 12): o texto deve tratar da atenção visual contínua de 360°, eliminação de dispersões visuais com aparelhos particulares e uso do rádio comunicador institucional.
    - Se a norma for sobre ALIMENTAÇÃO (ex: Seção 15): o texto deve tratar do acompanhamento de refeições, prevenção de engasgos e observância rigorosa a restrições e alergias.
-   - Se a norma for sobre OUTROS TEMAS (Parque, Lição de Casa, Abordagem Socioemocional, etc.): o texto deve focar estritamente na razão pedagógica e institucional daquele assunto.
+   - Se a norma for sobre OUTROS TEMAS (Parque, Lição de Casa, Abordagem Socioemocional, etc.): o texto deve focar estritamente na razão pedagógica e institucional daquele assunto.`}
 
 ==================================================
 MODELO OBRIGATÓRIO DE SAÍDA (ESTRUTURA UNIVERSAL CNV):
@@ -355,11 +378,11 @@ ${saudacao}
 
 Esperamos que você esteja bem. Gostaríamos de começar agradecendo pelo seu empenho e pela dedicação diária aos nossos alunos no Programa do Integral do Colégio Crescer.
 
-Gostaríamos de retomar uma situação ocorrida durante a rotina: [Resumo cordial da situação observada referente estritamente ao tema da norma selecionada].
+Gostaríamos de retomar uma situação ocorrida durante a rotina: [Resumo cordial da situação observada referente estritamente ao item específico do checklist ou à norma].
 
-Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de [A razão pedagógica, institucional e de segurança específica desta norma, sem usar palavras genéricas de outros temas].
+Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de [A razão pedagógica, institucional e de segurança específica deste ponto focado, sem usar palavras genéricas de outros temas].
 
-Por isso, retomamos a orientação prevista na norma institucional *“${cleanNormTitle}”${sectionLabel}*, destacando [Ação orientativa e preventiva específica e esperada da colaboradora com base na norma].
+Por isso, retomamos a orientação prevista na norma institucional *“${cleanNormTitle}”${sectionLabel}*, destacando [Ação orientativa e preventiva específica e esperada da colaboradora focada no item do checklist ou na norma].
 
 Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança, alinhamento institucional e responsabilidade coletiva. A atenção a essa conduta contribui diretamente para a proteção, o acolhimento e o bem-estar das crianças sob nossos cuidados.
 
@@ -375,11 +398,11 @@ Colégio Crescer
 INSTRUÇÕES DE PREENCHIMENTO DOS CAMPOS ENTRE COLCHETES:
 1. Saudação: DEVE ser exatamente "${saudacao}" em negrito com asterisco (*).
 2. [Resumo cordial da situação observada...]:
-   ${cleanContext ? `Integre o seguinte fato com cordialidade e acolhimento: "${cleanContext}"` : `Sintetize cordialmente uma situação típica da rotina escolar referente estritamente à norma "${cleanNormTitle}"${sectionLabel}, mantendo tom afetuoso e acolhedor.`}
+   ${cleanCheckItem ? `Retome com acolhimento e cordialidade estritamente o item observado: "${cleanCheckItem}". NÃO misture com outros assuntos da norma.` : (cleanContext ? `Integre o seguinte fato com cordialidade e acolhimento: "${cleanContext}"` : `Sintetize cordialmente uma situação típica da rotina escolar referente estritamente à norma "${cleanNormTitle}"${sectionLabel}, mantendo tom afetuoso e acolhedor.`)}
 3. [A razão pedagógica, institucional e de segurança...]:
-   Apresente a justificativa pedagógica e institucional genuína do tema da norma "${cleanNormTitle}"${sectionLabel}. Não use frases genéricas de outros temas.
+   ${cleanCheckItem ? `Apresente a razão pedagógica/de segurança específica e direta do item "${cleanCheckItem}".` : `Apresente a justificativa pedagógica e institucional genuína do tema da norma "${cleanNormTitle}"${sectionLabel}. Não use frases genéricas de outros temas.`}
 4. [Ação orientativa e preventiva esperada...]:
-   Explique com clareza e acolhimento a ação prática orientativa esperada da colaboradora.
+   ${cleanCheckItem ? `Explique a conduta prática esperada referente a "${cleanCheckItem}".` : `Explique com clareza e acolhimento a ação prática orientativa esperada da colaboradora.`}
 5. Encerramento: Finalize ESTRITAMENTE com:
 *Atenciosamente*,
 Coordenação do Integral

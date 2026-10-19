@@ -41,6 +41,7 @@ interface GestaoFeedbacksModalProps {
   currentUser?: UserProfile | null;
   users?: UserProfile[];
   initialNormId?: string;
+  initialChecklistItem?: string;
 }
 
 export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
@@ -49,6 +50,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   currentUser,
   users: initialUsers,
   initialNormId,
+  initialChecklistItem,
 }) => {
   const [activeTab, setActiveTab] = useState<'elaborate' | 'history'>('elaborate');
 
@@ -59,15 +61,23 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   const [normasList, setNormasList] = useState<ManualNorma[]>(NORMAS_DATA);
   const [feedbacksHistory, setFeedbacksHistory] = useState<PedagogicalFeedback[]>([]);
 
-  // Formulário Essencial de Elaboração (Colaborador + Norma)
+  // Formulário Essencial de Elaboração (Colaborador + Norma + Item Específico do Checklist)
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [selectedNormId, setSelectedNormId] = useState<string>(() => initialNormId || '');
+  const [selectedChecklistItem, setSelectedChecklistItem] = useState<string>(() => initialChecklistItem || '');
 
   useEffect(() => {
     if (initialNormId) {
       setSelectedNormId(initialNormId);
     }
   }, [initialNormId]);
+
+  useEffect(() => {
+    if (initialChecklistItem) {
+      setSelectedChecklistItem(initialChecklistItem);
+    }
+  }, [initialChecklistItem]);
+
   const [generatedMessage, setGeneratedMessage] = useState<string>('');
   const [actionPoints, setActionPoints] = useState<string[]>([]);
   const [newActionPoint, setNewActionPoint] = useState<string>('');
@@ -142,7 +152,8 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         selectedNorm.title,
         selectedNorm.summary || '',
         selectedNorm.sectionNumber || selectedNorm.section,
-        selectedNorm.details
+        selectedNorm.details,
+        selectedChecklistItem
       );
 
       setGeneratedMessage(result.message);
@@ -206,7 +217,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         normId: selectedNorm.id,
         normTitle: selectedNorm.title,
         normSection: selectedNorm.sectionNumber || undefined,
-        rawContext: selectedNorm.summary || selectedNorm.title,
+        rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
         generatedMessage: generatedMessage.trim(),
         actionPoints: finalPoints,
         createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
@@ -221,6 +232,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
       setActionPoints([]);
       setSelectedUserId('');
       setSelectedNormId('');
+      setSelectedChecklistItem('');
       setActiveTab('history');
     } catch (err) {
       console.error('Erro ao registrar feedback:', err);
@@ -266,7 +278,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         normId: selectedNorm.id,
         normTitle: selectedNorm.title,
         normSection: selectedNorm.sectionNumber || undefined,
-        rawContext: selectedNorm.summary || selectedNorm.title,
+        rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
         generatedMessage: generatedMessage.trim(),
         actionPoints: finalPoints,
         createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
@@ -399,8 +411,57 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                 <NormaSearchSelect
                   normas={normasList}
                   selectedNormId={selectedNormId}
-                  onSelectNorm={(id) => setSelectedNormId(id)}
+                  onSelectNorm={(id) => {
+                    setSelectedNormId(id);
+                    // Limpa item do checklist se a norma for trocada e o item anterior não pertencer à nova
+                    setSelectedChecklistItem('');
+                  }}
                 />
+
+                {/* Seletor Específico de Item do Checklist (Foco Estrito de IA) */}
+                {selectedNorm && Array.isArray(selectedNorm.details) && selectedNorm.details.length > 0 && (
+                  <div className="md:col-span-2 space-y-1.5 p-3.5 rounded-2xl bg-teal-50/60 border border-teal-200/90 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                        <span>Foco Específico em Item do Checklist:</span>
+                      </label>
+                      {selectedChecklistItem && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedChecklistItem('')}
+                          className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline cursor-pointer"
+                        >
+                          Remover foco específico (analisar norma geral)
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={selectedChecklistItem}
+                      onChange={(e) => setSelectedChecklistItem(e.target.value)}
+                      className="w-full text-xs font-semibold px-3 py-2.5 bg-white border border-teal-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-600 text-slate-800"
+                    >
+                      <option value="">🎯 Geral: Toda a Norma Institucional (Sem item específico)</option>
+                      {selectedNorm.details.map((detail, idx) => (
+                        <option key={idx} value={detail}>
+                          Item {idx + 1}: {detail}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedChecklistItem ? (
+                      <div className="flex items-center gap-1.5 text-[11px] text-teal-900 font-bold bg-teal-100/70 p-2 rounded-xl border border-teal-200">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span>
+                          Foco Estrito Ativo: A IA focará 100% no procedimento deste item (&quot;{selectedChecklistItem}&quot;), sem adicionar contextos genéricos de outros pontos da norma.
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[10.5px] text-slate-500">
+                        Selecione um item acima se a observação foi referente a um ponto específico (ex: uniforme/calçado, celular, crachá, fila).
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Botão de Ação: Gerar Feedback com IA */}

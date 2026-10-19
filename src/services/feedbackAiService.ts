@@ -41,7 +41,8 @@ function buildFallbackCordialMessage(
   normTitle: string,
   rawContext?: string,
   normSection?: string,
-  normDetails?: string[]
+  normDetails?: string[],
+  selectedChecklistItem?: string
 ): { message: string; actionPoints: string[] } {
   return buildDynamicPedagogicalFeedback({
     userName,
@@ -49,6 +50,7 @@ function buildFallbackCordialMessage(
     rawContext: rawContext || '',
     normSection,
     normDetails,
+    selectedChecklistItem,
   });
 }
 
@@ -61,11 +63,13 @@ export async function generateCordialFeedback(
   normTitle: string,
   rawContext?: string,
   normSection?: string,
-  normDetails?: string[]
+  normDetails?: string[],
+  selectedChecklistItem?: string
 ): Promise<CordialFeedbackResult> {
   const cleanName = (userName || '').trim() || 'Monitora';
   const cleanNorm = (normTitle || '').trim() || 'Norma Institucional';
   const cleanContext = (rawContext || '').trim();
+  const cleanCheckItem = (selectedChecklistItem || '').trim();
 
   try {
     const response = await fetch('/api/gemini/generate-cordial-feedback', {
@@ -79,6 +83,7 @@ export async function generateCordialFeedback(
         normSection,
         rawContext: cleanContext,
         normDetails,
+        selectedChecklistItem: cleanCheckItem,
       }),
     });
 
@@ -88,7 +93,7 @@ export async function generateCordialFeedback(
         let actionPoints: string[] = Array.isArray(data.feedback.actionPoints) && data.feedback.actionPoints.length > 0
           ? data.feedback.actionPoints
           : [
-              `Alinhamento integral com a norma "${cleanNorm}"`,
+              cleanCheckItem ? `Cumprir integralmente o procedimento: "${cleanCheckItem}"` : `Alinhamento integral com a norma "${cleanNorm}"`,
               'Zelo redobrado pela segurança e bem-estar das crianças',
               'Prática constante da escuta atenta e do acolhimento na rotina',
             ];
@@ -107,7 +112,7 @@ export async function generateCordialFeedback(
   }
 
   // Fallback heurístico CNV
-  const fallback = buildFallbackCordialMessage(cleanName, cleanNorm, cleanContext, normSection, normDetails);
+  const fallback = buildFallbackCordialMessage(cleanName, cleanNorm, cleanContext, normSection, normDetails, cleanCheckItem);
   return {
     message: fallback.message,
     plainMessage: sanitizePlainFeedbackText(fallback.message),
