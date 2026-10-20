@@ -540,7 +540,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       } else {
         list.push({
           id: 'usr_danyelpereira',
-          name: 'Danyel Pereira (Flauta)',
+          name: 'Danyel Pereira',
           email: 'danyel.pereira@crescercampinas.com.br',
           role: 'professor',
           cargoLabel: 'Professor de Flauta / Musicalização',
@@ -574,7 +574,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
       } else {
         list.push({
           id: 'usr_leticia',
-          name: 'Letícia (Balé e Dança)',
+          name: 'Letícia',
           email: 'leticia.danca@crescercampinas.com.br',
           role: 'professor',
           cargoLabel: 'Professora de Balé e Dança',

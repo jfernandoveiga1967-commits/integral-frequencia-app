@@ -981,6 +981,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
   const [isConfirmingAceite, setIsConfirmingAceite] = useState(false);
   const [hasDeclaredCheckbox, setHasDeclaredCheckbox] = useState(false);
   const [isStatusAceiteModalOpen, setIsStatusAceiteModalOpen] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [selectedNormIdForFeedback, setSelectedNormIdForFeedback] = useState<string>('');
   const [selectedChecklistItemForFeedback, setSelectedChecklistItemForFeedback] = useState<string>('');
   const [reminderSentUsers, setReminderSentUsers] = useState<Record<string, boolean>>({});

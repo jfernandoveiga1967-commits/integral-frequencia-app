@@ -50,7 +50,7 @@ export const PRESET_USERS: UserProfile[] = [
   } as UserProfile,
   {
     id: 'usr_danyelpereira',
-    name: 'Danyel Pereira (Flauta)',
+    name: 'Danyel Pereira',
     email: 'danyel.pereira@crescercampinas.com.br',
     role: 'professor' as UserRole,
     cargoLabel: 'Professor de Flauta / Musicalização',
@@ -82,7 +82,7 @@ export const PRESET_USERS: UserProfile[] = [
   } as UserProfile,
   {
     id: 'usr_leticia',
-    name: 'Letícia (Balé e Dança)',
+    name: 'Letícia',
     email: 'leticia.danca@crescercampinas.com.br',
     role: 'professor' as UserRole,
     cargoLabel: 'Professora de Balé e Dança',
@@ -396,16 +396,16 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         raw.id === 'usr_danyelpereira' ||
         (raw.name && raw.name.toLowerCase().includes('danyel'));
 
+      const cleanRawName = raw.name ? raw.name.replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
+      const cleanExistingName = existing.name ? existing.name.replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
+      const resolvedName = cleanRawName || cleanExistingName || (isDanyel ? 'Danyel Pereira' : (raw.name || existing.name || ''));
+
       const normalizedUser: UserProfile = {
         ...existing,
         ...raw,
-        name: isDanyel
-          ? (raw.name && raw.name.includes('Flauta') ? raw.name : 'Danyel Pereira (Flauta)')
-          : raw.name || existing.name,
+        name: resolvedName,
         email: raw.email || existing.email || '',
-        cargoLabel: isDanyel
-          ? 'Professor de Flauta / Musicalização'
-          : (raw.cargoLabel || existing.cargoLabel || ''),
+        cargoLabel: raw.cargoLabel || existing.cargoLabel || (isDanyel ? 'Professor de Flauta / Musicalização' : ''),
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
         status: raw.status || existing.status || ('ATIVO' as UserStatus),

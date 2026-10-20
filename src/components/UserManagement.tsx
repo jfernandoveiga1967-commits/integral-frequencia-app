@@ -216,6 +216,114 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [formContractDivisorHours, setFormContractDivisorHours] = useState<number | string>(220);
   const [formAjudaDeCusto, setFormAjudaDeCusto] = useState<number | string>(0);
   const [formCompany, setFormCompany] = useState('GADAL - Gestão e Apoio');
+  const [formCargoCategory, setFormCargoCategory] = useState<string>('monitor');
+  const [formCargoLabel, setFormCargoLabel] = useState<string>('Monitor / Professor');
+
+  // Helper para detectar a categoria padronizada do cargo a partir dos dados do usuário
+  const detectCargoCategory = (user: UserProfile): string => {
+    if (user.role === 'coordenador' || (user.email && user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com') || user.id === 'usr_coord_1') {
+      return 'coordenador';
+    }
+    if (user.role === 'nutricionista' || (user.cargoLabel && user.cargoLabel.toLowerCase().includes('nutri'))) {
+      return 'nutricionista';
+    }
+    if (
+      user.regimeTrabalho === 'prestador_aula_efetiva' ||
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('efetiv')) ||
+      (user.cargoLabel && user.cargoLabel.toLowerCase().includes('prestador'))
+    ) {
+      return 'professor_prestador';
+    }
+    if (
+      user.regimeTrabalho === 'professor_horista' ||
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('horista')) ||
+      (user.cargoLabel && user.cargoLabel.toLowerCase().includes('horista'))
+    ) {
+      return 'professor_horista';
+    }
+    if (
+      user.cargoLabel &&
+      (user.cargoLabel.toLowerCase().includes('adi') ||
+        (user.role === 'auxiliar' && !user.cargoLabel.toLowerCase().includes('monitor')))
+    ) {
+      return 'auxiliar_adi';
+    }
+    if (
+      (user.cargoLabel && user.cargoLabel.toLowerCase().includes('monitor')) ||
+      user.role === 'auxiliar' ||
+      user.role === 'professor'
+    ) {
+      return 'monitor';
+    }
+    return 'monitor';
+  };
+
+  // Sincronização automática do cargo com regime, permissões e abas liberadas
+  const handleCargoCategoryChange = (newCategory: string) => {
+    setFormCargoCategory(newCategory);
+
+    switch (newCategory) {
+      case 'coordenador':
+        setFormRole('coordenador');
+        setFormCargoLabel('Coordenador (Administrador)');
+        setFormCanManageStudents(true);
+        setFormCanMarkAttendance(true);
+        setFormAllowedTabs([...ALL_APP_TAB_IDS]);
+        break;
+
+      case 'auxiliar_adi':
+        setFormRole('auxiliar');
+        setFormCargoLabel('Auxiliar (ADI)');
+        setFormRegimeTrabalho('mensalista');
+        setFormContractDivisorHours(220);
+        setFormWorkShiftType('padrao_8h');
+        setFormAllowedTabs(['momento', 'frequencia', 'semanario', 'ponto', 'cardapio']);
+        break;
+
+      case 'professor_horista':
+        setFormRole('professor');
+        setFormCargoLabel('Professor Horista (CLT)');
+        setFormRegimeTrabalho('professor_horista');
+        setFormAllowedTabs(['frequencia', 'semanario', 'ponto', 'relatorio']);
+        break;
+
+      case 'professor_prestador':
+        setFormRole('professor');
+        setFormCargoLabel('Professor Prestador (PJ / Aula Efetiva)');
+        setFormRegimeTrabalho('prestador_aula_efetiva');
+        if (!formValorHoraAula || Number(formValorHoraAula) <= 0) {
+          setFormValorHoraAula(33.06);
+        }
+        if (!formDuracaoAulaMinutos || Number(formDuracaoAulaMinutos) <= 0) {
+          setFormDuracaoAulaMinutos(50);
+        }
+        setFormAllowedTabs(['frequencia', 'semanario', 'relatorio']);
+        break;
+
+      case 'monitor':
+        setFormRole('professor');
+        setFormCargoLabel('Monitor(a)');
+        if (formWorkShiftType !== 'padrao_8h') {
+          setFormWorkShiftType('continua_6h');
+          if (!formContractSchedule || formContractSchedule.includes('/')) {
+            setFormContractSchedule('11:40 - 17:40');
+          }
+          setFormContractDailyHours(6);
+          setFormContractDailyHoursFormatted('6h00min');
+          setFormContractDailyMinutes(360);
+        }
+        setFormRegimeTrabalho('mensalista');
+        setFormAllowedTabs(['momento', 'frequencia', 'semanario', 'ponto', 'manual']);
+        break;
+
+      case 'nutricionista':
+        setFormRole('nutricionista');
+        setFormCargoLabel('Nutricionista');
+        setFormRegimeTrabalho('mensalista');
+        setFormAllowedTabs(['cardapio']);
+        break;
+    }
+  };
 
   // Dynamic calculation for schedule and lunch interval
   const scheduleCalculation = useMemo(() => {
@@ -592,11 +700,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Handlers for User Modal
   const handleOpenEditModal = (user: UserProfile) => {
     setEditingUser(user);
-    setFormName(user.name);
+    const cleanInitialName = (user.name || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || user.name || '';
+    setFormName(cleanInitialName);
     setFormEmail(user.email);
     setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
     setFormRole(user.role);
+    const cat = detectCargoCategory(user);
+    setFormCargoCategory(cat);
+    setFormCargoLabel(user.cargoLabel || '');
 
     setFormStatus(getUserStatus(user));
     setFormDataDesligamento(user.dataDesligamento || '');
@@ -709,6 +821,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormEmail('');
     setFormPhone('');
     setFormBirthDate('1995-05-20');
+    setFormCargoCategory('monitor');
+    setFormCargoLabel('Monitor(a)');
     setFormRole('professor');
     setFormStatus('ATIVO');
     setFormDataDesligamento('');
@@ -716,7 +830,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormPin('1234');
     setFormActivities(activitiesList.slice(0, 3).map((a) => a.id));
     setFormTurmas(availableTurmas);
-    setFormAllowedTabs([]);
+    setFormAllowedTabs(['momento', 'frequencia', 'semanario', 'ponto', 'manual']);
     setFormCanManageStudents(true);
     setFormCanMarkAttendance(true);
     setFormPixKey('');
@@ -751,8 +865,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const toggleTabInForm = (tabId: TabType) => {
     setFormAllowedTabs((prev) => {
-      const list = Array.isArray(prev) ? prev : [];
-      return list.includes(tabId) ? list.filter((t) => t !== tabId) : [...list, tabId];
+      const currentList = formRole === 'coordenador' && (!prev || prev.length === 0)
+        ? [...ALL_APP_TAB_IDS]
+        : (Array.isArray(prev) ? prev : []);
+      return currentList.includes(tabId) ? currentList.filter((t) => t !== tabId) : [...currentList, tabId];
     });
   };
 
@@ -920,7 +1036,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       status: effectiveStatus,
       dataDesligamento: effectiveDataDesligamento,
       motivoDesligamento: effectiveMotivoDesligamento,
-      cargoLabel: roleLabels[effectiveRole],
+      cargoLabel: formCargoLabel || (editingUser?.cargoLabel) || roleLabels[effectiveRole],
       avatarColor: roleColors[effectiveRole],
       birthDate: effectiveBirthDate,
       pin: formattedPass || effectiveBirthDate,
@@ -942,14 +1058,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       baseSalary: parsedSalary,
       regimeTrabalho: formRegimeTrabalho,
       regimeContratual: formRegimeTrabalho === 'prestador_aula_efetiva'
-        ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
+        ? 'Prestador por Aula Efetiva PJ / Horista Efetivo'
         : formRegimeTrabalho === 'professor_horista'
-        ? 'Prof. Horista'
+        ? 'Professor Horista CLT (DSR + Hora-Ativ.)'
         : (formWorkShiftType === 'continua_6h'
             ? 'Jornada Contínua / Mensalista (6h)'
-            : (editingUser?.regimeContratual && !editingUser.regimeContratual.toLowerCase().includes('horista') && !editingUser.regimeContratual.toLowerCase().includes('efetiv')
-                ? editingUser.regimeContratual
-                : 'CLT')),
+            : 'Mensalista Jornada Padrão (220h)'),
       valorHoraAula: (formRegimeTrabalho === 'professor_horista' || formRegimeTrabalho === 'prestador_aula_efetiva') ? parsedHoraAula : undefined,
       duracaoAulaMinutos: Number(formDuracaoAulaMinutos) || 50,
       contractDivisorHours: Number(formContractDivisorHours) || 220,
@@ -2778,20 +2892,35 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </span>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <select
-                      value={formRole}
-                      onChange={(e) => setFormRole(e.target.value as UserRole)}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer text-xs"
+                      value={formCargoCategory}
+                      onChange={(e) => handleCargoCategoryChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer text-xs shadow-2xs"
                     >
-                      <option value="coordenador">Coordenador (Administrador - Acesso Total)</option>
-                      <option value="professor">Monitor / Professor (Diário de Classe + Alunos)</option>
-                      <option value="auxiliar">Auxiliar (Apoio Pedagógico)</option>
+                      <option value="coordenador">Coordenador (Administrador)</option>
+                      <option value="auxiliar_adi">Auxiliar (ADI)</option>
+                      <option value="professor_horista">Professor Horista (CLT)</option>
+                      <option value="professor_prestador">Professor Prestador (PJ / Aula Efetiva)</option>
+                      <option value="monitor">Monitor</option>
                       <option value="nutricionista">Nutricionista (Cardápio e Alimentação)</option>
                     </select>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      Atribua o cargo do colaborador. Coordenadores têm acesso total ao sistema; os demais seguem as permissões configuradas.
-                    </p>
+                    <div className="flex items-start gap-1.5 text-[11px] text-indigo-900 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-200">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
+                      <span className="leading-snug">
+                        {formCargoCategory === 'coordenador'
+                          ? 'Coordenador (Administrador): Permissão Admin total e 100% das abas do sistema liberadas.'
+                          : formCargoCategory === 'auxiliar_adi'
+                          ? 'Auxiliar (ADI): Regime Mensalista Jornada Padrão (220h) • Abas: Atividades do Momento, Chamada, Semanário, Livro Ponto e Cardápio.'
+                          : formCargoCategory === 'professor_horista'
+                          ? 'Professor Horista (CLT): Regime Professor Horista CLT (DSR + Hora-Ativ.) • Abas: Chamada, Semanário, Livro Ponto e Relatório.'
+                          : formCargoCategory === 'professor_prestador'
+                          ? 'Professor Prestador (PJ / Aula Efetiva): Regime Prestador por Aula Efetiva PJ / Horista Efetivo • Abas: Chamada, Semanário e Demonstrativo Financeiro.'
+                          : formCargoCategory === 'monitor'
+                          ? 'Monitor: Jornada Contínua (6h) / Padrão • Abas: Atividades do Momento, Chamada, Semanário, Livro Ponto e Manual e Normas.'
+                          : 'Configurações sincronizadas para a função selecionada.'}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3551,71 +3680,69 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   <label className="block font-bold text-slate-800 uppercase tracking-wider text-xs">
                     Abas Liberadas:
                   </label>
-                  {formRole !== 'coordenador' && (
-                    <div className="flex items-center space-x-2 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => setFormAllowedTabs([...ALL_APP_TAB_IDS])}
-                        className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
-                      >
-                        Marcar Todas
-                      </button>
-                      <span className="text-slate-300">•</span>
-                      <button
-                        type="button"
-                        onClick={() => setFormAllowedTabs([])}
-                        className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
-                      >
-                        Desmarcar Todas
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center space-x-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setFormAllowedTabs([...ALL_APP_TAB_IDS])}
+                      className="text-indigo-600 hover:text-indigo-800 font-extrabold cursor-pointer hover:underline"
+                    >
+                      Marcar Todas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setFormAllowedTabs([])}
+                      className="text-slate-500 hover:text-slate-700 font-bold cursor-pointer hover:underline"
+                    >
+                      Desmarcar Todas
+                    </button>
+                  </div>
                 </div>
 
-                {formRole === 'coordenador' ? (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex items-center space-x-2">
+                {formRole === 'coordenador' && (
+                  <div className="p-3 mb-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex items-center space-x-2">
                     <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Perfil <strong>Coordenador</strong> sempre tem acesso total e irrestrito a todas as abas do sistema.</span>
+                    <span>Perfil <strong>Coordenador (Administrador)</strong>: Todas as abas do sistema pré-selecionadas. Ajustes finos manuais disponíveis abaixo.</span>
                   </div>
-                ) : (
-                  <>
-                    <p className="text-[11px] text-slate-500 mb-2">
-                      Defina quais abas e módulos do aplicativo este colaborador pode visualizar e acessar:
-                    </p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
-                      {AVAILABLE_APP_TABS.map((tab) => {
-                        const isChecked = Array.isArray(formAllowedTabs) && formAllowedTabs.includes(tab.id);
-                        return (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => toggleTabInForm(tab.id)}
-                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
-                              isChecked
-                                ? 'bg-indigo-600 border-indigo-700 text-white font-bold shadow-sm ring-2 ring-indigo-300/70'
-                                : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            <div className="truncate pr-2">
-                              <span className={`text-xs block truncate ${isChecked ? 'text-white font-extrabold' : 'text-slate-800 font-medium'}`}>{tab.label}</span>
-                              {tab.description && (
-                                <span className={`text-[10px] block truncate font-normal ${isChecked ? 'text-indigo-100' : 'text-slate-400'}`}>
-                                  {tab.description}
-                                </span>
-                              )}
-                            </div>
-                            {isChecked ? (
-                              <CheckCircle2 className="w-4 h-4 text-white shrink-0 fill-indigo-700" />
-                            ) : (
-                              <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0 bg-white" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
                 )}
+
+                <p className="text-[11px] text-slate-500 mb-2">
+                  Defina quais abas e módulos do aplicativo este colaborador pode visualizar e acessar:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
+                  {AVAILABLE_APP_TABS.map((tab) => {
+                    const isChecked = formRole === 'coordenador'
+                      ? (Array.isArray(formAllowedTabs) && formAllowedTabs.length > 0 ? formAllowedTabs.includes(tab.id) : true)
+                      : (Array.isArray(formAllowedTabs) && formAllowedTabs.includes(tab.id));
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => toggleTabInForm(tab.id)}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                          isChecked
+                            ? 'bg-indigo-600 border-indigo-700 text-white font-bold shadow-sm ring-2 ring-indigo-300/70'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="truncate pr-2">
+                          <span className={`text-xs block truncate ${isChecked ? 'text-white font-extrabold' : 'text-slate-800 font-medium'}`}>{tab.label}</span>
+                          {tab.description && (
+                            <span className={`text-[10px] block truncate font-normal ${isChecked ? 'text-indigo-100' : 'text-slate-400'}`}>
+                              {tab.description}
+                            </span>
+                          )}
+                        </div>
+                        {isChecked ? (
+                          <CheckCircle2 className="w-4 h-4 text-white shrink-0 fill-indigo-700" />
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0 bg-white" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <SaveStatusBanner

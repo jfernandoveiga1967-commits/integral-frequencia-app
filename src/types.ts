@@ -116,7 +116,7 @@ export const AVAILABLE_APP_TABS: AppTabOption[] = [
   { id: 'ponto', label: 'Livro Ponto', description: 'Registro de ponto eletrônico e folha de frequência' },
   { id: 'cardapio', label: 'Cardápio e Culinária', description: 'Cardápio semanal e oficina de receitas' },
   { id: 'alunos', label: 'Alunos e Turmas', description: 'Cadastro e gestão de alunos e turmas' },
-  { id: 'relatorio', label: 'Relatório Semanal', description: 'Relatório analítico semanal de frequência' },
+  { id: 'relatorio', label: 'Relatório / Demonstrativo Financeiro', description: 'Relatório analítico semanal de frequência e Demonstrativo Financeiro' },
   { id: 'biblioteca', label: 'Biblioteca de Semanas', description: 'Histórico consolidado de semanas anteriores' },
   { id: 'usuarios', label: 'Gerenciamento de Usuários', description: 'Administração de colaboradores e permissões' },
   { id: 'manual', label: 'Manual e Normas', description: 'Orientações, normas internas e guia de abordagem sensível' },
