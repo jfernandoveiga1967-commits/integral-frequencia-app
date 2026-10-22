@@ -1,4 +1,5 @@
 import { SemanarioPlan, ScheduleBlock } from '../types.ts';
+import { deduplicateSemanarioPlans } from './semanarioUtils';
 
 /**
  * Normaliza strings para comparação flexível (remove acentos, espaços extras e lowercases)
@@ -43,11 +44,14 @@ export function findMatchingSemanarioPlan(
 ): SemanarioPlan | null {
   if (!block || !Array.isArray(plans) || plans.length === 0) return null;
 
+  // Sanitização automática: deduplica planos por chave única (turma_dia_horario_modalidade)
+  const cleanPlans = deduplicateSemanarioPlans(plans);
+
   const normTurma = normalizeString(turmaName);
   const normDate = targetDate.trim();
 
   // Filtrar planos da mesma turma
-  const turmaPlans = plans.filter((p) => {
+  const turmaPlans = cleanPlans.filter((p) => {
     if (!p) return false;
     const pTurma = normalizeString(p.turma);
     const isSameTurma =

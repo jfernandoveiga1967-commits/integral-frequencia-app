@@ -140,6 +140,12 @@ import {
   subscribeUserNotifications,
   markUserNotificationAsRead,
 } from './services/notificationService';
+import {
+  deduplicateSemanarioPlans,
+  upsertSemanarioPlans,
+  deduplicateScheduleBlocks,
+  upsertScheduleBlocks,
+} from './utils/scheduleDeduplication';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
@@ -386,8 +392,9 @@ export default function App() {
         case 'SYNC_SCHEDULES': {
           const updatedSchedules = message.payload as ScheduleBlock[];
           if (Array.isArray(updatedSchedules)) {
-            setSchedules(updatedSchedules);
-            saveSchedules(updatedSchedules);
+            const clean = deduplicateScheduleBlocks(updatedSchedules);
+            setSchedules(clean);
+            saveSchedules(clean);
           }
           break;
         }
@@ -427,8 +434,9 @@ export default function App() {
         case 'SYNC_SEMANARIO': {
           const updatedPlans = message.payload as SemanarioPlan[];
           if (Array.isArray(updatedPlans)) {
-            setSemanarioPlans(updatedPlans);
-            saveSemanarioPlans(updatedPlans);
+            const clean = deduplicateSemanarioPlans(updatedPlans);
+            setSemanarioPlans(clean);
+            saveSemanarioPlans(clean);
           }
           break;
         }
@@ -668,8 +676,9 @@ export default function App() {
     if (!shouldSyncSchedules) return;
 
     const unsubSchedules = subscribeToSchedules((fsSchedules) => {
-      setSchedules(fsSchedules);
-      saveSchedules(fsSchedules);
+      const cleanSchedules = deduplicateScheduleBlocks(fsSchedules);
+      setSchedules(cleanSchedules);
+      saveSchedules(cleanSchedules);
     });
 
     return () => {
@@ -759,12 +768,14 @@ export default function App() {
 
     const unsubSemanario = subscribeSemanarioPlans((fsPlans) => {
       if (fsPlans && fsPlans.length > 0) {
-        setSemanarioPlans(fsPlans);
-        saveSemanarioPlans(fsPlans);
+        const cleanPlans = deduplicateSemanarioPlans(fsPlans);
+        setSemanarioPlans(cleanPlans);
+        saveSemanarioPlans(cleanPlans);
       } else {
         const localPlans = loadSemanarioPlans();
         if (localPlans.length > 0) {
-          setSemanarioPlans(localPlans);
+          const cleanLocal = deduplicateSemanarioPlans(localPlans);
+          setSemanarioPlans(cleanLocal);
         }
       }
     });
@@ -788,18 +799,19 @@ export default function App() {
       targetDate,
       (fsTodayPlans) => {
         if (fsTodayPlans && fsTodayPlans.length > 0) {
-          setTodaySemanarioPlans(fsTodayPlans);
+          const cleanToday = deduplicateSemanarioPlans(fsTodayPlans);
+          setTodaySemanarioPlans(cleanToday);
         } else {
           const localPlans = loadSemanarioPlans();
           const filtered = localPlans.filter((p) => p.date === targetDate);
-          setTodaySemanarioPlans(filtered);
+          setTodaySemanarioPlans(deduplicateSemanarioPlans(filtered));
         }
       },
       (err) => {
         console.warn('Erro ao escutar planos do dia do Semanário para aba Momento:', err);
         const localPlans = loadSemanarioPlans();
         const filtered = localPlans.filter((p) => p.date === targetDate);
-        setTodaySemanarioPlans(filtered);
+        setTodaySemanarioPlans(deduplicateSemanarioPlans(filtered));
       }
     );
 
@@ -811,9 +823,9 @@ export default function App() {
   const effectiveTodaySemanarioPlans = useMemo(() => {
     const targetDate = selectedDate || todayStr;
     if (shouldSyncSemanario) {
-      return (semanarioPlans || []).filter((p) => p.date === targetDate);
+      return deduplicateSemanarioPlans((semanarioPlans || []).filter((p) => p.date === targetDate));
     }
-    return todaySemanarioPlans;
+    return deduplicateSemanarioPlans(todaySemanarioPlans);
   }, [shouldSyncSemanario, semanarioPlans, todaySemanarioPlans, selectedDate, todayStr]);
 
   // 10. Quadro de Atribuições em Tempo Real
@@ -1639,14 +1651,7 @@ export default function App() {
 
   // Schedule Management Handlers
   const handleSaveScheduleBlock = (block: ScheduleBlock) => {
-    const existingIdx = schedules.findIndex((s) => s.id === block.id);
-    let updated: ScheduleBlock[];
-    if (existingIdx >= 0) {
-      updated = [...schedules];
-      updated[existingIdx] = block;
-    } else {
-      updated = [...schedules, block];
-    }
+    const updated = upsertScheduleBlocks(schedules, [block]);
     setSchedules(updated);
     saveSchedules(updated);
     broadcastSyncEvent('SYNC_SCHEDULES', updated);
@@ -1666,13 +1671,14 @@ export default function App() {
     deletedIds: string[] = [],
     newOrUpdatedOnly?: ScheduleBlock[]
   ) => {
-    setSchedules(blocks);
-    saveSchedules(blocks);
-    broadcastSyncEvent('SYNC_SCHEDULES', blocks);
+    const cleanBlocks = deduplicateScheduleBlocks(blocks);
+    setSchedules(cleanBlocks);
+    saveSchedules(cleanBlocks);
+    broadcastSyncEvent('SYNC_SCHEDULES', cleanBlocks);
     if (deletedIds.length > 0) {
-      batchSyncSchedulesToFirestore(newOrUpdatedOnly || blocks, deletedIds).catch((err) => console.warn('Falha na gravação remota:', err));
+      batchSyncSchedulesToFirestore(newOrUpdatedOnly ? deduplicateScheduleBlocks(newOrUpdatedOnly) : cleanBlocks, deletedIds).catch((err) => console.warn('Falha na gravação remota:', err));
     } else {
-      saveAllSchedulesToFirestore(newOrUpdatedOnly || blocks).catch((err) => console.warn('Falha na gravação remota:', err));
+      saveAllSchedulesToFirestore(newOrUpdatedOnly ? deduplicateScheduleBlocks(newOrUpdatedOnly) : cleanBlocks).catch((err) => console.warn('Falha na gravação remota:', err));
     }
   };
 
@@ -1770,14 +1776,7 @@ export default function App() {
   // Semanário Pedagogical Planning Handlers
   const handleSaveSemanarioPlan = useCallback((plan: SemanarioPlan) => {
     setSemanarioPlans((prev) => {
-      const idx = prev.findIndex((p) => p.id === plan.id);
-      let next: SemanarioPlan[];
-      if (idx >= 0) {
-        next = [...prev];
-        next[idx] = plan;
-      } else {
-        next = [plan, ...prev];
-      }
+      const next = upsertSemanarioPlans(prev, [plan]);
       saveSemanarioPlans(next);
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
@@ -1797,10 +1796,7 @@ export default function App() {
 
   const handleBatchSaveSemanarioPlans = useCallback((plansToSave: SemanarioPlan[]) => {
     setSemanarioPlans((prev) => {
-      const map = new Map<string, SemanarioPlan>();
-      prev.forEach((p) => map.set(p.id, p));
-      plansToSave.forEach((p) => map.set(p.id, p));
-      const merged = Array.from(map.values());
+      const merged = upsertSemanarioPlans(prev, plansToSave);
       saveSemanarioPlans(merged);
       return merged;
     });

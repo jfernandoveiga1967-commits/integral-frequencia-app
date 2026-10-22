@@ -47,6 +47,7 @@ import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
 import { ActivityScheduleView } from './ActivityScheduleView';
 import { processMarkdownAndIconsForPDF } from '../utils/markdownUtils';
 import { PdfViewerModal, PDFPreviewModal } from './PdfViewerModal';
+import { deduplicateScheduleBlocks, upsertScheduleBlocks } from '../utils/scheduleDeduplication';
 
 interface ScheduleManagerProps {
   turmas: TurmaType[];
@@ -405,10 +406,13 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     }
   };
 
+  // Deduplicated schedules to prevent duplicate modality entries
+  const cleanSchedules = useMemo(() => deduplicateScheduleBlocks(schedules), [schedules]);
+
   // Filter schedules for the selected turma
   const currentTurmaSchedules = useMemo(() => {
-    return schedules.filter((s) => s.turma === selectedTurma);
-  }, [schedules, selectedTurma]);
+    return cleanSchedules.filter((s) => s.turma === selectedTurma);
+  }, [cleanSchedules, selectedTurma]);
 
   // Group schedules by day of the week and sort by startTime
   const schedulesByDay = useMemo(() => {
@@ -584,8 +588,23 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             updatedAt: new Date().toISOString(),
           });
         } else {
+          // Trava de Deduplicação / Reescrita Inteligente (Upsert):
+          // Verifica se já existe um registro com a mesma turma, horário e modalidade/atividade
+          const existingBlock = schedules.find((s) =>
+            s.turma === t &&
+            s.dayOfWeek === d &&
+            s.startTime === formStartTime &&
+            s.endTime === formEndTime &&
+            s.activityId === formActivityId
+          ) || schedules.find((s) =>
+            s.turma === t &&
+            s.dayOfWeek === d &&
+            s.startTime === formStartTime &&
+            s.endTime === formEndTime
+          );
+
           blocksToSave.push({
-            id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${t.replace(/\s+/g, '_').toLowerCase()}_${d}`,
+            id: existingBlock?.id || `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${t.replace(/\s+/g, '_').toLowerCase()}_${d}`,
             turma: t,
             dayOfWeek: d,
             startTime: formStartTime,
@@ -593,7 +612,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             activityId: formActivityId,
             location: formLocation.trim() || undefined,
             guidelines: formGuidelines.trim() || undefined,
-            createdAt: new Date().toISOString(),
+            createdAt: existingBlock?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           });
         }
@@ -608,10 +627,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       );
     } else {
       if (onBatchSaveSchedules) {
-        const existingMap = new Map<string, ScheduleBlock>();
-        schedules.forEach((s) => existingMap.set(s.id, s));
-        blocksToSave.forEach((b) => existingMap.set(b.id, b));
-        const updatedTotal = Array.from(existingMap.values());
+        const updatedTotal = upsertScheduleBlocks(schedules, blocksToSave);
         onBatchSaveSchedules(updatedTotal, [], blocksToSave);
       } else {
         blocksToSave.forEach((b) => onSaveScheduleBlock(b));
@@ -692,8 +708,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     // Generate new duplicated blocks for each target turma
     fullRoutineTargetTurmas.forEach((targetTurma) => {
       sourceBlocks.forEach((src) => {
+        const existingBlock = schedules.find((s) =>
+          s.turma === targetTurma &&
+          s.dayOfWeek === src.dayOfWeek &&
+          s.startTime === src.startTime &&
+          s.endTime === src.endTime &&
+          s.activityId === src.activityId
+        );
         const duplicated: ScheduleBlock = {
-          id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          id: existingBlock?.id || `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           turma: targetTurma,
           dayOfWeek: src.dayOfWeek,
           startTime: src.startTime,
@@ -701,7 +724,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           activityId: src.activityId,
           location: src.location || '',
           guidelines: src.guidelines || '',
-          createdAt: new Date().toISOString(),
+          createdAt: existingBlock?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         newBlocks.push(duplicated);
@@ -713,9 +736,9 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     if (fullRoutineOverwrite) {
       const deletedIdSet = new Set(deletedIds);
       const preserved = schedules.filter((s) => !deletedIdSet.has(s.id));
-      updatedTotalSchedules = [...preserved, ...newBlocks];
+      updatedTotalSchedules = upsertScheduleBlocks(preserved, newBlocks);
     } else {
-      updatedTotalSchedules = [...schedules, ...newBlocks];
+      updatedTotalSchedules = upsertScheduleBlocks(schedules, newBlocks);
     }
 
     if (onBatchSaveSchedules) {
@@ -840,8 +863,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     // Generate new duplicated blocks for each target pair
     targetPairs.forEach((pair) => {
       sourceBlocks.forEach((src) => {
+        const existingBlock = schedules.find((s) =>
+          s.turma === pair.turma &&
+          s.dayOfWeek === pair.day &&
+          s.startTime === src.startTime &&
+          s.endTime === src.endTime &&
+          s.activityId === src.activityId
+        );
         const duplicated: ScheduleBlock = {
-          id: `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          id: existingBlock?.id || `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           turma: pair.turma,
           dayOfWeek: pair.day,
           startTime: src.startTime,
@@ -849,7 +879,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           activityId: src.activityId,
           location: src.location || '',
           guidelines: src.guidelines || '',
-          createdAt: new Date().toISOString(),
+          createdAt: existingBlock?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         newBlocks.push(duplicated);
@@ -861,9 +891,9 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     if (dayReplicateOverwrite) {
       const deletedIdSet = new Set(deletedIds);
       const preserved = schedules.filter((s) => !deletedIdSet.has(s.id));
-      updatedTotalSchedules = [...preserved, ...newBlocks];
+      updatedTotalSchedules = upsertScheduleBlocks(preserved, newBlocks);
     } else {
-      updatedTotalSchedules = [...schedules, ...newBlocks];
+      updatedTotalSchedules = upsertScheduleBlocks(schedules, newBlocks);
     }
 
     if (onBatchSaveSchedules) {

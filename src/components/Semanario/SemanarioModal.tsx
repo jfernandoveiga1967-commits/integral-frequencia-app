@@ -27,7 +27,10 @@ import {
   getScheduleBlocksForTurma,
   generateCuratedProposal,
   isTurmaEligibleForProjeto,
+  deduplicateSemanarioPlans,
+  upsertSemanarioPlans,
 } from '../../utils/semanarioUtils';
+import { loadSemanarioPlans } from '../../utils/storageUtils';
 import { getWeekInfo, getWeekDays } from '../../utils/dateUtils';
 import { isCoordenador } from '../../utils/authUtils';
 import { fetchGeminiProposal } from '../../utils/semanarioAiGenerator';
@@ -49,6 +52,7 @@ interface SemanarioModalProps {
   year: number;
   defaultDate?: string;
   defaultDayOfWeek?: DayOfWeek;
+  existingPlans?: SemanarioPlan[];
 }
 
 // Dias letivos da semana para replicação
@@ -76,6 +80,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
   year,
   defaultDate,
   defaultDayOfWeek = 'segunda',
+  existingPlans,
 }) => {
   // Contextual metadata
   const [turma, setTurma] = useState<TurmaType>(turmas[0] || '1º Ano Azul');
@@ -493,6 +498,9 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     const targetTurmas = [turma, ...selectedCopyTurmas.filter((t) => t !== turma)];
     const targetDays = [dayOfWeek, ...selectedCopyDays.filter((d) => d !== dayOfWeek)];
 
+    const currentAllPlans = existingPlans && existingPlans.length > 0 ? existingPlans : loadSemanarioPlans();
+    const cleanAllPlans = deduplicateSemanarioPlans(currentAllPlans);
+
     const replicatedPlans: SemanarioPlan[] = [];
     let replicaIndex = 1;
 
@@ -503,17 +511,34 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
           continue;
         }
 
+        const targetDate = getDateForDay(d);
+        // Trava de Deduplicação / Reescrita Inteligente (Upsert):
+        // Antes de inserir a modalidade no dia de destino, verifica se já existe um registro
+        // com a mesma turma, horário e modalidade/atividade. Se já existir, substitui (Upsert).
+        const existingMatch = cleanAllPlans.find((p) => {
+          const matchTurma = p.turma === t;
+          const matchDay = p.dayOfWeek === d || p.date === targetDate;
+          const matchTime = (p.timeSlot || '').trim() === (timeSlot || '').trim();
+          const matchCategory =
+            ((p.category || '').trim().toLowerCase() === (category || '').trim().toLowerCase()) &&
+            category.trim() !== '';
+          const matchTitle =
+            ((p.title || '').trim().toLowerCase() === (savedTitle || '').trim().toLowerCase()) &&
+            savedTitle.trim() !== '';
+          return matchTurma && matchDay && (matchTime || (matchCategory && matchTitle));
+        });
+
         replicatedPlans.push({
           ...primaryPlan,
-          id: `plan_${Date.now()}_${replicaIndex++}_${Math.random().toString(36).substring(2, 7)}`,
+          id: existingMatch?.id || `plan_${Date.now()}_${replicaIndex++}_${Math.random().toString(36).substring(2, 7)}`,
           turma: t,
           dayOfWeek: d,
-          date: getDateForDay(d),
+          date: targetDate,
           status: copyExecutionRecords ? status : 'pendente',
           substitutionReason: copyExecutionRecords && status === 'substituida' ? substitutionReason.trim() : undefined,
           photos: copyExecutionRecords && photos.length > 0 ? [...photos] : undefined,
           notes: copyExecutionRecords && notes.trim() ? notes.trim() : undefined,
-          createdAt: new Date().toISOString(),
+          createdAt: existingMatch?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           ...({
             descricao: savedDesc,
@@ -528,11 +553,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     }
 
     if (replicatedPlans.length > 0) {
+      const allToUpsert = [primaryPlan, ...replicatedPlans];
       if (onBatchSave) {
-        onBatchSave([primaryPlan, ...replicatedPlans]);
+        onBatchSave(allToUpsert);
       } else {
-        onSave(primaryPlan);
-        replicatedPlans.forEach((p) => onSave(p));
+        allToUpsert.forEach((p) => onSave(p));
       }
     } else {
       onSave(primaryPlan);

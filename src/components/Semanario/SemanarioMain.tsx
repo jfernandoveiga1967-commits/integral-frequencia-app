@@ -1777,6 +1777,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         weekNumber={currentWeek.weekNumber}
         year={currentWeek.year}
         defaultDayOfWeek={defaultDayForModal}
+        existingPlans={plans}
       />
 
       {/* Modal for Adding New Turma */}

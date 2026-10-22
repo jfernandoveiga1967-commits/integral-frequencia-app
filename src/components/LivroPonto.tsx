@@ -798,7 +798,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     targetUser?.dataAdmissao,
   ]);
 
-  // Handle Quick Punch (Registrar Batida Agora)
+  // Handle Quick Punch (Registrar Batida)
   const handleQuickPunch = async () => {
     // 1. Bloqueio Instantâneo no primeiro milissegundo do clique
     if (isRegisteringPunchRef.current) return;

@@ -71,7 +71,13 @@ import { DepartureAlertBanner } from './DepartureAlertBanner';
 import { DepartureAlertModal } from './DepartureAlertModal';
 import { StudentCheckoutAlert } from './StudentCheckoutAlert';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
-import { isReforcoActivity, isStudentInReforco, isStudentInReforcoVigency } from '../utils/semanarioUtils';
+import {
+  isReforcoActivity,
+  isStudentInReforco,
+  isStudentInReforcoVigency,
+  deduplicateSemanarioPlans,
+  deduplicateScheduleBlocks,
+} from '../utils/semanarioUtils';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { WhatsAppNotifyModal } from './WhatsAppNotifyModal';
@@ -527,12 +533,21 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     return hasRotinaAct || isAuxiliarRole;
   }, [currentUser, isCoord, userAssignedTurmasList, userAssignedActivities]);
 
+  // Sanitização automática: deduplicação por chave única (turma_dia_horario_modalidade)
+  const cleanSchedules = useMemo(() => {
+    return deduplicateScheduleBlocks(Array.isArray(schedules) ? schedules : []);
+  }, [schedules]);
+
+  const cleanTodaySemanarioPlans = useMemo(() => {
+    return deduplicateSemanarioPlans(Array.isArray(todaySemanarioPlans) ? todaySemanarioPlans : []);
+  }, [todaySemanarioPlans]);
+
   // Blocos da Grade Horária que atendem rigorosamente a:
   // a) O dia da semana da atividade na Grade Horária corresponde ao dia atual (effectiveDayOfWeek).
   // b) Herança total de atividades para perfil 'Rotina' vinculada à turma OU modalidade específica para especialistas.
   // c) A turma está inclusa na lista 'turmas' do perfil do usuário.
   const userTodayScheduleBlocks = useMemo(() => {
-    const safeSchedules = Array.isArray(schedules) ? schedules : [];
+    const safeSchedules = cleanSchedules;
     if (isCoord || !currentUser) {
       return safeSchedules.filter((s) => s && s.dayOfWeek === effectiveDayOfWeek);
     }
@@ -558,7 +573,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       return matchesActivity;
     });
   }, [
-    schedules,
+    cleanSchedules,
     effectiveDayOfWeek,
     isCoord,
     currentUser,
@@ -571,7 +586,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
   // Outros dias da semana em que este professor/monitor possui atividades na Grade Horária
   const userOtherDaysWithClasses = useMemo(() => {
-    const safeSchedules = Array.isArray(schedules) ? schedules : [];
+    const safeSchedules = cleanSchedules;
     if (isCoord || !currentUser) return [];
     const otherBlocks = safeSchedules.filter((s) => {
       if (!s) return false;
@@ -594,7 +609,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     const distinctDays = Array.from(new Set(otherBlocks.map((b) => b.dayOfWeek).filter(Boolean)));
     return daysOrder.filter((d) => distinctDays.includes(d));
   }, [
-    schedules,
+    cleanSchedules,
     isCoord,
     currentUser,
     isRotinaProfile,
@@ -648,7 +663,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       // Para Coordenador e Monitora com perfil 'Rotina': exibe TODAS as atividades da grade da turma
       // Para Professor Especialista: exibe apenas as atividades correspondentes às suas modalidades atribuídas
       const turmaBlocks = isCoord || !currentUser || isRotinaProfile
-        ? schedules
+        ? cleanSchedules
             .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
             .sort((a, b) => a.startTime.localeCompare(b.startTime))
         : userTodayScheduleBlocks
@@ -1474,13 +1489,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
             // Busca os planos correspondentes do Semanário Pedagógico para hoje
             const activePlan = findMatchingSemanarioPlan(
-              todaySemanarioPlans,
+              cleanTodaySemanarioPlans,
               turmaName,
               selectedDate,
               activeBlock
             );
             const nextPlan = findMatchingSemanarioPlan(
-              todaySemanarioPlans,
+              cleanTodaySemanarioPlans,
               turmaName,
               selectedDate,
               nextBlock

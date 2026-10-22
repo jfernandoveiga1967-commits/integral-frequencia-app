@@ -7,6 +7,7 @@ import { getDefaultScheduleBlocks } from './scheduleDefaults';
 import { syncMealSnapshotsFromRecords } from './mealFinanceUtils';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
 import { repairOverlappedPontoRecords } from './pontoUtils';
+import { deduplicateSemanarioPlans, deduplicateScheduleBlocks } from './scheduleDeduplication';
 
 export const STUDENTS_KEY = 'integral_frequencia_students_v1';
 export const DELETED_STUDENTS_KEY = 'integral_frequencia_deleted_students_v1';
@@ -655,13 +656,13 @@ export function loadSchedules(): ScheduleBlock[] {
     if (data) {
       const parsed: ScheduleBlock[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return deduplicateScheduleBlocks(parsed);
       }
     }
   } catch (e) {
     console.error('Erro ao carregar grade horária do LocalStorage:', e);
   }
-  const defaultBlocks = getDefaultScheduleBlocks();
+  const defaultBlocks = deduplicateScheduleBlocks(getDefaultScheduleBlocks());
   saveSchedules(defaultBlocks);
   return defaultBlocks;
 }
@@ -947,13 +948,13 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
     if (data) {
       const parsed: SemanarioPlan[] = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return deduplicateSemanarioPlans(parsed);
       }
     }
   } catch (e) {
     console.warn('Aviso ao carregar planos do Semanário do LocalStorage:', e);
   }
-  const defaultPlans = getInitialSamplePlans();
+  const defaultPlans = deduplicateSemanarioPlans(getInitialSamplePlans());
   saveSemanarioPlans(defaultPlans);
   return defaultPlans;
 }
