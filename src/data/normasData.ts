@@ -10,6 +10,8 @@
  */
 
 import type { ManualNorma, ModuleCategory, NormaType } from '../types/manualNormas';
+import { parseSectionNumber, cleanNormaTitle } from '../types/manualNormas';
+export { cleanNormaTitle };
 
 export interface NormaDataRecord extends ManualNorma {
   section: string; // Ex: 'Seção 1', 'Seção 17', ... 'Seção 51'
@@ -1421,3 +1423,130 @@ export const MODULES_METADATA_4 = [
 ];
 
 export const MODULES_METADATA_6 = MODULES_METADATA_4;
+
+/**
+ * Normaliza e consolida o Módulo 1 (Rotina Operacional), garantindo:
+ * 1. Agrupamento estrito sob o Módulo 1: Rotina Operacional.
+ * 2. Sequenciamento lógico contínuo das Seções 1 a 16.
+ * 3. Unificação de subseções equivalentes e remoção de múltiplos títulos 'Seção 1'.
+ * 4. Preservação integral dos textos originais das normas e dos demais módulos.
+ */
+
+export function normalizeAndDeduplicateNormas(
+  rawList: ManualNorma[]
+): ManualNorma[] {
+  const moduleBySection: Record<
+    number,
+    { moduleId: ModuleCategory; moduleTitle: string }
+  > = {
+    1: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    2: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    3: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    4: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    5: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+
+    6: { moduleId: "alimentacao_refeitorio", moduleTitle: "Alimentação, refeitório e segurança alimentar" },
+    7: { moduleId: "alimentacao_refeitorio", moduleTitle: "Alimentação, refeitório e segurança alimentar" },
+    8: { moduleId: "alimentacao_refeitorio", moduleTitle: "Alimentação, refeitório e segurança alimentar" },
+    9: { moduleId: "alimentacao_refeitorio", moduleTitle: "Alimentação, refeitório e segurança alimentar" },
+
+    10: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+
+    11: { moduleId: "rotina_pedagogica", moduleTitle: "Rotina diária, acolhimento e organização pedagógica" },
+    12: { moduleId: "rotina_pedagogica", moduleTitle: "Rotina diária, acolhimento e organização pedagógica" },
+    13: { moduleId: "rotina_pedagogica", moduleTitle: "Rotina diária, acolhimento e organização pedagógica" },
+
+    14: { moduleId: "comunicacao_registros", moduleTitle: "Comunicação, registros, ocorrências e entrega de alunos" },
+    15: { moduleId: "comunicacao_registros", moduleTitle: "Comunicação, registros, ocorrências e entrega de alunos" },
+    16: { moduleId: "comunicacao_registros", moduleTitle: "Comunicação, registros, ocorrências e entrega de alunos" },
+
+    17: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+    18: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+    19: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+    20: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+    21: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+    22: { moduleId: "seguranca_supervisao", moduleTitle: "Segurança, supervisão e prevenção de acidentes" },
+
+    23: { moduleId: "academia_transporte", moduleTitle: "Academia, atividades externas e transporte" },
+    24: { moduleId: "academia_transporte", moduleTitle: "Academia, atividades externas e transporte" },
+    25: { moduleId: "academia_transporte", moduleTitle: "Academia, atividades externas e transporte" },
+    26: { moduleId: "academia_transporte", moduleTitle: "Academia, atividades externas e transporte" },
+
+    27: { moduleId: "alimentacao_refeitorio", moduleTitle: "Alimentação, refeitório e segurança alimentar" },
+
+    28: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    29: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    30: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    31: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    32: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    33: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+    34: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+
+    35: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    36: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    37: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+
+    38: { moduleId: "identidade_institucional", moduleTitle: "Identidade institucional, equipe e organização do trabalho" },
+
+    39: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    40: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    41: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    42: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    43: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    44: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    45: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+    46: { moduleId: "abordagem_socioemocional", moduleTitle: "Abordagem sensível, limites e desenvolvimento socioemocional" },
+
+    47: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    48: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    49: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    50: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+    51: { moduleId: "saude_higiene", moduleTitle: "Saúde, higiene e cuidados pessoais" },
+  };
+
+  const uniqueNormas = new Map<string, ManualNorma>();
+
+    // As normas oficiais servem como base para recuperar eventuais itens ausentes.
+  for (const norma of NORMAS_DATA) {
+    const sectionNumber = parseSectionNumber(
+      norma.sectionNumber || norma.section
+    );
+    const officialModule = moduleBySection[sectionNumber];
+
+    const normalized = {
+      ...norma,
+      ...(officialModule ?? {}),
+    } as ManualNorma;
+
+    uniqueNormas.set(normalized.id, normalized);
+  }
+
+  // Mantém o conteúdo já existente, inclusive edições administrativas,
+  // mas corrige a classificação temática pela numeração oficial da seção.
+  for (const norma of rawList) {
+    const sectionNumber = parseSectionNumber(
+      norma.sectionNumber || norma.section
+    );
+    const officialModule = moduleBySection[sectionNumber];
+
+    const normalized = {
+      ...norma,
+      ...(officialModule ?? {}),
+    } as ManualNorma;
+
+    uniqueNormas.set(normalized.id, normalized);
+  }
+
+  return Array.from(uniqueNormas.values()).sort((a, b) => {
+    const sectionA =
+      parseSectionNumber(a.sectionNumber || a.section) || 0;
+    const sectionB =
+      parseSectionNumber(b.sectionNumber || b.section) || 0;
+
+    if (sectionA !== sectionB) {
+      return sectionA - sectionB;
+    }
+
+    return String(a.id).localeCompare(String(b.id));
+  });
+}

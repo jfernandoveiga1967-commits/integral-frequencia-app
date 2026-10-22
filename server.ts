@@ -31,7 +31,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json({ limit: '20mb' }));
 
@@ -86,6 +86,17 @@ app.post('/api/demonstrativo/apuracao', (req, res) => {
       });
     }
 
+    const isDanyel =
+      prestador &&
+      (prestador.id === 'usr_danyelpereira' ||
+        Boolean(prestador.name && prestador.name.toLowerCase().includes('danyel')));
+
+    const effectiveActivities = isDanyel
+      ? ['Flauta']
+      : (Array.isArray(prestadorActivities) && prestadorActivities.length > 0
+          ? prestadorActivities
+          : ['Flauta']);
+
     const resultado = calculateDemonstrativoPJ({
       prestador,
       startDate,
@@ -93,7 +104,7 @@ app.post('/api/demonstrativo/apuracao', (req, res) => {
       holidays,
       records,
       schedules,
-      prestadorActivities,
+      prestadorActivities: effectiveActivities,
     });
 
     return res.json({
@@ -116,13 +127,15 @@ app.get('/api/demonstrativo/teto-grade/:prestadorId', (req, res) => {
     const dummyUser: any = {
       id: prestadorId,
       name: isDanyel ? 'Danyel Pereira' : 'Professor Prestador',
+      role: 'professor',
+      cargoLabel: isDanyel ? 'Professor de Flauta' : 'Professor Prestador',
       regimeTrabalho: 'prestador_aula_efetiva',
       valorHoraAula: 33.06,
       assignedActivities: ['Flauta'],
       specialtyActivity: 'Flauta',
     };
 
-    const tetoInfo = calculateDynamicTetoPrestador(dummyUser);
+    const tetoInfo = calculateDynamicTetoPrestador(dummyUser, undefined, ['Flauta']);
     return res.json({
       success: true,
       prestadorId,

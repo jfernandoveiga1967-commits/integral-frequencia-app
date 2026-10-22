@@ -534,8 +534,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           duracaoAulaMinutos: danyelFromUsers.duracaoAulaMinutos || 50,
           diasGradeAutorizados: danyelFromUsers.diasGradeAutorizados || ['segunda', 'terca'],
           tetoSemanalAulas: danyelFromUsers.tetoSemanalAulas || 8,
-          assignedActivities: Array.from(new Set(['Flauta', ...(danyelFromUsers.assignedActivities || [])])),
+          assignedActivities: ['Flauta'],
           specialtyActivity: 'Flauta',
+          cargoLabel: 'Professor de Flauta',
         });
       } else {
         list.push({
@@ -543,7 +544,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           name: 'Danyel Pereira',
           email: 'danyel.pereira@crescercampinas.com.br',
           role: 'professor',
-          cargoLabel: 'Professor de Flauta / Musicalização',
+          cargoLabel: 'Professor de Flauta',
           avatarColor: 'bg-emerald-600',
           regimeTrabalho: 'prestador_aula_efetiva',
           regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
@@ -603,6 +604,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   const prestadorActivities = useMemo(() => {
     if (!selectedPrestador) return [];
+    const isDanyel =
+      selectedPrestador.id === 'usr_danyelpereira' ||
+      Boolean(selectedPrestador.name && selectedPrestador.name.toLowerCase().includes('danyel'));
+
+    if (isDanyel) {
+      return ['Flauta'];
+    }
+
     const acts = new Set<string>();
     if (Array.isArray(selectedPrestador.assignedActivities) && selectedPrestador.assignedActivities.length > 0) {
       selectedPrestador.assignedActivities.forEach((a) => a && acts.add(a));

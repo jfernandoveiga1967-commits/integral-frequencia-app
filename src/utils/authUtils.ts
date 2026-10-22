@@ -53,7 +53,7 @@ export const PRESET_USERS: UserProfile[] = [
     name: 'Danyel Pereira',
     email: 'danyel.pereira@crescercampinas.com.br',
     role: 'professor' as UserRole,
-    cargoLabel: 'Professor de Flauta / Musicalização',
+    cargoLabel: 'Professor de Flauta',
     avatarColor: 'bg-emerald-600',
     birthDate: '1995-05-15',
     pin: '15/05/1995',
@@ -272,46 +272,242 @@ export interface BadgeStyle {
   className: string;
 }
 
-// Estilo do selo (badge) exibido ao lado do nome/cargo do usuário.
-// Aceita tanto objeto UserProfile quanto string de cargo/role.
-export function getRoleBadgeStyle(userOrRole?: UserProfile | UserRole | string | null): BadgeStyle {
-  const role = typeof userOrRole === 'object' && userOrRole !== null
-    ? String(userOrRole.role || '')
-    : String(userOrRole || '');
+export type UnifiedCargoCategory =
+  | 'coordenador'
+  | 'auxiliar_adi'
+  | 'professor_horista'
+  | 'professor_prestador'
+  | 'monitor'
+  | 'nutricionista';
 
-  switch (role) {
+/**
+ * Detecta a categoria padronizada oficial do colaborador.
+ * Categorias oficiais:
+ * - coordenador: Coordenador (Admin)
+ * - auxiliar_adi: Auxiliar (ADI)
+ * - professor_horista: Professor Horista (CLT)
+ * - professor_prestador: Professor Prestador (PJ)
+ * - monitor: Monitor
+ * - nutricionista: Nutricionista
+ */
+export function detectCargoCategory(userOrRole?: UserProfile | UserRole | string | null): UnifiedCargoCategory {
+  if (!userOrRole) return 'monitor';
+
+  if (typeof userOrRole === 'string') {
+    const s = userOrRole.trim().toLowerCase();
+    if (s === 'coordenador' || s === 'admin' || s === 'administrador') return 'coordenador';
+    if (s === 'nutricionista' || s.includes('nutri')) return 'nutricionista';
+    if (s === 'professor_prestador' || s.includes('prestador') || s.includes('pj')) return 'professor_prestador';
+    if (s === 'professor_horista' || s.includes('horista')) return 'professor_horista';
+    if (s === 'auxiliar_adi' || s === 'auxiliar' || s.includes('adi')) return 'auxiliar_adi';
+    if (s === 'monitor') return 'monitor';
+    return 'monitor';
+  }
+
+  const user = userOrRole as any;
+  const role = String(user.role || '').trim().toLowerCase();
+  const label = String(user.cargoLabel || '').trim().toLowerCase();
+  const regimeTrab = String(user.regimeTrabalho || '').trim().toLowerCase();
+  const regimeCont = String(user.regimeContratual || '').trim().toLowerCase();
+  const email = String(user.email || '').trim().toLowerCase();
+  const id = String(user.id || '').trim().toLowerCase();
+  const name = String(user.name || '').trim().toLowerCase();
+
+  // 1. Coordenador (Admin)
+  if (
+    role === 'coordenador' ||
+    role === 'admin' ||
+    role === 'administrador' ||
+    id === 'usr_coord_1' ||
+    email === ADMIN_EMAIL ||
+    email === 'jfernandoveiga1967@gmail.com' ||
+    label.includes('coordenador') ||
+    label.includes('administrador')
+  ) {
+    return 'coordenador';
+  }
+
+  // 2. Nutricionista
+  if (
+    role === 'nutricionista' ||
+    label.includes('nutri') ||
+    name.includes('thaís grisoni') ||
+    name.includes('thais grisoni') ||
+    email.includes('thaisgriisoni')
+  ) {
+    return 'nutricionista';
+  }
+
+  // 3. Professor Prestador (PJ)
+  if (
+    regimeTrab === 'prestador_aula_efetiva' ||
+    regimeCont.includes('prestador') ||
+    regimeCont.includes('aula efetiva') ||
+    regimeCont.includes('pj') ||
+    label.includes('prestador') ||
+    label.includes('pj') ||
+    id === 'usr_danyelpereira' ||
+    name.includes('danyel') ||
+    label.includes('flauta') ||
+    ((user.assignedActivities || []).some((a: any) => String(a).toLowerCase().includes('flauta')))
+  ) {
+    return 'professor_prestador';
+  }
+
+  // 4. Professor Horista (CLT)
+  if (
+    regimeTrab === 'professor_horista' ||
+    regimeCont.includes('horista') ||
+    label.includes('horista') ||
+    (label.includes('professor') && regimeTrab.includes('horista')) ||
+    (label.includes('professora') && regimeTrab.includes('horista')) ||
+    id === 'usr_leticia' ||
+    name.includes('letícia') ||
+    name.includes('leticia')
+  ) {
+    return 'professor_horista';
+  }
+
+  // 5. Auxiliar (ADI)
+  if (
+    label.includes('adi') ||
+    label.includes('auxiliar') ||
+    (role === 'auxiliar' && !label.includes('monitor'))
+  ) {
+    return 'auxiliar_adi';
+  }
+
+  // 6. Monitor
+  if (
+    label.includes('monitor') ||
+    role === 'auxiliar' ||
+    role === 'professor'
+  ) {
+    return 'monitor';
+  }
+
+  return 'monitor';
+}
+
+/**
+ * Retorna a oficina vinculada para professores PJ (sem resquícios de Musicalização).
+ */
+export function getProfessorPJOficina(user?: UserProfile | null): string | null {
+  if (!user) return null;
+  const isDanyel =
+    user.id === 'usr_danyelpereira' ||
+    (user.name && user.name.toLowerCase().includes('danyel'));
+
+  if (isDanyel) {
+    return 'Professor de Flauta';
+  }
+
+  const label = (user.cargoLabel || '').trim();
+  if (label && !label.toLowerCase().includes('prestador') && !label.toLowerCase().includes('pj')) {
+    const cleanLabel = label
+      .replace(/musicalização/gi, '')
+      .replace(/musicalidade/gi, '')
+      .replace(/roda de música/gi, '')
+      .trim();
+    if (cleanLabel) return cleanLabel;
+  }
+
+  if (user.specialtyActivity) {
+    const act = user.specialtyActivity.trim();
+    if (act.toLowerCase() === 'flauta') return 'Professor de Flauta';
+    return act;
+  }
+
+  const activities = (user.assignedActivities || []).filter(
+    (a) =>
+      !String(a).toLowerCase().includes('musicalização') &&
+      !String(a).toLowerCase().includes('musicalidade') &&
+      !String(a).toLowerCase().includes('roda de música')
+  );
+
+  if (activities.length > 0) {
+    const act = activities[0];
+    if (act.toLowerCase() === 'flauta') return 'Professor de Flauta';
+    return act;
+  }
+
+  return null;
+}
+
+/**
+ * Retorna o rótulo unificado exato do cargo/função para badges da tela e exportação de PDF.
+ * Garante que a coluna 'CARGO/FUNÇÃO' do PDF utilize estritamente a mesma string/rótulo formatado das badges da tela.
+ */
+export function getUnifiedCargoDisplay(userOrRole?: UserProfile | UserRole | string | null): string {
+  const cat = detectCargoCategory(userOrRole);
+  const user = typeof userOrRole === 'object' && userOrRole !== null ? userOrRole : null;
+  const badge = getRoleBadgeStyle(userOrRole);
+
+  if (cat === 'professor_prestador') {
+    const oficina = getProfessorPJOficina(user);
+    if (oficina) {
+      return `${badge.label} - ${oficina}`;
+    }
+    return badge.label;
+  }
+
+  return badge.label;
+}
+
+// Estilo do selo (badge) exibido ao lado do nome/cargo do usuário.
+// Aceita tanto objeto UserProfile quanto string de cargo/role/categoria.
+export function getRoleBadgeStyle(userOrRole?: UserProfile | UserRole | string | null): BadgeStyle {
+  const cat = detectCargoCategory(userOrRole);
+
+  switch (cat) {
     case 'coordenador':
       return {
         bg: 'bg-amber-500/15',
-        text: 'text-amber-300',
+        text: 'text-amber-800 dark:text-amber-300',
         border: 'border-amber-500/30',
-        label: 'Coordenador',
-        className: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+        label: 'COORDENADOR (ADMIN)',
+        className: 'bg-amber-500/20 text-amber-800 border border-amber-500/40',
       };
     case 'nutricionista':
       return {
         bg: 'bg-teal-500/15',
-        text: 'text-teal-300',
+        text: 'text-teal-800 dark:text-teal-300',
         border: 'border-teal-500/30',
-        label: 'Nutricionista',
-        className: 'bg-teal-500/20 text-teal-300 border border-teal-500/40',
+        label: 'NUTRICIONISTA',
+        className: 'bg-teal-500/20 text-teal-800 border border-teal-500/40',
       };
-    case 'auxiliar':
+    case 'professor_prestador':
       return {
         bg: 'bg-emerald-500/15',
-        text: 'text-emerald-300',
+        text: 'text-emerald-800 dark:text-emerald-300',
         border: 'border-emerald-500/30',
-        label: 'Auxiliar',
-        className: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+        label: 'PROFESSOR PRESTADOR (PJ)',
+        className: 'bg-emerald-500/20 text-emerald-800 border border-emerald-500/40',
       };
-    case 'professor':
+    case 'professor_horista':
+      return {
+        bg: 'bg-purple-500/15',
+        text: 'text-purple-800 dark:text-purple-300',
+        border: 'border-purple-500/30',
+        label: 'PROFESSOR HORISTA (CLT)',
+        className: 'bg-purple-500/20 text-purple-800 border border-purple-500/40',
+      };
+    case 'auxiliar_adi':
+      return {
+        bg: 'bg-blue-500/15',
+        text: 'text-blue-800 dark:text-blue-300',
+        border: 'border-blue-500/30',
+        label: 'AUXILIAR',
+        className: 'bg-blue-500/20 text-blue-800 border border-blue-500/40',
+      };
+    case 'monitor':
     default:
       return {
         bg: 'bg-indigo-500/15',
-        text: 'text-indigo-300',
+        text: 'text-indigo-800 dark:text-indigo-300',
         border: 'border-indigo-500/30',
-        label: 'Monitor / Professor',
-        className: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40',
+        label: 'MONITOR',
+        className: 'bg-indigo-500/20 text-indigo-800 border border-indigo-500/40',
       };
   }
 }
@@ -405,13 +601,13 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
         ...raw,
         name: resolvedName,
         email: raw.email || existing.email || '',
-        cargoLabel: raw.cargoLabel || existing.cargoLabel || (isDanyel ? 'Professor de Flauta / Musicalização' : ''),
+        cargoLabel: raw.cargoLabel || existing.cargoLabel || (isDanyel ? 'Professor de Flauta' : ''),
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
         status: raw.status || existing.status || ('ATIVO' as UserStatus),
         dataAdmissao: raw.dataAdmissao || existing.dataAdmissao || undefined,
         assignedActivities: isDanyel
-          ? Array.from(new Set(['Flauta', ...(Array.isArray(raw.assignedActivities) ? raw.assignedActivities : [])]))
+          ? ['Flauta']
           : (Array.isArray(raw.assignedActivities)
               ? raw.assignedActivities
               : (existing.assignedActivities || [])),

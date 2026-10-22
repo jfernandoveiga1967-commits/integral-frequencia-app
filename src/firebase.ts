@@ -25,7 +25,7 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
-import { ManualNorma, INITIAL_MANUAL_NORMAS, NormaAceite } from './types/manualNormas';
+import { ManualNorma, NormaAceite } from './types/manualNormas';
 import { NORMAS_DATA } from './data/normasData';
 import { formatMinutesToHoursAndMinutes, parseHoursAndMinutesStringToMinutes, repairOverlappedPontoRecords, parseContractSchedule } from './utils/pontoUtils';
 import {

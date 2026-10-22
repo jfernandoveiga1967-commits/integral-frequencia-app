@@ -419,11 +419,38 @@ Gere a resposta estritamente em formato JSON com o seguinte schema:
 }`;
 }
 
+export const STANDARD_FEEDBACK_CLOSING = '*Atenciosamente*,\nCoordenação do Integral\nColégio Crescer';
+
+/**
+ * Remove rigorosamente qualquer bloco de assinatura, despedida ou rodapé pré-existente
+ * ao final do texto (inclusive variações com 'Equipe do Integral', 'Coordenação', etc.),
+ * garantindo que assinaturas redundantes ou duplicadas sejam completamente eliminadas.
+ */
+export function stripTrailingFeedbackSignatures(text: string): string {
+  if (!text) return '';
+  let msg = text.trim();
+
+  // Padrão abrangente para capturar despedidas no final da mensagem (em linha única ou com quebras)
+  const trailingSignatureRegex = /\n+\s*\*?(?:Atenciosamente|Um abraço(?: fraterno)?|Fraternalmente|Com carinho|Cordialmente|Abraços?)\*?,?.*$/is;
+
+  // Padrão para capturar encerramentos de rodapé residuais (Coordenação / Equipe / Colégio Crescer)
+  const trailingFooterRegex = /\n+\s*\*?(?:Coordenação (?:do Integral|Pedagógica)|Equipe (?:do Integral|Pedagógica)|Colégio Crescer)[\s\S]*$/is;
+
+  let prev = '';
+  while (msg !== prev) {
+    prev = msg;
+    msg = msg.replace(trailingSignatureRegex, '').trim();
+    msg = msg.replace(trailingFooterRegex, '').trim();
+  }
+
+  return msg;
+}
+
 /**
  * Sanitiza e valida a mensagem cordial para WhatsApp e para o sistema:
  * - Mantém a saudação obrigatória (*Querida [Nome]!* ou *Querido [Nome]!*)
  * - Converte asteriscos duplos (**) em simples (*) para negrito nativo do WhatsApp
- * - Garante encerramento padrão institucional
+ * - Garante encerramento padrão institucional exatamente UMA vez
  * - Normaliza caracteres em UTF-8
  */
 export function sanitizeCordialMessageForWhatsApp(
@@ -454,17 +481,11 @@ export function sanitizeCordialMessageForWhatsApp(
     msg = `${expectedSaudacao}\n\n${msg.trim()}`;
   }
 
-  // 3. Remove eventuais assinaturas redundantes
-  msg = msg.replace(
-    /\n+(?:\*?Um abraço fraterno\*?,?|\*?Atenciosamente\*?,?|\*?Fraternalmente\*?,?|\*?Com carinho\*?,?)\s*\n+[\s\S]*$/is,
-    ''
-  );
-  msg = msg.replace(/\n+\*?Coordenação (?:do Integral|Pedagógica)[\s\S]*$/is, '');
-  msg = msg.replace(/\n+\*?Colégio Crescer\*?[\s\S]*$/is, '');
+  // 3. Remove rigorosamente qualquer assinatura prévia ou duplicada
+  msg = stripTrailingFeedbackSignatures(msg);
 
-  // 4. Aplica encerramento institucional padronizado do modelo
-  const finalClosing = '*Atenciosamente*,\nCoordenação do Integral\nColégio Crescer';
-  msg = `${msg.trim()}\n\n${finalClosing}`;
+  // 4. Aplica encerramento institucional padronizado do modelo exatamente UMA vez
+  msg = `${msg.trim()}\n\n${STANDARD_FEEDBACK_CLOSING}`;
 
   // 5. Normalização UTF-8
   return msg

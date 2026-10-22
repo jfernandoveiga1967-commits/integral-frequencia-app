@@ -21,7 +21,7 @@ import {
   Check,
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import { ManualNorma, INITIAL_MANUAL_NORMAS } from '../types/manualNormas';
+import { ManualNorma } from '../types/manualNormas';
 import { NORMAS_DATA } from '../data/normasData';
 import { subscribeManualNormas, subscribeUsers } from '../firebase';
 import { getLocalUsersList } from '../utils/authUtils';
@@ -34,6 +34,7 @@ import {
   PedagogicalFeedback,
 } from '../services/feedbackService';
 import { FeedbackMarkdown } from './FeedbackMarkdown';
+import { sanitizeCordialMessageForWhatsApp } from '../utils/feedbackPromptBuilder';
 
 interface GestaoFeedbacksModalProps {
   isOpen: boolean;
@@ -156,7 +157,14 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         selectedChecklistItem
       );
 
-      setGeneratedMessage(result.message);
+      const sanitized = sanitizeCordialMessageForWhatsApp(result.message, {
+        userName: selectedUser.name,
+        normTitle: selectedNorm.title,
+        rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
+        normSection: selectedNorm.sectionNumber ? String(selectedNorm.sectionNumber) : undefined,
+      });
+
+      setGeneratedMessage(sanitized);
       setActionPoints(result.actionPoints);
 
       setSuccessToast(
@@ -205,6 +213,13 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
     const employeeId = selectedUser.id || selectedUser.uid || '';
 
+    const sanitizedMessageToSave = sanitizeCordialMessageForWhatsApp(generatedMessage.trim(), {
+      userName: selectedUser.name || 'Colaboradora',
+      normTitle: selectedNorm.title,
+      rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
+      normSection: selectedNorm.sectionNumber ? String(selectedNorm.sectionNumber) : undefined,
+    });
+
     setIsSaving(true);
     try {
       await createPedagogicalFeedback({
@@ -218,7 +233,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         normTitle: selectedNorm.title,
         normSection: selectedNorm.sectionNumber || undefined,
         rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
-        generatedMessage: generatedMessage.trim(),
+        generatedMessage: sanitizedMessageToSave,
         actionPoints: finalPoints,
         createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
         createdByUserName: currentUser?.name || 'Coordenação Pedagógica',
@@ -264,6 +279,13 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
     const employeeId = selectedUser.id || selectedUser.uid || '';
 
+    const sanitizedMessageToSave = sanitizeCordialMessageForWhatsApp(generatedMessage.trim(), {
+      userName: selectedUser.name || 'Colaboradora',
+      normTitle: selectedNorm.title,
+      rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
+      normSection: selectedNorm.sectionNumber ? String(selectedNorm.sectionNumber) : undefined,
+    });
+
     // Salva no Firestore obrigatoriamente para não anular a persistência
     setIsSaving(true);
     let savedFeedback: PedagogicalFeedback | null = null;
@@ -279,7 +301,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
         normTitle: selectedNorm.title,
         normSection: selectedNorm.sectionNumber || undefined,
         rawContext: selectedChecklistItem || selectedNorm.summary || selectedNorm.title,
-        generatedMessage: generatedMessage.trim(),
+        generatedMessage: sanitizedMessageToSave,
         actionPoints: finalPoints,
         createdByUserId: currentUser?.id || currentUser?.uid || 'coordenacao',
         createdByUserName: currentUser?.name || 'Coordenação Pedagógica',
@@ -296,7 +318,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     const link = buildWhatsAppFeedbackLink(selectedUser.phone, {
       targetUserName: selectedUser.name,
       normTitle: selectedNorm.title,
-      generatedMessage: generatedMessage.trim(),
+      generatedMessage: sanitizedMessageToSave,
     });
 
     window.open(link, '_blank');

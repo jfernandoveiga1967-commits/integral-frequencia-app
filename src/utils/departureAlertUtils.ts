@@ -304,3 +304,88 @@ export function evaluateDepartureAlerts(params: {
 
   return alertsToTrigger;
 }
+
+export interface PendingEarlyDeparture {
+  student: Student;
+  departureTime: string;
+  standardTime: string;
+}
+
+/**
+ * Mapeia os alunos de uma determinada turma regular que possuem horário de saída antecipada
+ * programado para o dia selecionado e que AINDA NÃO tiveram a saída confirmada/concluída hoje.
+ *
+ * Regras estritas de ciclo de vida:
+ * 1. Mapeia alunos ativos e agendados para a data com horário de saída antes do término padrão da turma.
+ * 2. Garante que o aluno DESAPAREÇA do card automaticamente assim que:
+ *    a) A saída for confirmada/dada baixa no sistema (status === 'saida_antecipada' ou exitTime presente);
+ *    b) O aluno for marcado como falta no dia;
+ *    c) O aviso de saída for cancelado ou removido na ficha do aluno (horariosSaida limpo).
+ */
+export function getPendingEarlyDeparturesForTurma(params: {
+  turmaName: string;
+  students: Student[];
+  records: AttendanceRecord[];
+  selectedDate: string;
+  quadroAtribuicoes?: TurmaAtribuicao[];
+}): PendingEarlyDeparture[] {
+  const { turmaName, students, records, selectedDate, quadroAtribuicoes } = params;
+  if (!turmaName || !Array.isArray(students) || students.length === 0) return [];
+
+  const dayOfWeek = getDayOfWeekFromDate(selectedDate);
+  if (!dayOfWeek) return [];
+
+  // Mapeia alunos que já tiveram saída concluída ou foram marcados com falta hoje
+  const completedOrAbsentStudentIds = new Set<string>();
+  if (Array.isArray(records)) {
+    records.forEach((r) => {
+      if (r && r.date === selectedDate) {
+        if (r.status === 'saida_antecipada' || Boolean(r.exitTime)) {
+          completedOrAbsentStudentIds.add(r.studentId);
+        } else if (r.status === 'falta') {
+          completedOrAbsentStudentIds.add(r.studentId);
+        }
+      }
+    });
+  }
+
+  const standardDeparture = getTurmaStandardDepartureTime(turmaName, quadroAtribuicoes);
+  const standardMinutes = timeToMinutes(standardDeparture);
+
+  const pending: PendingEarlyDeparture[] = [];
+
+  students.forEach((student) => {
+    if (!student || student.turma !== turmaName) return;
+
+    // Aluno deve estar ativo na data
+    if (!isStudentActiveOnDate(student, selectedDate)) return;
+
+    // Aluno deve ter frequência prevista para a data
+    if (!isStudentScheduledForDate(student, selectedDate)) return;
+
+    // Se já teve a saída confirmada/dada baixa ou falta no dia, não inclui
+    if (completedOrAbsentStudentIds.has(student.id)) return;
+
+    // Obtém o horário de saída configurado na ficha do aluno para hoje
+    const departureTime = getStudentDepartureForDay(student, dayOfWeek);
+    if (!departureTime) return;
+
+    // Regra de Saída Antecipada: horário programado antes do término padrão da turma
+    const departureMinutes = timeToMinutes(departureTime);
+    if (departureMinutes < standardMinutes) {
+      pending.push({
+        student,
+        departureTime,
+        standardTime: standardDeparture,
+      });
+    }
+  });
+
+  // Ordena por horário de saída (mais cedo primeiro) e depois por ordem alfabética do nome
+  return pending.sort((a, b) => {
+    const diff = timeToMinutes(a.departureTime) - timeToMinutes(b.departureTime);
+    if (diff !== 0) return diff;
+    return (a.student.name || '').localeCompare(b.student.name || '', 'pt-BR');
+  });
+}
+

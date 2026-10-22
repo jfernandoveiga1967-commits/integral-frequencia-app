@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  BookOpen,
+    BookOpen,
   ShieldAlert,
   Award,
+  HeartPulse,
   HeartHandshake,
   Bus,
   Utensils,
@@ -31,7 +32,8 @@ import {
   Smartphone,
   Eye,
   Zap,
-  ClipboardCheck,
+    ClipboardCheck,
+  ClipboardList,
   FileCheck,
   Send,
   ShieldCheck,
@@ -44,11 +46,10 @@ import {
   NormaType,
   NormaAceite,
   MODULE_METADATA,
-  INITIAL_MANUAL_NORMAS,
   compareNormasBySectionNumber,
   parseSectionNumber,
 } from '../types/manualNormas';
-import { NORMAS_DATA } from '../data/normasData';
+import { NORMAS_DATA, normalizeAndDeduplicateNormas } from '../data/normasData';
 import {
   subscribeManualNormas,
   saveManualNormaToFirestore,
@@ -88,11 +89,16 @@ export interface ManualOrientacoesProps {
 export type AlertFilterType = 'all' | 'proibicoes_alertas' | 'boas_praticas' | 'diretrizes';
 
 // Tipos para Categorias Temáticas Sanfonadas
+
 export type ThematicCategoryId =
-  | 'rotina_operacional'
-  | 'seguranca_cuidados'
-  | 'postura_fardamento'
-  | 'guia_socioemocional';
+  | 'identidade_institucional'
+  | 'rotina_pedagogica'
+  | 'alimentacao_refeitorio'
+  | 'saude_higiene'
+  | 'seguranca_supervisao'
+  | 'academia_transporte'
+  | 'abordagem_socioemocional'
+  | 'comunicacao_registros';
 
 export interface ThematicCategoryMeta {
   id: ThematicCategoryId;
@@ -107,40 +113,80 @@ export interface ThematicCategoryMeta {
 
 export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
   {
-    id: 'rotina_operacional',
-    title: 'Módulo 1: Rotina Operacional',
-    subtitle: 'Objetivos, Direitos, Deveres, Ponto, Rádio Frequência 2, Refeitório, Acolhimento, Soninho, Lições e Caderno Vai e Volta (Seções 1 a 16)',
-    badgeLabel: 'Rotina Operacional • Seções 1 a 16',
+    id: 'identidade_institucional',
+    title: 'Módulo 1: Identidade Institucional, Equipe e Organização do Trabalho',
+    subtitle: 'Objetivos institucionais, direitos e deveres, pontualidade, ponto eletrônico, rádio, fardamento, ética, equipe, formação e penalidades (Seções 1 a 5, 28 a 34 e 38)',
+    badgeLabel: 'Identidade Institucional',
     theme: 'blue',
     borderClass: 'border-blue-200/90 hover:border-blue-300',
     headerBgClass: 'bg-gradient-to-r from-blue-900 to-slate-900 text-white',
     iconBgClass: 'bg-blue-500/20 text-blue-300',
   },
   {
-    id: 'seguranca_cuidados',
-    title: 'Módulo 2: Segurança, Espaços, Academia e Transporte',
-    subtitle: 'Vigilância Ativa, Parque/Parcão, Banheiros, Portões, Portaria, Emergência, Academia e Culinária (Seções 17 a 27)',
-    badgeLabel: 'Segurança & Academia • Seções 17 a 27',
-    theme: 'amber',
-    borderClass: 'border-amber-200/90 hover:border-amber-300',
-    headerBgClass: 'bg-gradient-to-r from-amber-900 to-slate-900 text-white',
-    iconBgClass: 'bg-amber-500/20 text-amber-300',
-  },
-  {
-    id: 'postura_fardamento',
-    title: 'Módulo 3: Postura, Fardamento e Proibições',
-    subtitle: 'Fardamento, Proibição de Celular, Ética, Hierarquia, Alergias, Remédios, Enfermaria, ECA e Penalidades (Seções 28 a 38)',
-    badgeLabel: 'Postura & Proibições • Seções 28 a 38',
+    id: 'rotina_pedagogica',
+    title: 'Módulo 2: Rotina Diária, Acolhimento e Organização Pedagógica',
+    subtitle: 'Acolhimento das turmas, organização de mochilas, soninho, repouso e mediação da lição de casa (Seções 11 a 13)',
+    badgeLabel: 'Rotina Pedagógica',
     theme: 'purple',
     borderClass: 'border-purple-200/90 hover:border-purple-300',
     headerBgClass: 'bg-gradient-to-r from-purple-950 to-slate-900 text-white',
     iconBgClass: 'bg-purple-500/20 text-purple-300',
   },
   {
-    id: 'guia_socioemocional',
-    title: 'Módulo 4: Guia Socioemocional e Abordagem Sensível',
-    subtitle: 'Comunicação Acolhedora, Não Gritar, Não Puxar, Empatia, Paciência, Mediação de Conflitos e Cuidados Infantis (Seções 39 a 51)',
-    badgeLabel: 'Abordagem Sensível • Seções 39 a 51',
+    id: 'alimentacao_refeitorio',
+    title: 'Módulo 3: Alimentação, Refeitório e Segurança Alimentar',
+    subtitle: 'Condução ao refeitório, alimentação saudável, prevenção de engasgos, sobremesas e cozinha pedagógica (Seções 6 a 9 e 27)',
+    badgeLabel: 'Alimentação e Refeitório',
+    theme: 'amber',
+    borderClass: 'border-amber-200/90 hover:border-amber-300',
+    headerBgClass: 'bg-gradient-to-r from-amber-900 to-slate-900 text-white',
+    iconBgClass: 'bg-amber-500/20 text-amber-300',
+  },
+  {
+    id: 'saude_higiene',
+    title: 'Módulo 4: Saúde, Higiene e Cuidados Pessoais',
+    subtitle: 'Higiene bucal, alergias, medicamentos, atendimento a acidentes, cuidados com bebês, fraldas, mãos, hidratação e sintomas febris (Seções 10, 35 a 37 e 47 a 51)',
+    badgeLabel: 'Saúde e Higiene',
+    theme: 'rose',
+    borderClass: 'border-rose-200/90 hover:border-rose-300',
+    headerBgClass: 'bg-gradient-to-r from-rose-950 to-slate-900 text-white',
+    iconBgClass: 'bg-rose-500/20 text-rose-300',
+  },
+  {
+    id: 'seguranca_supervisao',
+    title: 'Módulo 5: Segurança, Supervisão e Prevenção de Acidentes',
+    subtitle: 'Vigilância ativa, parque, banheiros, portões, portaria e conduta em emergências (Seções 17 a 22)',
+    badgeLabel: 'Segurança e Supervisão',
+    theme: 'blue',
+    borderClass: 'border-blue-200/90 hover:border-blue-300',
+    headerBgClass: 'bg-gradient-to-r from-blue-900 to-slate-900 text-white',
+    iconBgClass: 'bg-blue-500/20 text-blue-300',
+  },
+  {
+    id: 'academia_transporte',
+    title: 'Módulo 6: Academia, Atividades Externas e Transporte',
+    subtitle: 'Deslocamento organizado, regras da Academia, retorno seguro, troca de uniforme e atividades externas (Seções 23 a 26)',
+    badgeLabel: 'Academia e Transporte',
+    theme: 'amber',
+    borderClass: 'border-amber-200/90 hover:border-amber-300',
+    headerBgClass: 'bg-gradient-to-r from-amber-900 to-slate-900 text-white',
+    iconBgClass: 'bg-amber-500/20 text-amber-300',
+  },
+  {
+    id: 'abordagem_socioemocional',
+    title: 'Módulo 7: Abordagem Sensível, Limites e Desenvolvimento Socioemocional',
+    subtitle: 'Comunicação respeitosa, limites físicos, empatia, paciência, motivação positiva e mediação construtiva de conflitos (Seções 39 a 46)',
+    badgeLabel: 'Abordagem Sensível',
+    theme: 'purple',
+    borderClass: 'border-purple-200/90 hover:border-purple-300',
+    headerBgClass: 'bg-gradient-to-r from-purple-950 to-slate-900 text-white',
+    iconBgClass: 'bg-purple-500/20 text-purple-300',
+  },
+  {
+    id: 'comunicacao_registros',
+    title: 'Módulo 8: Comunicação, Registros, Ocorrências e Entrega de Alunos',
+    subtitle: 'Caderno Vai e Volta, frequência diária, saídas antecipadas, autorizações e conferência dos responsáveis na entrega (Seções 14 a 16)',
+    badgeLabel: 'Comunicação e Registros',
     theme: 'rose',
     borderClass: 'border-rose-200/90 hover:border-rose-300',
     headerBgClass: 'bg-gradient-to-r from-rose-950 to-slate-900 text-white',
@@ -149,37 +195,102 @@ export const THEMATIC_CATEGORIES: ThematicCategoryMeta[] = [
 ];
 
 // Helper para mapear norma para sua categoria temática oficial baseada na numeração contínua única (1 a 51)
+
 export function getThematicCategory(norma: ManualNorma): ThematicCategoryId {
   const secNum = parseSectionNumber(norma.sectionNumber || norma.section);
 
-  if (secNum >= 1 && secNum <= 16) {
-    return 'rotina_operacional';
-  }
-  if (secNum >= 17 && secNum <= 27) {
-    return 'seguranca_cuidados';
-  }
-  if (secNum >= 28 && secNum <= 38) {
-    return 'postura_fardamento';
-  }
-  if (secNum >= 39 && secNum <= 51) {
-    return 'guia_socioemocional';
+  if (secNum >= 1 && secNum <= 5) {
+    return 'identidade_institucional';
   }
 
-  // Fallback seguro por identificador de módulo caso sectionNumber não esteja presente
-  if (norma.moduleId === 'rotina_operacional' || norma.moduleId === 'normas_internas') {
-    return 'rotina_operacional';
-  }
-  if (norma.moduleId === 'seguranca_cuidados' || norma.moduleId === 'academia_transporte') {
-    return 'seguranca_cuidados';
-  }
-  if (norma.moduleId === 'postura_fardamento') {
-    return 'postura_fardamento';
-  }
-  if (norma.moduleId === 'guia_socioemocional' || norma.moduleId === 'guia_sensivel') {
-    return 'guia_socioemocional';
+  if (secNum >= 6 && secNum <= 9) {
+    return 'alimentacao_refeitorio';
   }
 
-  return 'rotina_operacional';
+  if (secNum === 10) {
+    return 'saude_higiene';
+  }
+
+  if (secNum >= 11 && secNum <= 13) {
+    return 'rotina_pedagogica';
+  }
+
+  if (secNum >= 14 && secNum <= 16) {
+    return 'comunicacao_registros';
+  }
+
+  if (secNum >= 17 && secNum <= 22) {
+    return 'seguranca_supervisao';
+  }
+
+  if (secNum >= 23 && secNum <= 26) {
+    return 'academia_transporte';
+  }
+
+  if (secNum === 27) {
+    return 'alimentacao_refeitorio';
+  }
+
+  if (secNum >= 28 && secNum <= 34) {
+    return 'identidade_institucional';
+  }
+
+  if (secNum >= 35 && secNum <= 37) {
+    return 'saude_higiene';
+  }
+
+  if (secNum === 38) {
+    return 'identidade_institucional';
+  }
+
+  if (secNum >= 39 && secNum <= 46) {
+    return 'abordagem_socioemocional';
+  }
+
+  if (secNum >= 47 && secNum <= 51) {
+    return 'saude_higiene';
+  }
+
+  // Fallback para registros sem numeração de seção válida.
+  const moduleId = String(norma.moduleId || '');
+
+  const validModuleIds: ThematicCategoryId[] = [
+    'identidade_institucional',
+    'rotina_pedagogica',
+    'alimentacao_refeitorio',
+    'saude_higiene',
+    'seguranca_supervisao',
+    'academia_transporte',
+    'abordagem_socioemocional',
+    'comunicacao_registros',
+  ];
+
+  if (validModuleIds.includes(moduleId as ThematicCategoryId)) {
+    return moduleId as ThematicCategoryId;
+  }
+
+  // Compatibilidade com registros salvos nos módulos antigos.
+  if (moduleId === 'identidade_institucional') {
+    return 'identidade_institucional';
+  }
+
+  if (moduleId === 'seguranca_cuidados') {
+    return 'seguranca_supervisao';
+  }
+
+  if (moduleId === 'identidade_institucional') {
+    return 'identidade_institucional';
+  }
+
+  if (
+  moduleId === 'guia_socioemocional' ||
+  moduleId === 'guia_sensivel' ||
+  moduleId === 'abordagem_socioemocional'
+) {
+    return 'abordagem_socioemocional';
+  }
+
+  return 'identidade_institucional';
 }
 
 // Modal para Criação e Edição de Norma
@@ -200,7 +311,7 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
 }) => {
   const isEditing = Boolean(normaToEdit && normaToEdit.id);
 
-  const [moduleId, setModuleId] = useState<ModuleCategory>('normas_internas');
+  const [moduleId, setModuleId] = useState<ModuleCategory>('identidade_institucional');
   const [sectionNumber, setSectionNumber] = useState('');
   const [sectionTitle, setSectionTitle] = useState('');
   const [title, setTitle] = useState('');
@@ -214,7 +325,65 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
 
   useEffect(() => {
     if (normaToEdit) {
-      setModuleId(normaToEdit.moduleId || 'normas_internas');
+      const moduleIdBySection: Record<number, ModuleCategory> = {
+  1: 'identidade_institucional',
+  2: 'identidade_institucional',
+  3: 'identidade_institucional',
+  4: 'identidade_institucional',
+  5: 'identidade_institucional',
+  6: 'alimentacao_refeitorio',
+  7: 'alimentacao_refeitorio',
+  8: 'alimentacao_refeitorio',
+  9: 'alimentacao_refeitorio',
+  10: 'saude_higiene',
+  11: 'rotina_pedagogica',
+  12: 'rotina_pedagogica',
+  13: 'rotina_pedagogica',
+  14: 'comunicacao_registros',
+  15: 'comunicacao_registros',
+  16: 'comunicacao_registros',
+  17: 'seguranca_supervisao',
+  18: 'seguranca_supervisao',
+  19: 'seguranca_supervisao',
+  20: 'seguranca_supervisao',
+  21: 'seguranca_supervisao',
+  22: 'seguranca_supervisao',
+  23: 'academia_transporte',
+  24: 'academia_transporte',
+  25: 'academia_transporte',
+  26: 'academia_transporte',
+  27: 'alimentacao_refeitorio',
+  28: 'identidade_institucional',
+  29: 'identidade_institucional',
+  30: 'identidade_institucional',
+  31: 'identidade_institucional',
+  32: 'identidade_institucional',
+  33: 'identidade_institucional',
+  34: 'identidade_institucional',
+  35: 'saude_higiene',
+  36: 'saude_higiene',
+  37: 'saude_higiene',
+  38: 'identidade_institucional',
+  39: 'abordagem_socioemocional',
+  40: 'abordagem_socioemocional',
+  41: 'abordagem_socioemocional',
+  42: 'abordagem_socioemocional',
+  43: 'abordagem_socioemocional',
+  44: 'abordagem_socioemocional',
+  45: 'abordagem_socioemocional',
+  46: 'abordagem_socioemocional',
+  47: 'saude_higiene',
+  48: 'saude_higiene',
+  49: 'saude_higiene',
+  50: 'saude_higiene',
+  51: 'saude_higiene',
+};
+
+const sectionNumber = Number.parseInt(normaToEdit.sectionNumber, 10);
+
+setModuleId(
+  moduleIdBySection[sectionNumber] ?? 'identidade_institucional'
+);
       setSectionNumber(normaToEdit.sectionNumber || '');
       setSectionTitle(normaToEdit.sectionTitle || '');
       setTitle(normaToEdit.title || '');
@@ -228,7 +397,7 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
       setTagsInput(Array.isArray(normaToEdit.tags) ? normaToEdit.tags.join(', ') : '');
       setOrder(normaToEdit.order ?? 99);
     } else {
-      setModuleId('normas_internas');
+      setModuleId('identidade_institucional');
       setSectionNumber('1.1');
       setSectionTitle('');
       setTitle('');
@@ -356,9 +525,16 @@ const EditNormaModal: React.FC<EditNormaModalProps> = ({
                 onChange={(e) => setModuleId(e.target.value as ModuleCategory)}
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="normas_internas">Módulo 1: Normas Internas do Integral</option>
-                <option value="academia_transporte">Módulo 2: Academia, Transporte e Deslocamento</option>
-                <option value="guia_sensivel">Módulo 3: Guia de Abordagem Sensível</option>
+                
+<option value="identidade_institucional">Módulo 1: Identidade Institucional, Equipe e Organização do Trabalho</option>
+<option value="rotina_pedagogica">Módulo 2: Rotina Diária, Acolhimento e Organização Pedagógica</option>
+<option value="alimentacao_refeitorio">Módulo 3: Alimentação, Refeitório e Segurança Alimentar</option>
+<option value="saude_higiene">Módulo 4: Saúde, Higiene e Cuidados Pessoais</option>
+<option value="seguranca_supervisao">Módulo 5: Segurança, Supervisão e Prevenção de Acidentes</option>
+<option value="academia_transporte">Módulo 6: Academia, Atividades Externas e Transporte</option>
+<option value="abordagem_socioemocional">Módulo 7: Abordagem Sensível, Limites e Desenvolvimento Socioemocional</option>
+<option value="comunicacao_registros">Módulo 8: Comunicação, Registros, Ocorrências e Entrega de Alunos</option>
+
               </select>
             </div>
 
@@ -911,11 +1087,11 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
 }) => {
   const isAdmin = isCoordenador(currentUser);
 
-  // Dynamic Normas State from Firestore
+  // Dynamic Normas State from Firestore (normalizado e deduplicado)
   const [normas, setNormas] = useState<ManualNorma[]>(() => {
     try {
       const cached = localStorage.getItem('crescer_manual_normas_cache');
-      if (cached) return JSON.parse(cached);
+      if (cached) return normalizeAndDeduplicateNormas(JSON.parse(cached));
     } catch {}
     return NORMAS_DATA;
   });
@@ -932,12 +1108,17 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
   const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
 
   // Accordion state for Thematic Categories (all open by default for comprehensive overview)
-  const [expandedCategories, setExpandedCategories] = useState<Record<ThematicCategoryId, boolean>>({
-    rotina_operacional: true,
-    seguranca_cuidados: true,
-    postura_fardamento: true,
-    guia_socioemocional: true,
-  });
+  
+const [expandedCategories, setExpandedCategories] = useState<Record<ThematicCategoryId, boolean>>({
+  identidade_institucional: true,
+  rotina_pedagogica: true,
+  alimentacao_refeitorio: true,
+  saude_higiene: true,
+  seguranca_supervisao: true,
+  academia_transporte: true,
+  abordagem_socioemocional: true,
+  comunicacao_registros: true,
+});
 
   // Accordion state for individual Norma Cards
   const [expandedNormas, setExpandedNormas] = useState<Record<string, boolean>>({});
@@ -1062,7 +1243,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
     setIsLoading(true);
     const unsubscribe = subscribeManualNormas(
       (items) => {
-        setNormas(items);
+        setNormas(normalizeAndDeduplicateNormas(items));
         setIsLoading(false);
       },
       (err) => {
@@ -1189,21 +1370,31 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
     }));
   };
 
+    // Expand all categories
   const handleExpandAllCategories = () => {
     setExpandedCategories({
-      rotina_operacional: true,
-      seguranca_cuidados: true,
-      postura_fardamento: true,
-      guia_socioemocional: true,
+      identidade_institucional: true,
+      rotina_pedagogica: true,
+      alimentacao_refeitorio: true,
+      saude_higiene: true,
+      seguranca_supervisao: true,
+      academia_transporte: true,
+      abordagem_socioemocional: true,
+      comunicacao_registros: true,
     });
   };
 
+  // Collapse all categories
   const handleCollapseAllCategories = () => {
     setExpandedCategories({
-      rotina_operacional: false,
-      seguranca_cuidados: false,
-      postura_fardamento: false,
-      guia_socioemocional: false,
+      identidade_institucional: false,
+      rotina_pedagogica: false,
+      alimentacao_refeitorio: false,
+      saude_higiene: false,
+      seguranca_supervisao: false,
+      academia_transporte: false,
+      abordagem_socioemocional: false,
+      comunicacao_registros: false,
     });
   };
 
@@ -1273,9 +1464,10 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
 
   // Filtered Normas based on Module, Search Term and Alert Type Filter
   const filteredNormas = useMemo(() => {
+    const normalized = normalizeAndDeduplicateNormas(normas);
     const term = searchTerm.trim().toLowerCase();
 
-    return normas.filter((norma) => {
+    return normalized.filter((norma) => {
       // 1. Module filter
       if (selectedModule !== 'all' && norma.moduleId !== selectedModule) {
         return false;
@@ -1305,26 +1497,31 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
   }, [normas, selectedModule, alertTypeFilter, searchTerm]);
 
   // Group filtered normas into the 4 Thematic Categories with strict numerical section sorting
-  const groupedThematicNormas = useMemo(() => {
-    const map: Record<ThematicCategoryId, ManualNorma[]> = {
-      rotina_operacional: [],
-      seguranca_cuidados: [],
-      postura_fardamento: [],
-      guia_socioemocional: [],
-    };
+  
+const groupedThematicNormas = useMemo(() => {
+  const map: Record<ThematicCategoryId, ManualNorma[]> = {
+    identidade_institucional: [],
+    rotina_pedagogica: [],
+    alimentacao_refeitorio: [],
+    saude_higiene: [],
+    seguranca_supervisao: [],
+    academia_transporte: [],
+    abordagem_socioemocional: [],
+    comunicacao_registros: [],
+  };
 
-    filteredNormas.forEach((n) => {
-      const cat = getThematicCategory(n);
-      map[cat].push(n);
-    });
+  filteredNormas.forEach((norma) => {
+    const category = getThematicCategory(norma);
+    map[category].push(norma);
+  });
 
-    // Ordenação rigorosa crescente por número de seção (ex: 1, 2, 3, 4, 10, 11...)
-    (Object.keys(map) as ThematicCategoryId[]).forEach((catId) => {
-      map[catId].sort(compareNormasBySectionNumber);
-    });
+  // Ordena as normas pelo número da seção.
+  (Object.keys(map) as ThematicCategoryId[]).forEach((categoryId) => {
+    map[categoryId].sort(compareNormasBySectionNumber);
+  });
 
-    return map;
-  }, [filteredNormas]);
+  return map;
+}, [filteredNormas]);
 
   // Statistics counters
   const totalCount = normas.length;
@@ -1561,8 +1758,8 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
             onClick={() =>
               handleQuickPinClick(
                 'radio',
-                'norma_fluxograma_ponto_radio',
-                'rotina_operacional'
+'norma_fluxograma_ponto_radio',
+'identidade_institucional'
               )
             }
             className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
@@ -1582,7 +1779,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
               handleQuickPinClick(
                 'academia_10_regras',
                 'norma_academia_10_regras_comportamento',
-                'seguranca_cuidados'
+                'academia_transporte'
               )
             }
             className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
@@ -1602,7 +1799,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
               handleQuickPinClick(
                 'parque',
                 'norma_regras_parque_parcao',
-                'seguranca_cuidados'
+                'seguranca_supervisao'
               )
             }
             className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
@@ -1622,7 +1819,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
               handleQuickPinClick(
                 'mediacao',
                 'norma_sensivel_mediacao_conflitos',
-                'guia_socioemocional'
+                'abordagem_socioemocional'
               )
             }
             className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
@@ -1642,7 +1839,7 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
               handleQuickPinClick(
                 'celular_bijuterias',
                 'norma_proibicao_celular_conversas',
-                'postura_fardamento'
+                'identidade_institucional'
               )
             }
             className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 border shadow-2xs ${
@@ -1755,8 +1952,27 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
         )}
       </div>
 
-      {/* 4. VISUALIZAÇÃO AGRUPADA EM CATEGORIAS TEMÁTICAS SANFONADAS */}
-      <div className="space-y-4">
+ 
+{/* 4. VISUALIZAÇÃO AGRUPADA EM CATEGORIAS TEMÁTICAS SANFONADAS */}
+<div className="space-y-4">
+  <div className="flex flex-wrap justify-end gap-2">
+    <button
+      type="button"
+      onClick={handleExpandAllCategories}
+      className="px-3 py-2 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition-colors cursor-pointer"
+    >
+      Expandir todas as categorias
+    </button>
+
+    <button
+      type="button"
+      onClick={handleCollapseAllCategories}
+      className="px-3 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer"
+    >
+      Recolher todas as categorias
+    </button>
+  </div>
+
         {isLoading && normas.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm space-y-3">
             <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
@@ -1805,15 +2021,24 @@ export const ManualOrientacoes: React.FC<ManualOrientacoesProps> = ({
                 >
                   <div className="flex items-start sm:items-center space-x-3.5">
                     <div className={`p-2.5 rounded-2xl shrink-0 mt-0.5 sm:mt-0 ${categoryMeta.iconBgClass}`}>
-                      {categoryMeta.id === 'rotina_operacional' ? (
-                        <Clock className="w-5 h-5 text-blue-300" />
-                      ) : categoryMeta.id === 'seguranca_cuidados' ? (
-                        <ShieldAlert className="w-5 h-5 text-amber-300" />
-                      ) : categoryMeta.id === 'postura_fardamento' ? (
-                        <Award className="w-5 h-5 text-purple-300" />
-                      ) : (
-                        <HeartHandshake className="w-5 h-5 text-rose-300" />
-                      )}
+                      
+{categoryMeta.id === 'identidade_institucional' ? (
+  <Award className="w-5 h-5 text-blue-300" />
+) : categoryMeta.id === 'rotina_pedagogica' ? (
+  <Clock className="w-5 h-5 text-purple-300" />
+) : categoryMeta.id === 'alimentacao_refeitorio' ? (
+  <Utensils className="w-5 h-5 text-amber-300" />
+) : categoryMeta.id === 'saude_higiene' ? (
+  <HeartPulse className="w-5 h-5 text-rose-300" />
+) : categoryMeta.id === 'seguranca_supervisao' ? (
+  <ShieldAlert className="w-5 h-5 text-blue-300" />
+) : categoryMeta.id === 'academia_transporte' ? (
+  <Bus className="w-5 h-5 text-amber-300" />
+) : categoryMeta.id === 'abordagem_socioemocional' ? (
+  <HeartHandshake className="w-5 h-5 text-purple-300" />
+) : (
+  <ClipboardList className="w-5 h-5 text-rose-300" />
+)}
                     </div>
                     <div>
                       <div className="flex flex-wrap items-center gap-2">

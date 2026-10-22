@@ -6,7 +6,7 @@
  */
 
 import { Student, AttendanceRecord, ActivityType, TurmaType, UserProfile, ScheduleBlock } from '../types';
-import { INITIAL_MANUAL_NORMAS, ManualNorma } from '../types/manualNormas';
+import { ManualNorma } from '../types/manualNormas';
 import { NORMAS_DATA } from '../data/normasData';
 import { DEFAULT_SEPTEMBER_2026_MENU } from '../data/defaultCardapioData';
 import { formatDateBR, getDayOfWeekFromDate, toISODateString } from '../utils/dateUtils';

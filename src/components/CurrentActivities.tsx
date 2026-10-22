@@ -64,9 +64,12 @@ import {
   evaluateDepartureAlerts,
   markDepartureAsAlerted,
   cleanOldDepartureAlertStorageKeys,
+  PendingEarlyDeparture,
+  getPendingEarlyDeparturesForTurma,
 } from '../utils/departureAlertUtils';
 import { DepartureAlertBanner } from './DepartureAlertBanner';
 import { DepartureAlertModal } from './DepartureAlertModal';
+import { StudentCheckoutAlert } from './StudentCheckoutAlert';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
 import { isReforcoActivity, isStudentInReforco, isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { ActivityBadge, renderActivityIconOrImage } from './ActivityBadge';
@@ -942,6 +945,55 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     });
   }, [turmaStatuses, searchTerm, selectedActivityFilter, statusFilter]);
 
+  // Mapeamento dinâmico de alunos com saída antecipada pendente por turma regular hoje
+  const pendingEarlyDeparturesByTurma = useMemo(() => {
+    const map: Record<string, PendingEarlyDeparture[]> = {};
+
+    turmas.forEach((turmaName) => {
+      map[turmaName] = getPendingEarlyDeparturesForTurma({
+        turmaName,
+        students,
+        records,
+        selectedDate,
+        quadroAtribuicoes,
+      });
+    });
+
+    return map;
+  }, [turmas, students, records, selectedDate, quadroAtribuicoes]);
+
+  const [confirmingCheckoutStudentId, setConfirmingCheckoutStudentId] = useState<string | null>(null);
+
+  // Ação de dar baixa / confirmar saída antecipada do aluno diretamente no card da turma
+  const handleConfirmEarlyCheckout = async (student: Student, departureTime: string) => {
+    if (!student) return;
+    try {
+      setConfirmingCheckoutStudentId(student.id);
+
+      const turmaStatus = turmaStatuses.find((ts) => ts.turmaName === student.turma);
+      const activityToRecord = (turmaStatus?.activeBlock?.activityId || 'Rotina') as ActivityType;
+
+      await onSaveRecord({
+        studentId: student.id,
+        activity: activityToRecord,
+        turma: student.turma,
+        date: selectedDate,
+        weekNumber: currentWeek.weekNumber,
+        year: currentWeek.year,
+        status: 'saida_antecipada',
+        exitTime: departureTime,
+        instructorId: currentUser?.id || undefined,
+        instructorName: currentUser?.name || undefined,
+        observation: `Saída antecipada confirmada às ${departureTime}`,
+      });
+    } catch (err: any) {
+      console.error('Erro ao confirmar saída antecipada:', err);
+      alert(`Erro ao registrar saída antecipada: ${err?.message || 'Falha na gravação'}`);
+    } finally {
+      setConfirmingCheckoutStudentId(null);
+    }
+  };
+
   // Quick Roll Call Student helpers (Alunos de Reforço no TOPO da lista)
   const quickModalStudents = useMemo(() => {
     if (!quickRollCallModal) return [];
@@ -1490,6 +1542,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
                 {/* Card Body: Active Activity or Idle Message */}
                 <div className="p-3 sm:p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
+                  {/* Bloco de Saída Antecipada Hoje (Exibição e Remoção Dinâmica) */}
+                  <StudentCheckoutAlert
+                    pendingDepartures={pendingEarlyDeparturesByTurma[turmaName] || []}
+                    turmaName={turmaName}
+                    onConfirmCheckout={handleConfirmEarlyCheckout}
+                    isConfirmingId={confirmingCheckoutStudentId}
+                  />
+
                   {isClassActive && activeBlock ? (
                     <div className="space-y-2.5">
                       {/* Activity Name & Icon */}

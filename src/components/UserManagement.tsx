@@ -15,6 +15,10 @@ import {
   getUserStatus,
   getUserStatusBadge,
   normalizeAndDeduplicateUsers,
+  UnifiedCargoCategory,
+  detectCargoCategory,
+  getProfessorPJOficina,
+  getUnifiedCargoDisplay,
 } from '../utils/authUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
@@ -164,9 +168,29 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   // Sub-tab switcher state
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'activities' | 'schedules' | 'holidays'>('users');
 
+  // Cargo Filter Labels e Opções Unificadas
+  const CARGO_FILTER_LABELS: Record<UnifiedCargoCategory, string> = {
+    coordenador: 'Coordenador (Admin)',
+    auxiliar_adi: 'Auxiliar (ADI)',
+    professor_horista: 'Professor Horista (CLT)',
+    professor_prestador: 'Professor Prestador (PJ)',
+    monitor: 'Monitor',
+    nutricionista: 'Nutricionista',
+  };
+
+  const CARGO_FILTER_OPTIONS: { id: 'TODOS' | UnifiedCargoCategory; label: string }[] = [
+    { id: 'TODOS', label: 'Todos os Cargos' },
+    { id: 'coordenador', label: 'Coordenador (Admin)' },
+    { id: 'auxiliar_adi', label: 'Auxiliar (ADI)' },
+    { id: 'professor_horista', label: 'Professor Horista (CLT)' },
+    { id: 'professor_prestador', label: 'Professor Prestador (PJ)' },
+    { id: 'monitor', label: 'Monitor' },
+    { id: 'nutricionista', label: 'Nutricionista' },
+  ];
+
   // Search & Filter state for Users
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'TODOS' | UserRole>('TODOS');
+  const [roleFilter, setRoleFilter] = useState<'TODOS' | UnifiedCargoCategory>('TODOS');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('ATIVOS');
   const [isReloadingUsers, setIsReloadingUsers] = useState(false);
 
@@ -445,7 +469,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           (u.name || '').toLowerCase().includes(cleanSearch) ||
           (u.phone || '').toLowerCase().includes(cleanSearch) ||
           (u.company || '').toLowerCase().includes(cleanSearch);
-        const matchesRole = roleFilter === 'TODOS' || u.role === roleFilter;
+        const matchesRole = roleFilter === 'TODOS' || detectCargoCategory(u) === roleFilter;
 
         let matchesStatus = true;
         if (statusFilter === 'ATIVOS') {
@@ -571,13 +595,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
       // Filtro de Cargo
       if (roleFilter !== 'TODOS') {
-        const roleLabels: Record<string, string> = {
-          coordenador: 'Coordenação',
-          professor: 'Monitoras / Prof.',
-          auxiliar: 'Auxiliares',
-          nutricionista: 'Nutricionista',
-        };
-        filterParts.push(`Cargo: ${roleLabels[roleFilter] || roleFilter}`);
+        filterParts.push(`Cargo: ${CARGO_FILTER_LABELS[roleFilter] || roleFilter}`);
       } else {
         filterParts.push('Cargos: Todos');
       }
@@ -1797,27 +1815,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                 {/* Role Filter */}
                 <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0">
-                  {(['TODOS', 'coordenador', 'professor', 'auxiliar', 'nutricionista'] as const).map((r) => {
-                    const labels: Record<string, string> = {
-                      TODOS: 'Todos os Cargos',
-                      coordenador: 'Coordenação',
-                      professor: 'Monitoras / Prof.',
-                      auxiliar: 'Auxiliares',
-                      nutricionista: 'Nutricionista',
-                    };
-
-                    const isSel = roleFilter === r;
+                  {CARGO_FILTER_OPTIONS.map((item) => {
+                    const isSel = roleFilter === item.id;
                     return (
                       <button
-                        key={r}
-                        onClick={() => setRoleFilter(r)}
+                        key={item.id}
+                        type="button"
+                        onClick={() => setRoleFilter(item.id)}
                         className={`px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                           isSel
                             ? 'bg-slate-900 text-white shadow-xs'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
-                        {labels[r]}
+                        {item.label}
                       </button>
                     );
                   })}
@@ -1890,7 +1901,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               </div>
             ) : (
               filteredUsers.map((user) => {
-                const roleStyle = getRoleBadgeStyle(user.role);
+                const roleStyle = getRoleBadgeStyle(user);
                 const userActivities = (user.assignedActivities || activitiesList.map((a) => a.id)).filter(
                   (a) => !REMOVED_CATEGORY_NAMES.has(a)
                 );
@@ -1944,6 +1955,26 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                               )}
                               <span>{roleStyle.label}</span>
                             </span>
+
+                            {/* Se for Professor PJ, exibe a oficina vinculada no perfil (ex: 'Professor de Flauta', sem resquícios de Musicalização) */}
+                            {(() => {
+                              const cargoCat = detectCargoCategory(user);
+                              if (cargoCat === 'professor_prestador') {
+                                const oficina = getProfessorPJOficina(user);
+                                if (oficina) {
+                                  return (
+                                    <span
+                                      title="Oficina Vinculada ao Professor PJ"
+                                      className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-lg border bg-teal-50 text-teal-800 border-teal-200 inline-flex items-center space-x-1"
+                                    >
+                                      <Sparkles className="w-3 h-3 text-teal-600 mr-1" />
+                                      <span>{oficina}</span>
+                                    </span>
+                                  );
+                                }
+                              }
+                              return null;
+                            })()}
 
                             {/* Status Badge */}
                             {(() => {
@@ -4293,7 +4324,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 {statusFilter === 'ATIVOS' && 'Filtrado: Apenas Ativos'}
                 {statusFilter === 'INATIVOS' && 'Filtrado: Inativos / Desligados'}
                 {statusFilter === 'TODOS' && 'Filtrado: Todos os Status'}
-                {roleFilter !== 'TODOS' && ` • Cargo: ${roleFilter}`}
+                {roleFilter !== 'TODOS' && ` • Cargo: ${CARGO_FILTER_LABELS[roleFilter] || roleFilter}`}
                 {searchTerm.trim() && ` • Busca: "${searchTerm.trim()}"`}
               </div>
             </div>

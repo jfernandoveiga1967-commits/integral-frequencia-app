@@ -88,6 +88,38 @@ export function isScheduleBlockOfTeacher(
     teacher.id === 'usr_danyelpereira' ||
     Boolean(teacher.name && teacher.name.toLowerCase().includes('danyel'));
 
+  const blockAct = (block.activityId || '').toLowerCase().trim();
+
+  // FILTRO ESTRITO DE DISCIPLINA:
+  // Se for Danyel Pereira, considerar EXCLUSIVAMENTE a modalidade 'Flauta'.
+  // Bloquear e rejeitar categoricamente qualquer bloco de disciplinas não ministradas por ele
+  // (ex: 'Roda de Música', 'Musicalização', 'Musicalidade', 'Música', etc.)
+  if (isDanyel) {
+    const isFlauta = blockAct === 'flauta' || blockAct.includes('flauta');
+    const isNonDanyelDiscipline =
+      blockAct.includes('musicaliza') ||
+      blockAct.includes('musicalidade') ||
+      blockAct.includes('roda de m') ||
+      blockAct.includes('roda de música') ||
+      (blockAct.includes('músic') && !isFlauta) ||
+      (blockAct.includes('music') && !isFlauta);
+
+    if (isNonDanyelDiscipline || !isFlauta) {
+      return false;
+    }
+
+    // Se o docente possui turmas restritas vinculadas, valida se a turma do bloco confere
+    if (Array.isArray(teacher.assignedTurmas) && teacher.assignedTurmas.length > 0) {
+      const blockTurmaNorm = normalizeTurmaForMatching(block.turma);
+      const hasTurma = teacher.assignedTurmas.some((t) =>
+        normalizeTurmaForMatching(t) === blockTurmaNorm ||
+        blockTurmaNorm.includes(normalizeTurmaForMatching(t))
+      );
+      if (!hasTurma) return false;
+    }
+    return true;
+  }
+
   // 1. Vínculo Direto por ID de Professor / Monitor
   const blockTeacherId = (block as any).teacherId || (block as any).instructorId || (block as any).userId;
   if (blockTeacherId) {
@@ -107,21 +139,12 @@ export function isScheduleBlockOfTeacher(
   if (Array.isArray(customActivities)) {
     customActivities.forEach((a) => a && teacherActs.add(a.toLowerCase().trim()));
   }
-  if (isDanyel) {
-    teacherActs.add('flauta');
-    teacherActs.add('música');
-    teacherActs.add('musica');
-    teacherActs.add('musicalização');
-    teacherActs.add('musicalizacao');
-  }
 
-  const blockAct = (block.activityId || '').toLowerCase().trim();
   const cargo = (teacher.cargoLabel || '').toLowerCase();
 
   const isMatchAct =
     teacherActs.has(blockAct) ||
-    cargo.includes(blockAct) ||
-    (isDanyel && (blockAct.includes('flauta') || blockAct.includes('músic') || blockAct.includes('music')));
+    cargo.includes(blockAct);
 
   if (!isMatchAct) return false;
 
@@ -148,20 +171,23 @@ export function getPrestadorWeeklyGradeBlocks(
 ): ScheduleBlock[] {
   if (!teacher) return [];
 
-  const sourceSchedules =
-    Array.isArray(schedules) && schedules.length > 0 ? schedules : loadSchedules();
-
-  let matched = sourceSchedules.filter((b) =>
-    isScheduleBlockOfTeacher(teacher, b, customActivities)
-  );
-
-  // Fallback de contingência caso a grade ainda não tenha blocos cadastrados para o docente Danyel
   const isDanyel =
     teacher.id === 'usr_danyelpereira' ||
     Boolean(teacher.name && teacher.name.toLowerCase().includes('danyel'));
 
+  // Para Danyel Pereira, as atividades são estritamente ['Flauta']
+  const effectiveActivities = isDanyel ? ['Flauta'] : customActivities;
+
+  const sourceSchedules =
+    Array.isArray(schedules) && schedules.length > 0 ? schedules : loadSchedules();
+
+  let matched = sourceSchedules.filter((b) =>
+    isScheduleBlockOfTeacher(teacher, b, effectiveActivities)
+  );
+
+  // Fallback de contingência caso a grade ainda não tenha blocos cadastrados para o docente Danyel
   if (matched.length === 0 && isDanyel) {
-    // 8 horários padrão (4 na Segunda e 4 na Terça) conforme rotina oficial do Integral
+    // 8 horários padrão (4 na Segunda e 4 na Terça) da modalidade 'Flauta' conforme rotina oficial do Integral
     matched = [
       {
         id: 'grade_danyel_seg_1',
@@ -230,6 +256,20 @@ export function getPrestadorWeeklyGradeBlocks(
     ];
   }
 
+  // Filtro restritivo por oficina: Se for Danyel, remove completamente qualquer disciplina não ministrada por ele
+  if (isDanyel) {
+    matched = matched.filter((b) => {
+      const act = (b.activityId || '').toLowerCase().trim();
+      return (
+        (act === 'flauta' || act.includes('flauta')) &&
+        !act.includes('musicaliza') &&
+        !act.includes('musicalidade') &&
+        !act.includes('roda de m') &&
+        !act.includes('roda de música')
+      );
+    });
+  }
+
   return matched;
 }
 
@@ -258,7 +298,14 @@ export function calculateDynamicTetoPrestador(
     };
   }
 
-  const activeGradeBlocks = getPrestadorWeeklyGradeBlocks(teacher, schedules, customActivities);
+  const isDanyel =
+    teacher.id === 'usr_danyelpereira' ||
+    Boolean(teacher.name && teacher.name.toLowerCase().includes('danyel'));
+
+  // Para Danyel Pereira, customActivities é estritamente ['Flauta']
+  const effectiveCustomActivities = isDanyel ? ['Flauta'] : customActivities;
+
+  const activeGradeBlocks = getPrestadorWeeklyGradeBlocks(teacher, schedules, effectiveCustomActivities);
   const cargaHorariaSemanalEsperada = activeGradeBlocks.length;
   const valorHora = Number(teacher.valorHoraAula) > 0 ? Number(teacher.valorHoraAula) : 33.06;
   const tetoFinanceiroSemanal = Math.round(cargaHorariaSemanalEsperada * valorHora * 100) / 100;
@@ -370,20 +417,21 @@ export function calculateDemonstrativoPJ({
 
   const ajudaCusto = Number(prestador.ajudaDeCusto) || 0;
 
+  // Se for Danyel, restringe estritamente para ['Flauta']
+  const effectiveActivities = isDanyel
+    ? ['Flauta']
+    : (Array.isArray(prestadorActivities) && prestadorActivities.length > 0
+        ? prestadorActivities
+        : ['Flauta']);
+
   // DERIVAÇÃO DINÂMICA DA GRADE HORÁRIA:
   const teacherGradeBlocks = getPrestadorWeeklyGradeBlocks(
     prestador,
     schedules,
-    prestadorActivities
+    effectiveActivities
   );
   const { cargaHorariaSemanalEsperada, tetoSemanalAulas, diasGradeSemanal } =
-    calculateDynamicTetoPrestador(prestador, schedules, prestadorActivities);
-
-  const effectiveActivities = isDanyel
-    ? Array.from(new Set(['Flauta', 'Música', 'Musicalização', ...prestadorActivities]))
-    : prestadorActivities.length > 0
-    ? prestadorActivities
-    : ['Flauta'];
+    calculateDynamicTetoPrestador(prestador, schedules, effectiveActivities);
 
   const items: DemonstrativoItem[] = [];
 
@@ -443,12 +491,33 @@ export function calculateDemonstrativoPJ({
     // 2. DIA LETIVO: Busca chamadas registradas vinculadas ao prestador ou à sua modalidade
     const dateRecords = records.filter((r) => {
       if (!r || r.date !== dateStr) return false;
+      const recActNorm = (r.activity || '').toLowerCase().trim();
+
+      // FILTRO ESTRITO DE DISCIPLINA:
+      // Se for Danyel Pereira, considerar EXCLUSIVAMENTE a modalidade 'Flauta'.
+      // Filtra e descarta completamente registros de chamada de disciplinas não ministradas por ele
+      // (como 'Roda de Música', 'Musicalização', 'Musicalidade', 'Música', etc.)
+      if (isDanyel) {
+        const isFlauta = recActNorm === 'flauta' || recActNorm.includes('flauta');
+        const isNonDanyelDiscipline =
+          recActNorm.includes('musicaliza') ||
+          recActNorm.includes('musicalidade') ||
+          recActNorm.includes('roda de m') ||
+          recActNorm.includes('roda de música') ||
+          (recActNorm.includes('músic') && !isFlauta) ||
+          (recActNorm.includes('music') && !isFlauta);
+
+        if (isNonDanyelDiscipline || !isFlauta) {
+          return false;
+        }
+      }
+
       const matchInstructor =
         r.instructorId &&
         (r.instructorId === prestador.id ||
           (prestador.uid && r.instructorId === prestador.uid));
       const matchActivity = effectiveActivities.some(
-        (act) => act.toLowerCase().trim() === (r.activity || '').toLowerCase().trim()
+        (act) => act.toLowerCase().trim() === recActNorm
       );
       return matchInstructor || matchActivity;
     });
@@ -568,16 +637,36 @@ export function calculateDemonstrativoPJ({
     curr.setDate(curr.getDate() + 1);
   }
 
+  // Sanitização estrita: garante que para Danyel Pereira nenhuma disciplina diferente de 'Flauta' apareça
+  const sanitizedItems = isDanyel
+    ? items.filter((item) => {
+        const actNorm = (item.activity || '').toLowerCase().trim();
+        return (
+          (actNorm === 'flauta' || actNorm.includes('flauta')) &&
+          !actNorm.includes('musicaliza') &&
+          !actNorm.includes('musicalidade') &&
+          !actNorm.includes('roda de m') &&
+          !actNorm.includes('roda de música')
+        );
+      })
+    : items;
+
+  // Recálculo estrito dos totais com base nos itens sanitizados
+  const finalTotalAulasDadas = sanitizedItems.filter((i) => i.status === 'realizada').length;
+  const finalTotalAulasExtrasPendentes = sanitizedItems.filter((i) => i.status === 'fora_da_grade').length;
+  const finalAulasNaoMinistradas = sanitizedItems.filter((i) => i.status === 'cancelada' || i.status === 'feriado').length;
+  const finalAulasForaGrade = finalTotalAulasExtrasPendentes;
+
   // APURAÇÃO FINAL:
-  const valorTotalAulasDadas = Math.round(totalAulasDadas * valorHora * 100) / 100;
+  const valorTotalAulasDadas = Math.round(finalTotalAulasDadas * valorHora * 100) / 100;
   const valorTotalLiquidoAPagar = Math.round((valorTotalAulasDadas + ajudaCusto) * 100) / 100;
 
   return {
-    itens: items,
-    totalAulasDadas,
-    totalAulasExtrasPendentes,
-    aulasNaoMinistradas,
-    aulasForaGrade,
+    itens: sanitizedItems,
+    totalAulasDadas: finalTotalAulasDadas,
+    totalAulasExtrasPendentes: finalTotalAulasExtrasPendentes,
+    aulasNaoMinistradas: finalAulasNaoMinistradas,
+    aulasForaGrade: finalAulasForaGrade,
     valorHoraAula: valorHora,
     valorTotalAulasDadas,
     ajudaDeCusto: ajudaCusto,
@@ -585,7 +674,7 @@ export function calculateDemonstrativoPJ({
     cargaHorariaSemanalEsperada,
     tetoSemanal: tetoSemanalAulas,
     diasGradeSemanal,
-    atingiuTeto: totalAulasDadas >= tetoSemanalAulas,
+    atingiuTeto: finalTotalAulasDadas >= tetoSemanalAulas,
     horariosGradeVinculados: teacherGradeBlocks.map((b) => ({
       id: b.id,
       turma: b.turma,

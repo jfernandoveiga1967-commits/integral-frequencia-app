@@ -26,7 +26,7 @@ import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStude
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
 import { getLogoDataUrl, LOGO_BASE64, LOGO_WIDTH_MM, LOGO_HEIGHT_MM } from './pdfLogo';
 import { formatPhoneDisplay } from './whatsappUtils';
-import { isUserActive, isUserDismissed } from './authUtils';
+import { isUserActive, isUserDismissed, getUnifiedCargoDisplay } from './authUtils';
 import {
   formatCurrencyBR,
   getMonthNameBR,
@@ -5095,26 +5095,7 @@ export function generateUsersReportPDF(
   }
 
   const getCargo = (user: User) => {
-    let cargo = user.cargoLabel || '';
-    if (!cargo.trim()) {
-      switch (user.role) {
-        case 'coordenador':
-          cargo = 'Coordenador(a)';
-          break;
-        case 'nutricionista':
-          cargo = 'Nutricionista';
-          break;
-        case 'auxiliar':
-          cargo = 'Monitora / Auxiliar';
-          break;
-        case 'professor':
-          cargo = 'Professor(a)';
-          break;
-        default:
-          cargo = user.role || 'Colaborador(a)';
-      }
-    }
-    return cargo;
+    return getUnifiedCargoDisplay(user);
   };
 
   const getStatus = (user: User) => {

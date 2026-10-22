@@ -16,7 +16,7 @@ import {
   Square,
   CheckSquare,
 } from 'lucide-react';
-import { ManualNorma, MODULE_METADATA } from '../types/manualNormas';
+import { ManualNorma, MODULE_METADATA, cleanNormaTitle } from '../types/manualNormas';
 import { UserProfile } from '../types';
 
 export interface ManualNormaCardProps {
@@ -212,16 +212,15 @@ export const ManualNormaCard: React.FC<ManualNormaCardProps> = ({
                   </span>
                 );
               })()}
-              <span className="text-[11px] font-bold text-slate-400">
-                {moduleMeta ? moduleMeta.title : norma.moduleTitle}
-              </span>
+              {norma.sectionTitle && (
+                <span className="text-[11px] font-bold text-slate-500">
+                  {norma.sectionTitle}
+                </span>
+              )}
             </div>
 
             <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
-              {(() => {
-                const secClean = String(norma.sectionNumber || norma.section || '').replace(/^seção\s*/i, '').trim();
-                return secClean ? `SEÇÃO ${secClean} • ${norma.title}` : norma.title;
-              })()}
+              {cleanNormaTitle(norma.title)}
             </h4>
             {norma.summary && (
               <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">

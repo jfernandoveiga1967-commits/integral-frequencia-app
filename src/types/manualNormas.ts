@@ -1,13 +1,28 @@
+
 export type ModuleCategory =
-  | 'normas_internas'
+  // Nova estrutura oficial: 8 módulos
+  | 'identidade_institucional'
+  | 'rotina_pedagogica'
+  | 'alimentacao_refeitorio'
+  | 'saude_higiene'
+  | 'seguranca_supervisao'
   | 'academia_transporte'
+  | 'abordagem_socioemocional'
+  | 'comunicacao_registros'
+
+  // Categorias antigas mantidas para compatibilidade durante a migração
+  | 'normas_internas'
   | 'guia_sensivel'
   | 'rotina_operacional'
   | 'seguranca_cuidados'
   | 'postura_fardamento'
   | 'guia_socioemocional';
 
-export type NormaType = 'proibicao' | 'alerta' | 'recomendado' | 'diretriz';
+export type NormaType =
+  | 'proibicao'
+  | 'alerta'
+  | 'recomendado'
+  | 'diretriz';
 
 export interface ManualNorma {
   id: string;
@@ -40,83 +55,203 @@ export interface NormaAceite {
   userAgent?: string;
 }
 
-/**
- * Converte o número de seção para valor numérico inteiro (1 a 51) para garantir ordenação crescente contínua
- */
-export function parseSectionNumber(section?: string | null): number {
-  if (!section) return 999;
-  const clean = section.trim().replace(/^seção\s*/i, '');
-  const anyNum = clean.match(/\d+/);
-  if (anyNum) {
-    return parseInt(anyNum[0], 10);
-  }
-  return 999;
+export interface ModuleMetadata {
+  title: string;
+  description: string;
+  defaultSectionNumber: string;
+  icon: string;
 }
 
 /**
- * Comparador numérico para ordenação rigorosa por seção sequencial de 1 a 51
+ * Converte o número da seção em valor numérico para ordenação.
  */
-export function compareNormasBySectionNumber(a: ManualNorma, b: ManualNorma): number {
+export function parseSectionNumber(
+  section?: string | null
+): number {
+  if (!section) return 999;
+
+  const clean = section.trim().replace(/^seção\s*/i, '');
+  const match = clean.match(/\d+/);
+
+  return match ? parseInt(match[0], 10) : 999;
+}
+
+/**
+ * Ordena as normas pelo número da seção e, em caso de empate,
+ * pelo campo order.
+ */
+export function compareNormasBySectionNumber(
+  a: ManualNorma,
+  b: ManualNorma
+): number {
   const numA = parseSectionNumber(a.sectionNumber || a.section);
   const numB = parseSectionNumber(b.sectionNumber || b.section);
+
   if (numA !== numB) return numA - numB;
+
   return (a.order ?? 0) - (b.order ?? 0);
 }
 
+/**
+ * Remove prefixos redundantes de seção do título.
+ */
+export function cleanNormaTitle(
+  title?: string | null
+): string {
+  if (!title) return '';
+
+  return title
+    .replace(
+      /^se[çc][ãa]o\s*\d+\s*[-:•–—]\s*/i,
+      ''
+    )
+    .replace(
+      /^\(?se[çc][ãa]o\s*\d+\)?\s*[-:•–—]?\s*/i,
+      ''
+    )
+    .trim();
+}
+
+/**
+ * Metadados dos oito módulos da nova estrutura.
+ *
+ * A distribuição das normas entre os módulos será realizada
+ * na etapa de reorganização dos dados.
+ */
+const NEW_MODULE_METADATA: Record<
+  Exclude<
+    ModuleCategory,
+    | 'normas_internas'
+    | 'guia_sensivel'
+    | 'rotina_operacional'
+    | 'seguranca_cuidados'
+    | 'postura_fardamento'
+    | 'guia_socioemocional'
+  >,
+  ModuleMetadata
+> = {
+  identidade_institucional: {
+    title: 'Módulo 1: Identidade institucional, equipe e organização do trabalho',
+    description:
+      'Identidade institucional, responsabilidades da equipe, deveres, organização do trabalho e alinhamento profissional.',
+    defaultSectionNumber: '1',
+    icon: 'Users',
+  },
+
+  rotina_pedagogica: {
+    title: 'Módulo 2: Rotina diária, acolhimento e organização pedagógica',
+    description:
+      'Rotina diária, acolhimento dos alunos, organização pedagógica, acompanhamento das atividades e lições.',
+    defaultSectionNumber: '1',
+    icon: 'CalendarDays',
+  },
+
+  alimentacao_refeitorio: {
+    title: 'Módulo 3: Alimentação, refeitório e segurança alimentar',
+    description:
+      'Organização das refeições, acompanhamento dos alunos, cuidados durante a alimentação e segurança alimentar.',
+    defaultSectionNumber: '1',
+    icon: 'Utensils',
+  },
+
+  saude_higiene: {
+    title: 'Módulo 4: Saúde, higiene e cuidados pessoais',
+    description:
+      'Higiene, cuidados pessoais, atenção às alergias, enfermaria e procedimentos relacionados à saúde dos alunos.',
+    defaultSectionNumber: '1',
+    icon: 'HeartPulse',
+  },
+
+  seguranca_supervisao: {
+    title: 'Módulo 5: Segurança, supervisão e prevenção de acidentes',
+    description:
+      'Supervisão ativa, prevenção de acidentes, controle de acesso, segurança dos espaços e procedimentos de emergência.',
+    defaultSectionNumber: '1',
+    icon: 'ShieldCheck',
+  },
+
+  academia_transporte: {
+    title: 'Módulo 6: Academia, atividades externas e transporte',
+    description:
+      'Deslocamentos, atividades na Academia, transporte, acompanhamento dos grupos e segurança em ambientes externos.',
+    defaultSectionNumber: '1',
+    icon: 'Bus',
+  },
+
+  abordagem_socioemocional: {
+    title: 'Módulo 7: Abordagem sensível, limites e desenvolvimento socioemocional',
+    description:
+      'Comunicação acolhedora, empatia, limites, postura respeitosa, mediação de conflitos e desenvolvimento socioemocional.',
+    defaultSectionNumber: '1',
+    icon: 'HeartHandshake',
+  },
+
+  comunicacao_registros: {
+    title: 'Módulo 8: Comunicação, registros, ocorrências e entrega de alunos',
+    description:
+      'Comunicação com a equipe e as famílias, confidencialidade, registros de ocorrências e procedimentos de entrega dos alunos.',
+    defaultSectionNumber: '1',
+    icon: 'ClipboardList',
+  },
+};
+
+/**
+ * Metadados unificados.
+ *
+ * As categorias antigas permanecem disponíveis para que os
+ * componentes existentes continuem compilando durante a migração.
+ */
 export const MODULE_METADATA: Record<
   ModuleCategory,
-  {
-    title: string;
-    description: string;
-    defaultSectionNumber: string;
-    icon: string;
-  }
+  ModuleMetadata
 > = {
+  ...NEW_MODULE_METADATA,
+
   rotina_operacional: {
     title: 'Módulo 1: Rotina Operacional',
-    description: 'Objetivos, direitos, deveres, ponto eletrônico, rádio frequência 2, refeitório, acolhimento e lições (Seções 1 a 16)',
+    description:
+      'Categoria antiga — será migrada para os oito módulos oficiais.',
     defaultSectionNumber: '1',
     icon: 'Award',
   },
+
   seguranca_cuidados: {
     title: 'Módulo 2: Segurança, Espaços, Academia e Transporte',
-    description: 'Vigilância ativa, parque/parcão, banheiros, portões, portaria, emergência, academia e culinária (Seções 17 a 27)',
+    description:
+      'Categoria antiga — será migrada para os oito módulos oficiais.',
     defaultSectionNumber: '17',
     icon: 'Bus',
   },
+
   postura_fardamento: {
     title: 'Módulo 3: Postura, Fardamento e Proibições',
-    description: 'Padrão de fardamento, proibição de celular, ética, hierarquia, alergias, enfermaria e ECA (Seções 28 a 38)',
+    description:
+      'Categoria antiga — será migrada para os oito módulos oficiais.',
     defaultSectionNumber: '28',
     icon: 'Award',
   },
+
   guia_socioemocional: {
     title: 'Módulo 4: Guia Socioemocional e Abordagem Sensível',
-    description: 'Comunicação acolhedora, não gritar, não puxar, empatia, paciência e mediação em 3 passos (Seções 39 a 51)',
+    description:
+      'Categoria antiga — será migrada para os oito módulos oficiais.',
     defaultSectionNumber: '39',
     icon: 'HeartHandshake',
   },
+
   normas_internas: {
-    title: 'Módulo 1: Rotina Operacional',
-    description: 'Direitos, deveres, ponto, rádio, refeitório, acolhimento e lições (Seções 1 a 16)',
+    title: 'Módulo antigo: Normas Internas',
+    description:
+      'Categoria legada mantida temporariamente para compatibilidade.',
     defaultSectionNumber: '1',
     icon: 'Award',
   },
-  academia_transporte: {
-    title: 'Módulo 2: Segurança, Espaços, Academia e Transporte',
-    description: 'Deslocamento, 10 regras da academia e segurança de portões (Seções 17 a 27)',
-    defaultSectionNumber: '17',
-    icon: 'Bus',
-  },
+
   guia_sensivel: {
-    title: 'Módulo 4: Guia Socioemocional e Abordagem Sensível',
-    description: 'Comunicação assertiva, afeto e acolhimento sensível (Seções 39 a 51)',
+    title: 'Módulo antigo: Guia Sensível',
+    description:
+      'Categoria legada mantida temporariamente para compatibilidade.',
     defaultSectionNumber: '39',
     icon: 'HeartHandshake',
   },
 };
-
-import { NORMAS_DATA } from "../data/normasData";
-
-export { NORMAS_DATA };
-export const INITIAL_MANUAL_NORMAS: ManualNorma[] = NORMAS_DATA;

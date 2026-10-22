@@ -11,6 +11,10 @@ import {
 import { db } from '../firebase';
 import { UserProfile } from '../types';
 import { getClientIpAddress } from './manualProgressService';
+import {
+  stripTrailingFeedbackSignatures,
+  STANDARD_FEEDBACK_CLOSING,
+} from '../utils/feedbackPromptBuilder';
 
 export type FeedbackStatus = 'PENDING' | 'ACKNOWLEDGED';
 
@@ -402,16 +406,14 @@ export function cleanWhatsAppCordialMessage(raw: string): string {
   // Remove eventuais rodapés legados repetitivos
   msg = msg.replace(/\n+Por gentileza, acesse o portal do Colégio Crescer.*$/is, '');
 
-  // Remove despedidas e assinaturas anteriores para garantir encerramento estrito
-  msg = msg.replace(/\n+(?:Um abraço fraterno,?|Atenciosamente,?|Fraternalmente,?|Com carinho,?)\s*\n+.*$/is, '');
-  msg = msg.replace(/\n+\*?(?:Coordenação (?:do Integral|Pedagógica) • Colégio Crescer)\*?$/is, '');
+  // Remove rigorosamente qualquer despedida e assinatura anterior para garantir encerramento único
+  msg = stripTrailingFeedbackSignatures(msg);
 
   // Converte asteriscos duplos (**) para simples (*) para negrito nativo do WhatsApp
   msg = formatWhatsAppMessage(msg);
 
-  // Aplica encerramento institucional estrito padronizado
-  const padraoEncerramento = 'Atenciosamente,\nCoordenação do Integral • Colégio Crescer';
-  msg = `${msg.trim()}\n\n${padraoEncerramento}`;
+  // Aplica encerramento institucional padronizado exatamente UMA vez
+  msg = `${msg.trim()}\n\n${STANDARD_FEEDBACK_CLOSING}`;
 
   return sanitizeWhatsAppText(msg);
 }
