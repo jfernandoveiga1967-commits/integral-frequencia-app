@@ -41,6 +41,7 @@ import {
   saveStudents,
   loadStudents,
   saveTurmas,
+  loadTurmas,
   saveAttendanceRecords,
   loadAttendanceRecords,
 } from './utils/storageUtils';
@@ -124,30 +125,37 @@ const quotaStateListeners = new Set<QuotaStateListener>();
 
 export function subscribeQuotaState(listener: QuotaStateListener): () => void {
   quotaStateListeners.add(listener);
-  // Sempre emite false para desativar a flag visual e manter o fluxo ativo
-  listener(false);
+  listener(isFirestoreQuotaExceeded);
   return () => {
     quotaStateListeners.delete(listener);
   };
 }
 
 export function getIsFirestoreQuotaExceeded(): boolean {
-  return false;
+  return isFirestoreQuotaExceeded;
 }
 
 export function setFirestoreQuotaExceeded() {
-  // Desativado: remove o bloqueio de cota e reconecta ao Firestore
-  isFirestoreQuotaExceeded = false;
+  if (isFirestoreQuotaExceeded) return;
+  isFirestoreQuotaExceeded = true;
+  lastQuotaCheckTime = Date.now();
+  try {
+    disableNetwork(db).catch(() => {});
+  } catch {}
   quotaStateListeners.forEach((l) => {
     try {
-      l(false);
+      l(true);
     } catch {}
   });
 }
 
 export function clearFirestoreQuotaExceeded() {
+  if (!isFirestoreQuotaExceeded) return;
   isFirestoreQuotaExceeded = false;
   lastQuotaCheckTime = 0;
+  try {
+    enableNetwork(db).catch(() => {});
+  } catch {}
   quotaStateListeners.forEach((l) => {
     try {
       l(false);
@@ -157,8 +165,20 @@ export function clearFirestoreQuotaExceeded() {
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errMsg = error instanceof Error ? error.message : String(error);
-  // Não bloqueia o app com flag visual de cota excedida
-  clearFirestoreQuotaExceeded();
+  const errCode = (error as { code?: string })?.code;
+  const isQuota =
+    errCode === 'resource-exhausted' ||
+    errMsg.toLowerCase().includes('resource-exhausted') ||
+    errMsg.toLowerCase().includes('quota exceeded') ||
+    errMsg.toLowerCase().includes('quota');
+
+  if (isQuota) {
+    setFirestoreQuotaExceeded();
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[Firestore Quota] Cota diária atingida em ${path || 'operação'}. Operando em modo de contingência local.`);
+    }
+    return;
+  }
 
   const errInfo: FirestoreErrorInfo = {
     error: errMsg,
@@ -180,7 +200,8 @@ let lastSuccessfulPingTime = 0;
 
 export async function testFirestoreConnection(force = false): Promise<boolean> {
   // Se a cota já foi confirmada como excedida, evitar spammar o servidor apenas em verificações automáticas de rotina
-  if (!force && isFirestoreQuotaExceeded && Date.now() - lastQuotaCheckTime < 180000) {
+  // Aplica cooldown de 15 minutos (900.000ms) para verificações em segundo plano
+  if (!force && isFirestoreQuotaExceeded && Date.now() - lastQuotaCheckTime < 900000) {
     return false;
   }
 
@@ -198,9 +219,10 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
+        const code = (err as { code?: string })?.code;
+        if (code === 'resource-exhausted' || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
           setFirestoreQuotaExceeded();
-          console.warn('Cota diária de leitura do Firestore excedida (Free daily read units per project). Operando em modo offline.');
+          console.warn('Cota diária de leitura do Firestore excedida (Free daily read units per project). Operando em modo local offline.');
         } else if (msg.includes('the client is offline') || msg.includes('unavailable')) {
           console.info('Firestore is operating in offline mode.');
         }
@@ -208,7 +230,7 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
       });
 
     const timeoutPromise = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), 5000);
+      setTimeout(() => resolve(false), 4000);
     });
 
     const success = await Promise.race([pingPromise, timeoutPromise]);
@@ -1560,6 +1582,11 @@ export async function disconnectFirestore(): Promise<boolean> {
 }
 
 export async function reconnectFirestore(force = false): Promise<boolean> {
+  // Se a cota estiver confirmada como excedida e não for forçada pelo usuário,
+  // manter a rede desativada para evitar ciclo de backoff contínuo no console
+  if (isFirestoreQuotaExceeded && !force) {
+    return false;
+  }
   if (!isNetworkDisabled && !force) {
     // Network is already active and healthy; do not reset active write streams
     return true;
@@ -1574,13 +1601,20 @@ export async function reconnectFirestore(force = false): Promise<boolean> {
     isNetworkDisabled = false;
     return true;
   } catch (err) {
-    console.warn('Notice while enabling Firestore network:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: string })?.code;
+    if (code === 'resource-exhausted' || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
+      setFirestoreQuotaExceeded();
+    } else {
+      console.warn('Notice while enabling Firestore network:', err);
+    }
     return false;
   }
 }
 
 let isProcessingOutbox = false;
 export async function processAttendanceOutbox(): Promise<number> {
+  if (isFirestoreQuotaExceeded) return 0;
   if (isProcessingOutbox) return 0;
   const outboxItems = getAttendanceOutbox();
   if (!outboxItems || outboxItems.length === 0) return 0;
@@ -1618,6 +1652,11 @@ export async function processAttendanceOutbox(): Promise<number> {
       }
     }
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code = (e as { code?: string })?.code;
+    if (code === 'resource-exhausted' || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted')) {
+      setFirestoreQuotaExceeded();
+    }
     console.warn('Erro ao processar outbox de frequência (retentando depois):', e);
   } finally {
     isProcessingOutbox = false;
@@ -1629,13 +1668,13 @@ export async function processAttendanceOutbox(): Promise<number> {
 // Global online listener for automatic outbox flush
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    if (getAttendanceOutbox().length > 0) {
+    if (!isFirestoreQuotaExceeded && getAttendanceOutbox().length > 0) {
       processAttendanceOutbox().catch(() => {});
     }
   });
-  // Periodic background check every 20 seconds (only if pending items exist)
+  // Periodic background check every 20 seconds (only if pending items exist and quota is not exceeded)
   setInterval(() => {
-    if (navigator.onLine && getAttendanceOutbox().length > 0) {
+    if (navigator.onLine && !isFirestoreQuotaExceeded && getAttendanceOutbox().length > 0) {
       processAttendanceOutbox().catch(() => {});
     }
   }, 20000);
@@ -3871,8 +3910,13 @@ export async function fetchRecordsDirectFromServer(
   targetDate?: string,
   limitCount?: number
 ): Promise<AttendanceRecord[]> {
-  const colRef = collection(db, 'attendanceRecords');
   const hoje = targetDate || new Date().toISOString().split('T')[0];
+  if (isFirestoreQuotaExceeded) {
+    const local = loadAttendanceRecords();
+    return hoje ? local.filter((r) => r.date === hoje || (r as any).data === hoje) : local;
+  }
+
+  const colRef = collection(db, 'attendanceRecords');
   const q = hoje
     ? (limitCount && limitCount > 0
         ? query(colRef, or(where('data', '==', hoje), where('date', '==', hoje)), limit(limitCount))
@@ -3909,7 +3953,8 @@ export async function fetchRecordsDirectFromServer(
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'attendanceRecords');
-    throw err;
+    const local = loadAttendanceRecords();
+    return hoje ? local.filter((r) => r.date === hoje || (r as any).data === hoje) : local;
   }
 }
 
@@ -3918,6 +3963,10 @@ export async function fetchRecordsDirectFromServer(
  * Ignora o cache local do Firestore para garantir lista atualizada no painel.
  */
 export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
+  if (isFirestoreQuotaExceeded) {
+    return loadStudents();
+  }
+
   const colRef = collection(db, 'alunos');
   try {
     const snap = await getDocsFromServer(colRef);
@@ -3946,7 +3995,7 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
     return deduplicateStudentsList(list);
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'alunos');
-    throw err;
+    return loadStudents();
   }
 }
 
@@ -3954,6 +4003,10 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
  * Busca direta no servidor das turmas via getDocsFromServer.
  */
 export async function fetchTurmasDirectFromServer(): Promise<string[]> {
+  if (isFirestoreQuotaExceeded) {
+    return loadTurmas();
+  }
+
   const colRef = collection(db, 'turmas');
   try {
     const snap = await getDocsFromServer(colRef);
@@ -3968,7 +4021,7 @@ export async function fetchTurmasDirectFromServer(): Promise<string[]> {
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'turmas');
-    throw err;
+    return loadTurmas();
   }
 }
 
@@ -3979,7 +4032,7 @@ export async function fetchTurmasDirectFromServer(): Promise<string[]> {
  * 3. Limpa o estado de erro de cota (RESOURCE_EXHAUSTED / QuotaExceeded) imediatamente se bem-sucedido.
  */
 export async function forceDirectServerSync(targetDate?: string) {
-  // Reativa conexão do SDK com o servidor
+  // Reativa conexão do SDK com o servidor se o usuário solicitou expressamente
   await reconnectFirestore(true);
 
   // Busca direta no servidor (bypassing cache)
@@ -4013,8 +4066,9 @@ export async function forceDirectServerSync(targetDate?: string) {
 if (typeof window !== 'undefined') {
   setTimeout(() => {
     try {
-      reconnectFirestore(true).catch(() => {});
-      clearFirestoreQuotaExceeded();
+      if (!isFirestoreQuotaExceeded) {
+        reconnectFirestore(false).catch(() => {});
+      }
     } catch (e) {
       console.warn('Notice na auto-inicialização do Firebase:', e);
     }

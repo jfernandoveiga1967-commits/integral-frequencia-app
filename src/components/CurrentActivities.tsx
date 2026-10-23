@@ -66,6 +66,7 @@ import {
   cleanOldDepartureAlertStorageKeys,
   PendingEarlyDeparture,
   getPendingEarlyDeparturesForTurma,
+  markEarlyCheckoutAsConfirmed,
 } from '../utils/departureAlertUtils';
 import { DepartureAlertBanner } from './DepartureAlertBanner';
 import { DepartureAlertModal } from './DepartureAlertModal';
@@ -988,6 +989,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       const turmaStatus = turmaStatuses.find((ts) => ts.turmaName === student.turma);
       const activityToRecord = (turmaStatus?.activeBlock?.activityId || 'Rotina') as ActivityType;
 
+      // Grava confirmação de baixa imediatamente no localStorage para resposta instantânea na interface
+      markEarlyCheckoutAsConfirmed(selectedDate, student.id);
+
       await onSaveRecord({
         studentId: student.id,
         activity: activityToRecord,
@@ -997,6 +1001,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         year: currentWeek.year,
         status: 'saida_antecipada',
         exitTime: departureTime,
+        checkoutConfirmed: true,
         instructorId: currentUser?.id || undefined,
         instructorName: currentUser?.name || undefined,
         observation: `Saída antecipada confirmada às ${departureTime}`,

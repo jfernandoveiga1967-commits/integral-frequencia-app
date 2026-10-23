@@ -239,6 +239,18 @@ let isReconnecting = false;
 
 export async function runAutoReconnect(force = false): Promise<boolean> {
   if (isReconnecting) return false;
+
+  // Se a cota estiver confirmada como excedida e não for uma tentativa manual expressa,
+  // evita chamadas ao servidor e opera silenciosamente em modo offline/local
+  if (!force && getIsFirestoreQuotaExceeded()) {
+    updateConnectionState({
+      status: 'offline',
+      isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      quotaExceeded: true,
+    });
+    return false;
+  }
+
   isReconnecting = true;
   updateConnectionState({ status: 'reconnecting' });
 
@@ -251,7 +263,7 @@ export async function runAutoReconnect(force = false): Promise<boolean> {
     }
 
     // Force Firestore network reconnection if offline
-    await reconnectFirestore();
+    await reconnectFirestore(force);
 
     // Check actual Firestore server ping (with caching/throttling)
     const isConnected = await testFirestoreConnection(force);
@@ -263,6 +275,7 @@ export async function runAutoReconnect(force = false): Promise<boolean> {
         isOnline: true,
         lastSyncTime: Date.now(),
         pendingOutboxCount: 0,
+        quotaExceeded: false,
       });
 
       // Broadcast force resync to make sure all instances refresh any missed writes
@@ -272,13 +285,17 @@ export async function runAutoReconnect(force = false): Promise<boolean> {
       isReconnecting = false;
       return true;
     } else {
-      updateConnectionState({ status: 'offline', isOnline: false });
+      updateConnectionState({
+        status: 'offline',
+        isOnline: navigator.onLine,
+        quotaExceeded: getIsFirestoreQuotaExceeded(),
+      });
       isReconnecting = false;
       return false;
     }
   } catch (err) {
     console.warn('Auto-reconnect notice:', err);
-    updateConnectionState({ status: 'offline' });
+    updateConnectionState({ status: 'offline', quotaExceeded: getIsFirestoreQuotaExceeded() });
     isReconnecting = false;
     return false;
   }
