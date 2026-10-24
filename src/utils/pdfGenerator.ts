@@ -16,11 +16,16 @@ import {
   HolidayItem,
   SemanarioPlan,
   TurmaAtribuicao,
+  NominalAttendanceFilter,
+  NominalStudentTypeFilter,
+  NominalPeriodMode,
+  NominalReportMetrics,
+  NominalProcessedStudent,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
-import { getPeriodConsolidatedMetrics } from './frequenciaUtils';
+import { getPeriodConsolidatedMetrics, normalizeAttendanceStatus } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
 import { parseTimeToMinutes, getStartMinutes, isReforcoActivity, getReforcoStudentsForCard, isStudentInReforcoVigency } from './semanarioUtils';
 import { processMarkdownAndIconsForPDF } from './markdownUtils';
@@ -4324,8 +4329,17 @@ export interface GenerateNominalListPDFOptions {
   turma?: string;
   dayOfWeek?: DayOfWeek | 'todos' | string;
   students: Student[];
+  records?: AttendanceRecord[];
   currentUser?: UserProfile | null;
   saveImmediately?: boolean;
+  attendanceFilter?: NominalAttendanceFilter;
+  studentTypeFilter?: NominalStudentTypeFilter;
+  periodMode?: NominalPeriodMode;
+  targetDate?: string;
+  startDate?: string;
+  endDate?: string;
+  metrics?: NominalReportMetrics;
+  processedItems?: NominalProcessedStudent[];
 }
 
 export function generateNominalListPDF({
@@ -4334,8 +4348,17 @@ export function generateNominalListPDF({
   turma = 'TODAS',
   dayOfWeek = 'todos',
   students = [],
+  records,
   currentUser,
   saveImmediately = false,
+  attendanceFilter = 'todos',
+  studentTypeFilter = 'todos',
+  periodMode = 'dia',
+  targetDate,
+  startDate,
+  endDate,
+  metrics,
+  processedItems,
 }: GenerateNominalListPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -4375,95 +4398,247 @@ export function generateNominalListPDF({
     sexta: 'Sex',
   };
 
-  // Filtragem dos alunos
-  const filteredStudents = (Array.isArray(students) ? students : []).filter((s) => {
-    if (!s || typeof s !== 'object') return false;
-    const st = s.status || s.statusMatricula || 'ativo';
-    if (st !== 'ativo') return false;
+  const isAttendanceReportMode = Boolean(records || metrics || processedItems);
 
-    // Filtro por turma
-    if (!isAllTurmas && s.turma !== turma) {
-      return false;
-    }
+  // Se já tivermos processedItems passados pelo modal, utilizamos diretamente
+  let itemsToRender: {
+    student: Student;
+    status: 'presente' | 'faltoso';
+    tipo: 'regular' | 'avulso';
+    presenceCount: number;
+    absenceCount: number;
+    isExpected: boolean;
+  }[] = [];
 
-    // Filtro por modalidade
-    if (!isAllSpecialties) {
-      if (isAllReforco) {
-        const hasReforco =
-          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'reforco')) ||
-          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
-          (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
-        if (!hasReforco) return false;
-      } else if (isRotina) {
-        const hasRotina =
-          (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
-          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
-          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
-          Boolean((s as any).activity && normalizeStr((s as any).activity) === 'rotina') ||
-          (!s.activities || s.activities.length === 0);
-        if (!hasRotina) return false;
-      } else {
-        const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(specialty));
-        const hasSpec =
-          (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === normalizeStr(specialty))) ||
-          (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === normalizeStr(specialty)));
-        if (!hasAct && !hasSpec) return false;
+  if (processedItems && processedItems.length > 0) {
+    itemsToRender = processedItems;
+  } else if (isAttendanceReportMode) {
+    // Computar avaliação nominal caso records tenha sido fornecido sem processedItems
+    const effectiveDate = targetDate || new Date().toISOString().split('T')[0];
+    const recs = records || [];
+
+    const candidateStudents = (Array.isArray(students) ? students : []).filter((s) => {
+      if (!s || typeof s !== 'object') return false;
+      const st = s.status || s.statusMatricula || 'ativo';
+      if (st !== 'ativo') return false;
+
+      if (studentTypeFilter === 'regular' && s.tipoContrato === 'avulso') return false;
+      if (studentTypeFilter === 'avulso' && s.tipoContrato !== 'avulso') return false;
+
+      if (!isAllTurmas && s.turma !== turma) return false;
+
+      if (!isAllSpecialties) {
+        if (isAllReforco) {
+          const hasRef =
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'reforco')) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
+          if (!hasRef) return false;
+        } else if (isRotina) {
+          const hasRot =
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
+            Boolean((s as any).activity && normalizeStr((s as any).activity) === 'rotina') ||
+            (!s.activities || s.activities.length === 0);
+          if (!hasRot) return false;
+        } else {
+          const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(specialty));
+          const hasSpec =
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === normalizeStr(specialty))) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === normalizeStr(specialty)));
+          if (!hasAct && !hasSpec) return false;
+        }
       }
-    }
 
-    // Filtro por dia da semana
-    if (!isAllDays) {
-      const scheduledOnDay = isStudentScheduledForDay(s, dayOfWeek as DayOfWeek);
-      if (!scheduledOnDay) return false;
-    }
+      return true;
+    });
 
-    return true;
-  });
+    itemsToRender = candidateStudents.map((s) => {
+      let isExpected = false;
+      let hasPresence = false;
+      let pCount = 0;
+      let aCount = 0;
+
+      if (periodMode === 'dia') {
+        isExpected = isStudentScheduledForDate(s, effectiveDate);
+        const dayRecs = recs.filter((r) => r.studentId === s.id && r.date === effectiveDate);
+        pCount = dayRecs.filter((r) => {
+          const norm = normalizeAttendanceStatus(r.status);
+          return norm === 'presente' || norm === 'sem_equipamento' || norm === 'saida_antecipada';
+        }).length;
+        aCount = dayRecs.filter((r) => normalizeAttendanceStatus(r.status) === 'falta').length;
+        hasPresence = pCount > 0;
+        if (hasPresence) isExpected = true;
+      } else {
+        const sDate = startDate || effectiveDate;
+        const eDate = endDate || effectiveDate;
+        const periodRecs = recs.filter((r) => r.studentId === s.id && r.date >= sDate && r.date <= eDate);
+        pCount = periodRecs.filter((r) => {
+          const norm = normalizeAttendanceStatus(r.status);
+          return norm === 'presente' || norm === 'sem_equipamento' || norm === 'saida_antecipada';
+        }).length;
+        aCount = periodRecs.filter((r) => normalizeAttendanceStatus(r.status) === 'falta').length;
+        hasPresence = pCount > 0;
+        isExpected = hasPresence || true;
+      }
+
+      return {
+        student: s,
+        status: hasPresence ? ('presente' as const) : ('faltoso' as const),
+        tipo: s.tipoContrato === 'avulso' ? ('avulso' as const) : ('regular' as const),
+        presenceCount: pCount,
+        absenceCount: aCount,
+        isExpected,
+      };
+    }).filter((item) => {
+      if (!item.isExpected) return false;
+      if (attendanceFilter === 'presentes') return item.status === 'presente';
+      if (attendanceFilter === 'faltosos') return item.status === 'faltoso';
+      return true;
+    });
+  } else {
+    // Modo tradicional puramente cadastral
+    const filteredStudents = (Array.isArray(students) ? students : []).filter((s) => {
+      if (!s || typeof s !== 'object') return false;
+      const st = s.status || s.statusMatricula || 'ativo';
+      if (st !== 'ativo') return false;
+
+      if (studentTypeFilter === 'regular' && s.tipoContrato === 'avulso') return false;
+      if (studentTypeFilter === 'avulso' && s.tipoContrato !== 'avulso') return false;
+
+      if (!isAllTurmas && s.turma !== turma) return false;
+
+      if (!isAllSpecialties) {
+        if (isAllReforco) {
+          const hasRef =
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'reforco')) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'reforco')) ||
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'reforco'));
+          if (!hasRef) return false;
+        } else if (isRotina) {
+          const hasRot =
+            (Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === 'rotina')) ||
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === 'rotina')) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === 'rotina')) ||
+            Boolean((s as any).activity && normalizeStr((s as any).activity) === 'rotina') ||
+            (!s.activities || s.activities.length === 0);
+          if (!hasRot) return false;
+        } else {
+          const hasAct = Array.isArray(s.activities) && s.activities.some((act) => normalizeStr(act) === normalizeStr(specialty));
+          const hasSpec =
+            (Array.isArray(s.modalidadesEspeciais) && s.modalidadesEspeciais.some((m) => normalizeStr(m) === normalizeStr(specialty))) ||
+            (Array.isArray(s.specialties) && s.specialties.some((m) => normalizeStr(m) === normalizeStr(specialty)));
+          if (!hasAct && !hasSpec) return false;
+        }
+      }
+
+      if (!isAllDays) {
+        const scheduledOnDay = isStudentScheduledForDay(s, dayOfWeek as DayOfWeek);
+        if (!scheduledOnDay) return false;
+      }
+
+      return true;
+    });
+
+    itemsToRender = filteredStudents.map((s) => ({
+      student: s,
+      status: 'presente' as const,
+      tipo: s.tipoContrato === 'avulso' ? ('avulso' as const) : ('regular' as const),
+      presenceCount: 0,
+      absenceCount: 0,
+      isExpected: true,
+    }));
+  }
 
   // Ordenação Estrita Alfabética
-  const sortedStudents = [...filteredStudents].sort((a, b) =>
-    (a.name || '').localeCompare(b.name || '', 'pt-BR')
+  const sortedItems = [...itemsToRender].sort((a, b) =>
+    (a.student.name || '').localeCompare(b.student.name || '', 'pt-BR')
   );
 
   // Determinar Título Oficial
   let docTitle = title;
   if (!docTitle) {
-    if (isAllReforco) {
-      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — REFORÇO ESCOLAR';
-    } else if (isRotina) {
-      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — ROTINA';
-    } else if (!isAllSpecialties) {
-      docTitle = `RELAÇÃO NOMINAL DE ALUNOS — ${specialty.toUpperCase()}`;
-    } else if (!isAllTurmas) {
-      docTitle = `RELAÇÃO NOMINAL DE ALUNOS — TURMA ${turma.toUpperCase()}`;
+    if (isAttendanceReportMode) {
+      if (attendanceFilter === 'presentes') {
+        docTitle = 'RELAÇÃO NOMINAL — ALUNOS PRESENTES';
+      } else if (attendanceFilter === 'faltosos') {
+        docTitle = 'RELAÇÃO NOMINAL — ALUNOS FALTOSOS / AUSENTES';
+      } else {
+        docTitle = 'RELAÇÃO NOMINAL DE FREQUÊNCIA (PRESENTES E FALTOSOS)';
+      }
     } else {
-      docTitle = 'RELAÇÃO NOMINAL DE ALUNOS MATRICULADOS';
+      if (isAllReforco) {
+        docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — REFORÇO ESCOLAR';
+      } else if (isRotina) {
+        docTitle = 'RELAÇÃO NOMINAL DE ALUNOS — ROTINA';
+      } else if (!isAllSpecialties) {
+        docTitle = `RELAÇÃO NOMINAL DE ALUNOS — ${specialty.toUpperCase()}`;
+      } else if (!isAllTurmas) {
+        docTitle = `RELAÇÃO NOMINAL DE ALUNOS — TURMA ${turma.toUpperCase()}`;
+      } else {
+        docTitle = 'RELAÇÃO NOMINAL DE ALUNOS MATRICULADOS';
+      }
     }
   }
 
-  const subtitle = 'Cadastro Oficial de Matrícula • Programa Integral';
+  const subtitle = isAttendanceReportMode
+    ? 'Acompanhamento Nominal de Presença e Faltas • Programa Integral'
+    : 'Cadastro Oficial de Matrícula • Programa Integral';
 
   // Detalhes de Filtro no Cabeçalho (Tier 4)
   const filterDetails: string[] = [];
-  if (isAllReforco) {
-    filterDetails.push('Modalidade: Reforço Escolar (Atendimento Paralelo)');
-  } else if (isRotina) {
-    filterDetails.push('Modalidade: Rotina');
-  } else if (!isAllSpecialties) {
-    filterDetails.push(`Modalidade: ${specialty}`);
-  } else {
-    filterDetails.push('Modalidade: Todas as Modalidades');
-  }
 
-  filterDetails.push(isAllTurmas ? 'Turma: Todas as Turmas' : `Turma: ${turma}`);
-
-  if (!isAllDays) {
+  // Período
+  if (isAttendanceReportMode) {
+    if (periodMode === 'dia') {
+      const dt = targetDate || new Date().toISOString().split('T')[0];
+      const dLabel = getDayOfWeekLabel(dt);
+      filterDetails.push(`Data: ${formatDateBR(dt)} (${dLabel})`);
+    } else {
+      const s = startDate ? formatDateBR(startDate) : 'Início';
+      const e = endDate ? formatDateBR(endDate) : 'Fim';
+      filterDetails.push(`Período: ${s} até ${e}`);
+    }
+  } else if (!isAllDays) {
     filterDetails.push(`Dia: ${dayLabelsMap[dayOfWeek] || dayOfWeek}`);
   } else {
     filterDetails.push('Frequência: Todos os Dias');
   }
 
-  filterDetails.push(`Total: ${sortedStudents.length} ${sortedStudents.length === 1 ? 'aluno' : 'alunos'}`);
+  // Tipo de Aluno
+  if (studentTypeFilter === 'regular') {
+    filterDetails.push('Alunos: Apenas Regulares');
+  } else if (studentTypeFilter === 'avulso') {
+    filterDetails.push('Alunos: Apenas Avulsos');
+  } else {
+    filterDetails.push('Alunos: Regulares e Avulsos');
+  }
+
+  // Status de Presença
+  if (isAttendanceReportMode) {
+    if (attendanceFilter === 'presentes') {
+      filterDetails.push('Filtro: Apenas Presentes');
+    } else if (attendanceFilter === 'faltosos') {
+      filterDetails.push('Filtro: Apenas Faltosos / Ausentes');
+    } else {
+      filterDetails.push('Filtro: Presentes e Faltosos');
+    }
+  }
+
+  // Turma
+  filterDetails.push(isAllTurmas ? 'Turma: Todas as Turmas' : `Turma: ${turma}`);
+
+  // Modalidade
+  if (isAllReforco) {
+    filterDetails.push('Modalidade: Reforço Escolar');
+  } else if (isRotina) {
+    filterDetails.push('Modalidade: Rotina');
+  } else if (!isAllSpecialties) {
+    filterDetails.push(`Modalidade: ${specialty}`);
+  }
+
+  filterDetails.push(`Listados: ${sortedItems.length}`);
 
   if (currentUser?.name) {
     filterDetails.push(`Coord: ${currentUser.name}`);
@@ -4472,93 +4647,209 @@ export function generateNominalListPDF({
   // Desenhar cabeçalho oficial institucional de 4 níveis
   drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
 
-  // Preparar linhas da tabela cadastral limpa (SEM elementos de chamada, presenças ou faltas)
-  const tableRows = sortedStudents.map((st, idx) => {
-    const num = String(idx + 1).padStart(2, '0');
-    const studentName = (st.name || '').trim().toUpperCase();
-    const studentTurma = st.turma || '—';
+  // Desenhar Cards de KPIs se métricas estiverem disponíveis
+  let tableStartY = 37;
+  if (metrics) {
+    tableStartY = 47;
+    const boxWidth = 43;
+    const boxHeight = 10;
+    const spacing = 3.3;
+    drawMetricBoxes(doc, 14, 34, boxWidth, boxHeight, spacing, [
+      { label: 'Total Esperados', value: metrics.totalEsperados, color: [15, 23, 42] },
+      { label: 'Total Presentes', value: `${metrics.totalPresentes} (${metrics.taxaPresenca}%)`, color: [5, 150, 105] },
+      { label: 'Total Faltosos', value: `${metrics.totalFaltosos} (${metrics.taxaFaltas}%)`, color: [225, 29, 72] },
+      { label: 'Alunos Listados', value: `${sortedItems.length} de ${metrics.totalEsperados}`, color: [79, 70, 229] },
+    ]);
+  }
 
-    // Formatar dias de frequência
-    let freqDaysStr = 'Seg a Sex (Todos)';
-    if (Array.isArray(st.diasFrequencia) && st.diasFrequencia.length > 0 && st.diasFrequencia.length < 5) {
-      freqDaysStr = st.diasFrequencia.map((d) => dayShortMap[d] || d).join(', ');
-    }
+  // Preparar linhas da tabela
+  if (isAttendanceReportMode) {
+    const tableRows = sortedItems.map((item, idx) => {
+      const st = item.student;
+      const num = String(idx + 1).padStart(2, '0');
+      const studentName = (st.name || '').trim().toUpperCase();
+      const tipoContrato = item.tipo === 'avulso' ? 'AVULSO' : 'REGULAR';
+      const studentTurma = st.turma || '—';
 
-    // Horário de saída
-    let exitTime = '18:00';
-    if (!isAllDays && st.horariosSaida && st.horariosSaida[dayOfWeek as DayOfWeek]) {
-      exitTime = st.horariosSaida[dayOfWeek as DayOfWeek] || '18:00';
-    } else if (st.horarioSaida) {
-      exitTime = st.horarioSaida;
-    }
+      const statusText = item.status === 'presente'
+        ? item.presenceCount > 1
+          ? `PRESENTE (${item.presenceCount})`
+          : 'PRESENTE'
+        : 'FALTOSO / AUSENTE';
 
-    // Modalidades / Observação Cadastral
-    const allMods: string[] = [];
-    if (Array.isArray(st.modalidadesEspeciais) && st.modalidadesEspeciais.length > 0) {
-      allMods.push(...st.modalidadesEspeciais);
-    } else if (Array.isArray(st.specialties) && st.specialties.length > 0) {
-      allMods.push(...st.specialties);
-    }
-    if (Array.isArray(st.activities) && st.activities.length > 0) {
-      st.activities.forEach((act) => {
-        if (!allMods.includes(act)) allMods.push(act);
-      });
-    }
-
-    const modalidadesStr = allMods.length > 0 ? allMods.join(', ') : 'Rotina Regular';
-
-    return [num, studentName, studentTurma, freqDaysStr, exitTime, modalidadesStr];
-  });
-
-  // Renderizar autoTable
-  autoTable(doc, {
-    startY: 37,
-    head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
-    body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—']],
-    theme: 'striped',
-    headStyles: {
-      fillColor: [15, 23, 42], // slate-900
-      textColor: [255, 255, 255],
-      fontSize: 8,
-      fontStyle: 'bold',
-      halign: 'left',
-      cellPadding: 2.8,
-    },
-    styles: {
-      fontSize: 7.8,
-      cellPadding: 2.2,
-      textColor: [30, 41, 59], // slate-800
-      lineColor: [226, 232, 240], // slate-200
-      lineWidth: 0.2,
-    },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252], // slate-50
-    },
-    columnStyles: {
-      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
-      1: { cellWidth: 62, fontStyle: 'bold' },
-      2: { cellWidth: 28, halign: 'center' },
-      3: { cellWidth: 32, halign: 'center' },
-      4: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-      5: { cellWidth: 'auto', halign: 'left' },
-    },
-    margin: { left: 14, right: 14, top: 37, bottom: 14 },
-    didDrawPage: (data) => {
-      // Se não for a primeira página, redesenhar cabeçalho compacto
-      if (data.pageNumber > 1) {
-        doc.setFillColor(15, 23, 42);
-        doc.rect(0, 0, pageWidth, 12, 'F');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor(255, 255, 255);
-        doc.text(`${docTitle} — (Continuação)`, 14, 8);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.setTextColor(203, 213, 225);
-        doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+      let detalheStr = '—';
+      if (item.status === 'presente') {
+        detalheStr = item.presenceCount === 1 ? '1 chamada' : `${item.presenceCount} chamadas`;
+      } else {
+        detalheStr = item.absenceCount > 0 ? `${item.absenceCount} falta anotada` : 'Sem presença';
       }
-    },
-  });
+
+      // Modalidades
+      const allMods: string[] = [];
+      if (Array.isArray(st.modalidadesEspeciais) && st.modalidadesEspeciais.length > 0) {
+        allMods.push(...st.modalidadesEspeciais);
+      } else if (Array.isArray(st.specialties) && st.specialties.length > 0) {
+        allMods.push(...st.specialties);
+      }
+      if (Array.isArray(st.activities) && st.activities.length > 0) {
+        st.activities.forEach((act) => {
+          if (!allMods.includes(act)) allMods.push(act);
+        });
+      }
+      const modalidadesStr = allMods.length > 0 ? allMods.join(', ') : 'Rotina Regular';
+
+      return [num, studentName, tipoContrato, studentTurma, statusText, detalheStr, modalidadesStr];
+    });
+
+    autoTable(doc, {
+      startY: tableStartY,
+      head: [['Nº', 'NOME DO ALUNO', 'TIPO', 'TURMA', 'STATUS FREQUÊNCIA', 'DETALHE', 'MODALIDADES']],
+      body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
+      theme: 'striped',
+      headStyles: {
+        fillColor: [15, 23, 42], // slate-900
+        textColor: [255, 255, 255],
+        fontSize: 7.8,
+        fontStyle: 'bold',
+        halign: 'left',
+        cellPadding: 2.6,
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 2.0,
+        textColor: [30, 41, 59], // slate-800
+        lineColor: [226, 232, 240], // slate-200
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252], // slate-50
+      },
+      columnStyles: {
+        0: { cellWidth: 9, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
+        1: { cellWidth: 54, fontStyle: 'bold' },
+        2: { cellWidth: 18, halign: 'center' },
+        3: { cellWidth: 22, halign: 'center' },
+        4: { cellWidth: 30, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 20, halign: 'center' },
+        6: { cellWidth: 'auto', halign: 'left' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 4) {
+          const val = String(data.cell.raw || '');
+          if (val.includes('PRESENTE')) {
+            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+          } else if (val.includes('FALTOSO') || val.includes('AUSENTE')) {
+            data.cell.styles.textColor = [225, 29, 72]; // rose-600
+          }
+        }
+        if (data.section === 'body' && data.column.index === 2) {
+          const val = String(data.cell.raw || '');
+          if (val === 'AVULSO') {
+            data.cell.styles.textColor = [180, 83, 9]; // amber-700
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      },
+      margin: { left: 14, right: 14, top: tableStartY, bottom: 14 },
+      didDrawPage: (data) => {
+        if (data.pageNumber > 1) {
+          doc.setFillColor(15, 23, 42);
+          doc.rect(0, 0, pageWidth, 12, 'F');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(255, 255, 255);
+          doc.text(`${docTitle} — (Continuação)`, 14, 8);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7);
+          doc.setTextColor(203, 213, 225);
+          doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+        }
+      },
+    });
+  } else {
+    // Modo tradicional limpo cadastral
+    const tableRows = sortedItems.map((item, idx) => {
+      const st = item.student;
+      const num = String(idx + 1).padStart(2, '0');
+      const studentName = (st.name || '').trim().toUpperCase();
+      const studentTurma = st.turma || '—';
+
+      let freqDaysStr = 'Seg a Sex (Todos)';
+      if (Array.isArray(st.diasFrequencia) && st.diasFrequencia.length > 0 && st.diasFrequencia.length < 5) {
+        freqDaysStr = st.diasFrequencia.map((d) => dayShortMap[d] || d).join(', ');
+      }
+
+      let exitTime = '18:00';
+      if (!isAllDays && st.horariosSaida && st.horariosSaida[dayOfWeek as DayOfWeek]) {
+        exitTime = st.horariosSaida[dayOfWeek as DayOfWeek] || '18:00';
+      } else if (st.horarioSaida) {
+        exitTime = st.horarioSaida;
+      }
+
+      const allMods: string[] = [];
+      if (Array.isArray(st.modalidadesEspeciais) && st.modalidadesEspeciais.length > 0) {
+        allMods.push(...st.modalidadesEspeciais);
+      } else if (Array.isArray(st.specialties) && st.specialties.length > 0) {
+        allMods.push(...st.specialties);
+      }
+      if (Array.isArray(st.activities) && st.activities.length > 0) {
+        st.activities.forEach((act) => {
+          if (!allMods.includes(act)) allMods.push(act);
+        });
+      }
+      const modalidadesStr = allMods.length > 0 ? allMods.join(', ') : 'Rotina Regular';
+
+      return [num, studentName, studentTurma, freqDaysStr, exitTime, modalidadesStr];
+    });
+
+    autoTable(doc, {
+      startY: 37,
+      head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
+      body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—']],
+      theme: 'striped',
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'left',
+        cellPadding: 2.8,
+      },
+      styles: {
+        fontSize: 7.8,
+        cellPadding: 2.2,
+        textColor: [30, 41, 59],
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
+        1: { cellWidth: 62, fontStyle: 'bold' },
+        2: { cellWidth: 28, halign: 'center' },
+        3: { cellWidth: 32, halign: 'center' },
+        4: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 'auto', halign: 'left' },
+      },
+      margin: { left: 14, right: 14, top: 37, bottom: 14 },
+      didDrawPage: (data) => {
+        if (data.pageNumber > 1) {
+          doc.setFillColor(15, 23, 42);
+          doc.rect(0, 0, pageWidth, 12, 'F');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(255, 255, 255);
+          doc.text(`${docTitle} — (Continuação)`, 14, 8);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7);
+          doc.setTextColor(203, 213, 225);
+          doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+        }
+      },
+    });
+  }
 
   // Aplicar rodapés e paginação
   applyPageNumbersAndFooters(doc, 'portrait');
@@ -4566,21 +4857,35 @@ export function generateNominalListPDF({
   // Gerar nome de arquivo amigável e higienizado
   const cleanSpec = (isAllReforco ? 'Reforco' : isRotina ? 'Rotina' : !isAllSpecialties ? specialty : 'Geral').replace(/[\/\s]+/g, '_');
   const cleanTurma = (!isAllTurmas ? turma : 'TodasTurmas').replace(/[\/\s]+/g, '_');
-  const cleanDay = (!isAllDays ? (dayShortMap[dayOfWeek] || dayOfWeek) : 'Semana').replace(/[\/\s]+/g, '_');
+  const cleanPeriod = isAttendanceReportMode
+    ? (periodMode === 'dia' ? (targetDate || 'Hoje') : `${startDate || 'Ini'}_${endDate || 'Fim'}`).replace(/[\/\s-]+/g, '_')
+    : (!isAllDays ? (dayShortMap[dayOfWeek] || dayOfWeek) : 'Semana').replace(/[\/\s]+/g, '_');
   const dateStr = new Date().toISOString().split('T')[0];
-  const filename = `Relacao_Nominal_${cleanSpec}_${cleanTurma}_${cleanDay}_${dateStr}.pdf`;
+  const filename = isAttendanceReportMode
+    ? `Relatorio_Nominal_Frequencia_${cleanSpec}_${cleanTurma}_${cleanPeriod}_${dateStr}.pdf`
+    : `Relacao_Nominal_${cleanSpec}_${cleanTurma}_${cleanPeriod}_${dateStr}.pdf`;
 
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');
-  const dataUrl = dataUri;
-  const download = () => doc.save(filename);
+
+  const download = () => {
+    doc.save(filename);
+  };
 
   if (saveImmediately) {
-    doc.save(filename);
+    download();
   }
 
-  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+  return {
+    doc,
+    blob,
+    blobUrl,
+    dataUri,
+    dataUrl: dataUri,
+    filename,
+    download,
+  };
 }
 
 /**

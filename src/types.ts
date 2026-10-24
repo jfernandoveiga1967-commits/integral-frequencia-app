@@ -514,4 +514,30 @@ export interface NormaReminderRecord {
   messageText?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Relações Nominais e Relatórios de Presença e Faltas (Nominal Attendance Engine)
+// ---------------------------------------------------------------------------
+
+export type NominalAttendanceFilter = 'todos' | 'presentes' | 'faltosos';
+export type NominalStudentTypeFilter = 'todos' | 'regular' | 'avulso';
+export type NominalPeriodMode = 'dia' | 'intervalo';
+
+export interface NominalReportMetrics {
+  totalEsperados: number;
+  totalPresentes: number;
+  totalFaltosos: number;
+  taxaPresenca: number;
+  taxaFaltas: number;
+}
+
+export interface NominalProcessedStudent {
+  student: Student;
+  status: 'presente' | 'faltoso';
+  tipo: ContractType;
+  presenceCount: number;
+  absenceCount: number;
+  isExpected: boolean;
+  departureTime?: string;
+}
+
 

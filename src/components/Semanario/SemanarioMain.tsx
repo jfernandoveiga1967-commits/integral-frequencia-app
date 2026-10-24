@@ -61,7 +61,7 @@ import {
   SemanarioAiBatchResult,
 } from '../../utils/semanarioAiGenerator';
 import { SemanarioBatchAiModal } from './SemanarioBatchAiModal';
-import { isCoordenador } from '../../utils/authUtils';
+import { isCoordenador, isAuxiliar, canDeleteSemanarioActivity } from '../../utils/authUtils';
 
 /**
  * Extrai o horário de início (horaInicio) de um timeSlot como '11:20 - 11:30' ou '07:30'
@@ -1751,7 +1751,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                     onDuplicate={handleDuplicatePlan}
                     onStatusChange={handleStatusChange}
                     onRegenerateWithAI={handleRegenerateWithAI}
-                    isCoordinator={isCoordenador(currentUser) || !currentUser || currentUser?.role === 'coordenador' || currentUser?.role === 'professor'}
+                    isCoordinator={canDeleteSemanarioActivity(currentUser)}
                   />
                 ))}
               </div>

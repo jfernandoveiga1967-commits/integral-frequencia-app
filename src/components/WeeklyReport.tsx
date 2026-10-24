@@ -23,6 +23,7 @@ import {
 } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { MealReportModal } from './MealReportModal';
+import { NominalListModal } from './NominalListModal';
 import { safeWindowPrint, triggerPrint } from '../utils/printUtils';
 import { formatDateBR, getDayOfWeekFromDate, getDayOfWeekLabel, getEffectiveSchoolDays, isHolidayOrRecess, isStudentScheduledForDate, toISODateString } from '../utils/dateUtils';
 import { getPeriodConsolidatedMetrics, calculateRelatorioConsolidado, calculateApuracaoAulasEfetivasPrestador, AulaEfetivaItem } from '../utils/frequenciaUtils';
@@ -56,6 +57,7 @@ import {
   GraduationCap,
   Loader2,
   AlertCircle,
+  BookMarked,
 } from 'lucide-react';
 
 export const SPECIALIST_WORKSHOPS: ActivityType[] = [
@@ -462,6 +464,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // 5. Meal Financial Report Modal State
   const [showMealReportModal, setShowMealReportModal] = useState(false);
+
+  // 6. Nominal Presence / Absence Report Modal State
+  const [showNominalReportModal, setShowNominalReportModal] = useState(false);
 
   const numericTargetStudents = useMemo(() => {
     if (numericTurmaFilter === 'all') {
@@ -896,6 +901,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             >
               <BarChart3 className="w-4 h-4 text-emerald-600" />
               <span>PDF Numérico</span>
+            </button>
+
+            <button
+              onClick={() => setShowNominalReportModal(true)}
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-emerald-500/20"
+              title="Abrir Relação Nominal de Presença e Faltas (Presentes vs. Faltosos)"
+            >
+              <BookMarked className="w-4 h-4 text-emerald-600" />
+              <span>Relação Nominal</span>
             </button>
 
             <button
@@ -2703,6 +2717,24 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           holidays={holidays}
           currentUser={currentUser}
           onFinalizeCall={onFinalizeCall}
+        />
+      )}
+
+      {/* Relação Nominal de Presença e Faltas Modal */}
+      {showNominalReportModal && (
+        <NominalListModal
+          isOpen={showNominalReportModal}
+          onClose={() => setShowNominalReportModal(false)}
+          students={students}
+          records={records}
+          turmasList={turmasList}
+          extracurricularRollCallActivities={activitiesList}
+          currentUser={currentUser}
+          defaultPeriodMode={filterMode === 'week' ? 'dia' : 'intervalo'}
+          defaultDate={periodStartDate}
+          defaultStartDate={periodStartDate}
+          defaultEndDate={periodEndDate}
+          holidays={holidays}
         />
       )}
 

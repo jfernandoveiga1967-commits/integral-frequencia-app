@@ -28,6 +28,7 @@ import { getFirstName, buildApoioWhatsAppUrl, getDefaultHorarioTurnoForTurma } f
 import { ApoioWhatsAppModal } from './ApoioWhatsAppModal';
 import { UserScrollSelect } from './UserScrollSelect';
 import { generateQuadroAtribuicoesPDF } from '../utils/pdfGenerator';
+import { isCoordenador, canEditQuadroAtribuicoes } from '../utils/authUtils';
 
 export interface QuadroAtribuicoesModalProps {
   isOpen: boolean;
@@ -48,7 +49,8 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
   onSaveAtribuicao,
   onBatchSaveAtribuicoes,
 }) => {
-  const isCoord = currentUser?.role === 'coordenador';
+  const isCoord = isCoordenador(currentUser);
+  const canEdit = canEditQuadroAtribuicoes(currentUser);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<'todas' | 'minhas'>('todas');
@@ -317,7 +319,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                           <Clock className="w-3 h-3 text-amber-600" />
                           {getDisplayHorario(item)}
                         </span>
-                        {isCoord && !isEditing && (
+                        {canEdit && !isEditing && (
                           <button
                             onClick={() => startEdit(item)}
                             className="p-1 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-100/50 transition-colors"
@@ -655,7 +657,7 @@ export const QuadroAtribuicoesModal: React.FC<QuadroAtribuicoesModalProps> = ({
                                   <Edit3 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                            ) : isCoord ? (
+                            ) : canEdit ? (
                               <button
                                 type="button"
                                 onClick={() => startEdit(item)}

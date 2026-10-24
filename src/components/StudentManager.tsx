@@ -2945,11 +2945,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         </div>
       )}
 
-      {/* Modal de Relações Nominais de Alunos (Exportação e Visualização Cadastral Limpa) */}
+      {/* Modal de Relações Nominais de Alunos (Presença e Faltas - Regulares e Avulsos) */}
       <RosterReportModal
         isOpen={showNominalListModal}
         onClose={() => setShowNominalListModal(false)}
         students={students || []}
+        records={records || []}
         turmasList={turmasList}
         extracurricularRollCallActivities={extracurricularRollCallActivities}
         currentUser={currentUser}
