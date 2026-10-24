@@ -540,4 +540,39 @@ export interface NominalProcessedStudent {
   departureTime?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Feedback Pedagógico Cordial & Gestão de Orientações (CNV)
+// ---------------------------------------------------------------------------
+
+export type FeedbackStatus = 'PENDING' | 'ACKNOWLEDGED';
+
+export interface PedagogicalFeedback {
+  id: string;
+  targetUserId: string;
+  employee_id: string;
+  user_id: string;
+  targetUserName: string;
+  targetUserEmail?: string;
+  targetUserPhone?: string;
+  normId: string;
+  normTitle: string;
+  normSection?: string;
+  rawContext: string;
+  generatedMessage: string;
+  actionPoints: string[];
+  checklistItems?: { text: string; checked: boolean }[];
+  status: FeedbackStatus;
+  displayStatus?: string;
+  createdByUserId: string;
+  createdByUserName: string;
+  createdAt: string;
+  acknowledgedAt?: string;
+  acknowledgedFormatted?: string;
+  acknowledgedIp?: string;
+  acknowledgedUserAgent?: string;
+  acknowledgedByUserId?: string;
+  acknowledgedByUserName?: string;
+  whatsappSentAt?: string;
+}
+
 

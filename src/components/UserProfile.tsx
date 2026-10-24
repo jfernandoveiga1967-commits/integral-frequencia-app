@@ -22,14 +22,17 @@ import {
   Layers,
   ChevronRight,
   Award,
+  Trash2,
 } from 'lucide-react';
 import { UserProfile as UserProfileType } from '../types';
 import {
   PedagogicalFeedback,
   subscribeAllFeedbacksForUser,
   acknowledgePedagogicalFeedback,
+  deletePedagogicalFeedback,
   formatFeedbackDateTimeBR,
 } from '../services/feedbackService';
+import { canDeleteFeedback } from '../utils/permissionUtils';
 
 import { FeedbackMarkdown } from './FeedbackMarkdown';
 
@@ -57,6 +60,8 @@ export const UserProfileModal: React.FC<UserProfileProps> = ({
   const [checkedItems, setCheckedItems] = useState<Record<string, Record<number, boolean>>>({});
   const [signingId, setSigningId] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [feedbackToDelete, setFeedbackToDelete] = useState<PedagogicalFeedback | null>(null);
+  const [isDeletingFeedback, setIsDeletingFeedback] = useState<boolean>(false);
 
   const userId = currentUser.id || currentUser.uid || '';
   const userEmail = currentUser.email || '';
@@ -142,6 +147,29 @@ export const UserProfileModal: React.FC<UserProfileProps> = ({
       alert('Erro ao registrar assinatura. Tente novamente.');
     } finally {
       setSigningId(null);
+    }
+  };
+
+  // Exclusão individual de feedback no perfil com atualização imediata de estado e toast
+  const handleConfirmDeleteFeedback = async () => {
+    if (!feedbackToDelete) return;
+    setIsDeletingFeedback(true);
+    try {
+      const feedbackId = feedbackToDelete.id;
+      const targetNorm = feedbackToDelete.normTitle;
+      await deletePedagogicalFeedback(feedbackId);
+
+      // Atualiza o estado local imediatamente sem necessidade de recarregar a página
+      setFeedbacks((prev) => prev.filter((fb) => fb.id !== feedbackId));
+      setFeedbackToDelete(null);
+
+      setSuccessToast(`Feedback de "${targetNorm}" excluído com sucesso!`);
+      setTimeout(() => setSuccessToast(null), 3500);
+    } catch (err) {
+      console.error('Erro ao excluir feedback no perfil:', err);
+      alert('Não foi possível excluir o feedback do banco de dados.');
+    } finally {
+      setIsDeletingFeedback(false);
     }
   };
 
@@ -372,8 +400,20 @@ export const UserProfileModal: React.FC<UserProfileProps> = ({
                             </h3>
                           </div>
 
-                          <div className="text-right text-[11px] text-slate-500 shrink-0">
-                            Enviado por: <strong className="text-slate-700">{fb.createdByUserName || 'Coordenação'}</strong>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-right text-[11px] text-slate-500">
+                              Enviado por: <strong className="text-slate-700">{fb.createdByUserName || 'Coordenação'}</strong>
+                            </div>
+                            {canDeleteFeedback(currentUser, fb) && (
+                              <button
+                                type="button"
+                                onClick={() => setFeedbackToDelete(fb)}
+                                className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 transition-colors cursor-pointer shrink-0"
+                                title="Excluir este feedback (Apenas Coordenação/Autor)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -611,6 +651,83 @@ export const UserProfileModal: React.FC<UserProfileProps> = ({
             </div>
           )}
         </div>
+
+        {/* Modal de Confirmação de Segurança para Exclusão de Feedback */}
+        {feedbackToDelete && (
+          <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-rose-100 rounded-2xl text-rose-600 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-slate-900">
+                    Excluir Registro de Feedback?
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Confirmação de segurança
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/80 p-4 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-2">
+                <p className="font-bold text-rose-900">
+                  Deseja realmente excluir este feedback? Esta ação não pode ser desfeita.
+                </p>
+                <div className="pt-2 text-[11px] text-slate-700 space-y-1 border-t border-rose-200/60">
+                  <p>
+                    <strong className="text-slate-900">Norma:</strong> {feedbackToDelete.normTitle}
+                  </p>
+                  <p>
+                    <strong className="text-slate-900">Status:</strong>{' '}
+                    <span
+                      className={`font-bold ${
+                        feedbackToDelete.status === 'PENDING' ? 'text-rose-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {feedbackToDelete.status === 'PENDING'
+                        ? 'Pendente de Assinatura'
+                        : 'Ciente e Assinado'}
+                    </span>
+                  </p>
+                  <p>
+                    <strong className="text-slate-900">Data de Envio:</strong>{' '}
+                    {formatFeedbackDateTimeBR(feedbackToDelete.createdAt)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingFeedback}
+                  onClick={() => setFeedbackToDelete(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingFeedback}
+                  onClick={handleConfirmDeleteFeedback}
+                  className="px-4 py-2.5 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-600/20 disabled:opacity-50 active:scale-95"
+                >
+                  {isDeletingFeedback ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4 text-white" />
+                      <span>Sim, Excluir Registro</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Rodapé do Modal */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">

@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   query,
   where,
@@ -348,6 +349,44 @@ export async function acknowledgePedagogicalFeedback(
       new CustomEvent('app_pedagogical_feedback_acknowledged', {
         detail: { feedbackId, acknowledgedAt: nowIso, acknowledgedFormatted: formattedBR, userIp },
       })
+    );
+  }
+}
+
+/**
+ * Exclui individualmente um registro de feedback pedagógico no Firestore e remove do cache local
+ */
+export async function deletePedagogicalFeedback(feedbackId: string): Promise<void> {
+  if (!feedbackId) return;
+
+  try {
+    const docRef = doc(db, PRIMARY_COLLECTION, feedbackId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn(`[feedbackService] Erro ao deletar feedback em ${PRIMARY_COLLECTION}:`, err);
+    try {
+      const backupRef = doc(db, BACKUP_COLLECTION, feedbackId);
+      await deleteDoc(backupRef);
+    } catch (backupErr) {
+      console.warn(`[feedbackService] Erro ao deletar feedback em ${BACKUP_COLLECTION}:`, backupErr);
+      throw backupErr;
+    }
+  }
+
+  // Atualiza cache local
+  try {
+    const cachedRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (cachedRaw) {
+      const all: PedagogicalFeedback[] = JSON.parse(cachedRaw);
+      const updated = all.filter((f) => f.id !== feedbackId);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+    }
+  } catch {}
+
+  // Dispara evento global de exclusão para sincronização imediata
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('app_pedagogical_feedback_deleted', { detail: { feedbackId } })
     );
   }
 }

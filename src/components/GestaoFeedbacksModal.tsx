@@ -30,9 +30,11 @@ import { NormaSearchSelect } from './NormaSearchSelect';
 import {
   createPedagogicalFeedback,
   subscribeAllPedagogicalFeedbacks,
+  deletePedagogicalFeedback,
   buildWhatsAppFeedbackLink,
   PedagogicalFeedback,
 } from '../services/feedbackService';
+import { canDeleteFeedback } from '../utils/permissionUtils';
 import { FeedbackMarkdown } from './FeedbackMarkdown';
 import { sanitizeCordialMessageForWhatsApp } from '../utils/feedbackPromptBuilder';
 
@@ -88,6 +90,23 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [selectedFeedbackDetails, setSelectedFeedbackDetails] = useState<PedagogicalFeedback | null>(null);
+  const [feedbackToDelete, setFeedbackToDelete] = useState<PedagogicalFeedback | null>(null);
+  const [isDeletingFeedback, setIsDeletingFeedback] = useState<boolean>(false);
+
+  // Escuta exclusão global para sincronização imediata entre abas
+  useEffect(() => {
+    const handleDeletedEvent = (e: any) => {
+      const deletedId = e?.detail?.feedbackId;
+      if (deletedId) {
+        setFeedbacksHistory((prev) => prev.filter((fb) => fb.id !== deletedId));
+        setSelectedFeedbackDetails((curr) => (curr?.id === deletedId ? null : curr));
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('app_pedagogical_feedback_deleted', handleDeletedEvent);
+      return () => window.removeEventListener('app_pedagogical_feedback_deleted', handleDeletedEvent);
+    }
+  }, []);
 
   // Carrega e escuta usuários
   useEffect(() => {
@@ -322,6 +341,37 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
     });
 
     window.open(link, '_blank');
+  };
+
+  // Exclusão individual de feedback com atualização imediata de estado e toast de confirmação
+  const handleConfirmDeleteFeedback = async () => {
+    if (!feedbackToDelete) return;
+    setIsDeletingFeedback(true);
+    try {
+      const targetName = feedbackToDelete.targetUserName;
+      const targetNorm = feedbackToDelete.normTitle;
+      const feedbackId = feedbackToDelete.id;
+
+      await deletePedagogicalFeedback(feedbackId);
+
+      // Atualiza o estado local imediatamente sem necessidade de recarregar a página
+      setFeedbacksHistory((prev) => prev.filter((fb) => fb.id !== feedbackId));
+
+      if (selectedFeedbackDetails?.id === feedbackId) {
+        setSelectedFeedbackDetails(null);
+      }
+
+      setFeedbackToDelete(null);
+
+      // Notificação / toast de sucesso da operação
+      setSuccessToast(`Feedback de "${targetNorm}" para ${targetName} excluído com sucesso!`);
+      setTimeout(() => setSuccessToast(null), 3500);
+    } catch (err) {
+      console.error('Erro ao excluir feedback:', err);
+      alert('Não foi possível excluir o feedback do banco de dados. Tente novamente.');
+    } finally {
+      setIsDeletingFeedback(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -760,6 +810,16 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                               <Phone className="w-4 h-4" />
                             </button>
                           )}
+                          {canDeleteFeedback(currentUser, fb) && (
+                            <button
+                              type="button"
+                              onClick={() => setFeedbackToDelete(fb)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 transition-colors cursor-pointer shrink-0"
+                              title="Excluir este feedback (Apenas Coordenação/Autor)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -835,12 +895,111 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                 )}
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                {canDeleteFeedback(currentUser, selectedFeedbackDetails) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFeedbackToDelete(selectedFeedbackDetails);
+                    }}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Excluir este feedback permanentemente"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Excluir Feedback</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
                 <button
                   onClick={() => setSelectedFeedbackDetails(null)}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
                 >
                   Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Confirmação de Segurança para Exclusão de Feedback */}
+        {feedbackToDelete && (
+          <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-rose-100 rounded-2xl text-rose-600 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-slate-900">
+                    Excluir Registro de Feedback?
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Ação restrita da coordenação e autor
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/80 p-4 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-2">
+                <p className="font-bold text-rose-900">
+                  Deseja realmente excluir este feedback? Esta ação não pode ser desfeita.
+                </p>
+                <div className="pt-2 text-[11px] text-slate-700 space-y-1 border-t border-rose-200/60">
+                  <p>
+                    <strong className="text-slate-900">Colaboradora:</strong> {feedbackToDelete.targetUserName}
+                  </p>
+                  <p>
+                    <strong className="text-slate-900">Norma:</strong> {feedbackToDelete.normTitle}
+                  </p>
+                  <p>
+                    <strong className="text-slate-900">Status:</strong>{' '}
+                    <span
+                      className={`font-bold ${
+                        feedbackToDelete.status === 'PENDING' ? 'text-rose-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {feedbackToDelete.status === 'PENDING'
+                        ? 'Pendente de Assinatura'
+                        : 'Ciente e Assinado'}
+                    </span>
+                  </p>
+                  <p>
+                    <strong className="text-slate-900">Data de Envio:</strong>{' '}
+                    {new Date(feedbackToDelete.createdAt).toLocaleDateString('pt-BR')} às{' '}
+                    {new Date(feedbackToDelete.createdAt).toLocaleTimeString('pt-BR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingFeedback}
+                  onClick={() => setFeedbackToDelete(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingFeedback}
+                  onClick={handleConfirmDeleteFeedback}
+                  className="px-4 py-2.5 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-600/20 disabled:opacity-50 active:scale-95"
+                >
+                  {isDeletingFeedback ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4 text-white" />
+                      <span>Sim, Excluir Registro</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

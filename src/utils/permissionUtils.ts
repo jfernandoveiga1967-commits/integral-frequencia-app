@@ -48,4 +48,25 @@ export function canEditQuadroAtribuicoes(user?: UserProfile | null): boolean {
   return isCoordenador(user) || isAuxiliar(user);
 }
 
+/**
+ * Verifica se o usuário tem permissão para excluir um registro de feedback pedagógico.
+ * Permite Coordenadores, Administradores ou o próprio criador/autor do feedback.
+ */
+export function canDeleteFeedback(
+  user?: UserProfile | null,
+  feedback?: { createdByUserId?: string; user_id?: string; employee_id?: string } | null
+): boolean {
+  if (!user) return false;
+  if (isCoordenador(user) || isAdmin(user)) return true;
+  const currentUid = user.id || user.uid;
+  if (
+    feedback?.createdByUserId &&
+    currentUid &&
+    String(feedback.createdByUserId).trim() === String(currentUid).trim()
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export { isCoordenador, isAdmin };
