@@ -39,7 +39,9 @@ import {
   Wifi,
   WifiOff,
   Copy,
+  FileSpreadsheet,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import {
   UserProfile,
   HolidayItem,
@@ -1699,6 +1701,49 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     }
   };
 
+  // Exportar Espelho de Ponto em Planilha Excel (.xlsx)
+  const handleExportExcelPonto = () => {
+    try {
+      const rows = monthDaysGrid.map((item) => {
+        const rec = item.record;
+        const isDiaDescanso = item.isWk || Boolean(item.holidayItem) || rec?.status === 'sabado' || rec?.status === 'domingo' || rec?.status === 'feriado' || rec?.status === 'recesso';
+        const dayCalc = rec ? calculateDayWorkedMinutes(rec, contractSchedule, 5, contractDailyMinutes, isDiaDescanso, holidays) : null;
+        const workedFmt = dayCalc ? formatMinutesToHoursAndMinutes(dayCalc.workedMinutes) : '0h00min';
+
+        return {
+          Dia: item.dateStr,
+          'Dia da Semana': item.dayOfWeekName || '',
+          Entrada: rec?.entry1 || '',
+          'Saída Intervalo': rec?.exit1 || '',
+          'Retorno Intervalo': rec?.entry2 || '',
+          Saída: rec?.exit2 || '',
+          'Horas Trabalhadas': workedFmt,
+          Status: rec?.status || item.defaultStatus || '',
+          Observações: rec?.note || '',
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Espelho_Ponto');
+      const filename = `Espelho_Ponto_${(targetUser?.name || 'Colaborador').replace(/\s+/g, '_')}_${selectedMonth}_${selectedYear}.xlsx`;
+      XLSX.writeFile(wb, filename);
+
+      setPunchFeedback({
+        text: `Planilha Excel "${filename}" exportada com sucesso!`,
+        type: 'success',
+      });
+      setTimeout(() => setPunchFeedback(null), 3500);
+    } catch (e) {
+      console.error('Erro ao exportar Excel do Livro Ponto:', e);
+      setPunchFeedback({
+        text: 'Não foi possível exportar a planilha Excel. Tente novamente.',
+        type: 'error',
+      });
+      setTimeout(() => setPunchFeedback(null), 3500);
+    }
+  };
+
   // Generate Official PDF Report for Receipt & Quittance
   const handleGenerateReceiptPDF = (saveImmediately = true) => {
     try {
@@ -1792,20 +1837,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       )}
 
       {/* Main Header & Control Panel */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          {/* Title & Live Clock */}
-          <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div className="flex justify-between items-center gap-4 flex-wrap">
+          {/* Zona Esquerda / Central: Título, Seletores de Período/Data e Botões de Exportação */}
+          <div className="flex-1 min-w-[280px] space-y-3.5">
+            {/* Linha 1: Título e Relógio Oficial com Tolerância e Wi-Fi */}
             <div className="flex items-center space-x-3">
-              <div className="p-2.5 bg-indigo-600/20 border border-indigo-500/30 rounded-xl text-indigo-400">
+              <div className="p-2.5 bg-indigo-600/20 border border-indigo-500/30 rounded-xl text-indigo-400 shrink-0">
                 <Clock className="w-6 h-6 animate-pulse" />
               </div>
-              <div>
-                <h1 className="text-xl font-black text-slate-100 flex items-center gap-2">
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-black text-slate-100 flex items-center gap-2 truncate">
                   Fechamento do Ponto
                 </h1>
                 <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <span>Horário Oficial: <strong className="text-emerald-400">{liveClock}</strong></span>
+                  <span>Horário Oficial: <strong className="text-emerald-400 font-mono">{liveClock}</strong></span>
                   <span>•</span>
                   <span>Tolerância de 5 min</span>
                   <span>•</span>
@@ -1813,27 +1859,146 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     className="inline-flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60"
                     title="Validação presencial obrigatória via rede Wi-Fi Institucional do Colégio Crescer"
                   >
-                    <Wifi className="w-3 h-3 text-emerald-400" />
-                    Validação por Wi-Fi Institucional (Colégio Crescer)
+                    <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
+                    Wi-Fi Institucional (Colégio Crescer)
                   </span>
                 </p>
               </div>
             </div>
+
+            {/* Linha 2: Agrupamento de Seletores de Período/Data e Botões de Exportação (PDF, Excel, etc.) */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Seletor de Período / Mês de Competência */}
+              <div className="inline-flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                  title="Mês Anterior"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="text-center px-1">
+                  <span className="text-[10px] text-indigo-400 uppercase tracking-wider block font-bold leading-none">
+                    Mês de Competência
+                  </span>
+                  <span className="text-xs font-black text-slate-100">
+                    {getMonthNameBR(selectedMonth)} de {selectedYear}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                  title="Próximo Mês"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Botões de Exportação e Gestão com espaçamento uniforme e rótulos claros */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* 1. Exportar Espelhos (PDF) */}
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAllPontoPDF(true)}
+                  disabled={isGeneratingAllPDF}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white border border-emerald-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
+                  title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
+                >
+                  {isGeneratingAllPDF ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-emerald-200" />
+                  )}
+                  <span>Espelhos (PDF)</span>
+                </button>
+
+                {/* 2. Exportar Recibos (Lote PDF) */}
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAllReceiptsPDF(true)}
+                  disabled={isGeneratingAllReceipts}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-indigo-900/30 active:scale-95"
+                  title="Baixar em um único PDF consolidado os recibos de pagamento de todos os colaboradores ativos do mês de competência"
+                >
+                  {isGeneratingAllReceipts ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" />
+                  ) : (
+                    <FileCheck2 className="w-3.5 h-3.5 text-indigo-200" />
+                  )}
+                  <span>Recibos (PDF)</span>
+                </button>
+
+                {/* 3. Exportar Planilha Excel (.xlsx) */}
+                <button
+                  type="button"
+                  onClick={handleExportExcelPonto}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-teal-700/80 hover:bg-teal-600 text-white border border-teal-500/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-teal-900/30 active:scale-95"
+                  title="Exportar batidas e cálculos do espelho em planilha Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
+                  <span>Planilha (Excel)</span>
+                </button>
+
+                {/* 4. Feriados e Recessos (Admin) */}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHolidayModal(true)}
+                    className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-semibold transition cursor-pointer"
+                    title="Cadastrar e Gerenciar Feriados e Recessos Escolares"
+                  >
+                    <CalendarDays className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Feriados & Recessos</span>
+                  </button>
+                )}
+
+                {/* 5. Travar / Destravar Mês (Admin) */}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleToggleMonthLock}
+                    className={`inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl font-bold text-xs transition cursor-pointer border shadow-sm ${
+                      isMonthClosed
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 font-black shadow-amber-900/30 active:scale-95'
+                        : 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400/40 shadow-rose-900/30 active:scale-95'
+                    }`}
+                    title={
+                      isMonthClosed
+                        ? 'Destravar e Reabrir folha para permitir ajustes pontuais pela coordenação (ação auditada)'
+                        : 'Travar mês de competência e consolidar fechamento da folha (bloqueia novas batidas)'
+                    }
+                  >
+                    {isMonthClosed ? (
+                      <>
+                        <Unlock className="w-3.5 h-3.5 text-slate-950" />
+                        <span>Destravar Mês</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5 text-rose-200" />
+                        <span>Travar Mês</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Action Buttons Bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Quick Punch Button (For Current Day) */}
+          {/* Zona Direita (Destaque Principal): Botão do Livro Ponto com formato quadrado/compacto de alto impacto */}
+          <div className="shrink-0 flex items-center justify-end sm:ml-auto">
             <button
               type="button"
               onClick={handleQuickPunch}
               disabled={isRegisteringPunch || isMonthClosed || isUserInactiveOrDismissed(targetUser)}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all ${
+              className={`aspect-square w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex flex-col items-center justify-center p-2 text-center transition-all cursor-pointer relative group ${
                 isRegisteringPunch
-                  ? 'bg-emerald-900/90 text-emerald-200 cursor-not-allowed border border-emerald-500/50 opacity-90'
+                  ? 'bg-emerald-950 border-2 border-emerald-500/70 text-emerald-300 cursor-not-allowed shadow-inner'
                   : isMonthClosed || isUserInactiveOrDismissed(targetUser)
-                  ? 'bg-slate-800/80 text-slate-500 cursor-not-allowed border border-slate-700 opacity-60'
-                  : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white border border-emerald-400/40 shadow-emerald-900/30 cursor-pointer'
+                  ? 'bg-slate-800/90 border-2 border-slate-700 text-slate-500 cursor-not-allowed opacity-70'
+                  : 'bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 border-2 border-emerald-200 shadow-xl shadow-emerald-500/40 ring-4 ring-emerald-400/30 active:scale-95 hover:shadow-2xl hover:scale-[1.03]'
               }`}
               title={
                 isRegisteringPunch
@@ -1847,123 +2012,37 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             >
               {isRegisteringPunch ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
-                  <span>[ ⏳ Validando GPS e Ponto... ]</span>
+                  <Loader2 className="w-7 h-7 sm:w-8 sm:h-8 animate-spin text-emerald-300 mb-1" />
+                  <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-300 leading-tight">
+                    Gravando...
+                  </span>
+                </>
+              ) : isMonthClosed ? (
+                <>
+                  <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-500 mb-1" />
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500 leading-tight">
+                    Fechado
+                  </span>
                 </>
               ) : (
                 <>
-                  <Clock className="w-4 h-4" />
-                  <span>Registrar Batida Agora</span>
+                  <div className="p-1 rounded-full bg-slate-950/10 mb-0.5 group-hover:scale-110 transition-transform">
+                    <Clock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-950 drop-shadow-xs" />
+                  </div>
+                  <span className="text-[11px] sm:text-xs font-black uppercase tracking-tight text-slate-950 leading-tight">
+                    Livro Ponto
+                  </span>
+                  <span className="text-[9px] font-black uppercase tracking-wider text-emerald-950 bg-white/50 px-1.5 py-0.2 rounded-md mt-0.5">
+                    Registrar
+                  </span>
                 </>
               )}
             </button>
-
-            {/* Batch Download All Timecards PDF */}
-            <button
-              type="button"
-              onClick={() => handleGenerateAllPontoPDF(true)}
-              disabled={isGeneratingAllPDF}
-              className="flex items-center space-x-2 px-3.5 py-2.5 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white border border-emerald-400/40 rounded-xl text-sm font-bold transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
-              title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
-            >
-              {isGeneratingAllPDF ? (
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
-              ) : (
-                <Download className="w-4 h-4 text-emerald-200" />
-              )}
-              <span>Baixar Todos os Espelhos (PDF Único)</span>
-            </button>
-
-            {/* Batch Download All Receipts PDF */}
-            <button
-              type="button"
-              onClick={() => handleGenerateAllReceiptsPDF(true)}
-              disabled={isGeneratingAllReceipts}
-              className="flex items-center space-x-2 px-3.5 py-2.5 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-400/40 rounded-xl text-sm font-bold transition shadow-sm cursor-pointer shadow-indigo-900/30 active:scale-95"
-              title="Baixar em um único PDF consolidado os recibos de pagamento de todos os colaboradores ativos do mês de competência"
-            >
-              {isGeneratingAllReceipts ? (
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-200" />
-              ) : (
-                <FileCheck2 className="w-4 h-4 text-indigo-200" />
-              )}
-              <span>Baixar Todos os Recibos (Lote)</span>
-            </button>
-
-            {/* Holiday / Recess Manager */}
-            {isAdmin && (
-              <button
-                onClick={() => setShowHolidayModal(true)}
-                className="flex items-center space-x-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-xl text-sm font-semibold transition cursor-pointer"
-                title="Cadastrar e Gerenciar Feriados e Recessos Escolares"
-              >
-                <CalendarDays className="w-4 h-4 text-amber-400" />
-                <span>Feriados & Recessos</span>
-              </button>
-            )}
-
-            {/* Lock / Unlock Month (Admin only) */}
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={handleToggleMonthLock}
-                className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition cursor-pointer border shadow-sm ${
-                  isMonthClosed
-                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 font-black shadow-amber-900/30 active:scale-95'
-                    : 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400/40 shadow-rose-900/30 active:scale-95'
-                }`}
-                title={
-                  isMonthClosed
-                    ? 'Destravar e Reabrir folha para permitir ajustes pontuais pela coordenação (ação auditada)'
-                    : 'Travar mês de competência e consolidar fechamento da folha (bloqueia novas batidas)'
-                }
-              >
-                {isMonthClosed ? (
-                  <>
-                    <Unlock className="w-4 h-4 text-slate-950" />
-                    <span>Destravar Mês / Reabrir</span>
-                  </>
-                ) : (
-                  <>
-                    <Lock className="w-4 h-4 text-rose-200" />
-                    <span>Travar Mês / Fechar Folha</span>
-                  </>
-                )}
-              </button>
-            )}
           </div>
         </div>
 
-        {/* Filters Row: Month Picker & Collaborator Selector */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5 pt-4 border-t border-slate-800">
-          {/* Month Selector */}
-          <div className="flex items-center space-x-2 bg-slate-950/70 border border-slate-800 rounded-xl p-2">
-            <button
-              onClick={handlePrevMonth}
-              className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
-              title="Mês Anterior"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-
-            <div className="flex-1 text-center font-bold text-slate-200 text-sm">
-              <span className="text-indigo-400 uppercase tracking-wider text-xs block font-semibold">
-                Mês de Competência
-              </span>
-              {getMonthNameBR(selectedMonth)} de {selectedYear}
-            </div>
-
-            <button
-              onClick={handleNextMonth}
-              className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
-              title="Próximo Mês"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Collaborator Selector (Admin or Locked for standard user) & Badges */}
-          <div className="md:col-span-2 flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+        {/* Linha Inferior: Seletor de Colaborador e Badges de Status / PIX */}
+        <div className="w-full flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-3 mt-4 pt-3">
             {/* Left side: Colaborador selector */}
             <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
               <div className="flex items-center space-x-1.5 shrink-0 text-slate-400 font-medium text-xs">
@@ -2043,9 +2122,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Institutional Collaborator Card & Contract Header */}
+        {/* Institutional Collaborator Card & Contract Header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div className="flex items-center space-x-3.5">
