@@ -1014,169 +1014,162 @@ export function processSequentialPunch({
   let slotName = '';
   let slotKey: 'entry1' | 'exit1' | 'entry2' | 'exit2';
 
-  if (isContinuousShift) {
-    // Continuous Shift: strictly 2 punches (Entrada and Saída)
-    const e1 = (existingRecord?.entry1 || '').trim();
-    const s_final = (existingRecord?.exit2 || existingRecord?.exit1 || '').trim();
+  // 1. Extração das marcas existentes com compatibilidade para camelCase e snake_case
+  const e1 = (existingRecord?.entry1 || existingRecord?.entrada_1 || '').trim();
+  const s1 = (existingRecord?.exit1 || existingRecord?.saida_1 || '').trim();
+  const e2 = (existingRecord?.entry2 || existingRecord?.entrada_2 || '').trim();
+  const s2 = (existingRecord?.exit2 || existingRecord?.saida_2 || '').trim();
 
-    if (!e1) {
-      // 1ª Batida do dia: ENTRADA
-      slotKey = 'entry1';
-      slotName = 'Entrada (Início da Jornada)';
-      const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
-      updatedRecord = {
-        id: existingRecord?.id || `${userId}_${dateStr}`,
+  const currentMinutes = parseTimeToMinutes(currentTime);
+  if (currentMinutes === null) {
+    return {
+      success: false,
+      error: `Formato de horário inválido: "${currentTime}". Esperado HH:mm.`,
+    };
+  }
+
+  // 2. Alocação Sequencial Determinística dos 4 Slots Diários com Trava Anti-Sobrescrita:
+  // • Batida 1 -> Atribua estritamente a entrada_1.
+  // • Batida 2 -> Atribua estritamente a saida_1 (validando que o horário seja maior que entrada_1).
+  // • Batida 3 -> Atribua estritamente a entrada_2 (validando que o horário seja maior que saida_1).
+  // • Batida 4 -> Atribua estritamente a saida_2 (validando que o horário seja maior que entrada_2).
+  if (!e1) {
+    // Batida 1 -> Atribua estritamente a entrada_1
+    slotKey = 'entry1';
+    slotName = 'Entrada 1 (Início da Jornada)';
+    const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
+    updatedRecord = {
+      id: existingRecord?.id || `${userId}_${dateStr}`,
+      userId,
+      userName,
+      date: dateStr,
+      monthKey,
+      dayNumber,
+      entry1: effectivePunch,
+      exit1: s1,
+      entry2: e2,
+      exit2: s2,
+      entrada_1: effectivePunch,
+      saida_1: s1,
+      entrada_2: e2,
+      saida_2: s2,
+      status: existingRecord?.status || 'normal',
+      createdAt: existingRecord?.createdAt || nowIso,
+      updatedAt: nowIso,
+      updatedBy: updatedByName,
+    };
+  } else if (!s1) {
+    // Batida 2 -> Atribua estritamente a saida_1 (trava: NUNCA sobrescreve entrada_1)
+    const e1Min = parseTimeToMinutes(e1);
+    if (e1Min !== null && currentMinutes <= e1Min) {
+      return {
+        success: false,
+        error: `O horário da Saída 1 (${currentTime}) deve ser estritamente posterior ao horário de Entrada 1 (${e1}).`,
+      };
+    }
+
+    slotKey = 'exit1';
+    slotName = 'Saída 1 (Saída Intervalo/Almoço)';
+    updatedRecord = {
+      ...(existingRecord || {
+        id: `${userId}_${dateStr}`,
         userId,
         userName,
         date: dateStr,
         monthKey,
         dayNumber,
-        entry1: effectivePunch,
-        exit1: '',
-        entry2: '',
-        exit2: '',
-        status: existingRecord?.status || 'normal',
-        createdAt: existingRecord?.createdAt || nowIso,
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else if (!s_final) {
-      // 2ª Batida do dia: SAÍDA (A Entrada já está preenchida, então obrigatoriamente grava em Saída)
-      slotKey = 'exit2';
-      slotName = 'Saída (Fim da Jornada)';
-      const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
-      updatedRecord = {
-        ...(existingRecord || {
-          id: `${userId}_${dateStr}`,
-          userId,
-          userName,
-          date: dateStr,
-          monthKey,
-          dayNumber,
-          entry1: e1,
-          createdAt: nowIso,
-        }),
-        entry1: e1,
-        exit1: '',
-        entry2: '',
-        exit2: effectivePunch,
         status: 'normal',
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else {
-      // Ambas as batidas do dia já foram preenchidas
-      const calc = calcularHorasDia(existingRecord, contractSchedule, toleranceMinutes);
+        createdAt: nowIso,
+      }),
+      entry1: e1,
+      exit1: currentTime,
+      entry2: e2,
+      exit2: s2,
+      entrada_1: e1,
+      saida_1: currentTime,
+      entrada_2: e2,
+      saida_2: s2,
+      status: 'normal',
+      updatedAt: nowIso,
+      updatedBy: updatedByName,
+    };
+  } else if (!e2) {
+    // Batida 3 -> Atribua estritamente a entrada_2 (trava: NUNCA sobrescreve slots anteriores)
+    const s1Min = parseTimeToMinutes(s1);
+    if (s1Min !== null && currentMinutes <= s1Min) {
       return {
         success: false,
-        error: `Todas as batidas de hoje já foram registradas (Entrada: ${e1} • Saída: ${s_final} • Total: ${formatMinutesToHoursAndMinutes(calc.workedMinutes)}). Para editar horários, clique no botão de edição na tabela.`,
+        error: `O horário da Entrada 2 (${currentTime}) deve ser estritamente posterior ao horário de Saída 1 (${s1}).`,
       };
     }
+
+    slotKey = 'entry2';
+    slotName = 'Entrada 2 (Retorno Intervalo/Almoço)';
+    updatedRecord = {
+      ...(existingRecord || {
+        id: `${userId}_${dateStr}`,
+        userId,
+        userName,
+        date: dateStr,
+        monthKey,
+        dayNumber,
+        status: 'normal',
+        createdAt: nowIso,
+      }),
+      entry1: e1,
+      exit1: s1,
+      entry2: currentTime,
+      exit2: s2,
+      entrada_1: e1,
+      saida_1: s1,
+      entrada_2: currentTime,
+      saida_2: s2,
+      status: 'normal',
+      updatedAt: nowIso,
+      updatedBy: updatedByName,
+    };
+  } else if (!s2) {
+    // Batida 4 -> Atribua estritamente a saida_2 (trava: NUNCA sobrescreve slots anteriores)
+    const e2Min = parseTimeToMinutes(e2);
+    if (e2Min !== null && currentMinutes <= e2Min) {
+      return {
+        success: false,
+        error: `O horário da Saída 2 (${currentTime}) deve ser estritamente posterior ao horário de Entrada 2 (${e2}).`,
+      };
+    }
+
+    slotKey = 'exit2';
+    slotName = 'Saída 2 (Saída Final da Jornada)';
+    const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
+    updatedRecord = {
+      ...(existingRecord || {
+        id: `${userId}_${dateStr}`,
+        userId,
+        userName,
+        date: dateStr,
+        monthKey,
+        dayNumber,
+        status: 'normal',
+        createdAt: nowIso,
+      }),
+      entry1: e1,
+      exit1: s1,
+      entry2: e2,
+      exit2: effectivePunch,
+      entrada_1: e1,
+      saida_1: s1,
+      entrada_2: e2,
+      saida_2: effectivePunch,
+      status: 'normal',
+      updatedAt: nowIso,
+      updatedBy: updatedByName,
+    };
   } else {
-    // Standard Shift (4 Batidas)
-    const e1 = (existingRecord?.entry1 || '').trim();
-    const s1 = (existingRecord?.exit1 || '').trim();
-    const e2 = (existingRecord?.entry2 || '').trim();
-    const s2 = (existingRecord?.exit2 || '').trim();
-
-    if (!e1) {
-      // 1. Se ENTRADA 1 estiver vazia -> Grave em ENTRADA 1
-      slotKey = 'entry1';
-      slotName = 'Entrada 1 (Início da Jornada)';
-      const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
-      updatedRecord = {
-        id: existingRecord?.id || `${userId}_${dateStr}`,
-        userId,
-        userName,
-        date: dateStr,
-        monthKey,
-        dayNumber,
-        entry1: effectivePunch,
-        exit1: s1,
-        entry2: e2,
-        exit2: s2,
-        status: existingRecord?.status || 'normal',
-        createdAt: existingRecord?.createdAt || nowIso,
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else if (!s1) {
-      // 2. Se ENTRADA 1 estiver preenchida e SAÍDA 1 vazia -> Grave em SAÍDA 1 (Saída Almoço)
-      slotKey = 'exit1';
-      slotName = 'Saída 1 (Saída Almoço)';
-      updatedRecord = {
-        ...(existingRecord || {
-          id: `${userId}_${dateStr}`,
-          userId,
-          userName,
-          date: dateStr,
-          monthKey,
-          dayNumber,
-          status: 'normal',
-          createdAt: nowIso,
-        }),
-        entry1: e1,
-        exit1: currentTime,
-        entry2: e2,
-        exit2: s2,
-        status: 'normal',
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else if (!e2) {
-      // 3. Se SAÍDA 1 estiver preenchida e ENTRADA 2 vazia -> Grave em ENTRADA 2 (Retorno Almoço)
-      slotKey = 'entry2';
-      slotName = 'Entrada 2 (Retorno Almoço)';
-      updatedRecord = {
-        ...(existingRecord || {
-          id: `${userId}_${dateStr}`,
-          userId,
-          userName,
-          date: dateStr,
-          monthKey,
-          dayNumber,
-          status: 'normal',
-          createdAt: nowIso,
-        }),
-        entry1: e1,
-        exit1: s1,
-        entry2: currentTime,
-        exit2: s2,
-        status: 'normal',
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else if (!s2) {
-      // 4. Se ENTRADA 2 estiver preenchida e SAÍDA 2 vazia -> Grave em SAÍDA 2 (Saída Final)
-      slotKey = 'exit2';
-      slotName = 'Saída 2 (Saída Final)';
-      const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
-      updatedRecord = {
-        ...(existingRecord || {
-          id: `${userId}_${dateStr}`,
-          userId,
-          userName,
-          date: dateStr,
-          monthKey,
-          dayNumber,
-          status: 'normal',
-          createdAt: nowIso,
-        }),
-        entry1: e1,
-        exit1: s1,
-        entry2: e2,
-        exit2: effectivePunch,
-        status: 'normal',
-        updatedAt: nowIso,
-        updatedBy: updatedByName,
-      };
-    } else {
-      // 5. Todas as 4 batidas já preenchidas
-      return {
-        success: false,
-        error: `Todas as 4 batidas da jornada padrão de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Para editar qualquer batida, utilize o botão de edição na tabela.`,
-      };
-    }
+    // Trava de segurança: Todas as 4 batidas diárias já preenchidas
+    return {
+      success: false,
+      error: `Todas as 4 batidas da jornada diária de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Nenhuma batida foi sobrescrita. Para editar qualquer batida, utilize o botão de edição na tabela.`,
+    };
   }
 
   // Recalculate daily worked hours immediately
@@ -1976,9 +1969,13 @@ export function repairSinglePontoRecord(
   return {
     ...record,
     entry1: resolvedEntry,
-    exit1: '',
-    entry2: '',
+    exit1: record.exit1 || '',
+    entry2: record.entry2 || '',
     exit2: resolvedExit,
+    entrada_1: resolvedEntry,
+    saida_1: record.exit1 || '',
+    entrada_2: record.entry2 || '',
+    saida_2: resolvedExit,
     status: record.status === 'falta_injustificada' ? 'normal' : (record.status || 'normal'),
     updatedAt: nowIso,
     updatedBy: 'Restauração Automática de Batida',

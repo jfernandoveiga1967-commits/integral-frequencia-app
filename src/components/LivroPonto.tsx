@@ -113,6 +113,7 @@ import { loadPontoRecords, loadAttendanceRecords } from '../utils/storageUtils';
 import { playPontoSuccessSound } from '../utils/notificationUtils';
 import { PdfViewerModal } from './PdfViewerModal';
 import { HolidayManager } from './HolidayManager';
+import { registerPunch, salvarBatidaPonto } from '../services/timeTrackingService';
 
 // ============================================================================
 // VALIDAÇÃO POR REDE WI-FI INSTITUCIONAL / IP - COLÉGIO CRESCER
@@ -899,18 +900,20 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
     const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
 
-    const result = processSequentialPunch({
-      existingRecord: dayRecord,
+    const result = await registerPunch({
       userId: selectedUserId,
       userName: targetUser?.name || 'Colaborador',
       dateStr: todayStr,
-      monthKey,
-      dayNumber: currentNow.getDate(),
       currentTime: currentHoursMinutes,
-      isContinuousShift: isUserContinuous,
-      contractSchedule,
-      toleranceMinutes: 5,
+      existingRecord: dayRecord,
       updatedByName: currentUser?.name || 'Sistema',
+      auditData: {
+        wifiValidated: true,
+        networkName: 'Wi-Fi Colégio Crescer',
+        clientIp: networkResult.clientIp,
+        geofenceValidated: true,
+        locationName: 'Sede (Wi-Fi Colégio Crescer)',
+      },
     });
 
     if (!result.success || !result.updatedRecord) {
@@ -931,7 +934,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       console.warn('Erro ao salvar timestamp da batida:', e);
     }
 
-    // Incorpora campos de auditoria de validação por Wi-Fi no registro para persistência no Firestore
     const recordWithAudit: PontoRecord = {
       ...result.updatedRecord,
       wifiValidated: true,
@@ -960,21 +962,16 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     playPontoSuccessSound();
 
     let slotDisplayName = 'Batida';
-    if (result.slotKey === 'entry1') {
-      slotDisplayName = isUserContinuous ? 'Entrada' : 'Entrada 1';
-    } else if (result.slotKey === 'exit1') {
+    if (result.slotAssigned === 'entry1' || result.slotNumber === 1) {
+      slotDisplayName = 'Entrada 1';
+    } else if (result.slotAssigned === 'exit1' || result.slotNumber === 2) {
       slotDisplayName = 'Saída 1';
-    } else if (result.slotKey === 'entry2') {
+    } else if (result.slotAssigned === 'entry2' || result.slotNumber === 3) {
       slotDisplayName = 'Entrada 2';
-    } else if (result.slotKey === 'exit2') {
-      slotDisplayName = isUserContinuous ? 'Saída' : 'Saída 2';
+    } else if (result.slotAssigned === 'exit2' || result.slotNumber === 4) {
+      slotDisplayName = 'Saída 2';
     } else if (result.slotName) {
-      if (result.slotName.includes('Entrada 1')) slotDisplayName = 'Entrada 1';
-      else if (result.slotName.includes('Saída 1') || result.slotName.includes('Saida 1')) slotDisplayName = 'Saída 1';
-      else if (result.slotName.includes('Entrada 2')) slotDisplayName = 'Entrada 2';
-      else if (result.slotName.includes('Saída 2') || result.slotName.includes('Saida 2')) slotDisplayName = 'Saída 2';
-      else if (result.slotName.toLowerCase().includes('entrada')) slotDisplayName = 'Entrada';
-      else if (result.slotName.toLowerCase().includes('saída') || result.slotName.toLowerCase().includes('saida')) slotDisplayName = 'Saída';
+      slotDisplayName = result.slotName;
     }
 
     setPunchFeedback({
@@ -1380,6 +1377,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     const hasCompletePunches = isDayShiftComplete(recordToSave, isUserContinuous);
     const finalRecord: PontoRecord = {
       ...recordToSave,
+      entry1: recordToSave.entry1 || recordToSave.entrada_1 || '',
+      exit1: recordToSave.exit1 || recordToSave.saida_1 || '',
+      entry2: recordToSave.entry2 || recordToSave.entrada_2 || '',
+      exit2: recordToSave.exit2 || recordToSave.saida_2 || '',
+      entrada_1: recordToSave.entry1 || recordToSave.entrada_1 || '',
+      saida_1: recordToSave.exit1 || recordToSave.saida_1 || '',
+      entrada_2: recordToSave.entry2 || recordToSave.entrada_2 || '',
+      saida_2: recordToSave.exit2 || recordToSave.saida_2 || '',
       status: (hasCompletePunches && (!recordToSave.status || recordToSave.status === 'normal')) ? 'normal' : (recordToSave.status || 'normal'),
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name || 'Administrador',

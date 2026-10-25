@@ -174,6 +174,10 @@ export interface PontoRecord {
   exit1?: string; // e.g. ""
   entry2?: string; // e.g. ""
   exit2?: string; // e.g. "17:40"
+  entrada_1?: string; // Alias interoperável para Entrada 1
+  saida_1?: string; // Alias interoperável para Saída 1
+  entrada_2?: string; // Alias interoperável para Entrada 2
+  saida_2?: string; // Alias interoperável para Saída 2
   status: PontoStatus;
   manualOverride?: boolean;
   note?: string;
