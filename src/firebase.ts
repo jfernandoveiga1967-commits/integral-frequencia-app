@@ -53,6 +53,8 @@ import {
   getLocalUsersList,
   saveLocalUsersList,
   PRESET_USERS,
+  markUserAsDeleted,
+  getDeletedUserIds,
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
@@ -1160,17 +1162,30 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
 }
 
 /**
- * Remove um usuário tanto da coleção 'usuarios' quanto da coleção 'users' no Firestore.
+ * Remove um usuário tanto da coleção 'usuarios' quanto da coleção 'users' no Firestore,
+ * além de registrar a exclusão permanente no cache local.
  */
-export async function deleteUserFromFirestore(userId: string): Promise<void> {
+export async function deleteUserFromFirestore(userId: string, userEmail?: string): Promise<void> {
   try {
-    const results = await Promise.allSettled([
-      deleteDoc(doc(db, 'usuarios', userId)),
-      deleteDoc(doc(db, 'users', userId)),
-    ]);
-    if (results[0].status === 'rejected') {
-      throw results[0].reason;
+    markUserAsDeleted(userId, userEmail);
+
+    const idsToDelete = new Set<string>();
+    if (userId) idsToDelete.add(userId);
+
+    if (userEmail) {
+      const emailLower = userEmail.trim().toLowerCase();
+      const slug = emailLower.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+      if (slug) idsToDelete.add(`usr_${slug}`);
+      idsToDelete.add(emailLower);
     }
+
+    const deletePromises: Promise<any>[] = [];
+    idsToDelete.forEach((id) => {
+      deletePromises.push(deleteDoc(doc(db, 'usuarios', id)).catch(() => {}));
+      deletePromises.push(deleteDoc(doc(db, 'users', id)).catch(() => {}));
+    });
+
+    await Promise.all(deletePromises);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `usuarios/${userId}`);
     throw error;

@@ -55,6 +55,7 @@ import { UserNotificationBanner } from './components/UserNotificationBanner';
 import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal';
 import { UserProfileModal } from './components/UserProfile';
 import { subscribePendingFeedbacksForUser } from './services/feedbackService';
+import { deleteUser } from './services/userService';
 import { VoiceWidget } from './components/VoiceWidget';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
@@ -1602,14 +1603,16 @@ export default function App() {
     handleSaveUser(updated);
   };
 
-  const handleDeleteUser = async (userId: string) => {
+  const handleDeleteUser = async (userId: string, email?: string) => {
     try {
-      // 1. Exclui no Firestore primeiro
-      await deleteUserFromFirestore(userId);
-
-      // 2. Atualiza estado e cache local após confirmação
       const targetUser = users.find((u) => u.id === userId);
-      const targetEmail = (targetUser?.email || '').trim().toLowerCase();
+      const targetEmail = (email || targetUser?.email || '').trim().toLowerCase();
+      const targetName = (targetUser?.name || '').trim();
+
+      // 1. Exclui no Firestore e registra tombstone no cache permanente
+      await deleteUser(userId, targetEmail);
+
+      // 2. Atualiza estado e cache local imediatamente
       const updatedUsers = users.filter(
         (u) => u.id !== userId && (!targetEmail || !u.email || u.email.trim().toLowerCase() !== targetEmail)
       );
@@ -1618,7 +1621,50 @@ export default function App() {
       saveLocalUsersList(deduplicated);
       broadcastSyncEvent('SYNC_USERS', deduplicated);
 
-      // 3. Força recarga sem cache
+      // 3. Remove imediatamente o colaborador das atribuições de turmas (Quadro de Atribuições)
+      setQuadroAtribuicoes((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          let itemChanged = false;
+          const copy = { ...item };
+
+          if (copy.monitoraId === userId || (targetName && copy.monitoraName === targetName) || (targetEmail && copy.monitoraName.toLowerCase() === targetEmail)) {
+            copy.monitoraId = '';
+            copy.monitoraName = '';
+            copy.monitoraPhone = '';
+            itemChanged = true;
+          }
+          if (copy.adiId === userId || (targetName && copy.adiName === targetName) || (targetEmail && copy.adiName.toLowerCase() === targetEmail)) {
+            copy.adiId = '';
+            copy.adiName = '';
+            copy.adiPhone = '';
+            itemChanged = true;
+          }
+          if (copy.monitoraAssistenteId === userId || (targetName && copy.monitoraAssistenteName === targetName) || (targetEmail && copy.monitoraAssistenteName.toLowerCase() === targetEmail)) {
+            copy.monitoraAssistenteId = '';
+            copy.monitoraAssistenteName = '';
+            copy.monitoraAssistentePhone = '';
+            itemChanged = true;
+          }
+
+          if (itemChanged) {
+            copy.updatedAt = new Date().toISOString();
+            changed = true;
+            return copy;
+          }
+          return item;
+        });
+
+        if (changed) {
+          saveLocalQuadroAtribuicoes(next);
+          batchSaveQuadroAtribuicoesToFirestore(next).catch((e) =>
+            console.warn('Erro ao sincronizar quadro de atribuições após exclusão de usuário:', e)
+          );
+        }
+        return changed ? next : prev;
+      });
+
+      // 4. Força recarga sem cache (garante lista sincronizada do servidor sem ressuscitar o excluído)
       await handleForceReloadUsers();
     } catch (err: any) {
       console.error('Erro ao excluir usuário no Firestore:', err);

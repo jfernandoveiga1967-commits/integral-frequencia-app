@@ -73,6 +73,17 @@ import { DepartureAlertModal } from './DepartureAlertModal';
 import { StudentCheckoutAlert } from './StudentCheckoutAlert';
 import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
 import {
+  normalizeTime,
+  timeToMinutes,
+  isTimeInRange,
+  extractSlotLimits,
+  getCurrentActivityForTurma,
+  getSlotAtivo,
+  getNextSlot,
+  getPastSlots,
+  extractActivityDescription,
+} from '../utils/timeUtils';
+import {
   isReforcoActivity,
   isStudentInReforco,
   isStudentInReforcoVigency,
@@ -372,15 +383,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     targetUserName?: string;
   } | null>(null);
 
-  // Update real-time clock every second
+  // Update real-time clock every second and ensure precise minute change trigger
   useEffect(() => {
-    const timer = setInterval(() => {
+    const updateClock = () => {
       const d = new Date();
       const hh = String(d.getHours()).padStart(2, '0');
       const mm = String(d.getMinutes()).padStart(2, '0');
-      setSystemTime(`${hh}:${mm}`);
+      const formatted = `${hh}:${mm}`;
+      setSystemTime((prev) => (prev !== formatted ? formatted : prev));
       setSystemSeconds(d.getSeconds());
-    }, 1000);
+    };
+    updateClock();
+    const timer = setInterval(updateClock, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -397,7 +411,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     ? simulatedDay
     : (selectedDateDayOfWeek || realDayOfWeek || 'segunda');
 
-  const effectiveCurrentTime: string = isSimulatingTime ? simulatedTime : systemTime;
+  const effectiveCurrentTime: string = normalizeTime(isSimulatingTime ? simulatedTime : systemTime);
 
   // Check if selected date is weekend or holiday in real mode
   const isWeekendDay = useMemo(() => isWeekend(selectedDate), [selectedDate]);
@@ -663,13 +677,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       // All blocks for this turma on this day
       // Para Coordenador e Monitora com perfil 'Rotina': exibe TODAS as atividades da grade da turma
       // Para Professor Especialista: exibe apenas as atividades correspondentes às suas modalidades atribuídas
-      const turmaBlocks = isCoord || !currentUser || isRotinaProfile
+      const rawTurmaBlocks = isCoord || !currentUser || isRotinaProfile
         ? cleanSchedules
             .filter((s) => s.turma === turmaName && s.dayOfWeek === effectiveDayOfWeek)
-            .sort((a, b) => a.startTime.localeCompare(b.startTime))
         : userTodayScheduleBlocks
-            .filter((s) => s.turma === turmaName)
-            .sort((a, b) => a.startTime.localeCompare(b.startTime));
+            .filter((s) => s.turma === turmaName);
+
+      // Ordenação estritamente cronológica por minutos de início
+      const turmaBlocks = [...rawTurmaBlocks].sort((a, b) => {
+        const minA = timeToMinutes(extractSlotLimits(a).horaInicio);
+        const minB = timeToMinutes(extractSlotLimits(b).horaInicio);
+        return minA - minB;
+      });
 
       // Se for final de semana e não estiver em modo de simulação, nenhum bloco está em andamento
       if (isWeekendLocked) {
@@ -683,20 +702,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         };
       }
 
-      // Active block
-      const activeBlock = turmaBlocks.find(
-        (b) => effectiveCurrentTime >= b.startTime && effectiveCurrentTime < b.endTime
-      ) || null;
+      // Localização determinística da atividade ativa no minuto atual
+      const activeBlock = getCurrentActivityForTurma(turmaBlocks, effectiveCurrentTime);
 
-      // Next upcoming block
-      const nextBlock = turmaBlocks.find(
-        (b) => effectiveCurrentTime < b.startTime
-      ) || null;
+      // Próxima atividade programada
+      const nextBlock = getNextSlot(turmaBlocks, effectiveCurrentTime);
 
-      // Past blocks today
-      const pastBlocks = turmaBlocks.filter(
-        (b) => effectiveCurrentTime >= b.endTime
-      );
+      // Atividades já concluídas no dia
+      const pastBlocks = getPastSlots(turmaBlocks, effectiveCurrentTime);
 
       // Roll call details if active block requires roll call
       let rollCallInfo = null;
@@ -1588,7 +1601,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               Momento
                             </div>
                             <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">
-                              {activeBlock.activityId}
+                              {activeBlock.nome || activeBlock.activityId}
                             </div>
                           </div>
                         </div>
@@ -1598,14 +1611,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
                             <Clock className="w-2.5 h-2.5 text-indigo-500" />
                             <span>
-                              {activeBlock.startTime} - {activeBlock.endTime}
+                              {normalizeTime(activeBlock.horaInicio || activeBlock.startTime)} - {normalizeTime(activeBlock.horaFim || activeBlock.endTime)}
                             </span>
                           </span>
                         </div>
                       </div>
 
-                      {/* Location & Guidelines */}
-                      <div className="space-y-1 bg-slate-50 rounded-xl p-2 border border-slate-100 text-[11px]">
+                      {/* Location & Guidelines / Detalhamento da Atividade */}
+                      <div className="space-y-1.5 bg-slate-50 rounded-xl p-2.5 border border-slate-100 text-[11px]">
                         <div className="flex items-center space-x-1.5 text-slate-700 font-semibold truncate">
                           <MapPin className="w-3 h-3 text-indigo-600 shrink-0" />
                           <span className="text-slate-400">Local:</span>
@@ -1614,12 +1627,47 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           </span>
                         </div>
 
-                        {activeBlock.guidelines && (
-                          <div className="flex items-start space-x-1.5 text-slate-600 pt-1 border-t border-slate-200/60 text-[10px] leading-snug">
-                            <FileText className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                            <span className="italic line-clamp-2">{activeBlock.guidelines}</span>
-                          </div>
-                        )}
+                        {/* Descrição Detalhada da Atividade com fallback seguro sem cortes */}
+                        {(() => {
+                          // Inspeciona todos os campos possíveis onde o detalhamento fica salvo
+                          const blockDesc =
+                            activeBlock.descricao ||
+                            activeBlock.observacao ||
+                            activeBlock.detalhes ||
+                            activeBlock.guidelines;
+
+                          const planDesc =
+                            activePlan?.development ||
+                            activePlan?.descricao ||
+                            activePlan?.detalhes ||
+                            activePlan?.observacao ||
+                            activePlan?.notes ||
+                            activePlan?.objectives;
+
+                          const catalogDesc =
+                            actDetails?.description ||
+                            actDetails?.descricao ||
+                            actDetails?.detalhes ||
+                            actDetails?.observacao;
+
+                          const finalDesc = blockDesc || planDesc || catalogDesc;
+
+                          if (!finalDesc) return null;
+
+                          return (
+                            <div className="flex items-start space-x-1.5 text-slate-700 pt-1.5 border-t border-slate-200/60 text-[10.5px] leading-relaxed">
+                              <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
+                              <div className="space-y-0.5 flex-1 min-w-0">
+                                <span className="font-extrabold text-slate-800 block text-[10px] uppercase tracking-wide">
+                                  Descrição & Orientações:
+                                </span>
+                                <p className="text-slate-600 whitespace-pre-line break-words font-medium">
+                                  {finalDesc}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Alerta de Atividade Paralela • Reforço vs Lego (Exclusivo para Reforço e Lego) */}
@@ -1713,7 +1761,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           <div className="space-y-1.5">
                             <div className="space-y-0.5">
                               <div className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
-                                {activePlan.title}
+                                {activePlan.title || activePlan.nome}
                               </div>
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
                                 {activePlan.category && (
@@ -1738,6 +1786,19 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                   <span>Motivo da Substituição:</span>
                                 </div>
                                 <p className="italic text-amber-800">{activePlan.substitutionReason}</p>
+                              </div>
+                            )}
+
+                            {/* Detalhamento do Planejamento Semanal (exibido sem cortes para as monitoras) */}
+                            {(activePlan.development || activePlan.descricao || activePlan.detalhes || activePlan.observacao) && (
+                              <div className="bg-white/95 rounded-lg p-2 border border-indigo-100/90 text-[10.5px] space-y-1 leading-relaxed shadow-2xs">
+                                <div className="font-extrabold text-indigo-950 flex items-center gap-1 text-[10px] uppercase tracking-wide">
+                                  <Sparkles className="w-3 h-3 text-indigo-600 shrink-0" />
+                                  <span>Passo a Passo / Desenvolvimento:</span>
+                                </div>
+                                <p className="text-slate-600 whitespace-pre-line break-words">
+                                  {activePlan.development || activePlan.descricao || activePlan.detalhes || activePlan.observacao}
+                                </p>
                               </div>
                             )}
 
@@ -2009,7 +2070,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                           </div>
                           <div className="min-w-0">
                             <span className="font-extrabold text-slate-800 truncate block text-[11px] leading-tight">
-                              {nextBlock.activityId}
+                              {nextBlock.nome || nextBlock.activityId}
                             </span>
                             {nextBlock.location && (
                               <span className="text-[9px] text-slate-500 font-semibold truncate block">
@@ -2019,7 +2080,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             {nextPlan && (
                               <div className="mt-0.5 flex items-center space-x-1 text-[9px] text-indigo-800 bg-indigo-50/80 rounded px-1.5 py-0.5 border border-indigo-100/80 max-w-full">
                                 <BookOpen className="w-2.5 h-2.5 shrink-0 text-indigo-600" />
-                                <span className="font-bold truncate">Plano: {nextPlan.title}</span>
+                                <span className="font-bold truncate">Plano: {nextPlan.title || nextPlan.nome}</span>
                                 {nextPlan.status === 'substituida' && (
                                   <span className="text-[8px] font-black text-amber-900 bg-amber-100 px-1 rounded-2xs shrink-0">
                                     Subst.
@@ -2032,7 +2093,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
                         <div className="flex items-center space-x-1 shrink-0">
                           <span className="font-bold text-indigo-700 text-[10px] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                            {nextBlock.startTime} - {nextBlock.endTime}
+                            {normalizeTime(nextBlock.horaInicio || nextBlock.startTime)} - {normalizeTime(nextBlock.horaFim || nextBlock.endTime)}
                           </span>
                           <button
                             type="button"

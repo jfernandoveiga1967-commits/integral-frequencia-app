@@ -624,16 +624,67 @@ export function getUserStatusBadge(userOrStatus?: UserProfile | UserStatus | str
 // Normalização e armazenamento local de usuários
 // ---------------------------------------------------------------------------
 
+export const DELETED_USERS_STORAGE_KEY = 'app_deleted_user_ids';
+
+/**
+ * Retorna o conjunto de IDs e emails de usuários permanentemente excluídos
+ */
+export function getDeletedUserIds(): Set<string> {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_USERS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed.map((item) => String(item).toLowerCase().trim()).filter(Boolean));
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao ler lista de usuários excluídos:', e);
+  }
+  return new Set();
+}
+
+/**
+ * Marca permanentemente um usuário como excluído no cache do navegador
+ */
+export function markUserAsDeleted(userId: string, email?: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const current = getDeletedUserIds();
+      if (userId) current.add(userId.toLowerCase().trim());
+      if (email) current.add(email.toLowerCase().trim());
+      localStorage.setItem(DELETED_USERS_STORAGE_KEY, JSON.stringify(Array.from(current)));
+    }
+  } catch (e) {
+    console.error('Erro ao marcar usuário como excluído:', e);
+  }
+}
+
 export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfile[] {
+  const deletedIds = getDeletedUserIds();
   const userById = new Map<string, UserProfile>();
 
   PRESET_USERS.forEach((preset) => {
-    userById.set(preset.id, { ...preset });
+    const pId = (preset.id || '').toLowerCase().trim();
+    const pEmail = (preset.email || '').toLowerCase().trim();
+    if (!deletedIds.has(pId) && !deletedIds.has(pEmail)) {
+      userById.set(preset.id, { ...preset });
+    }
   });
 
   if (Array.isArray(rawUsers)) {
     rawUsers.forEach((raw) => {
       if (!raw || !raw.id) return;
+      const rawId = (raw.id || '').toLowerCase().trim();
+      const rawEmail = (raw.email || '').toLowerCase().trim();
+
+      // Ignora usuários permanentemente excluídos
+      if (deletedIds.has(rawId) || (rawEmail && deletedIds.has(rawEmail))) {
+        return;
+      }
+
       const existing = userById.get(raw.id) || ({} as UserProfile);
       const isDanyel =
         raw.id === 'usr_danyelpereira' ||

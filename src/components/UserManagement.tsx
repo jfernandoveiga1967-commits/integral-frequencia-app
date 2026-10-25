@@ -104,7 +104,7 @@ interface UserManagementProps {
   schedules?: ScheduleBlock[];
   holidays?: HolidayItem[];
   onSaveUser: (user: UserProfile) => void | Promise<void>;
-  onDeleteUser: (userId: string) => void;
+  onDeleteUser: (userId: string, email?: string) => void | Promise<void>;
   onSaveActivity: (activity: ActivityItem) => void;
   onDeleteActivity: (activityId: string) => void;
   onSaveScheduleBlock?: (block: ScheduleBlock) => void;
@@ -1455,12 +1455,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     }
     const deletedUserName = userToDelete.name;
     const deletedUserId = userToDelete.id;
+    const deletedUserEmail = userToDelete.email;
     setUserToDelete(null);
 
     setPendingActionLabel(`Excluindo ${deletedUserName}...`);
     await userAction.execute(
       async () => {
-        await Promise.resolve(onDeleteUser(deletedUserId));
+        await Promise.resolve(onDeleteUser(deletedUserId, deletedUserEmail));
       },
       {
         loadingMessage: `Excluindo usuário ${deletedUserName} no Firestore...`,
@@ -2059,12 +2060,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           <span>Editar</span>
                         </button>
 
-                        {!isMasterCoord && currentUser?.id !== user.id && (
+                        {isAdmin && !isMasterCoord && currentUser?.id !== user.id && (
                           <button
                             type="button"
                             onClick={() => setUserToDelete(user)}
                             className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer"
                             title="Remover usuário"
+                            aria-label={`Remover usuário ${user.name}`}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -4232,9 +4234,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
               <Trash2 className="w-7 h-7" />
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900">Remover Usuário?</h3>
+            <h3 className="text-lg font-extrabold text-slate-900">Deseja remover este usuário?</h3>
             <p className="text-xs text-slate-600">
-              Tem certeza que deseja revogar o acesso do usuário <strong>{userToDelete.name}</strong> ({userToDelete.email})?
+              Tem certeza que deseja excluir permanentemente o cadastro de <strong>{userToDelete.name}</strong> ({userToDelete.email})? Esta ação não pode ser desfeita.
             </p>
 
             <div className="flex items-center justify-center space-x-3 pt-2">

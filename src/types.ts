@@ -6,6 +6,9 @@ export interface ActivityItem {
   icon: string; // Lucide icon identifier name (fallback)
   customIconUrl?: string; // Base64 data URL (PNG, SVG, JPG) for custom icon
   description: string;
+  descricao?: string; // Alias interoperável
+  observacao?: string; // Alias interoperável
+  detalhes?: string; // Alias interoperável
   defaultEquipment: string;
   requiresRollCall?: boolean; // true = Exige registro de presença na chamada; false = Atividade orientativa da Grade/Rotina
   isCustom?: boolean;
@@ -83,7 +86,13 @@ export interface ScheduleBlock {
   dayOfWeek: DayOfWeek;
   startTime: string; // e.g. "13:30"
   endTime: string;   // e.g. "14:20"
+  horaInicio?: string; // Limite de início estrito HH:mm (alias interoperável)
+  horaFim?: string;    // Limite de fim estrito HH:mm (alias interoperável)
   activityId: ActivityType; // Refers to an ActivityItem (e.g. "Rotina", "Natação", "Almoço", etc.)
+  nome?: string; // Nome da atividade / proposta
+  descricao?: string; // Detalhamento da atividade / descrição pedagógica
+  observacao?: string; // Observações ou orientações
+  detalhes?: string; // Detalhes da atividade
   location?: string; // e.g. "Piscina", "Refeitório", "Sala de Leitura"
   guidelines?: string; // Orientações para a Monitora/Professor
   createdAt?: string;
@@ -395,9 +404,15 @@ export interface SemanarioPlan {
   date: string; // YYYY-MM-DD
   dayOfWeek: DayOfWeek;
   timeSlot?: string; // e.g. "13:30 - 14:30"
+  horaInicio?: string; // Limite de início estrito HH:mm (alias interoperável)
+  horaFim?: string;    // Limite de fim estrito HH:mm (alias interoperável)
   weekTheme?: string; // Tema da Semana (ex: "Perdoar como Jesus nos ensinou")
   category: string; // Categoria / Prefixo pedagógico oficial (ex: "Artes")
   title: string; // Nome da Atividade / Proposta (ex: "Crescendo com Jesus")
+  nome?: string; // Alias para title / Nome da atividade
+  descricao?: string; // Alias para development / descrição detalhada
+  observacao?: string; // Alias para notes / observações pedagógicas
+  detalhes?: string; // Alias para detalhes adicionais
   adiResponsible?: string; // ADI Responsável (ex: "Patrícia")
   monitors?: string; // Monitora(s) (ex: "Sthefany e Márcia")
   objectives?: string; // Objetivos de Aprendizagem & BNCC

@@ -1,5 +1,6 @@
 import { SemanarioPlan, ScheduleBlock } from '../types.ts';
 import { deduplicateSemanarioPlans } from './semanarioUtils';
+import { normalizeTime } from './timeUtils';
 
 /**
  * Normaliza strings para comparação flexível (remove acentos, espaços extras e lowercases)
@@ -14,17 +15,17 @@ export function normalizeString(str?: string): string {
 }
 
 /**
- * Extrai horários de início e término em formato "HH:MM" de uma string de timeSlot
+ * Extrai horários de início e término em formato "HH:mm" de uma string de timeSlot
  * Ex: "13:30 - 14:30" => ["13:30", "14:30"]
- * Ex: "13:30 às 14:30" => ["13:30", "14:30"]
+ * Ex: "9:30 às 10:30" => ["09:30", "10:30"]
  */
 export function extractTimeInterval(timeSlot?: string): { start?: string; end?: string } {
   if (!timeSlot) return {};
-  const matches = timeSlot.match(/(\d{1,2}:\d{2})/g);
+  const matches = timeSlot.match(/(\d{1,2}[:hH]\d{2})/g);
   if (!matches || matches.length === 0) return {};
   return {
-    start: matches[0],
-    end: matches.length > 1 ? matches[1] : undefined,
+    start: normalizeTime(matches[0]),
+    end: matches.length > 1 ? normalizeTime(matches[1]) : undefined,
   };
 }
 
@@ -33,7 +34,7 @@ export function extractTimeInterval(timeSlot?: string): { start?: string; end?: 
  * Critérios rigorosos de cruzamento:
  * 1. Turma deve corresponder (com normalização tolerante a variações como '1º Ano A' vs '1º Ano Azul')
  * 2. Data deve corresponder à data solicitada (se o plano possuir data gravada)
- * 3. Match de Horário (timeSlot vs startTime/endTime)
+ * 3. Match de Horário (timeSlot vs startTime/endTime/horaInicio/horaFim)
  * 4. Match de Categoria / Atividade (category ou title vs activityId)
  */
 export function findMatchingSemanarioPlan(
@@ -67,15 +68,14 @@ export function findMatchingSemanarioPlan(
 
   if (turmaPlans.length === 0) return null;
 
-  const blockStart = (block.startTime || '').trim();
+  const blockStart = normalizeTime(block.horaInicio || block.startTime);
   const normActivity = normalizeString(block.activityId);
 
   // Tentativa 1: Match por timeSlot exato ou sobreposto
   const timeMatched = turmaPlans.find((p) => {
-    if (!p.timeSlot) return false;
-    const { start } = extractTimeInterval(p.timeSlot);
-    if (start && start === blockStart) return true;
-    if (p.timeSlot.includes(blockStart)) return true;
+    const pStart = normalizeTime(p.horaInicio || (p.timeSlot ? extractTimeInterval(p.timeSlot).start : ''));
+    if (blockStart && pStart && blockStart === pStart) return true;
+    if (blockStart && p.timeSlot && p.timeSlot.includes(blockStart)) return true;
     return false;
   });
   if (timeMatched) return timeMatched;
