@@ -1130,7 +1130,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const handleQuickRoleChange = async (user: UserProfile, newRole: UserRole) => {
     if (user.role === newRole) return;
-    if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
+    if ((user.email || '').toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
       showToast('O perfil do Coordenador Geral não pode ter o cargo alterado.', 'error');
       return;
     }
@@ -1175,7 +1175,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const handleQuickStatusChange = async (user: UserProfile, newStatus: UserStatus) => {
     if (user.status === newStatus) return;
-    if (user.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
+    if ((user.email || '').toLowerCase() === 'jfernandoveiga1967@gmail.com' || user.id === 'usr_coord_1') {
       showToast('O status do Coordenador Geral não pode ser alterado.', 'error');
       return;
     }
@@ -1448,7 +1448,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const confirmDeleteUser = async () => {
     if (!userToDelete) return;
-    if (userToDelete.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || userToDelete.id === 'usr_coord_1') {
+    if ((userToDelete.email || '').toLowerCase() === 'jfernandoveiga1967@gmail.com' || userToDelete.id === 'usr_coord_1') {
       showToast('O perfil do Coordenador Geral não pode ser excluído.', 'error');
       setUserToDelete(null);
       return;
@@ -2914,7 +2914,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Cargo / Categoria de Acesso:
                 </label>
-                {editingUser && (editingUser.email.toLowerCase() === 'jfernandoveiga1967@gmail.com' || editingUser.id === 'usr_coord_1') ? (
+                {editingUser && (((editingUser.email || '').toLowerCase() === 'jfernandoveiga1967@gmail.com') || editingUser.id === 'usr_coord_1') ? (
                   <div className="w-full px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 font-bold text-xs flex items-center justify-between shadow-xs">
                     <span className="flex items-center space-x-1.5">
                       <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
@@ -2959,7 +2959,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
               </div>
 
               {/* Status do Colaborador (Situação Funcional & Livro Ponto) */}
-              {(!editingUser || (editingUser.email.toLowerCase() !== 'jfernandoveiga1967@gmail.com' && editingUser.id !== 'usr_coord_1')) && (
+              {(!editingUser || (((editingUser.email || '').toLowerCase() !== 'jfernandoveiga1967@gmail.com') && editingUser.id !== 'usr_coord_1')) && (
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="block font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">

@@ -707,7 +707,8 @@ export default function App() {
             needsSync = true;
           }
           if (!updated.endDate || updated.endDate === updated.date) {
-            const match = initialMap.get(updated.id) || initialMap.get(updated.name.toLowerCase().trim());
+            const hName = (updated.name || '').toLowerCase().trim();
+            const match = initialMap.get(updated.id) || (hName ? initialMap.get(hName) : undefined);
             if (match && match.endDate && match.endDate !== updated.endDate) {
               updated.endDate = match.endDate;
               needsSync = true;
@@ -1150,8 +1151,8 @@ export default function App() {
         if (
           resolvedName &&
           resolvedTurma &&
-          s.name.trim().toLowerCase() === resolvedName.toLowerCase() &&
-          s.turma.trim().toLowerCase() === resolvedTurma.toLowerCase()
+          (s.name || '').trim().toLowerCase() === resolvedName.toLowerCase() &&
+          (s.turma || '').trim().toLowerCase() === resolvedTurma.toLowerCase()
         ) {
           return false;
         }
@@ -1624,23 +1625,41 @@ export default function App() {
       // 3. Remove imediatamente o colaborador das atribuições de turmas (Quadro de Atribuições)
       setQuadroAtribuicoes((prev) => {
         let changed = false;
-        const next = prev.map((item) => {
+        const next = (prev || []).map((item) => {
+          if (!item) return item;
           let itemChanged = false;
           const copy = { ...item };
 
-          if (copy.monitoraId === userId || (targetName && copy.monitoraName === targetName) || (targetEmail && copy.monitoraName.toLowerCase() === targetEmail)) {
+          const monNameLower = (copy.monitoraName || '').trim().toLowerCase();
+          const adiNameLower = (copy.adiName || '').trim().toLowerCase();
+          const asstNameLower = (copy.monitoraAssistenteName || '').trim().toLowerCase();
+          const targetNameLower = targetName ? targetName.toLowerCase() : '';
+
+          if (
+            copy.monitoraId === userId ||
+            (targetNameLower && monNameLower === targetNameLower) ||
+            (targetEmail && monNameLower === targetEmail)
+          ) {
             copy.monitoraId = '';
             copy.monitoraName = '';
             copy.monitoraPhone = '';
             itemChanged = true;
           }
-          if (copy.adiId === userId || (targetName && copy.adiName === targetName) || (targetEmail && copy.adiName.toLowerCase() === targetEmail)) {
+          if (
+            copy.adiId === userId ||
+            (targetNameLower && adiNameLower === targetNameLower) ||
+            (targetEmail && adiNameLower === targetEmail)
+          ) {
             copy.adiId = '';
             copy.adiName = '';
             copy.adiPhone = '';
             itemChanged = true;
           }
-          if (copy.monitoraAssistenteId === userId || (targetName && copy.monitoraAssistenteName === targetName) || (targetEmail && copy.monitoraAssistenteName.toLowerCase() === targetEmail)) {
+          if (
+            copy.monitoraAssistenteId === userId ||
+            (targetNameLower && asstNameLower === targetNameLower) ||
+            (targetEmail && asstNameLower === targetEmail)
+          ) {
             copy.monitoraAssistenteId = '';
             copy.monitoraAssistenteName = '';
             copy.monitoraAssistentePhone = '';
@@ -2102,8 +2121,8 @@ export default function App() {
         const matchTurma = pendingFilterTurma === 'all' || s.turma === pendingFilterTurma;
         const matchSearch =
           !pendingSearchTerm.trim() ||
-          s.name.toLowerCase().includes(pendingSearchTerm.toLowerCase()) ||
-          s.turma.toLowerCase().includes(pendingSearchTerm.toLowerCase());
+          (s.name || '').toLowerCase().includes(pendingSearchTerm.toLowerCase()) ||
+          (s.turma || '').toLowerCase().includes(pendingSearchTerm.toLowerCase());
         return matchTurma && matchSearch;
       })
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
