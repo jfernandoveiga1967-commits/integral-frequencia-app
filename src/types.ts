@@ -594,4 +594,6 @@ export interface PedagogicalFeedback {
   whatsappSentAt?: string;
 }
 
+export type { NormaAceite } from './types/manualNormas';
+
 

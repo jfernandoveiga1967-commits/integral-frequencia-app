@@ -777,7 +777,7 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
           config: {
             responseMimeType: 'application/json',
             maxOutputTokens: 2500,
-            temperature: 0.7,
+            temperature: 0.3,
           },
         });
 

@@ -540,7 +540,7 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
               <div className="flex items-center justify-between pt-1">
                 <div className="flex items-center gap-2 text-[11px] text-slate-500">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>A IA gerará a mensagem seguindo estritamente o modelo cordial de Comunicação Não Violenta (CNV).</span>
+                  <span>A IA gerará a mensagem institucional técnica e contextualizada no padrão oficial do Colégio Crescer.</span>
                 </div>
                 <button
                   type="button"

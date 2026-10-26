@@ -287,28 +287,25 @@ export function buildDynamicPedagogicalFeedback({
     }
   }
 
-  const saudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
+  const saudacao = salutation === 'querido' ? `**Querido ${firstName}!**` : `**Querida ${firstName}!**`;
   const cleanSituacaoResumo = situacaoResumo.replace(/[\.\s]+$/, '').trim();
   const cleanRazao = razaoProcedimento.replace(/[\.\s]+$/, '').trim();
   const cleanAcao = acaoOrientativa.replace(/[\.\s]+$/, '').trim();
+  const normRefBold = cleanSection
+    ? `**Manual de Normas e Conduta – Seção ${cleanSection}: ${cleanNormTitle}**`
+    : `**Norma Institucional: ${cleanNormTitle}**`;
 
   const message = `${saudacao}
 
-Esperamos que você esteja bem. Gostaríamos de começar agradecendo pelo seu empenho e pela dedicação diária aos nossos alunos no Programa do Integral do Colégio Crescer.
+Agradecemos pela sua dedicação e pelo cuidado diário com os nossos alunos no Programa Integral do Colégio Crescer.
 
-Gostaríamos de retomar uma situação ocorrida durante a rotina: ${cleanSituacaoResumo}.
+Escrevemos para apresentar uma orientação técnica e alinhar a rotina referente a ${cleanSituacaoResumo}.
 
-Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de ${cleanRazao}.
+Essa conduta está fundamentada nas diretrizes oficiais do ${normRefBold}, que estabelece ${cleanAcao}.
 
-Por isso, retomamos a orientação prevista na norma institucional ${normFullRef}, destacando ${cleanAcao}.
+A observância rigorosa a este procedimento é indispensável para assegurar a organização institucional, a previsibilidade dos fluxos e a máxima segurança e bem-estar dos nossos alunos.
 
-Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança, alinhamento institucional e responsabilidade coletiva. A atenção a essa conduta contribui diretamente para a proteção, o acolhimento e o bem-estar das crianças sob nossos cuidados.
-
-Contamos com seu compromisso para reforçar essa prática em todos os momentos, mantendo a atenção necessária para que situações semelhantes sejam prevenidas.
-
-Agradecemos sua compreensão e parceria na construção de uma rotina cada vez mais segura e cuidadosa para nossos alunos.
-
-*Atenciosamente*,
+**Atenciosamente,**
 Coordenação do Integral
 Colégio Crescer`;
 
@@ -325,8 +322,8 @@ Colégio Crescer`;
 
 /**
  * Constrói o System Prompt refinado para o Gemini (Flash)
- * com FOCO ESTRITO E RESTRITO AO ASSUNTO DA NORMA SELECIONADA
- * e eliminação completa de frases genéricas inadequadas (deslocamento, academia, etc.)
+ * garantindo mensagens institucionais técnicas, diretas, objetivas e contextualizadas
+ * conforme o padrão oficial do Colégio Crescer.
  */
 export function buildGeminiFeedbackSystemPrompt({
   userName,
@@ -342,84 +339,75 @@ export function buildGeminiFeedbackSystemPrompt({
   const cleanNormTitle = (normTitle || '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   const cleanContext = (rawContext || '').trim();
   const cleanCheckItem = (selectedChecklistItem || '').trim().replace(/^[-•*]\s*/, '');
-  const saudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
+  const saudacao = salutation === 'querido' ? `**Querido ${firstName}!**` : `**Querida ${firstName}!**`;
+  const normRefBold = cleanSection
+    ? `**Manual de Normas e Conduta – Seção ${cleanSection}: ${cleanNormTitle}**`
+    : `**Norma Institucional: ${cleanNormTitle}**`;
 
-  return `Você é a Coordenação do Programa do Período Integral do Colégio Crescer.
-Sua missão é gerar um Feedback Pedagógico Cordial individual para o(a) colaborador(a) ${userName}, fundamentado estritamente nos princípios da Comunicação Não-Violenta (CNV), tom acolhedor, respeito mútuo e compromisso inegociável com a segurança, o bem-estar dos alunos e as diretrizes institucionais.
-
-==================================================
-DIRETRIZ DE FOCO ESTRITO E CONTEXTUALIZAÇÃO DINÂMICA (REGRA CRÍTICA):
-1. O texto gerado deve ser 100% DINÂMICO e RESTRITO AO TEMA DA NORMA SELECIONADA:
-   - Norma: "${cleanNormTitle}"${sectionLabel}
-   - Detalhes do Manual: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Manual de Normas e Conduta do Colégio Crescer'}
-   ${cleanCheckItem ? `- ITEM ESPECÍFICO DO CHECKLIST OBSERVADO: "${cleanCheckItem}"` : ''}
-   ${cleanContext ? `- Contexto do Fato / Resumo Adicional: "${cleanContext}"` : ''}
-
-${cleanCheckItem ? `==================================================
-DIRETRIZ DE FOCO EXCLUSIVO NO ITEM DO CHECKLIST SELECIONADO (REGRA MÁXIMA):
-Se um 'item do checklist' específico for fornecido, a mensagem DEVE se concentrar 100% nessa situação pontual. NÃO adicione contextos genéricos ou outros pontos da norma que não foram o foco da observação. Mantenha a Comunicação Não Violenta (CNV), abordando o motivo pedagógico/de segurança focado estritamente nesse item selecionado.
-- Item focado: "${cleanCheckItem}"
-- Na retomada cordial da situação observada, cite explicitamente esse item específico ("${cleanCheckItem}").
-- Na razão pedagógica/de segurança, aborde exclusivamente a justificativa protetiva e de conformidade referente a esse item específico.
-- No checklist de ciência ('actionPoints'), o Item 1 DEVE ser o cumprimento prático pontual deste item ("${cleanCheckItem}").
-==================================================` : `2. ELIMINE TOTALMENTE QUALQUER FRASE GENÉRICA FIXA OU DESLOCADA DO ASSUNTO:
-   - NUNCA mencione "deslocamento", "trajetos", "transporte", "fila" ou "academia" se a norma NÃO for sobre deslocamento/transporte!
-   - Se a norma for sobre UNIFORME / FARDAMENTO (ex: Seção 28): o texto deve tratar EXCLUSIVAMENTE de vestuário institucional completo, crachá, padronização visual, salvaguarda institucional e identificação imediata perante famílias e crianças. JAMAIS mencione trânsito ou deslocamento!
-   - Se a norma for sobre DESLOCAMENTO / TRANSPORTE (ex: Seção 17): o texto deve tratar da contagem nominal contínua de alunos, embarque, desembarque, organização da fila e segurança durante os trajetos.
-   - Se a norma for sobre POSTURA / PONTUALIDADE (ex: Seção 5 ou Seção 30): o texto deve tratar de assiduidade, cumprimento da carga horária, registro de ponto, conduta ética e postura exemplar para as crianças.
-   - Se a norma for sobre USO DE CELULAR (ex: Seção 12): o texto deve tratar da atenção visual contínua de 360°, eliminação de dispersões visuais com aparelhos particulares e uso do rádio comunicador institucional.
-   - Se a norma for sobre ALIMENTAÇÃO (ex: Seção 15): o texto deve tratar do acompanhamento de refeições, prevenção de engasgos e observância rigorosa a restrições e alergias.
-   - Se a norma for sobre OUTROS TEMAS (Parque, Lição de Casa, Abordagem Socioemocional, etc.): o texto deve focar estritamente na razão pedagógica e institucional daquele assunto.`}
+  return `Você é a Coordenação do Programa Integral do Colégio Crescer.
+Sua missão é redigir um Feedback Institucional e Pedagógico oficial, técnico, afetuoso e objetivo para o(a) colaborador(a) ${userName}, fundamentado nas normas e condutas oficiais da instituição.
 
 ==================================================
-MODELO OBRIGATÓRIO DE SAÍDA (ESTRUTURA UNIVERSAL CNV):
+DIRETRIZES DE ENGENHARIA DE PROMPT (ESTRITAMENTE OBRIGATÓRIAS):
 
-${saudacao}
+1. TOM E ESTILO:
+- Formal, afetuoso porém altamente técnico e institucional.
+- Seja direto, claro e profissional, expressando respeito e parceria educativa.
+- É TERMINANTEMENTE PROIBIDO inventar fatos, florear, presumir acontecimentos não relatados ou incluir saudações motivacionais genéricas (ex.: proibidíssimo usar "esperamos que esteja bem", "que seu dia seja iluminado", clichês vazios de autoajuda).
 
-Esperamos que você esteja bem. Gostaríamos de começar agradecendo pelo seu empenho e pela dedicação diária aos nossos alunos no Programa do Integral do Colégio Crescer.
+2. FOCO NO TEMA INFORMADO:
+- O assunto específico informado DEVE ser o centro imediato da mensagem (ex.: reforço escolar, horário do almoço, vestuário/uniforme, registro de ponto, conduta em passeios, atenção no parque).
+- Não faça rodeios nem introduções prolixas. Vá direto ao ponto técnico do assunto.
+- Dados específicos da orientação:
+  * Colaborador(a): ${userName}
+  * Norma Selecionada: "${cleanNormTitle}"${sectionLabel}
+  * Detalhamento Oficial do Manual: ${Array.isArray(normDetails) && normDetails.length > 0 ? normDetails.join('; ') : 'Manual de Normas e Conduta do Colégio Crescer'}
+  ${cleanCheckItem ? `* Item Específico do Checklist Observado: "${cleanCheckItem}"` : ''}
+  ${cleanContext ? `* Contexto Adicional / Ocorrência Informada: "${cleanContext}"` : ''}
 
-Gostaríamos de retomar uma situação ocorrida durante a rotina: [Resumo cordial da situação observada referente estritamente ao item específico do checklist ou à norma].
+3. CITAÇÃO DE NORMAS:
+- Vincule sempre a orientação de forma inequívoca à regra ou norma institucional correspondente do Manual do Colégio Crescer.
+- A citação da norma DEVE vir destacada em negrito no corpo do texto: ${normRefBold}.
 
-Sabemos que a rotina do Integral exige atenção constante, organização e cuidado com diferentes necessidades das crianças. Ainda assim, situações como essa reforçam a importância de [A razão pedagógica, institucional e de segurança específica deste ponto focado, sem usar palavras genéricas de outros temas].
+4. ESTRUTURA OBRIGATÓRIA DA MENSAGEM (6 BLOCOS SEQUENCIAIS ESTRITOS):
+A mensagem final DEVE conter exatamente e sem desvios os seguintes parágrafos e elementos:
 
-Por isso, retomamos a orientação prevista na norma institucional *“${cleanNormTitle}”${sectionLabel}*, destacando [Ação orientativa e preventiva específica e esperada da colaboradora focada no item do checklist ou na norma].
+• BLOCO 1 - Saudação:
+  ${saudacao}
 
-Mais do que uma etapa da rotina, a atenção a este procedimento é uma medida indispensável de segurança, alinhamento institucional e responsabilidade coletiva. A atenção a essa conduta contribui diretamente para a proteção, o acolhimento e o bem-estar das crianças sob nossos cuidados.
+• BLOCO 2 - Introdução:
+  Agradecimento conciso pela dedicação ao Programa Integral do Colégio Crescer.
+  (Exemplo: Agradecemos pela sua dedicação e pelo cuidado diário com os nossos alunos no Programa Integral do Colégio Crescer.)
 
-Contamos com seu compromisso para reforçar essa prática em todos os momentos, mantendo a atenção necessária para que situações semelhantes sejam prevenidas.
+• BLOCO 3 - Contexto Direto:
+  Apresentação técnica da orientação/retomada de rotina com foco imediato no fato ou item informado (${cleanCheckItem || cleanContext || cleanNormTitle}), de forma transparente e acolhedora.
 
-Agradecemos sua compreensão e parceria na construção de uma rotina cada vez mais segura e cuidadosa para nossos alunos.
+• BLOCO 4 - Fundamentação:
+  Citação em negrito da norma institucional aplicável (${normRefBold}), explicitando com clareza o procedimento correto e o alinhamento esperado.
 
-*Atenciosamente*,
-Coordenação do Integral
-Colégio Crescer
-==================================================
+• BLOCO 5 - Justificativa Operacional:
+  Exposição técnica e pedagógica do impacto do procedimento na organização, na segurança e no bem-estar integral dos alunos.
 
-INSTRUÇÕES DE PREENCHIMENTO DOS CAMPOS ENTRE COLCHETES:
-1. Saudação: DEVE ser exatamente "${saudacao}" em negrito com asterisco (*).
-2. [Resumo cordial da situação observada...]:
-   ${cleanCheckItem ? `Retome com acolhimento e cordialidade estritamente o item observado: "${cleanCheckItem}". NÃO misture com outros assuntos da norma.` : (cleanContext ? `Integre o seguinte fato com cordialidade e acolhimento: "${cleanContext}"` : `Sintetize cordialmente uma situação típica da rotina escolar referente estritamente à norma "${cleanNormTitle}"${sectionLabel}, mantendo tom afetuoso e acolhedor.`)}
-3. [A razão pedagógica, institucional e de segurança...]:
-   ${cleanCheckItem ? `Apresente a razão pedagógica/de segurança específica e direta do item "${cleanCheckItem}".` : `Apresente a justificativa pedagógica e institucional genuína do tema da norma "${cleanNormTitle}"${sectionLabel}. Não use frases genéricas de outros temas.`}
-4. [Ação orientativa e preventiva esperada...]:
-   ${cleanCheckItem ? `Explique a conduta prática esperada referente a "${cleanCheckItem}".` : `Explique com clareza e acolhimento a ação prática orientativa esperada da colaboradora.`}
-5. Encerramento: Finalize ESTRITAMENTE com:
-*Atenciosamente*,
+• BLOCO 6 - Encerramento e Assinatura Padronizada:
+  Finalize ESTRITAMENTE com a assinatura oficial em 3 linhas:
+**Atenciosamente,**
 Coordenação do Integral
 Colégio Crescer
 
-Gere a resposta estritamente em formato JSON com o seguinte schema:
+==================================================
+FORMATO DE SAÍDA OBRIGATÓRIO (JSON):
+Retorne EXCLUSIVAMENTE um objeto JSON válido (sem blocos markdown \`\`\`json em volta):
 {
-  "message": "Texto completo da mensagem exatamente nos parágrafos do modelo obrigatório, mantendo os destaques em *",
+  "message": "Texto completo da mensagem nos 6 blocos obrigatórios, com formatação em negrito (**) na saudação, na citação da norma e na assinatura.",
   "actionPoints": [
-    "Item 1 prático do checklist de ciência da colaboradora para assinar no app",
-    "Item 2 prático do checklist de ciência da colaboradora para assinar no app",
-    "Item 3 prático do checklist de ciência da colaboradora para assinar no app"
+    "Item 1 objetivo do checklist prático de ciência e alinhamento do colaborador",
+    "Item 2 objetivo do checklist prático de ciência e alinhamento do colaborador",
+    "Item 3 objetivo do checklist prático de ciência e alinhamento do colaborador"
   ]
 }`;
 }
 
-export const STANDARD_FEEDBACK_CLOSING = '*Atenciosamente*,\nCoordenação do Integral\nColégio Crescer';
+export const STANDARD_FEEDBACK_CLOSING = '**Atenciosamente,**\nCoordenação do Integral\nColégio Crescer';
 
 /**
  * Remove rigorosamente qualquer bloco de assinatura, despedida ou rodapé pré-existente
@@ -430,11 +418,11 @@ export function stripTrailingFeedbackSignatures(text: string): string {
   if (!text) return '';
   let msg = text.trim();
 
-  // Padrão abrangente para capturar despedidas no final da mensagem (em linha única ou com quebras)
-  const trailingSignatureRegex = /\n+\s*\*?(?:Atenciosamente|Um abraço(?: fraterno)?|Fraternalmente|Com carinho|Cordialmente|Abraços?)\*?,?.*$/is;
+  // Padrão abrangente para capturar despedidas no final da mensagem com * ou **
+  const trailingSignatureRegex = /\n+\s*(?:\*{1,2})?(?:Atenciosamente|Um abraço(?: fraterno)?|Fraternalmente|Com carinho|Cordialmente|Abraços?)(?:\*{1,2})?,?.*$/is;
 
   // Padrão para capturar encerramentos de rodapé residuais (Coordenação / Equipe / Colégio Crescer)
-  const trailingFooterRegex = /\n+\s*\*?(?:Coordenação (?:do Integral|Pedagógica)|Equipe (?:do Integral|Pedagógica)|Colégio Crescer)[\s\S]*$/is;
+  const trailingFooterRegex = /\n+\s*(?:\*{1,2})?(?:Coordenação (?:do Integral|Pedagógica)|Equipe (?:do Integral|Pedagógica)|Colégio Crescer)[\s\S]*$/is;
 
   let prev = '';
   while (msg !== prev) {
@@ -447,9 +435,9 @@ export function stripTrailingFeedbackSignatures(text: string): string {
 }
 
 /**
- * Sanitiza e valida a mensagem cordial para WhatsApp e para o sistema:
- * - Mantém a saudação obrigatória (*Querida [Nome]!* ou *Querido [Nome]!*)
- * - Converte asteriscos duplos (**) em simples (*) para negrito nativo do WhatsApp
+ * Sanitiza e valida a mensagem institucional de feedback:
+ * - Mantém a saudação obrigatória (**Querida [Nome]!** ou **Querido [Nome]!**)
+ * - Preserva destaques em negrito (**) da norma e assinatura
  * - Garante encerramento padrão institucional exatamente UMA vez
  * - Normaliza caracteres em UTF-8
  */
@@ -466,16 +454,15 @@ export function sanitizeCordialMessageForWhatsApp(
   let msg = rawText.trim();
 
   const { salutation, firstName } = getSalutationForName(params.userName);
-  const cleanSection = params.normSection ? String(params.normSection).replace(/[^0-9]/g, '') || String(params.normSection) : '';
-  const expectedSaudacao = salutation === 'querido' ? `*Querido ${firstName}!*` : `*Querida ${firstName}!*`;
+  const expectedSaudacao = salutation === 'querido' ? `**Querido ${firstName}!**` : `**Querida ${firstName}!**`;
 
-  // 1. Converte asteriscos duplos (**) para simples (*)
-  msg = msg.replace(/\*\*(.*?)\*\*/g, '*$1*').replace(/\*\*/g, '*');
+  // 1. Normaliza eventuais saudações com * para **
+  msg = msg.replace(/^\*Querid([oa])\s+([A-Za-zÀ-ÿ]+)!\*/i, '**Querid$1 $2!**');
 
   // 2. Garante saudação estrita do modelo
   if (!msg.startsWith(expectedSaudacao)) {
     msg = msg.replace(
-      /^(?:\*?Olá,?\s*)?(?:\*?Querid[oa]\s+[A-Za-zÀ-ÿ]+!?\*?|\*?[A-Za-zÀ-ÿ]+!?\*?)\s*\n+/i,
+      /^(?:\*{1,2})?(?:Olá,?\s*)?(?:Querid[oa]\s+[A-Za-zÀ-ÿ]+!?|[A-Za-zÀ-ÿ]+!?)(?:\*{1,2})?\s*\n+/i,
       ''
     );
     msg = `${expectedSaudacao}\n\n${msg.trim()}`;

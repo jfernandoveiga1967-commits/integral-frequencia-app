@@ -78,6 +78,7 @@ import {
   ManualAcknowledgmentRecord,
   UserManualProgress,
 } from '../services/manualProgressService';
+import { filterActiveUsers, syncAcceptanceList } from '../services/manualService';
 
 export interface ManualOrientacoesProps {
   currentUser?: UserProfile | null;
@@ -717,7 +718,7 @@ setModuleId(
 };
 
 // Modal de Status de Aceite e Auditoria da Equipe
-interface StatusAceiteModalProps {
+export interface StatusAceiteModalProps {
   isOpen: boolean;
   onClose: () => void;
   users: UserProfile[];
@@ -728,9 +729,10 @@ interface StatusAceiteModalProps {
   onSendReminder: (userId: string, userName: string) => void;
   reminderSentUsers: Record<string, boolean>;
   onExportPDF: () => void;
+  onSyncAcceptanceList?: () => void;
 }
 
-const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
+export const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
   isOpen,
   onClose,
   users,
@@ -741,38 +743,40 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
   onSendReminder,
   reminderSentUsers,
   onExportPDF,
+  onSyncAcceptanceList,
 }) => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'cientes' | 'pendentes'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUserForReminder, setSelectedUserForReminder] = useState<UserProfile | null>(null);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
 
-  if (!isOpen) return null;
+  // Mapear cada colaborador ativo para seu registro de aceite e lembrete
+  const usersWithAceite = useMemo(() => {
+    return filterActiveUsers(users)
+      .map((user) => {
+        const userAceite = aceites.find(
+          (a) => a.userId === user.id || (user.email && a.userEmail?.toLowerCase() === user.email.toLowerCase())
+        );
+        const userReminder = (reminders || []).find(
+          (r) => r.userId === user.id
+        );
+        return {
+          user,
+          aceite: userAceite || null,
+          reminder: userReminder || null,
+          isSigned: Boolean(userAceite),
+        };
+      })
+      .sort((a, b) => {
+        // Pendentes primeiro, depois ordem alfabética
+        if (a.isSigned !== b.isSigned) {
+          return a.isSigned ? 1 : -1;
+        }
+        return a.user.name.localeCompare(b.user.name);
+      });
+  }, [users, aceites, reminders]);
 
-  // Mapear cada usuário para seu registro de aceite e lembrete
-  const usersWithAceite = users
-    .filter((u) => u.status !== 'inativo' && u.name)
-    .map((user) => {
-      const userAceite = aceites.find(
-        (a) => a.userId === user.id || (user.email && a.userEmail?.toLowerCase() === user.email.toLowerCase())
-      );
-      const userReminder = (reminders || []).find(
-        (r) => r.userId === user.id
-      );
-      return {
-        user,
-        aceite: userAceite || null,
-        reminder: userReminder || null,
-        isSigned: Boolean(userAceite),
-      };
-    })
-    .sort((a, b) => {
-      // Pendentes primeiro, depois ordem alfabética
-      if (a.isSigned !== b.isSigned) {
-        return a.isSigned ? 1 : -1;
-      }
-      return a.user.name.localeCompare(b.user.name);
-    });
+  if (!isOpen) return null;
 
   const total = usersWithAceite.length;
   const totalCientes = usersWithAceite.filter((u) => u.isSigned).length;
@@ -812,6 +816,17 @@ const StatusAceiteModal: React.FC<StatusAceiteModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
+            {onSyncAcceptanceList && (
+              <button
+                type="button"
+                onClick={onSyncAcceptanceList}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer border border-slate-700"
+                title="Sincronizar Normas e Auditar Colaboradores Ativos"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Sincronizar</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onExportPDF}
@@ -1269,9 +1284,9 @@ const [expandedCategories, setExpandedCategories] = useState<Record<ThematicCate
     );
   }, [allAceites, currentUser]);
 
-  // Colaboradores elegíveis para aceite
+  // Colaboradores elegíveis para aceite (estritamente ativos)
   const eligibleUsers = useMemo(() => {
-    return allUsers.filter((u) => u.status !== 'inativo' && u.name);
+    return filterActiveUsers(allUsers);
   }, [allUsers]);
 
   // Total de cientes
@@ -1550,15 +1565,16 @@ const groupedThematicNormas = useMemo(() => {
     }
   };
 
-  // Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer
+  // Sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer e auditar equipe ativa
   const handleSyncOfficialDocuments = async () => {
-    if (!confirm('Deseja sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer no Firestore?')) {
+    if (!confirm('Deseja sincronizar as 32 normas reais dos documentos oficiais do Colégio Crescer e auditar a lista de colaboradores ativos no Firestore?')) {
       return;
     }
     try {
       setIsSyncingOfficial(true);
       await syncOfficialManualNormasToFirestore();
-      showToast('32 normas oficiais do Colégio Crescer sincronizadas com sucesso no Firestore!');
+      const audit = syncAcceptanceList(allUsers, allAceites);
+      showToast(`Normas sincronizadas! Auditoria de equipe: ${audit.totalEquipe} colaboradores ativos, ${audit.totalCientes} cientes (${audit.taxaConformidade}%).`);
     } catch (e: any) {
       alert(`Erro ao sincronizar: ${e?.message || 'Falha na conexão'}`);
     } finally {
@@ -2151,6 +2167,7 @@ const groupedThematicNormas = useMemo(() => {
           onSendReminder={handleSendReminder}
           reminderSentUsers={reminderSentUsers}
           onExportPDF={handleExportRelatorioConformidadePDF}
+          onSyncAcceptanceList={handleSyncOfficialDocuments}
         />
       )}
 
