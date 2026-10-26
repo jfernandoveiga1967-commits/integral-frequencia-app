@@ -24,6 +24,7 @@ import {
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
+import { PedagogicalFeedback } from '../services/feedbackService';
 import { formatDateBR, getDayOfWeekLabel, isStudentScheduledForDate, getEffectiveSchoolDays, isStudentScheduledForDay } from './dateUtils';
 import { getPeriodConsolidatedMetrics, normalizeAttendanceStatus } from './frequenciaUtils';
 import { sortTurmasPedagogical } from './turmaUtils';
@@ -5655,5 +5656,221 @@ export function generateUsersReportPDF(
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
+
+/**
+ * Gera o Relatório Oficial de Feedbacks de Orientação Profissional (PDF).
+ * Documento estruturado com timbre institucional do Colégio Crescer, métricas de conformidade,
+ * e detalhamento dos feedbacks emitidos com carimbo de ciência e IP.
+ */
+export function generateRelatorioFeedbacksPDF(
+  feedbacks: PedagogicalFeedback[],
+  collaboratorFilter?: string,
+  saveImmediately = false
+): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const marginX = 14;
+  const contentWidth = pageWidth - marginX * 2;
+
+  const total = feedbacks.length;
+  const cientes = feedbacks.filter((f) => f.status === 'ACKNOWLEDGED').length;
+  const pendentes = total - cientes;
+  const taxaCientes = total > 0 ? Math.round((cientes / total) * 100) : 0;
+
+  const docTitle = 'RELATÓRIO DE FEEDBACKS DE ORIENTAÇÃO PROFISSIONAL';
+  const subtitle = 'Clareza, respeito e responsabilidade institucional • Colégio Crescer';
+
+  const filterDesc = collaboratorFilter && collaboratorFilter !== 'all'
+    ? `Colaborador(a): ${collaboratorFilter}`
+    : 'Todos os Colaboradores';
+
+  const filterDetails = [
+    `Total: ${total} registro(s)`,
+    `Cientes: ${cientes} (${taxaCientes}%)`,
+    `Pendentes: ${pendentes}`,
+    filterDesc,
+    `Emissão: ${getCurrentDateTimeString()}`,
+  ];
+
+  drawOfficialHeader(doc, docTitle, subtitle, filterDetails, 'portrait');
+
+  let currentY = 38;
+
+  // Caixas de métricas institucionais
+  const boxWidth = (contentWidth - 6) / 3;
+  const boxHeight = 16;
+
+  // Box 1: Cientes e Assinados
+  doc.setFillColor(240, 253, 244); // green-50
+  doc.setDrawColor(187, 247, 208); // green-200
+  doc.roundedRect(marginX, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(22, 101, 52); // green-800
+  doc.text('CIENTES E ASSINADOS', marginX + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${cientes}`, marginX + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Taxa: ${taxaCientes}% de ciência`, marginX + 22, currentY + 12);
+
+  // Box 2: Pendentes de Assinatura
+  const box2X = marginX + boxWidth + 3;
+  doc.setFillColor(254, 242, 242); // red-50
+  doc.setDrawColor(254, 202, 202); // red-200
+  doc.roundedRect(box2X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(153, 27, 27); // red-800
+  doc.text('PENDENTES DE ASSINATURA', box2X + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${pendentes}`, box2X + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${pendentes} aguardando ciência`, box2X + 22, currentY + 12);
+
+  // Box 3: Total Registros
+  const box3X = marginX + (boxWidth + 3) * 2;
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.roundedRect(box3X, currentY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59); // slate-800
+  doc.text('TOTAL DE FEEDBACKS', box3X + 4, currentY + 5.5);
+  doc.setFontSize(13);
+  doc.text(`${total}`, box3X + 4, currentY + 12);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Orientações emitidas', box3X + 22, currentY + 12);
+
+  currentY += boxHeight + 6;
+
+  // Mapear dados da tabela:
+  // Nome do Colaborador, Status (Ciente/Assinado), Norma/Seção citada, Data de Envio e IP/Carimbo de leitura
+  const tableData = feedbacks.map((fb) => {
+    const isSigned = fb.status === 'ACKNOWLEDGED';
+    const statusLabel = isSigned ? 'CIENTE E ASSINADO' : 'PENDENTE';
+
+    // Norma / Seção
+    const normaText = fb.normSection ? `${fb.normTitle} (${fb.normSection})` : (fb.normTitle || '—');
+
+    // Data de Envio
+    let dataEnvio = '—';
+    if (fb.createdAt) {
+      try {
+        const d = new Date(fb.createdAt);
+        dataEnvio = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      } catch {
+        dataEnvio = fb.createdAt;
+      }
+    }
+
+    // Carimbo de leitura e IP
+    let carimboLeitura = 'Aguardando ciência';
+    if (isSigned) {
+      const dataHoraCiente = fb.acknowledgedFormatted || (fb.acknowledgedAt ? new Date(fb.acknowledgedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Confirmado');
+      const ip = fb.acknowledgedIp ? ` • IP: ${fb.acknowledgedIp}` : '';
+      carimboLeitura = `${dataHoraCiente}${ip}`;
+    }
+
+    return [
+      fb.targetUserName || 'Sem nome',
+      statusLabel,
+      normaText,
+      dataEnvio,
+      carimboLeitura,
+    ];
+  });
+
+  const emptyRow = ['—', '—', 'Nenhum feedback encontrado com os filtros selecionados.', '—', '—'];
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [['Nome do Colaborador', 'Status', 'Norma / Seção Citada', 'Data de Envio', 'IP / Carimbo de Leitura']],
+    body: tableData.length > 0 ? tableData : [emptyRow],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'left',
+      cellPadding: 2.4,
+    },
+    styles: {
+      font: 'helvetica',
+      fontSize: 7.2,
+      cellPadding: 2.2,
+      textColor: [30, 41, 59],
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+    },
+    columnStyles: {
+      0: { cellWidth: 40, fontStyle: 'bold' },
+      1: { cellWidth: 32, halign: 'center' },
+      2: { cellWidth: 48 },
+      3: { cellWidth: 26, halign: 'center' },
+      4: { cellWidth: 36, halign: 'center' },
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 1) {
+        if (String(data.cell.raw).includes('CIENTE')) {
+          data.cell.styles.textColor = [22, 101, 52]; // green-800
+          data.cell.styles.fillColor = [240, 253, 244]; // green-50
+          data.cell.styles.fontStyle = 'bold';
+        } else if (String(data.cell.raw).includes('PENDENTE')) {
+          data.cell.styles.textColor = [185, 28, 28]; // red-700
+          data.cell.styles.fillColor = [254, 242, 242]; // red-50
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    },
+    didDrawPage: (data) => {
+      if (data.pageNumber > 1) {
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, pageWidth, 12, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(255, 255, 255);
+        doc.text('RELATÓRIO DE FEEDBACKS DE ORIENTAÇÃO PROFISSIONAL — (Continuação)', 14, 8);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(203, 213, 225);
+        doc.text(`Página ${data.pageNumber}`, pageWidth - 14, 8, { align: 'right' });
+      }
+    },
+  });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const cleanFilter = (collaboratorFilter && collaboratorFilter !== 'all' ? collaboratorFilter : 'Geral')
+    .replace(/[^a-zA-Z0-9]/g, '_')
+    .slice(0, 25);
+  const dateStr = new Date().toISOString().split('T')[0];
+  const filename = `Relatorio_Feedbacks_${cleanFilter}_${dateStr}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
 
 

@@ -19,6 +19,10 @@ import {
   ShieldCheck,
   HeartHandshake,
   Check,
+  Download,
+  Printer,
+  Search,
+  Filter,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ManualNorma } from '../types/manualNormas';
@@ -37,6 +41,7 @@ import {
 import { canDeleteFeedback } from '../utils/permissionUtils';
 import { FeedbackMarkdown } from './FeedbackMarkdown';
 import { sanitizeCordialMessageForWhatsApp } from '../utils/feedbackPromptBuilder';
+import { generateRelatorioFeedbacksPDF } from '../utils/pdfGenerator';
 
 interface GestaoFeedbacksModalProps {
   isOpen: boolean;
@@ -92,6 +97,75 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
   const [selectedFeedbackDetails, setSelectedFeedbackDetails] = useState<PedagogicalFeedback | null>(null);
   const [feedbackToDelete, setFeedbackToDelete] = useState<PedagogicalFeedback | null>(null);
   const [isDeletingFeedback, setIsDeletingFeedback] = useState<boolean>(false);
+
+  // Filtros de Pesquisa por Colaborador no Histórico e Exportação PDF
+  const [historyCollaboratorFilter, setHistoryCollaboratorFilter] = useState<string>('all');
+  const [historySearchQuery, setHistorySearchQuery] = useState<string>('');
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+
+  // Lista única de colaboradores para o dropdown
+  const collaboratorFilterOptions = useMemo(() => {
+    const namesSet = new Set<string>();
+    feedbacksHistory.forEach((fb) => {
+      if (fb.targetUserName && fb.targetUserName.trim()) {
+        namesSet.add(fb.targetUserName.trim());
+      }
+    });
+    usersList.forEach((u) => {
+      if (u.name && u.name.trim()) {
+        namesSet.add(u.name.trim());
+      }
+    });
+    return Array.from(namesSet).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [feedbacksHistory, usersList]);
+
+  // Feedbacks filtrados com precisão por colaborador e busca textual
+  const filteredFeedbacksHistory = useMemo(() => {
+    return feedbacksHistory.filter((fb) => {
+      // 1. Filtro estrito por colaborador selecionado
+      if (historyCollaboratorFilter !== 'all') {
+        const target = (fb.targetUserName || '').trim().toLowerCase();
+        const selected = historyCollaboratorFilter.trim().toLowerCase();
+        if (target !== selected && !target.includes(selected)) {
+          return false;
+        }
+      }
+
+      // 2. Filtro complementar por busca textual
+      if (historySearchQuery.trim()) {
+        const query = historySearchQuery.trim().toLowerCase();
+        const matchName = (fb.targetUserName || '').toLowerCase().includes(query);
+        const matchNorm = (fb.normTitle || '').toLowerCase().includes(query) || (fb.normSection || '').toLowerCase().includes(query);
+        const matchContext = (fb.rawContext || '').toLowerCase().includes(query);
+        const matchMsg = (fb.generatedMessage || '').toLowerCase().includes(query);
+        if (!matchName && !matchNorm && !matchContext && !matchMsg) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [feedbacksHistory, historyCollaboratorFilter, historySearchQuery]);
+
+  // Ação de download do Relatório de Feedbacks em PDF
+  const handleExportFeedbacksPDF = () => {
+    try {
+      setIsExportingPdf(true);
+      const filterLabel = historyCollaboratorFilter !== 'all' ? historyCollaboratorFilter : undefined;
+      const { filename } = generateRelatorioFeedbacksPDF(
+        filteredFeedbacksHistory,
+        filterLabel,
+        true
+      );
+      setSuccessToast(`Relatório oficial em PDF baixado com sucesso: ${filename}`);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao gerar relatório em PDF:', err);
+      alert(`Não foi possível gerar o PDF: ${err?.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
 
   // Escuta exclusão global para sincronização imediata entre abas
   useEffect(() => {
@@ -392,11 +466,10 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
-              Feedback Pedagógico Cordial Por Norma
+              Feedbacks de Orientação Profissional
             </h2>
             <p className="text-xs sm:text-sm text-teal-100/90 leading-relaxed max-w-2xl">
-              Transforme observações da rotina em orientações acolhedoras e construtivas com inteligência artificial,
-              preservando o bem-estar e a segurança integral dos alunos no Colégio Crescer.
+              Clareza, respeito e responsabilidade institucional.
             </p>
           </div>
           <button
@@ -701,18 +774,115 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
 
           {activeTab === 'history' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-800">
-                    Feedbacks Pedagógicos Enviados pela Coordenação
+                    Histórico de Feedbacks Enviados
                   </h3>
                   <p className="text-xs text-slate-500">
                     Acompanhamento em tempo real das ciências e compromissos registrados pelas monitoras.
                   </p>
                 </div>
-                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
-                  Total: {feedbacksHistory.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportFeedbacksPDF}
+                    disabled={isExportingPdf || filteredFeedbacksHistory.length === 0}
+                    className="px-3 py-1.5 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-600 hover:to-emerald-600 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Baixar Relatório Oficial de Feedbacks em PDF"
+                  >
+                    {isExportingPdf ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5 text-emerald-200" />
+                    )}
+                    <span>Baixar Relatório em PDF</span>
+                  </button>
+                  <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                    Total: {filteredFeedbacksHistory.length}
+                    {historyCollaboratorFilter !== 'all' && (
+                      <span className="text-slate-400 font-normal ml-1">
+                        (de {feedbacksHistory.length})
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Barra de Filtros por Colaborador e Pesquisa */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                {/* Seletor de Colaborador */}
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Filtrar por Colaborador
+                  </label>
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <select
+                      value={historyCollaboratorFilter}
+                      onChange={(e) => setHistoryCollaboratorFilter(e.target.value)}
+                      className="w-full pl-8.5 pr-8 py-2 text-xs font-semibold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 cursor-pointer shadow-2xs"
+                    >
+                      <option value="all">
+                        Todos os Colaboradores ({feedbacksHistory.length})
+                      </option>
+                      {collaboratorFilterOptions.map((name) => {
+                        const count = feedbacksHistory.filter(
+                          (fb) => fb.targetUserName?.toLowerCase().trim() === name.toLowerCase().trim()
+                        ).length;
+                        return (
+                          <option key={name} value={name}>
+                            {name} {count > 0 ? `(${count})` : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Busca Textual */}
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Buscar no Histórico
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={historySearchQuery}
+                      onChange={(e) => setHistorySearchQuery(e.target.value)}
+                      placeholder="Nome, norma ou contexto..."
+                      className="w-full pl-8.5 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 placeholder-slate-400 shadow-2xs"
+                    />
+                    {historySearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setHistorySearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        title="Limpar busca"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Botão de Limpar Filtros quando ativo */}
+                {(historyCollaboratorFilter !== 'all' || historySearchQuery.trim()) && (
+                  <div className="sm:self-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryCollaboratorFilter('all');
+                        setHistorySearchQuery('');
+                      }}
+                      className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl transition-all cursor-pointer whitespace-nowrap shadow-2xs flex items-center gap-1.5"
+                    >
+                      <X className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Limpar Filtro</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {feedbacksHistory.length === 0 ? (
@@ -723,9 +893,31 @@ export const GestaoFeedbacksModal: React.FC<GestaoFeedbacksModalProps> = ({
                     Use a aba &quot;Elaborar Novo Feedback com IA&quot; para criar orientações humanizadas e acompanhar o progresso aqui.
                   </p>
                 </div>
+              ) : filteredFeedbacksHistory.length === 0 ? (
+                <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-3xl p-6 bg-slate-50/50">
+                  <User className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">
+                    Nenhum feedback encontrado para o filtro selecionado
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                    {historyCollaboratorFilter !== 'all'
+                      ? `Não foram encontrados feedbacks para "${historyCollaboratorFilter}".`
+                      : 'Tente alterar os termos de pesquisa.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistoryCollaboratorFilter('all');
+                      setHistorySearchQuery('');
+                    }}
+                    className="mt-3 px-3.5 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-xl border border-teal-200 cursor-pointer inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <span>Limpar Filtros</span>
+                  </button>
+                </div>
               ) : (
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
-                  {feedbacksHistory.map((fb) => {
+                  {filteredFeedbacksHistory.map((fb) => {
                     const isPending = fb.status === 'PENDING';
                     const dateFormatted = new Date(fb.createdAt).toLocaleDateString('pt-BR');
                     const timeFormatted = new Date(fb.createdAt).toLocaleTimeString('pt-BR', {

@@ -263,3 +263,5 @@ export async function identifyNormFromContext(
 
   return heuristicMatchNorm(cleanContext, norms);
 }
+
+export { generateRelatorioFeedbacksPDF } from '../utils/pdfGenerator';
