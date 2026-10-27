@@ -157,30 +157,6 @@ export const HeaderStats: React.FC<HeaderStatsProps> = ({
         </>
       )}
 
-      {/* 6. Pendentes */}
-      {pendentesHoje > 0 && (
-        <>
-          <div className="h-3.5 w-px bg-slate-700 hidden sm:block" />
-          <button
-            type="button"
-            onClick={onNavigateToPending}
-            title={
-              isTurmaContextActive
-                ? `Existem ${pendentesHoje} alunos da turma ${selectedTurma} aguardando chamada de rotina. Clique para conferir.`
-                : `Existem ${pendentesHoje} alunos aguardando chamada de rotina. Clique para conferir.`
-            }
-            className="flex items-center space-x-1 px-1.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
-          >
-            <span
-              className={`inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 ${
-                isOffline ? '' : 'animate-ping'
-              }`}
-            />
-            <span className="font-medium text-[11px]">Pendentes:</span>
-            <span className="font-extrabold text-amber-300 text-[11px]">{pendentesHoje}</span>
-          </button>
-        </>
-      )}
     </div>
   );
 };

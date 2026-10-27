@@ -67,6 +67,8 @@ export interface AttendanceRecord {
   timeSlot?: string; // Bloco/Horário da aula (ex: "13:30 - 14:20")
   tipo?: string; // Modalidade/Tipo da chamada no banco (ex: "ROTINA")
   rawStatus?: string; // Status bruto original do documento (ex: "CONCLUIDO")
+  confirmadoNoBloco?: boolean; // Auditoria: true quando o monitor salvou/confirmou a chamada no horário do bloco
+  confirmedAt?: string; // Carimbo de data/hora da confirmação do bloco
   createdAt: string;
 }
 
@@ -625,4 +627,13 @@ export interface SofiaResponsePayload {
   isAiGenerated?: boolean;
 }
 
-
+export interface BlockConfirmation {
+  id: string; // e.g. "conf_${date}_${turma}_${activityId}_${timeSlot}"
+  turma: string;
+  activityId: string;
+  date: string; // YYYY-MM-DD
+  timeSlot?: string;
+  confirmedAt: string; // ISO string
+  confirmedBy?: string; // Nome ou ID do monitor responsável
+  confirmadoNoBloco: boolean;
+}

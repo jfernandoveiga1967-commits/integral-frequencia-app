@@ -40,6 +40,7 @@ import {
   Target,
   Package,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Student,
@@ -57,6 +58,7 @@ import {
   SemanarioPlan,
   DepartureAlertSettings,
 } from '../types';
+import { isBlockAttendanceConfirmed, confirmBlockAttendance } from '../services/frequencyService';
 import { getDepartureAlertSettings, subscribeDepartureAlertSettings } from '../firebase';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
 import {
@@ -252,6 +254,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'TODAS' | 'EM_ANDAMENTO' | 'EXIGE_CHAMADA' | 'CHAMADA_PENDENTE' | 'SEM_ATIVIDADE'>('TODAS');
   const [selectedActivityFilter, setSelectedActivityFilter] = useState<string>('TODAS');
+
+  // Auditoria de confirmação de chamada no bloco
+  const [confirmationTick, setConfirmationTick] = useState<number>(0);
+
+  useEffect(() => {
+    const handleConfirmationUpdate = () => setConfirmationTick((t) => t + 1);
+    window.addEventListener('BLOCK_CONFIRMATION_UPDATED', handleConfirmationUpdate);
+    return () => window.removeEventListener('BLOCK_CONFIRMATION_UPDATED', handleConfirmationUpdate);
+  }, []);
 
   // Quadro de Atribuições local state & sync (sempre estritamente alinhado às turmas de Alunos e Turmas)
   const [atribuicoesList, setAtribuicoesList] = useState<TurmaAtribuicao[]>(() => {
@@ -819,15 +830,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     const inActivity = turmaStatuses.filter((ts) => ts.activeBlock !== null).length;
 
     // Card "Chamadas Pendentes":
-    // Contagem por Turma/Atividade: Deve somar +1 pendência para cada turma cuja atividade atual
-    // exija chamada (ou seja marcada para acompanhamento) e ainda não tenha a lista de presença/frequência
-    // salva pelo monitor para o bloco de horário atual.
-    // A pendência deve sumir do card assim que a chamada do horário for confirmada.
+    // Contagem por Turma/Atividade: Reflete a quantidade de TURMAS/OFICINAS ativas no horário atual
+    // cuja chamada do bloco ainda NÃO foi salva/confirmada pelo monitor (confirmadoNoBloco === false).
+    // A pendência some do card assim que a chamada do horário for confirmada.
     const pendingRollCalls = turmaStatuses.filter((ts) => {
       if (!ts.activeBlock || !ts.rollCallInfo) return false;
       if (!ts.rollCallInfo.requiresRollCall) return false;
       if (ts.rollCallInfo.totalEnrolled === 0) return false;
-      return ts.rollCallInfo.statusType !== 'concluida';
+      return !ts.rollCallInfo.confirmadoNoBloco;
     }).length;
 
     const completedRollCalls = turmaStatuses.filter(
@@ -835,7 +845,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         ts.activeBlock !== null &&
         ts.rollCallInfo &&
         ts.rollCallInfo.requiresRollCall &&
-        ts.rollCallInfo.statusType === 'concluida' &&
+        ts.rollCallInfo.confirmadoNoBloco &&
         ts.rollCallInfo.totalEnrolled > 0
     ).length;
 
@@ -963,7 +973,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           item.rollCallInfo &&
           item.rollCallInfo.requiresRollCall &&
           item.rollCallInfo.totalEnrolled > 0 &&
-          item.rollCallInfo.statusType !== 'concluida'
+          !item.rollCallInfo.confirmadoNoBloco
         );
       }
       if (statusFilter === 'SEM_ATIVIDADE') {
@@ -1230,9 +1240,9 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           </div>
 
           <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
-            <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Chamadas Pendentes</div>
-            <div className="text-lg sm:text-xl font-black text-rose-300 mt-0.5">{stats.pendingRollCalls}</div>
-            <div className="text-[9px] text-rose-400/80 mt-0.5">Aguardando registro</div>
+            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Chamadas Pendentes</div>
+            <div className="text-lg sm:text-xl font-black text-amber-300 mt-0.5">{stats.pendingRollCalls}</div>
+            <div className="text-[9px] text-amber-400/80 mt-0.5">Turmas sem confirmação no horário</div>
           </div>
 
           <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
@@ -1254,6 +1264,26 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           }
           onDismissAll={() => setActiveDepartureAlerts([])}
         />
+      )}
+
+      {/* Tarja de Alerta de Chamadas Pendentes no Horário Vigente */}
+      {stats.pendingRollCalls > 0 && (
+        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <div className="min-w-0">
+              <span className="font-bold">Aviso de Auditoria de Horário:</span>{' '}
+              Há <strong>{stats.pendingRollCalls} turma(s)/oficina(s)</strong> ativas no horário atual cuja chamada do bloco ainda não foi confirmada pelo monitor.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('CHAMADA_PENDENTE')}
+            className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] shrink-0 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+          >
+            <span>Ver Turmas Pendentes ({stats.pendingRollCalls})</span>
+          </button>
+        </div>
       )}
 
       {/* Filter, Search and Quadro de Atribuições Bar */}
@@ -1883,32 +1913,28 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             <div className="rounded-xl border p-2.5 space-y-2 transition-all bg-white shadow-2xs border-slate-200">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center space-x-1.5 min-w-0">
-                                  {rollCallInfo.statusType === 'concluida' ? (
+                                  {rollCallInfo.confirmadoNoBloco ? (
                                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  ) : rollCallInfo.statusType === 'parcial' ? (
-                                    <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                                   ) : (
-                                    <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                                   )}
                                   <span className="text-[11px] font-black text-slate-800 truncate">
-                                    {rollCallInfo.statusType === 'concluida'
+                                    {rollCallInfo.confirmadoNoBloco
                                       ? 'Chamada Concluída'
-                                      : rollCallInfo.statusType === 'parcial'
-                                      ? 'Chamada Parcial'
-                                      : 'Chamada Pendente'}
+                                      : 'Registro Pendente'}
                                   </span>
                                 </div>
 
                                 <span
-                                  className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border shrink-0 ${
-                                    rollCallInfo.statusType === 'concluida'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : rollCallInfo.statusType === 'parcial'
-                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${
+                                    rollCallInfo.confirmadoNoBloco
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                      : 'bg-amber-50 text-amber-800 border-amber-300'
                                   }`}
                                 >
-                                  {rollCallInfo.recordedCount}/{rollCallInfo.totalEnrolled} Alunos
+                                  {rollCallInfo.confirmadoNoBloco
+                                    ? '✓ Chamada Concluída'
+                                    : '⚠️ Registro Pendente'}
                                 </span>
                               </div>
 
@@ -1917,16 +1943,16 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                 <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
                                   <div
                                     className={`h-full rounded-full transition-all duration-300 ${
-                                      rollCallInfo.statusType === 'concluida'
+                                      rollCallInfo.confirmadoNoBloco
                                         ? 'bg-emerald-500'
-                                        : rollCallInfo.statusType === 'parcial'
-                                        ? 'bg-amber-500'
-                                        : 'bg-rose-500'
+                                        : 'bg-amber-500'
                                     }`}
                                     style={{
                                       width: `${Math.min(
                                         100,
-                                        (rollCallInfo.recordedCount / rollCallInfo.totalEnrolled) * 100
+                                        rollCallInfo.confirmadoNoBloco
+                                          ? 100
+                                          : (rollCallInfo.recordedCount / rollCallInfo.totalEnrolled) * 100
                                       )}%`,
                                     }}
                                   />
@@ -1936,25 +1962,48 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                               {/* Action buttons */}
                               <div className="flex items-center space-x-1.5 pt-0.5">
                                 {userCanMark && rollCallInfo.totalEnrolled > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setQuickRollCallModal({
-                                        isOpen: true,
-                                        turma: turmaName,
-                                        activityId: activeBlock.activityId,
-                                        block: activeBlock,
-                                      })
-                                    }
-                                    className="flex-1 py-1 px-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] shadow-2xs transition-colors flex items-center justify-center space-x-1 cursor-pointer"
-                                  >
-                                    <ClipboardCheck className="w-3 h-3" />
-                                    <span>
-                                      {rollCallInfo.statusType === 'concluida'
-                                        ? 'Revisar'
-                                        : 'Chamada'}
-                                    </span>
-                                  </button>
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setQuickRollCallModal({
+                                          isOpen: true,
+                                          turma: turmaName,
+                                          activityId: activeBlock.activityId,
+                                          block: activeBlock,
+                                        })
+                                      }
+                                      className="flex-1 py-1 px-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] shadow-2xs transition-colors flex items-center justify-center space-x-1 cursor-pointer"
+                                    >
+                                      <ClipboardCheck className="w-3 h-3" />
+                                      <span>
+                                        {rollCallInfo.confirmadoNoBloco
+                                          ? 'Revisar'
+                                          : 'Chamada'}
+                                      </span>
+                                    </button>
+
+                                    {!rollCallInfo.confirmadoNoBloco && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          confirmBlockAttendance({
+                                            date: selectedDate,
+                                            turma: turmaName,
+                                            activityId: activeBlock.activityId,
+                                            timeSlot: `${activeBlock.startTime} - ${activeBlock.endTime}`,
+                                            confirmedBy: currentUser?.name || 'Monitor',
+                                          });
+                                          setConfirmationTick((t) => t + 1);
+                                        }}
+                                        title="Confirmar chamada realizada no horário"
+                                        className="py-1 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] shadow-2xs transition-colors flex items-center justify-center space-x-1 cursor-pointer"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                        <span>Confirmar</span>
+                                      </button>
+                                    )}
+                                  </>
                                 )}
 
                                 <button
@@ -2270,6 +2319,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             quickRollCallModal.activityId as ActivityType,
                             selectedDate
                           );
+                          confirmBlockAttendance({
+                            date: selectedDate,
+                            turma: quickRollCallModal.turma,
+                            activityId: quickRollCallModal.activityId,
+                            timeSlot: quickRollCallModal.block ? `${quickRollCallModal.block.startTime} - ${quickRollCallModal.block.endTime}` : '',
+                            confirmedBy: currentUser?.name || 'Monitor',
+                          });
+                          setConfirmationTick((t) => t + 1);
                         },
                         {
                           pendingMessage: `Gravando chamada de ${studentIds.length} alunos no Firestore...`,
@@ -2291,6 +2348,26 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                         <span>Marcar Todos Presentes</span>
                       </>
                     )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={quickRollCallAction.isPending}
+                    onClick={() => {
+                      confirmBlockAttendance({
+                        date: selectedDate,
+                        turma: quickRollCallModal.turma,
+                        activityId: quickRollCallModal.activityId,
+                        timeSlot: quickRollCallModal.block ? `${quickRollCallModal.block.startTime} - ${quickRollCallModal.block.endTime}` : '',
+                        confirmedBy: currentUser?.name || 'Monitor',
+                      });
+                      setConfirmationTick((t) => t + 1);
+                      setQuickRollCallModal((prev) => ({ ...prev, isOpen: false }));
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs transition-colors shadow-xs flex items-center space-x-1 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Salvar & Confirmar</span>
                   </button>
 
                   <button
@@ -2457,7 +2534,16 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                       weekNumber: currentWeek.weekNumber,
                                       year: currentWeek.year,
                                       status: st.id,
+                                      confirmadoNoBloco: true,
                                     });
+                                    confirmBlockAttendance({
+                                      date: selectedDate,
+                                      turma: quickRollCallModal.turma,
+                                      activityId: quickRollCallModal.activityId,
+                                      timeSlot: quickRollCallModal.block ? `${quickRollCallModal.block.startTime} - ${quickRollCallModal.block.endTime}` : '',
+                                      confirmedBy: currentUser?.name || 'Monitor',
+                                    });
+                                    setConfirmationTick((t) => t + 1);
                                   } catch (err: any) {
                                     console.error('Erro ao salvar presença no modal:', err);
                                     setQuickModalSaveError({
