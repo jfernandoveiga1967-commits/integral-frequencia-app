@@ -596,4 +596,33 @@ export interface PedagogicalFeedback {
 
 export type { NormaAceite } from './types/manualNormas';
 
+// Tipagens do Agente Inteligente Sofia • Colégio Crescer
+export type SofiaActionType =
+  | 'navegar_modulo'
+  | 'consultar_ou_lancar_chamada'
+  | 'consultar_livro_ponto'
+  | 'consultar_feedbacks'
+  | 'consultar_manual_normas'
+  | 'consultar_cardapio_ou_semanario'
+  | 'info';
+
+export interface SofiaActionPayload {
+  type: SofiaActionType;
+  title: string;
+  details: string;
+  badge?: string;
+  targetTab?: string;
+  functionArgs?: Record<string, any>;
+  success?: boolean;
+}
+
+export interface SofiaResponsePayload {
+  spokenText: string;
+  displayText?: string;
+  action?: SofiaActionPayload;
+  functionCalled?: string;
+  functionArgs?: Record<string, any>;
+  isAiGenerated?: boolean;
+}
+
 

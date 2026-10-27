@@ -56,7 +56,7 @@ import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal'
 import { UserProfileModal } from './components/UserProfile';
 import { subscribePendingFeedbacksForUser } from './services/feedbackService';
 import { deleteUser } from './services/userService';
-import { VoiceWidget } from './components/VoiceWidget';
+import { SofiaAssistant, VoiceWidget } from './components/SofiaAssistant';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   DepartureAlertItem,
@@ -2746,14 +2746,16 @@ export default function App() {
         </div>
       )}
 
-      {/* Agente de IA por Voz — Sofia (Exclusivo para perfil Administrador) */}
+      {/* Agente de IA Oficial — Sofia (Exclusivo para perfil Administrador / Coordenação) */}
       {currentUser && isAdmin(currentUser) && (
-        <VoiceWidget
+        <SofiaAssistant
           students={students}
           records={records}
           currentUser={currentUser}
           selectedDate={selectedDate}
           schedules={schedules}
+          pontoRecords={pontoRecords}
+          activeTurmas={turmas}
           onSaveRecord={handleSaveRecord}
           onNavigateTab={(tab) => setActiveTab(tab)}
           onSelectDate={(date) => setSelectedDate(date)}

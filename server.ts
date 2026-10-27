@@ -27,6 +27,10 @@ import {
   calculateCargaSemanalFixa,
   getProfessorWeeklyGradeBlocks,
 } from './src/services/FolhaService';
+import {
+  buildSofiaSystemPrompt,
+  SOFIA_DEFAULT_TEMPERATURE,
+} from './src/utils/sofiaPromptBuilder';
 
 dotenv.config();
 
@@ -978,24 +982,10 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
     const ai = getAIClient();
     if (ai) {
       try {
-        const systemInstruction = `Você é Sofia, a assistente e guia inteligente por voz do Período Integral do Colégio Crescer.
-Seu tom é acolhedor, profissional, pedagógico e objetivo.
-Sua resposta será falada em voz alta através de Text-To-Speech (TTS), portanto:
-- Seja concisa, clara e natural (1 a 3 frases no máximo).
-- Evite listar caracteres especiais, asteriscos ou tabelas.
-- Identifique com precisão se a intenção do usuário requer o uso de uma das 3 funções disponíveis:
-  1. consultar_ou_lancar_chamada: para verificar pendências, marcar presença ou falta de alunos.
-  2. consultar_manual_normas: para responder sobre regras, fardamento, segurança, postura e procedimentos do Manual Oficial de 51 Normas do Período Integral (Seções 1 a 51 organizadas em 4 Módulos: Módulo 1 Rotina Operacional 1-16, Módulo 2 Segurança 17-27, Módulo 3 Postura e Fardamento 28-38, Módulo 4 Guia Socioemocional 39-51).
-  3. consultar_cardapio_ou_semanario: para consultar almoço, lanche, oficinas ou rotinas do Semanário.
-Retorne um JSON estrito no seguinte formato:
-{
-  "spokenText": "texto que será falado para o usuário",
-  "functionCall": {
-    "name": "consultar_ou_lancar_chamada" | "consultar_manual_normas" | "consultar_cardapio_ou_semanario",
-    "args": { ... }
-  }
-}
-Se nenhuma função for estritamente necessária, omita "functionCall" e apenas responda com "spokenText".`;
+        const systemInstruction = buildSofiaSystemPrompt(context);
+        const temperature = typeof req.body.temperature === 'number'
+          ? Math.max(0.2, Math.min(0.3, req.body.temperature))
+          : SOFIA_DEFAULT_TEMPERATURE;
 
         // Manipulador de Timeout resiliente ajustado para 20 segundos
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -1020,6 +1010,7 @@ Se nenhuma função for estritamente necessária, omita "functionCall" e apenas 
           config: {
             systemInstruction,
             responseMimeType: 'application/json',
+            temperature,
           },
         });
 
@@ -1035,10 +1026,13 @@ Se nenhuma função for estritamente necessária, omita "functionCall" e apenas 
         }
 
         if (parsed?.spokenText) {
+          const functionCall = parsed.functionCall || (parsed.action ? { name: parsed.action.type, args: parsed.action.args } : undefined);
           return res.json({
             success: true,
             spokenText: parsed.spokenText,
-            functionCall: parsed.functionCall,
+            displayText: parsed.displayText || parsed.spokenText,
+            action: parsed.action,
+            functionCall,
             isAiGenerated: true,
           });
         }

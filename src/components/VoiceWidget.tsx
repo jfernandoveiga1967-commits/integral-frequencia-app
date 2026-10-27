@@ -94,12 +94,12 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     {
       id: 'welcome',
       sender: 'sofia',
-      text: 'Olá! Sou Sofia, sua assistente por voz do Integral. Posso consultar pendências de chamada, registrar presença, buscar no Manual de 51 Normas ou conferir o cardápio e semanário. Toque no microfone ou fale comigo!',
+      text: 'Olá! Sou Sofia, assistente oficial do Programa Integral. Como posso ajudar com frequência, livro ponto, atividades ou normas hoje?',
       timestamp: 'Agora',
       actionResult: {
         type: 'info',
-        title: 'Sofia • Guia do Integral',
-        details: 'Comandos por voz e inteligência artificial pedagógica.',
+        title: 'Sofia • Assistente Oficial',
+        details: 'Comandos rápidos por voz e inteligência artificial pedagógica.',
         badge: 'Pronta',
       },
     },
@@ -822,3 +822,6 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
     </>
   );
 };
+
+export { SofiaAssistant } from './SofiaAssistant';
+export default VoiceWidget;

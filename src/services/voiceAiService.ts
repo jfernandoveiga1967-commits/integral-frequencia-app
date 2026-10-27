@@ -796,18 +796,43 @@ export async function processVoiceAgentQuery(
     };
   }
 
-  // Saudação padrão e ajuda
+  // Intenção D: Livro Ponto / Navegação
+  if (
+    normInput.includes('livro ponto') ||
+    normInput.includes('ponto') ||
+    normInput.includes('bater ponto') ||
+    normInput.includes('espelho de ponto')
+  ) {
+    if (context.onNavigateTab) {
+      context.onNavigateTab('ponto');
+    }
+    const text = 'Abrindo o Livro Ponto do Programa Integral.';
+    return {
+      spokenText: text,
+      displayText: text,
+      functionCalled: 'navegar_modulo',
+      actionResult: {
+        type: 'info',
+        title: 'Livro Ponto',
+        details: 'Navegando para o Livro Ponto',
+        badge: 'Ponto',
+        success: true,
+      },
+    };
+  }
+
+  // Resposta padrão imediata e profissional
   const defaultText =
-    'Olá! Eu sou Sofia, sua assistente por voz do Integral. Posso ajudar você a registrar presença, verificar pendências de chamada, consultar o Manual de 51 Normas ou conferir o cardápio e o semanário do dia. O que você gostaria de fazer?';
+    'Olá! Sou Sofia, assistente oficial do Programa Integral. Como posso ajudar com frequência, livro ponto, atividades ou normas hoje?';
 
   return {
     spokenText: defaultText,
     displayText: defaultText,
     actionResult: {
       type: 'info',
-      title: 'Sofia • Guia do Integral',
-      details: 'Comandos disponíveis: Chamada, Manual de Normas, Cardápio e Semanário.',
-      badge: 'Pronta para Ajudar',
+      title: 'Sofia • Assistente Oficial',
+      details: 'Pronta para comandos de chamada, ponto, atividades e normas.',
+      badge: 'Pronta',
     },
   };
 }
