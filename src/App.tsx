@@ -2247,53 +2247,6 @@ export default function App() {
           onDismissAll={() => setActiveDepartureAlerts([])}
         />
 
-        {/* Banner de Auditoria e Trava para Coordenação/Administração - Exibido exclusivamente na aba Chamada de Frequência */}
-        {activeTab === 'frequencia' && todayConsolidated.pendentes > 0 && isCoordenador(currentUser) && (
-          <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
-            <div className="flex items-start space-x-3">
-              <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
-                <AlertTriangle className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200/90 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300">
-                    Auditoria de Chamada
-                  </span>
-                  <span className="text-xs font-bold text-amber-800">
-                    Dia {formatDateBR(todayStr)} ({todayConsolidated.dayName})
-                  </span>
-                </div>
-                <h4 className="text-sm font-extrabold text-amber-950 mt-1">
-                  Existem {todayConsolidated.pendentes} {todayConsolidated.pendentes === 1 ? 'aluno esperado com chamada pendente' : 'alunos esperados com chamada pendente/não lançada'} hoje
-                </h4>
-                <p className="text-xs text-amber-800/90 mt-0.5">
-                  Total apurado: <strong>{todayConsolidated.apurados}</strong> de <strong>{todayConsolidated.totalAtivos} alunos com frequência prevista hoje</strong> (de {todayConsolidated.totalMatriculados} matriculados). Alunos sem agenda para hoje não geram pendência.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setShowPendingAuditModal(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-extrabold text-white bg-amber-600 hover:bg-amber-700 shadow-sm transition-all cursor-pointer flex items-center space-x-1.5"
-              >
-                <UserX className="w-4 h-4" />
-                <span>Ver {todayConsolidated.pendentes} Alunos Pendentes</span>
-              </button>
-              {selectedDate !== todayStr && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDate(todayStr);
-                  }}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300 transition-all cursor-pointer"
-                >
-                  Ir para Hoje
-                </button>
-              )}
-            </div>
-          </div>
-        )}
         {/* Fallback quando o usuário não possui nenhuma aba liberada */}
         {getUserAllowedTabs(currentUser).length === 0 && (
           <div className="bg-white rounded-3xl p-8 sm:p-12 text-center max-w-lg mx-auto border border-slate-200 shadow-sm space-y-4 my-8">

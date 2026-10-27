@@ -55,6 +55,7 @@ import {
   PRESET_USERS,
   markUserAsDeleted,
   getDeletedUserIds,
+  isPurgedUser,
 } from './utils/authUtils';
 import { INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
@@ -1049,6 +1050,7 @@ export async function fetchAllUsersDirectFromServer(force = false): Promise<User
       const rawName = (data.name || '').trim();
       const rawEmail = (data.email || '').trim().toLowerCase();
       const rawId = (data.id || docId || '').trim();
+      if (isPurgedUser({ id: rawId, email: rawEmail, name: rawName })) return;
 
       const isMasterAdmin =
         rawEmail === ADMIN_EMAIL.toLowerCase() ||

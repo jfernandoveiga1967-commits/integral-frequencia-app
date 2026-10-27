@@ -48,96 +48,31 @@ export const PRESET_USERS: UserProfile[] = [
     canMarkAttendance: false,
     company: 'Colégio Crescer',
   } as UserProfile,
-  {
-    id: 'usr_danyelpereira',
-    name: 'Danyel Pereira',
-    email: 'danyel.pereira@crescercampinas.com.br',
-    role: 'professor' as UserRole,
-    cargoLabel: 'Professor de Flauta',
-    avatarColor: 'bg-emerald-600',
-    birthDate: '1995-05-15',
-    pin: '15/05/1995',
-    status: 'ATIVO' as UserStatus,
-    regimeTrabalho: 'prestador_aula_efetiva',
-    regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-    valorHoraAula: 33.06,
-    duracaoAulaMinutos: 50,
-    diasGradeAutorizados: ['segunda', 'terca'],
-    tetoSemanalAulas: 8,
-    assignedActivities: ['Flauta'],
-    specialtyActivity: 'Flauta',
-    assignedTurmas: [],
-    allowedClassIds: [],
-    allowedTabs: ['frequencia', 'ponto', 'semanario', 'relatorio', 'manual'],
-    company: 'Prestação de Serviços PJ',
-    empresa: 'Prestação de Serviços PJ',
-    contractSchedule: '13:00 - 17:30',
-    horarioInicio: '13:00',
-    horarioFim: '17:30',
-    workShiftType: 'continua_6h',
-    ajudaDeCusto: 0,
-    baseSalary: 0,
-    canManageStudents: false,
-    canMarkAttendance: true,
-  } as UserProfile,
-  {
-    id: 'usr_leticia',
-    name: 'Letícia',
-    email: 'leticia.danca@crescercampinas.com.br',
-    role: 'professor' as UserRole,
-    cargoLabel: 'Professora de Balé e Dança',
-    avatarColor: 'bg-purple-600',
-    birthDate: '1996-03-22',
-    pin: '22/03/1996',
-    status: 'ATIVO' as UserStatus,
-    regimeTrabalho: 'professor_horista',
-    regimeContratual: 'Professor Horista (CLT)',
-    valorHoraAula: 35.00,
-    duracaoAulaMinutos: 50,
-    diasGradeAutorizados: ['segunda', 'terca'],
-    assignedActivities: ['Balé', 'Dança'],
-    specialtyActivity: 'Balé',
-    assignedTurmas: [],
-    allowedClassIds: [],
-    allowedTabs: ['frequencia', 'ponto', 'semanario', 'relatorio', 'manual'],
-    company: 'Colégio Crescer',
-    empresa: 'Colégio Crescer',
-    contractSchedule: '13:00 - 17:30',
-    horarioInicio: '13:00',
-    horarioFim: '17:30',
-    workShiftType: 'continua_6h',
-    ajudaDeCusto: 150,
-    baseSalary: 0,
-    canManageStudents: false,
-    canMarkAttendance: true,
-  } as UserProfile,
-  {
-    id: 'usr_amanda',
-    name: 'Amanda Oliveira',
-    email: 'amanda.oliveira@crescercampinas.com.br',
-    role: 'auxiliar' as UserRole,
-    cargoLabel: 'Monitora do Período Integral',
-    avatarColor: 'bg-rose-500',
-    birthDate: '1998-04-20',
-    pin: '20/04/1998',
-    status: 'ATIVO' as UserStatus,
-    regimeTrabalho: 'mensalista',
-    regimeContratual: 'Mensalista CLT',
-    assignedActivities: ['Rotina'],
-    assignedTurmas: ['1º Ano A', '2º Ano A'],
-    allowedClassIds: ['1º Ano A', '2º Ano A'],
-    allowedTabs: ['momento', 'frequencia', 'ponto', 'cardapio', 'manual'],
-    company: 'Colégio Crescer',
-    empresa: 'Colégio Crescer',
-    phone: '19998765432',
-    contractSchedule: '07:30 - 17:30',
-    horarioInicio: '07:30',
-    horarioFim: '17:30',
-    workShiftType: 'padrao_8h',
-    canManageStudents: false,
-    canMarkAttendance: true,
-  } as UserProfile,
 ];
+
+// ===========================================================================
+// EXPURGO DEFINITIVO DE PERFIS DE TESTE / FICTÍCIOS
+// ===========================================================================
+export const PURGED_EMAILS = [
+  'amanda.oliveira@crescercampinas.com.br',
+  'danyel.pereira@crescercampinas.com.br',
+  'leticia.danca@crescercampinas.com.br',
+] as const;
+
+export const PURGED_USER_IDS = [
+  'usr_amanda',
+  'usr_danyelpereira',
+  'usr_leticia',
+] as const;
+
+export function isPurgedUser(user: { email?: string; id?: string; name?: string } | null | undefined): boolean {
+  if (!user) return false;
+  const email = (user.email || '').trim().toLowerCase();
+  const id = (user.id || '').trim().toLowerCase();
+  if (email && PURGED_EMAILS.some((p) => p.toLowerCase() === email)) return true;
+  if (id && PURGED_USER_IDS.some((p) => p.toLowerCase() === id)) return true;
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Autenticação e login
@@ -393,8 +328,6 @@ export function detectCargoCategory(userOrRole?: UserProfile | UserRole | string
     regimeCont.includes('pj') ||
     label.includes('prestador') ||
     label.includes('pj') ||
-    id === 'usr_danyelpereira' ||
-    name.includes('danyel') ||
     label.includes('flauta') ||
     ((user.assignedActivities || []).some((a: any) => String(a).toLowerCase().includes('flauta')))
   ) {
@@ -407,10 +340,7 @@ export function detectCargoCategory(userOrRole?: UserProfile | UserRole | string
     regimeCont.includes('horista') ||
     label.includes('horista') ||
     (label.includes('professor') && regimeTrab.includes('horista')) ||
-    (label.includes('professora') && regimeTrab.includes('horista')) ||
-    id === 'usr_leticia' ||
-    name.includes('letícia') ||
-    name.includes('leticia')
+    (label.includes('professora') && regimeTrab.includes('horista'))
   ) {
     return 'professor_horista';
   }
@@ -441,13 +371,6 @@ export function detectCargoCategory(userOrRole?: UserProfile | UserRole | string
  */
 export function getProfessorPJOficina(user?: UserProfile | null): string | null {
   if (!user) return null;
-  const isDanyel =
-    user.id === 'usr_danyelpereira' ||
-    (user.name && user.name.toLowerCase().includes('danyel'));
-
-  if (isDanyel) {
-    return 'Professor de Flauta';
-  }
 
   const label = (user.cargoLabel || '').trim();
   if (label && !label.toLowerCase().includes('prestador') && !label.toLowerCase().includes('pj')) {
@@ -627,23 +550,35 @@ export function getUserStatusBadge(userOrStatus?: UserProfile | UserStatus | str
 export const DELETED_USERS_STORAGE_KEY = 'app_deleted_user_ids';
 
 /**
- * Retorna o conjunto de IDs e emails de usuários permanentemente excluídos
+ * Retorna o conjunto de IDs e emails de usuários permanentemente excluídos.
+ * Inicializa e garante a presença dos perfis de teste expurgados como tombstones irremovíveis.
  */
 export function getDeletedUserIds(): Set<string> {
+  const baseSet = new Set<string>();
+
+  // Semente obrigatória com perfis de teste permanentemente expurgados
+  PURGED_EMAILS.forEach((e) => baseSet.add(e.toLowerCase().trim()));
+  PURGED_USER_IDS.forEach((id) => baseSet.add(id.toLowerCase().trim()));
+
   try {
     if (typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(DELETED_USERS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          return new Set(parsed.map((item) => String(item).toLowerCase().trim()).filter(Boolean));
+          parsed.forEach((item) => {
+            const clean = String(item).toLowerCase().trim();
+            if (clean) baseSet.add(clean);
+          });
         }
       }
+      // Registra no cache local para assegurar que restaurações de backup não ressuscitem esses perfis
+      localStorage.setItem(DELETED_USERS_STORAGE_KEY, JSON.stringify(Array.from(baseSet)));
     }
   } catch (e) {
     console.error('Erro ao ler lista de usuários excluídos:', e);
   }
-  return new Set();
+  return baseSet;
 }
 
 /**
@@ -669,7 +604,7 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
   PRESET_USERS.forEach((preset) => {
     const pId = (preset.id || '').toLowerCase().trim();
     const pEmail = (preset.email || '').toLowerCase().trim();
-    if (!deletedIds.has(pId) && !deletedIds.has(pEmail)) {
+    if (!deletedIds.has(pId) && !deletedIds.has(pEmail) && !isPurgedUser(preset)) {
       userById.set(preset.id, { ...preset });
     }
   });
@@ -680,54 +615,38 @@ export function normalizeAndDeduplicateUsers(rawUsers: UserProfile[]): UserProfi
       const rawId = (raw.id || '').toLowerCase().trim();
       const rawEmail = (raw.email || '').toLowerCase().trim();
 
-      // Ignora usuários permanentemente excluídos
-      if (deletedIds.has(rawId) || (rawEmail && deletedIds.has(rawEmail))) {
+      // Ignora usuários permanentemente excluídos ou pertencentes aos perfis de teste expurgados
+      if (deletedIds.has(rawId) || (rawEmail && deletedIds.has(rawEmail)) || isPurgedUser(raw)) {
         return;
       }
 
       const existing = userById.get(raw.id) || ({} as UserProfile);
-      const isDanyel =
-        raw.id === 'usr_danyelpereira' ||
-        (raw.name && raw.name.toLowerCase().includes('danyel'));
-
       const cleanRawName = raw.name ? raw.name.replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
       const cleanExistingName = existing.name ? existing.name.replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
-      const resolvedName = cleanRawName || cleanExistingName || (isDanyel ? 'Danyel Pereira' : (raw.name || existing.name || ''));
+      const resolvedName = cleanRawName || cleanExistingName || (raw.name || existing.name || '');
 
       const normalizedUser: UserProfile = {
         ...existing,
         ...raw,
         name: resolvedName,
         email: raw.email || existing.email || '',
-        cargoLabel: raw.cargoLabel || existing.cargoLabel || (isDanyel ? 'Professor de Flauta' : ''),
+        cargoLabel: raw.cargoLabel || existing.cargoLabel || '',
         pixKey: raw.pixKey || existing.pixKey || '',
         baseSalary: raw.baseSalary ?? existing.baseSalary,
         status: raw.status || existing.status || ('ATIVO' as UserStatus),
         dataAdmissao: raw.dataAdmissao || existing.dataAdmissao || undefined,
-        assignedActivities: isDanyel
-          ? ['Flauta']
-          : (Array.isArray(raw.assignedActivities)
-              ? raw.assignedActivities
-              : (existing.assignedActivities || [])),
-        specialtyActivity: isDanyel ? 'Flauta' : (raw.specialtyActivity || existing.specialtyActivity),
+        assignedActivities: Array.isArray(raw.assignedActivities)
+          ? raw.assignedActivities
+          : (existing.assignedActivities || []),
+        specialtyActivity: raw.specialtyActivity || existing.specialtyActivity,
         assignedTurmas: Array.isArray(raw.assignedTurmas)
           ? raw.assignedTurmas
           : (existing.assignedTurmas || []),
-        regimeTrabalho: isDanyel
-          ? 'prestador_aula_efetiva'
-          : (raw.regimeTrabalho || existing.regimeTrabalho || 'mensalista'),
-        regimeContratual: isDanyel
-          ? 'Prestador por Aula Efetiva (PJ/Horista Efetivo)'
-          : (raw.regimeContratual || existing.regimeContratual || undefined),
-        valorHoraAula: isDanyel
-          ? (raw.valorHoraAula && Number(raw.valorHoraAula) > 0 ? Number(raw.valorHoraAula) : 33.06)
-          : (raw.valorHoraAula !== undefined && raw.valorHoraAula !== null ? Number(raw.valorHoraAula) : existing.valorHoraAula),
-        duracaoAulaMinutos: isDanyel
-          ? (raw.duracaoAulaMinutos && Number(raw.duracaoAulaMinutos) > 0 ? Number(raw.duracaoAulaMinutos) : 50)
-          : (raw.duracaoAulaMinutos !== undefined ? Number(raw.duracaoAulaMinutos) : existing.duracaoAulaMinutos),
-        diasGradeAutorizados: isDanyel
-          ? (Array.isArray(raw.diasGradeAutorizados) && raw.diasGradeAutorizados.length > 0 ? raw.diasGradeAutorizados : ['segunda', 'terca'])
-          : (raw.diasGradeAutorizados || existing.diasGradeAutorizados),
+        regimeTrabalho: raw.regimeTrabalho || existing.regimeTrabalho || 'mensalista',
+        regimeContratual: raw.regimeContratual || existing.regimeContratual || undefined,
+        valorHoraAula: raw.valorHoraAula !== undefined && raw.valorHoraAula !== null ? Number(raw.valorHoraAula) : existing.valorHoraAula,
+        duracaoAulaMinutos: raw.duracaoAulaMinutos !== undefined ? Number(raw.duracaoAulaMinutos) : existing.duracaoAulaMinutos,
+        diasGradeAutorizados: raw.diasGradeAutorizados || existing.diasGradeAutorizados,
         tetoSemanalAulas: raw.tetoSemanalAulas !== undefined ? Number(raw.tetoSemanalAulas) : existing.tetoSemanalAulas,
         ajudaDeCusto: raw.ajudaDeCusto !== undefined ? Number(raw.ajudaDeCusto) : existing.ajudaDeCusto,
         company: raw.company || raw.empresa || existing.company,
@@ -747,7 +666,13 @@ export function getLocalUsersList(): UserProfile[] {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return normalizeAndDeduplicateUsers(parsed);
+          const filtered = parsed.filter((u) => !isPurgedUser(u));
+          const normalized = normalizeAndDeduplicateUsers(filtered);
+          // Limpa cache se continha perfis expurgados
+          if (filtered.length !== parsed.length) {
+            localStorage.setItem('app_users_list', JSON.stringify(normalized));
+          }
+          return normalized;
         }
       }
     }
@@ -760,7 +685,8 @@ export function getLocalUsersList(): UserProfile[] {
 export function saveLocalUsersList(users: UserProfile[]): void {
   try {
     if (typeof localStorage !== 'undefined') {
-      const normalized = normalizeAndDeduplicateUsers(users);
+      const sanitized = (users || []).filter((u) => !isPurgedUser(u));
+      const normalized = normalizeAndDeduplicateUsers(sanitized);
       localStorage.setItem('app_users_list', JSON.stringify(normalized));
     }
   } catch (e) {
@@ -777,7 +703,12 @@ export function getStoredUser(): UserProfile | null {
   try {
     const stored = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
     if (stored) {
-      return JSON.parse(stored) as UserProfile;
+      const parsed = JSON.parse(stored) as UserProfile;
+      if (parsed && isPurgedUser(parsed)) {
+        localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+        return null;
+      }
+      return parsed;
     }
   } catch (e) {
     console.error('Erro ao ler usuário logado do localStorage:', e);

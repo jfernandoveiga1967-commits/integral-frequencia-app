@@ -19,6 +19,7 @@ import {
   detectCargoCategory,
   getProfessorPJOficina,
   getUnifiedCargoDisplay,
+  isPurgedUser,
 } from '../utils/authUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import { formatPhoneDisplay, generateWhatsAppUrl } from '../utils/whatsappUtils';
@@ -460,7 +461,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     return deduplicatedUsers
       .filter((u) => {
-        if (!u) return false;
+        if (!u || isPurgedUser(u)) return false;
         // Busca primária por UID fixo e E-mail cadastrado, complementada por Nome, Empresa e Telefone
         const matchesSearch =
           !cleanSearch ||
@@ -788,14 +789,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
     setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
     // Fonte de verdade única e soberana: regimeTrabalho técnico (não o texto legado de regimeContratual)
-    const isPrestadorDanyel =
-      user.id === 'usr_danyelpereira' ||
-      (user.name && user.name.toLowerCase().includes('danyel'));
-
     const initialRegime: RegimeTrabalho =
       user.regimeTrabalho === 'prestador_aula_efetiva' ||
-      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('efetiv')) ||
-      isPrestadorDanyel
+      (user.regimeContratual && user.regimeContratual.toLowerCase().includes('efetiv'))
         ? 'prestador_aula_efetiva'
         : user.regimeTrabalho === 'professor_horista'
         ? 'professor_horista'
@@ -804,7 +800,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormValorHoraAula(
       user.valorHoraAula !== undefined && user.valorHoraAula !== null && Number(user.valorHoraAula) > 0
         ? user.valorHoraAula
-        : (isPrestadorDanyel || initialRegime === 'prestador_aula_efetiva' ? 33.06 : '')
+        : (initialRegime === 'prestador_aula_efetiva' ? 33.06 : '')
     );
     setFormDuracaoAulaMinutos(
       user.duracaoAulaMinutos !== undefined && Number(user.duracaoAulaMinutos) > 0

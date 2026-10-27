@@ -30,6 +30,7 @@ import { getPeriodConsolidatedMetrics, calculateRelatorioConsolidado, calculateA
 import { calculateFolhaProfessorHorista, FolhaApuracaoProfessorHoristaResult } from '../services/FolhaService';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
+import { isPurgedUser } from '../utils/authUtils';
 import {
   BarChart3,
   Printer,
@@ -519,88 +520,19 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   // 6. Apuração de Aulas Efetivas (Prestadores PJ & Professores Horistas CLT)
   // -------------------------------------------------------------------------
   const prestadorUsers = useMemo(() => {
-    const list = (users || []).filter(
+    return (users || []).filter(
       (u) =>
-        u.regimeTrabalho === 'prestador_aula_efetiva' ||
-        u.regimeTrabalho === 'professor_horista' ||
-        (u.regimeContratual && (u.regimeContratual.toLowerCase().includes('efetiv') || u.regimeContratual.toLowerCase().includes('horista'))) ||
-        (u.name && (u.name.toLowerCase().includes('danyel') || u.name.toLowerCase().includes('leticia')))
+        !isPurgedUser(u) &&
+        (u.regimeTrabalho === 'prestador_aula_efetiva' ||
+          u.regimeTrabalho === 'professor_horista' ||
+          (u.regimeContratual &&
+            (u.regimeContratual.toLowerCase().includes('efetiv') ||
+              u.regimeContratual.toLowerCase().includes('horista'))))
     );
-
-    // Garante presença do Professor Danyel Pereira (Prestador PJ)
-    if (!list.some((u) => u.id === 'usr_danyelpereira' || (u.name && u.name.toLowerCase().includes('danyel')))) {
-      const danyelFromUsers = (users || []).find((u) => u.name && u.name.toLowerCase().includes('danyel'));
-      if (danyelFromUsers) {
-        list.push({
-          ...danyelFromUsers,
-          regimeTrabalho: 'prestador_aula_efetiva',
-          regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-          valorHoraAula: danyelFromUsers.valorHoraAula && Number(danyelFromUsers.valorHoraAula) > 0 ? Number(danyelFromUsers.valorHoraAula) : 33.06,
-          duracaoAulaMinutos: danyelFromUsers.duracaoAulaMinutos || 50,
-          diasGradeAutorizados: danyelFromUsers.diasGradeAutorizados || ['segunda', 'terca'],
-          tetoSemanalAulas: danyelFromUsers.tetoSemanalAulas || 8,
-          assignedActivities: ['Flauta'],
-          specialtyActivity: 'Flauta',
-          cargoLabel: 'Professor de Flauta',
-        });
-      } else {
-        list.push({
-          id: 'usr_danyelpereira',
-          name: 'Danyel Pereira',
-          email: 'danyel.pereira@crescercampinas.com.br',
-          role: 'professor',
-          cargoLabel: 'Professor de Flauta',
-          avatarColor: 'bg-emerald-600',
-          regimeTrabalho: 'prestador_aula_efetiva',
-          regimeContratual: 'Prestador por Aula Efetiva (PJ/Horista Efetivo)',
-          valorHoraAula: 33.06,
-          duracaoAulaMinutos: 50,
-          diasGradeAutorizados: ['segunda', 'terca'],
-          tetoSemanalAulas: 8,
-          assignedActivities: ['Flauta'],
-          specialtyActivity: 'Flauta',
-        } as UserProfile);
-      }
-    }
-
-    // Garante presença da Professora Letícia (Professor Horista CLT)
-    if (!list.some((u) => u.id === 'usr_leticia' || (u.name && u.name.toLowerCase().includes('leticia')))) {
-      const leticiaFromUsers = (users || []).find((u) => u.name && u.name.toLowerCase().includes('leticia'));
-      if (leticiaFromUsers) {
-        list.push({
-          ...leticiaFromUsers,
-          regimeTrabalho: 'professor_horista',
-          regimeContratual: 'Professor Horista (CLT)',
-          valorHoraAula: leticiaFromUsers.valorHoraAula && Number(leticiaFromUsers.valorHoraAula) > 0 ? Number(leticiaFromUsers.valorHoraAula) : 35.0,
-          duracaoAulaMinutos: leticiaFromUsers.duracaoAulaMinutos || 50,
-          diasGradeAutorizados: leticiaFromUsers.diasGradeAutorizados || ['segunda', 'terca'],
-          assignedActivities: Array.from(new Set(['Balé', 'Dança', ...(leticiaFromUsers.assignedActivities || [])])),
-          specialtyActivity: 'Balé',
-        });
-      } else {
-        list.push({
-          id: 'usr_leticia',
-          name: 'Letícia',
-          email: 'leticia.danca@crescercampinas.com.br',
-          role: 'professor',
-          cargoLabel: 'Professora de Balé e Dança',
-          avatarColor: 'bg-purple-600',
-          regimeTrabalho: 'professor_horista',
-          regimeContratual: 'Professor Horista (CLT)',
-          valorHoraAula: 35.0,
-          duracaoAulaMinutos: 50,
-          diasGradeAutorizados: ['segunda', 'terca'],
-          assignedActivities: ['Balé', 'Dança'],
-          specialtyActivity: 'Balé',
-        } as UserProfile);
-      }
-    }
-
-    return list;
   }, [users]);
 
   const [selectedPrestadorId, setSelectedPrestadorId] = useState<string>(() => {
-    return prestadorUsers[0]?.id || 'usr_danyelpereira';
+    return prestadorUsers[0]?.id || '';
   });
 
   const selectedPrestador = useMemo(() => {
@@ -609,13 +541,6 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   const prestadorActivities = useMemo(() => {
     if (!selectedPrestador) return [];
-    const isDanyel =
-      selectedPrestador.id === 'usr_danyelpereira' ||
-      Boolean(selectedPrestador.name && selectedPrestador.name.toLowerCase().includes('danyel'));
-
-    if (isDanyel) {
-      return ['Flauta'];
-    }
 
     const acts = new Set<string>();
     if (Array.isArray(selectedPrestador.assignedActivities) && selectedPrestador.assignedActivities.length > 0) {
