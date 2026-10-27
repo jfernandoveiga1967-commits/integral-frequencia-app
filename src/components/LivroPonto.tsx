@@ -1901,53 +1901,53 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </button>
               </div>
 
-              {/* Botões de Exportação e Gestão com espaçamento uniforme e rótulos claros */}
-              <div className="flex flex-wrap items-center gap-2">
-                {/* 1. Exportar Espelhos (PDF) */}
-                <button
-                  type="button"
-                  onClick={() => handleGenerateAllPontoPDF(true)}
-                  disabled={isGeneratingAllPDF}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white border border-emerald-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
-                  title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
-                >
-                  {isGeneratingAllPDF ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-emerald-200" />
-                  )}
-                  <span>Espelhos (PDF)</span>
-                </button>
+              {/* Botões de Exportação e Gestão em Lote (Exclusivo para Administração / Coordenação) */}
+              {isAdmin && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* 1. Exportar Espelhos (PDF) */}
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateAllPontoPDF(true)}
+                    disabled={isGeneratingAllPDF}
+                    className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white border border-emerald-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-emerald-900/30 active:scale-95"
+                    title="Baixar em um único PDF consolidado os espelhos de ponto de todos os colaboradores ativos do mês de competência"
+                  >
+                    {isGeneratingAllPDF ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5 text-emerald-200" />
+                    )}
+                    <span>Espelhos (PDF)</span>
+                  </button>
 
-                {/* 2. Exportar Recibos (Lote PDF) */}
-                <button
-                  type="button"
-                  onClick={() => handleGenerateAllReceiptsPDF(true)}
-                  disabled={isGeneratingAllReceipts}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-indigo-900/30 active:scale-95"
-                  title="Baixar em um único PDF consolidado os recibos de pagamento de todos os colaboradores ativos do mês de competência"
-                >
-                  {isGeneratingAllReceipts ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" />
-                  ) : (
-                    <FileCheck2 className="w-3.5 h-3.5 text-indigo-200" />
-                  )}
-                  <span>Recibos (PDF)</span>
-                </button>
+                  {/* 2. Exportar Recibos (Lote PDF) */}
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateAllReceiptsPDF(true)}
+                    disabled={isGeneratingAllReceipts}
+                    className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white border border-indigo-400/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-indigo-900/30 active:scale-95"
+                    title="Baixar em um único PDF consolidado os recibos de pagamento de todos os colaboradores ativos do mês de competência"
+                  >
+                    {isGeneratingAllReceipts ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" />
+                    ) : (
+                      <FileCheck2 className="w-3.5 h-3.5 text-indigo-200" />
+                    )}
+                    <span>Recibos (PDF)</span>
+                  </button>
 
-                {/* 3. Exportar Planilha Excel (.xlsx) */}
-                <button
-                  type="button"
-                  onClick={handleExportExcelPonto}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-teal-700/80 hover:bg-teal-600 text-white border border-teal-500/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-teal-900/30 active:scale-95"
-                  title="Exportar batidas e cálculos do espelho em planilha Excel (.xlsx)"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
-                  <span>Planilha (Excel)</span>
-                </button>
+                  {/* 3. Exportar Planilha Excel (.xlsx) */}
+                  <button
+                    type="button"
+                    onClick={handleExportExcelPonto}
+                    className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-teal-700/80 hover:bg-teal-600 text-white border border-teal-500/40 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer shadow-teal-900/30 active:scale-95"
+                    title="Exportar batidas e cálculos do espelho em planilha Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
+                    <span>Planilha (Excel)</span>
+                  </button>
 
-                {/* 4. Feriados e Recessos (Admin) */}
-                {isAdmin && (
+                  {/* 4. Feriados e Recessos (Admin) */}
                   <button
                     type="button"
                     onClick={() => setShowHolidayModal(true)}
@@ -1957,10 +1957,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     <CalendarDays className="w-3.5 h-3.5 text-amber-400" />
                     <span>Feriados & Recessos</span>
                   </button>
-                )}
 
-                {/* 5. Travar / Destravar Mês (Admin) */}
-                {isAdmin && (
+                  {/* 5. Travar / Destravar Mês (Admin) */}
                   <button
                     type="button"
                     onClick={handleToggleMonthLock}
@@ -1987,8 +1985,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       </>
                     )}
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
