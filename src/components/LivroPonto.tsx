@@ -2378,14 +2378,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <th className="py-2.5 px-3 w-28">Dia da Semana</th>
                 {isUserContinuous ? (
                   <>
-                    <th className="py-2.5 px-3 text-center w-24">Entrada</th>
-                    <th className="py-2.5 px-3 text-center w-24">Saída</th>
+                    <th className="py-2.5 px-3 text-center w-24">Entrada 1</th>
+                    <th className="py-2.5 px-3 text-center w-24">Saída 1</th>
                   </>
                 ) : (
                   <>
                     <th className="py-2.5 px-3 text-center w-20">Entrada 1</th>
-                    <th className="py-2.5 px-3 text-center w-20">Saída 1</th>
-                    <th className="py-2.5 px-3 text-center w-20">Entrada 2</th>
+                    <th className="py-2.5 px-3 text-center w-20">Saída Almoço</th>
+                    <th className="py-2.5 px-3 text-center w-20">Retorno Almoço</th>
                     <th className="py-2.5 px-3 text-center w-20">Saída 2</th>
                   </>
                 )}
@@ -2408,7 +2408,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 else if (item.isSat) rowBg = 'bg-slate-50/70 text-slate-400';
                 else if (status === 'nao_admitido' || (targetUser?.dataAdmissao && item.dateStr < targetUser.dataAdmissao)) rowBg = 'bg-slate-50/60 text-slate-400';
                 else if (status === 'feriado' || status === 'recesso') rowBg = 'bg-emerald-50/40 text-emerald-900';
-                else if (status === 'falta_injustificada') rowBg = 'bg-rose-50/60 text-rose-950';
+                else if (status === 'falta_injustificada' || status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada') rowBg = 'bg-rose-50/80 text-rose-950 border-l-4 border-l-rose-500';
 
                 return (
                   <tr key={item.dateStr} className={`${rowBg} text-slate-800`}>
@@ -2456,12 +2456,19 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           {contractDailyHoursFormatted}
                         </td>
                       </>
-                    ) : status === 'falta_injustificada' ? (
+                    ) : status === 'falta_injustificada' || status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada' ? (
                       <>
-                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center font-bold text-rose-600 bg-rose-100/40">
-                          FALTA INJUSTIFICADA (Desconto de 1 Diária)
+                        <td colSpan={isUserContinuous ? 2 : 4} className="py-2 px-3 text-center font-bold text-rose-700 bg-rose-100/60">
+                          <div className="flex items-center justify-center space-x-1.5">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-rose-600 text-white shadow-sm">
+                              FALTA NÃO ABONADA
+                            </span>
+                            <span className="text-[11px] font-semibold text-rose-800">
+                              (Desconto de 1 Diária)
+                            </span>
+                          </div>
                         </td>
-                        <td className="py-2 px-3 text-center text-rose-600 font-black font-mono">
+                        <td className="py-2 px-3 text-center text-rose-700 font-black font-mono">
                           0h00min
                         </td>
                       </>
@@ -2482,7 +2489,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                               {rec?.entry1 || '—'}
                             </td>
                             <td className="py-2 px-3 text-center font-mono font-bold text-slate-900">
-                              {rec?.exit2 || rec?.exit1 || '—'}
+                              {rec?.exit1 || rec?.exit2 || '—'}
                             </td>
                           </>
                         ) : (
@@ -2578,6 +2585,8 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           icon = <Clock className="w-3 h-3 mr-0.5 text-amber-600 animate-pulse" />;
                         } else if (statusResult.statusKey === 'presenca_normal') {
                           icon = <Check className="w-3 h-3 mr-0.5 text-emerald-600" />;
+                        } else if (statusResult.statusKey === 'falta_injustificada') {
+                          icon = <AlertTriangle className="w-3 h-3 mr-0.5 text-white" />;
                         } else if (statusResult.statusKey === 'turno_incompleto' || statusResult.statusKey === 'pendente_saida') {
                           icon = <Clock className="w-3 h-3 mr-0.5 text-amber-600" />;
                         }
@@ -3719,14 +3728,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                       <th className="p-1.5 w-24">Semana</th>
                       {isUserContinuous ? (
                         <>
-                          <th className="p-1.5 w-20">Entrada</th>
-                          <th className="p-1.5 w-20">Saída</th>
+                          <th className="p-1.5 w-20">Entrada 1</th>
+                          <th className="p-1.5 w-20">Saída 1</th>
                         </>
                       ) : (
                         <>
                           <th className="p-1.5 w-16">Entrada 1</th>
-                          <th className="p-1.5 w-16">Saída 1</th>
-                          <th className="p-1.5 w-16">Entrada 2</th>
+                          <th className="p-1.5 w-16">Saída Almoço</th>
+                          <th className="p-1.5 w-16">Retorno Almoço</th>
                           <th className="p-1.5 w-16">Saída 2</th>
                         </>
                       )}
@@ -3756,6 +3765,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                           ) : !hasPunches && (status === 'feriado' || status === 'recesso') ? (
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-emerald-800 bg-emerald-50">
                               {status === 'feriado' ? 'FERIADO PAGO' : 'RECESSO PAGO'} ({item.holidayItem?.name || ''})
+                            </td>
+                          ) : !hasPunches && (status === 'falta_injustificada' || status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada') ? (
+                            <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-rose-800 bg-rose-50">
+                              FALTA NÃO ABONADA (-1D)
                             </td>
                           ) : isUserContinuous ? (
                             <>
@@ -3968,39 +3981,53 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2 p-2.5 bg-indigo-950/50 border border-indigo-500/40 rounded-xl text-indigo-200 text-[11px] flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Jornada Contínua de 6h (2 batidas: Entrada e Saída Direta, com tolerância de 5 min).</span>
+                    <span>Jornada Simplificada de 2 batidas ([Entrada 1] e [Saída 1]).</span>
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Entrada (Início)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Entrada 1</label>
                     <input
                       type="time"
                       value={showEditDayModal.entry1 || ''}
                       onChange={(e) => {
                         const newEntry = e.target.value;
-                        const exitVal = showEditDayModal.exit2 || showEditDayModal.exit1 || '';
+                        const exitVal = showEditDayModal.exit1 || showEditDayModal.exit2 || '';
                         setShowEditDayModal({
                           ...showEditDayModal,
                           entry1: newEntry,
-                          status: newEntry && exitVal && showEditDayModal.status !== 'falta_injustificada' ? 'normal' : showEditDayModal.status,
+                          status:
+                            newEntry &&
+                            exitVal &&
+                            showEditDayModal.status !== 'falta_injustificada' &&
+                            showEditDayModal.status !== 'Falta Não Abonada (Descontar 1 Diária)' &&
+                            showEditDayModal.status !== 'falta_nao_abonada'
+                              ? 'normal'
+                              : showEditDayModal.status,
                         });
                       }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Saída (Fim)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída 1</label>
                     <input
                       type="time"
-                      value={showEditDayModal.exit2 || showEditDayModal.exit1 || ''}
+                      value={showEditDayModal.exit1 || showEditDayModal.exit2 || ''}
                       onChange={(e) => {
                         const newExit = e.target.value;
                         const entryVal = showEditDayModal.entry1 || '';
                         setShowEditDayModal({
                           ...showEditDayModal,
+                          exit1: newExit,
                           exit2: newExit,
-                          exit1: '',
                           entry2: '',
-                          status: entryVal && newExit && showEditDayModal.status !== 'falta_injustificada' ? 'normal' : showEditDayModal.status,
+                          status:
+                            entryVal &&
+                            newExit &&
+                            showEditDayModal.status !== 'falta_injustificada' &&
+                            showEditDayModal.status !== 'Falta Não Abonada (Descontar 1 Diária)' &&
+                            showEditDayModal.status !== 'falta_nao_abonada'
+                              ? 'normal'
+                              : showEditDayModal.status,
                         });
                       }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
@@ -4010,7 +4037,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Entrada 1 (Manhã / Início)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Entrada 1</label>
                     <input
                       type="time"
                       value={showEditDayModal.entry1 || ''}
@@ -4021,7 +4048,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Saída 1 (Almoço / Saída)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída Almoço</label>
                     <input
                       type="time"
                       value={showEditDayModal.exit1 || ''}
@@ -4032,7 +4059,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Entrada 2 (Retorno Almoço)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Retorno Almoço</label>
                     <input
                       type="time"
                       value={showEditDayModal.entry2 || ''}
@@ -4043,7 +4070,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1 font-medium">Saída 2 (Fim da Jornada)</label>
+                    <label className="text-slate-400 block mb-1 font-medium">Saída 2</label>
                     <input
                       type="time"
                       value={showEditDayModal.exit2 || ''}
@@ -4127,15 +4154,22 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <label className="text-slate-400 block mb-1 font-medium">Status / Ocorrência do Dia</label>
                 <select
                   value={showEditDayModal.status}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const newStatus = e.target.value as PontoStatus;
+                    const isFalta =
+                      newStatus === 'Falta Não Abonada (Descontar 1 Diária)' ||
+                      newStatus === 'falta_injustificada' ||
+                      newStatus === 'falta_nao_abonada';
                     setShowEditDayModal({
                       ...showEditDayModal,
-                      status: e.target.value as PontoStatus,
-                    })
-                  }
+                      status: newStatus,
+                      ...(isFalta ? { entry1: '', exit1: '', entry2: '', exit2: '' } : {}),
+                    });
+                  }}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-semibold focus:border-indigo-500 focus:outline-none"
                 >
                   <option value="normal">Presença Normal (Trabalhado)</option>
+                  <option value="Falta Não Abonada (Descontar 1 Diária)">Falta Não Abonada (Descontar 1 Diária)</option>
                   <option value="falta_injustificada">Falta Injustificada (Descontar 1 Diária)</option>
                   <option value="falta_justificada">Falta Justificada (Abonada / Sem Desconto)</option>
                   <option value="atestado">Atestado Médico (Abonado)</option>
@@ -4269,14 +4303,14 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                     <th className="p-1.5 w-24">Semana</th>
                     {isUserContinuous ? (
                       <>
-                        <th className="p-1.5 w-20">Entrada</th>
-                        <th className="p-1.5 w-20">Saída</th>
+                        <th className="p-1.5 w-20">Entrada 1</th>
+                        <th className="p-1.5 w-20">Saída 1</th>
                       </>
                     ) : (
                       <>
                         <th className="p-1.5 w-14">Entrada 1</th>
-                        <th className="p-1.5 w-14">Saída 1</th>
-                        <th className="p-1.5 w-14">Entrada 2</th>
+                        <th className="p-1.5 w-14">Saída Almoço</th>
+                        <th className="p-1.5 w-14">Retorno Almoço</th>
                         <th className="p-1.5 w-14">Saída 2</th>
                       </>
                     )}
@@ -4312,10 +4346,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                               {contractDailyHoursFormatted}
                             </td>
                           </>
-                        ) : status === 'falta_injustificada' ? (
+                        ) : status === 'falta_injustificada' || status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada' ? (
                           <>
                             <td colSpan={isUserContinuous ? 2 : 4} className="p-1 text-center font-bold text-rose-800 bg-rose-50">
-                              FALTA INJUSTIFICADA
+                              {status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada' ? 'FALTA NÃO ABONADA (-1D)' : 'FALTA INJUSTIFICADA'}
                             </td>
                             <td className="p-1 text-center font-bold text-rose-800 font-mono">
                               0h00min

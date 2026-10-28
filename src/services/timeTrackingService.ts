@@ -19,6 +19,7 @@ import { db } from '../firebase';
 import { PontoRecord } from '../types';
 import { loadPontoRecords, savePontoRecords } from '../utils/storageUtils';
 import { broadcastSyncEvent } from './syncService';
+import { isSimplifiedTwoPunchUser } from '../utils/pontoUtils';
 
 export type PunchSlotKey = 'entry1' | 'exit1' | 'entry2' | 'exit2';
 
@@ -237,71 +238,103 @@ export async function registerPunch(params: RegisterPunchParams): Promise<Regist
   existingMarks.sort((a, b) => a.minutes - b.minutes);
 
   // 3. Alocação Sequencial Determinística de Slots & Trava Anti-Sobrescrita
+  const isSimplifiedUser = isSimplifiedTwoPunchUser(undefined, userName || userId);
+
   let targetSlot: PunchSlotKey;
   let slotNumber: 1 | 2 | 3 | 4;
   let slotName: string;
 
-  // Garante a distribuição sequencial:
-  // Se entrada_1 vazia -> Batida 1
-  // Se entrada_1 preenchida e saida_1 vazia -> Batida 2 (com validação > entrada_1)
-  // Se saida_1 preenchida e entrada_2 vazia -> Batida 3 (com validação > saida_1)
-  // Se entrada_2 preenchida e saida_2 vazia -> Batida 4 (com validação > entrada_2)
-  if (!currentSlots.e1) {
-    // Batida 1 -> Atribua estritamente a entrada_1
-    targetSlot = 'entry1';
-    slotNumber = 1;
-    slotName = 'Entrada 1 (Início da Jornada)';
-  } else if (!currentSlots.s1) {
-    // Batida 2 -> Atribua estritamente a saida_1
-    const prevTime = currentSlots.e1;
-    const prevMinutes = timeStringToMinutes(prevTime)!;
+  if (isSimplifiedUser) {
+    // Jornada Simplificada de 2 batidas ([Entrada 1] e [Saída 1]) exclusivamente para Danyel Pereira e Thaís Grisoni
+    if (!currentSlots.e1) {
+      targetSlot = 'entry1';
+      slotNumber = 1;
+      slotName = 'Entrada 1 (Início da Jornada)';
+    } else if (!currentSlots.s1 && !currentSlots.s2) {
+      const prevTime = currentSlots.e1;
+      const prevMinutes = timeStringToMinutes(prevTime)!;
 
-    if (punchMinutes <= prevMinutes) {
+      if (punchMinutes <= prevMinutes) {
+        return {
+          success: false,
+          error: `O horário da Saída 1 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Entrada 1 (${prevTime}).`,
+        };
+      }
+
+      targetSlot = 'exit1';
+      slotNumber = 2;
+      slotName = 'Saída 1 (Fim da Jornada)';
+    } else {
+      const e1Val = currentSlots.e1;
+      const s1Val = currentSlots.s1 || currentSlots.s2;
       return {
         success: false,
-        error: `O horário da Saída 1 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Entrada 1 (${prevTime}).`,
+        error: `Todas as 2 batidas da jornada simplificada de hoje já foram preenchidas (Entrada 1: ${e1Val} • Saída 1: ${s1Val}). Nenhuma batida foi sobrescrita. Utilize o botão de edição na tabela se precisar ajustar horários.`,
       };
     }
-
-    targetSlot = 'exit1';
-    slotNumber = 2;
-    slotName = 'Saída 1 (Saída Intervalo/Almoço)';
-  } else if (!currentSlots.e2) {
-    // Batida 3 -> Atribua estritamente a entrada_2
-    const prevTime = currentSlots.s1;
-    const prevMinutes = timeStringToMinutes(prevTime)!;
-
-    if (punchMinutes <= prevMinutes) {
-      return {
-        success: false,
-        error: `O horário da Entrada 2 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Saída 1 (${prevTime}).`,
-      };
-    }
-
-    targetSlot = 'entry2';
-    slotNumber = 3;
-    slotName = 'Entrada 2 (Retorno Intervalo/Almoço)';
-  } else if (!currentSlots.s2) {
-    // Batida 4 -> Atribua estritamente a saida_2
-    const prevTime = currentSlots.e2;
-    const prevMinutes = timeStringToMinutes(prevTime)!;
-
-    if (punchMinutes <= prevMinutes) {
-      return {
-        success: false,
-        error: `O horário da Saída 2 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Entrada 2 (${prevTime}).`,
-      };
-    }
-
-    targetSlot = 'exit2';
-    slotNumber = 4;
-    slotName = 'Saída 2 (Saída Final da Jornada)';
   } else {
-    // Trava de segurança: todas as 4 batidas já registradas
-    return {
-      success: false,
-      error: `Todas as 4 batidas da jornada diária de hoje já foram preenchidas (E1: ${currentSlots.e1} • S1: ${currentSlots.s1} • E2: ${currentSlots.e2} • S2: ${currentSlots.s2}). Nenhuma batida foi sobrescrita. Utilize o botão de edição na tabela se precisar ajustar horários.`,
-    };
+    // Garante a distribuição sequencial de 4 batidas para os demais colaboradores da instituição:
+    // Se entrada_1 vazia -> Batida 1
+    // Se entrada_1 preenchida e saida_1 vazia -> Batida 2 (com validação > entrada_1)
+    // Se saida_1 preenchida e entrada_2 vazia -> Batida 3 (com validação > saida_1)
+    // Se entrada_2 preenchida e saida_2 vazia -> Batida 4 (com validação > entrada_2)
+    if (!currentSlots.e1) {
+      // Batida 1 -> Atribua estritamente a entrada_1
+      targetSlot = 'entry1';
+      slotNumber = 1;
+      slotName = 'Entrada 1 (Início da Jornada)';
+    } else if (!currentSlots.s1) {
+      // Batida 2 -> Atribua estritamente a saida_1
+      const prevTime = currentSlots.e1;
+      const prevMinutes = timeStringToMinutes(prevTime)!;
+
+      if (punchMinutes <= prevMinutes) {
+        return {
+          success: false,
+          error: `O horário da Saída 1 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Entrada 1 (${prevTime}).`,
+        };
+      }
+
+      targetSlot = 'exit1';
+      slotNumber = 2;
+      slotName = 'Saída Almoço (Saída Intervalo)';
+    } else if (!currentSlots.e2) {
+      // Batida 3 -> Atribua estritamente a entrada_2
+      const prevTime = currentSlots.s1;
+      const prevMinutes = timeStringToMinutes(prevTime)!;
+
+      if (punchMinutes <= prevMinutes) {
+        return {
+          success: false,
+          error: `O horário do Retorno Almoço (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Saída Almoço (${prevTime}).`,
+        };
+      }
+
+      targetSlot = 'entry2';
+      slotNumber = 3;
+      slotName = 'Retorno Almoço (Retorno Intervalo)';
+    } else if (!currentSlots.s2) {
+      // Batida 4 -> Atribua estritamente a saida_2
+      const prevTime = currentSlots.e2;
+      const prevMinutes = timeStringToMinutes(prevTime)!;
+
+      if (punchMinutes <= prevMinutes) {
+        return {
+          success: false,
+          error: `O horário da Saída 2 (${normalizedPunchTime}) deve ser estritamente posterior ao horário de Retorno Almoço (${prevTime}).`,
+        };
+      }
+
+      targetSlot = 'exit2';
+      slotNumber = 4;
+      slotName = 'Saída 2 (Saída Final da Jornada)';
+    } else {
+      // Trava de segurança: todas as 4 batidas já registradas
+      return {
+        success: false,
+        error: `Todas as 4 batidas da jornada diária de hoje já foram preenchidas (E1: ${currentSlots.e1} • S1: ${currentSlots.s1} • E2: ${currentSlots.e2} • S2: ${currentSlots.s2}). Nenhuma batida foi sobrescrita. Utilize o botão de edição na tabela se precisar ajustar horários.`,
+      };
+    }
   }
 
   // 4. Monta o registro consolidado com a matriz completa de 4 batidas sem perder nenhum horário

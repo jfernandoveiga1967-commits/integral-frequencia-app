@@ -270,50 +270,69 @@ export function applyTolerance(
 }
 
 /**
- * Determines if a user/schedule is configured for continuous shift (e.g. 6 hours straight without mandatory lunch punch)
- * - Returns true ONLY for 'continua_6h' (2 punches: Entrada and Saida)
- * - Returns false for 'padrao_8h' and 'personalizada' (4 punches: Entrada 1, Saida 1, Entrada 2, Saida 2)
+ * Identifica os colaboradores com jornada simplificada de 2 batidas diárias ([Entrada 1] e [Saída 1]),
+ * aplicável exclusivamente para Danyel Pereira e Thaís Grisoni conforme diretriz institucional.
+ */
+export function isSimplifiedTwoPunchUser(
+  user?: Partial<UserProfile> | null,
+  employeeIdentifier?: string
+): boolean {
+  const target = user || {};
+  const name = (target.name || employeeIdentifier || '').trim().toLowerCase();
+  const email = (target.email || employeeIdentifier || '').trim().toLowerCase();
+  const id = (target.id || employeeIdentifier || '').trim().toLowerCase();
+
+  const isDanyel =
+    id === 'usr_danyelpereira' ||
+    email === 'danyel.pereira@crescercampinas.com.br' ||
+    name.includes('danyel');
+
+  const isThais =
+    id === 'usr_nutri_1' ||
+    email === 'thaisgriisoni@gmail.com' ||
+    name.includes('thaís grisoni') ||
+    name.includes('thais grisoni') ||
+    name.includes('thais') ||
+    name.includes('thaís');
+
+  return isDanyel || isThais;
+}
+
+/**
+ * Determina se o colaborador deve utilizar a jornada simplificada de 2 batidas diárias ([Entrada 1] e [Saída 1]).
+ * Regra institucional:
+ * - Aplicada EXCLUSIVAMENTE para Danyel Pereira e Thaís Grisoni (ou se explicitamente configurada como 'continua_6h').
+ * - Todos os demais colaboradores da instituição seguem a regra padrão de 4 batidas diárias (Entrada 1, Saída Almoço, Retorno Almoço, Saída 2).
  */
 export function isContinuousShift(
   user?: Partial<UserProfile> | null,
   contractSchedule?: string
 ): boolean {
-  // If explicitly set to Standard (8h+) or Custom -> ALWAYS false (must show 4 punch columns: Entrada 1, Saída 1, Entrada 2, Saída 2)
-  if (user?.workShiftType === 'padrao_8h' || user?.workShiftType === 'personalizada') {
-    return false;
+  // 1. Identificação prioritária dos perfis com 2 batidas simplificadas
+  if (isSimplifiedTwoPunchUser(user)) {
+    return true;
   }
 
-  // If explicitly set to Continuous 6h -> true (shows 2 punch columns: Entrada, Saída)
+  // 2. Se explicitamente configurado no perfil como 'continua_6h'
   if (user?.workShiftType === 'continua_6h') {
     return true;
   }
 
-  // Fallback for contract schedule:
+  // 3. Fallback inteligente apenas se o horário contratual for estritamente turno único de até 6h
+  // e o colaborador NÃO tiver a jornada padrão 8h ou personalizada
+  if (user?.workShiftType === 'padrao_8h' || user?.workShiftType === 'personalizada') {
+    return false;
+  }
+
   const sched = (contractSchedule || user?.contractSchedule || '').trim();
   if (sched) {
-    // If it contains a lunch interval separator (/ or ;) or mentions almoço / intervalo -> 4 punch columns
     if (sched.includes('/') || sched.includes(';') || sched.toLowerCase().includes('alm') || sched.toLowerCase().includes('intervalo')) {
       return false;
     }
-    const { shiftsCount, dailyHours } = calculateDailyHoursFromSchedule(sched);
-    if (shiftsCount > 1 || dailyHours > 6) {
-      return false;
-    }
-    // Single continuous shift with 1 entrance and 1 exit (e.g. 11:40 - 17:40)
-    if (shiftsCount === 1) {
-      return true;
-    }
   }
 
-  if (user?.contractDailyHours !== undefined && user.contractDailyHours > 6) {
-    return false;
-  }
-  if (user?.contractDailyMinutes !== undefined && user.contractDailyMinutes > 360) {
-    return false;
-  }
-
-  // Default: true (2 punches: Entrada e Saída) for standard single shifts in the school
-  return true;
+  // Regra padrão da instituição para os demais colaboradores: 4 batidas diárias
+  return false;
 }
 
 /**
@@ -330,7 +349,7 @@ export function isDayShiftComplete(
   const s2 = (record.exit2 || '').trim();
 
   return isContinuous
-    ? Boolean(e1 && (s2 || s1))
+    ? Boolean(e1 && (s1 || s2))
     : Boolean(e1 && s1 && e2 && s2);
 }
 
@@ -545,17 +564,22 @@ export function getDayPontoStatus({
     };
   }
 
-  if (status === 'falta_injustificada') {
+  if (
+    status === 'falta_injustificada' ||
+    status === 'Falta Não Abonada (Descontar 1 Diária)' ||
+    status === 'falta_nao_abonada'
+  ) {
+    const isNaoAbonada = status === 'Falta Não Abonada (Descontar 1 Diária)' || status === 'falta_nao_abonada';
     return {
       statusKey: 'falta_injustificada',
-      label: 'FALTA (-1D)',
-      badgeBg: 'bg-rose-100',
-      badgeText: 'text-rose-800',
+      label: isNaoAbonada ? 'FALTA NÃO ABONADA (-1D)' : 'FALTA (-1D)',
+      badgeBg: 'bg-rose-600',
+      badgeText: 'text-white font-black shadow-sm',
       isShiftComplete: false,
       hasPunches: false,
       isToday,
       isPast,
-      tooltip: 'Falta Injustificada (Desconto integral de 1 Diária)',
+      tooltip: 'Falta Não Abonada (Descontar 1 Diária)',
     };
   }
 
@@ -713,7 +737,8 @@ export function calculateDayWorkedMinutes(
   toleranceMinutes = 5,
   explicitDailyMinutes?: number,
   isDiaDescansoParam?: boolean,
-  holidays?: HolidayItem[]
+  holidays?: HolidayItem[],
+  user?: Partial<UserProfile> | null
 ): DayWorkedMinutesResult {
   if (!record) {
     return {
@@ -839,14 +864,20 @@ export function calculateDayWorkedMinutes(
     ? explicitDailyMinutes
     : (parsedSchedMinutes > 0 ? parsedSchedMinutes : Math.round(dailyHours * 60));
 
-  if (recStatus === 'falta_injustificada') {
+  if (
+    recStatus === 'falta_injustificada' ||
+    recStatus === 'Falta Não Abonada (Descontar 1 Diária)' ||
+    recStatus === 'falta_nao_abonada'
+  ) {
     return {
       workedMinutes: 0,
       overtimeMinutes: 0,
       overtime50Minutes: 0,
       overtime100Minutes: 0,
       missingMinutes: expectedDailyMinutes,
-      effectiveSummary: 'Falta Injustificada',
+      effectiveSummary: recStatus === 'Falta Não Abonada (Descontar 1 Diária)' || recStatus === 'falta_nao_abonada'
+        ? 'Falta Não Abonada (Descontar 1 Diária)'
+        : 'Falta Injustificada',
       isDiaDescanso: false,
       isDiaDescansoTrabalhado: false,
       expectedDailyMinutes,
@@ -856,18 +887,24 @@ export function calculateDayWorkedMinutes(
   let period1 = 0;
   let period2 = 0;
 
-  const continuous = isContinuousShift(null, contractSchedule);
+  const isSimplified = isSimplifiedTwoPunchUser(user, record?.userName || record?.userId);
+  const continuous = isSimplified || isContinuousShift(user, contractSchedule);
 
   if (continuous) {
-    if (e1 !== null && (s2 !== null || s1 !== null) && e2 === null) {
-      const punchOut = s2 !== null ? s2 : s1!;
-      const startDiff = e1 - expStart;
-      const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
+    if (e1 !== null && (s1 !== null || s2 !== null)) {
+      const punchOut = s1 !== null ? s1 : s2!;
+      // Para Danyel Pereira e Thaís Grisoni, o cálculo diário considera a diferença direta entre [Saída 1] e [Entrada 1]
+      if (isSimplified) {
+        period1 = Math.max(0, punchOut - e1);
+      } else {
+        const startDiff = e1 - expStart;
+        const effectiveStart = Math.abs(startDiff) <= toleranceMinutes ? expStart : e1;
 
-      const endDiff = punchOut - expEnd;
-      const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : punchOut;
+        const endDiff = punchOut - expEnd;
+        const effectiveEnd = Math.abs(endDiff) <= toleranceMinutes ? expEnd : punchOut;
 
-      period1 = Math.max(0, effectiveEnd - effectiveStart);
+        period1 = Math.max(0, effectiveEnd - effectiveStart);
+      }
     }
   } else {
     const timeRegex = /\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b/g;
@@ -1374,8 +1411,11 @@ export function calculateMonthlyPontoFinancials({
         }
       }
     } else {
-      // DIAS ÚTEIS REGULARES
-      if (recStatus === 'falta_injustificada') {
+      if (
+        recStatus === 'falta_injustificada' ||
+        recStatus === 'Falta Não Abonada (Descontar 1 Diária)' ||
+        recStatus === 'falta_nao_abonada'
+      ) {
         unjustifiedAbsencesCount++;
       } else if (recStatus === 'feriado') {
         paidHolidaysCount++;
@@ -1976,7 +2016,7 @@ export function repairSinglePontoRecord(
     saida_1: record.exit1 || '',
     entrada_2: record.entry2 || '',
     saida_2: resolvedExit,
-    status: record.status === 'falta_injustificada' ? 'normal' : (record.status || 'normal'),
+    status: (record.status === 'falta_injustificada' || record.status === 'Falta Não Abonada (Descontar 1 Diária)' || record.status === 'falta_nao_abonada') ? 'normal' : (record.status || 'normal'),
     updatedAt: nowIso,
     updatedBy: 'Restauração Automática de Batida',
     note: record.note

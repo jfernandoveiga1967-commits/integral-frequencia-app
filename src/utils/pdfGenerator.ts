@@ -1872,7 +1872,11 @@ export function drawSingleTimecardPage(
       workedHoursStr = formatMinutesToHoursAndMinutes(dayCalc.workedMinutes);
     } else if (isDiaDescanso) {
       workedHoursStr = (status === 'feriado' || status === 'recesso') ? contractDailyHoursFormatted : '-';
-    } else if (status === 'falta_injustificada') {
+    } else if (
+      status === 'falta_injustificada' ||
+      status === 'Falta Não Abonada (Descontar 1 Diária)' ||
+      status === 'falta_nao_abonada'
+    ) {
       workedHoursStr = '0h00min';
     }
 
@@ -1931,8 +1935,8 @@ export function drawSingleTimecardPage(
   });
 
   const tableHead = isContinuous
-    ? [['Dia', 'Sem.', 'Entrada', 'Saída', 'Horas', 'Status / Ocorrência', 'Observações']]
-    : [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']];
+    ? [['Dia', 'Sem.', 'Entrada 1', 'Saída 1', 'Horas', 'Status / Ocorrência', 'Observações']]
+    : [['Dia', 'Sem.', 'Entrada 1', 'Saída Almoço', 'Retorno Almoço', 'Saída 2', 'Horas', 'Status / Ocorrência', 'Observações']];
 
   // Column styles fitting exactly 194mm (8mm margins on A4 portrait)
   const columnStyles = isContinuous
@@ -2001,7 +2005,11 @@ export function drawSingleTimecardPage(
           if (isBeforeAdmissao) {
             data.cell.styles.fillColor = [241, 245, 249]; // light slate neutro
             data.cell.styles.textColor = [100, 116, 139]; // slate-500
-          } else if (status === 'falta_injustificada') {
+          } else if (
+            status === 'falta_injustificada' ||
+            status === 'Falta Não Abonada (Descontar 1 Diária)' ||
+            status === 'falta_nao_abonada'
+          ) {
             data.cell.styles.fillColor = [254, 226, 226]; // light red
             data.cell.styles.textColor = [153, 27, 27];
             data.cell.styles.fontStyle = 'bold';

@@ -66,22 +66,17 @@ import { saveMealConfig } from './utils/mealFinanceUtils';
 export { doc, getDoc, updateDoc, deleteDoc };
 
 const app = initializeApp(firebaseConfig);
-// Configuração validada: experimentalForceLongPolling mantido ativo para proteger contra bloqueios
-// de proxies, firewalls e instabilidades em redes móveis (latência idêntica ao streaming ~100ms).
+// Configuração recomendada: experimentalAutoDetectLongPolling utiliza streaming WebChannel HTTP/2
+// e faz fallback dinâmico para long-polling caso detecte proxy ou bloqueio de rede.
 export const db = initializeFirestore(
   app,
   {
     localCache: memoryLocalCache(),
-    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: true,
     ignoreUndefinedProperties: true,
   },
   firebaseConfig.firestoreDatabaseId
 );
-
-// Força reconexão imediata à rede Firestore
-try {
-  enableNetwork(db).catch(() => {});
-} catch {}
 
 export const auth = getAuth(app);
 
@@ -233,7 +228,7 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
       });
 
     const timeoutPromise = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), 4000);
+      setTimeout(() => resolve(false), 10000);
     });
 
     const success = await Promise.race([pingPromise, timeoutPromise]);

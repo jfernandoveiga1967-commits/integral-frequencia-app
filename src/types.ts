@@ -161,7 +161,11 @@ export type PontoStatus =
   | 'compensado'
   | 'sabado'
   | 'domingo'
-  | 'nao_admitido';
+  | 'nao_admitido'
+  | 'falta_nao_abonada'
+  | 'Falta Não Abonada (Descontar 1 Diária)';
+
+export type WorkShiftType = 'continua_6h' | 'padrao_8h' | 'personalizada';
 
 export interface WorkLocation {
   id: string; // ex: 'sede', 'academia_fit', 'ext_quadra_esportiva_a1b2'
@@ -235,7 +239,7 @@ export interface PontoMonthClosing {
   contractDailyMinutes?: number; // e.g. 528 (8h 48min)
   contractDailyHoursFormatted?: string; // e.g. "8h 48min"
   contractSchedule: string; // default "11:40 - 17:40"
-  workShiftType?: 'continua_6h' | 'padrao_8h' | 'personalizada';
+  workShiftType?: WorkShiftType;
   companyName: string; // default "GADAL - Gestão e Apoio"
   institutionName: string; // default "Instituto Educacional Crescer"
   pixKey?: string;
