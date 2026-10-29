@@ -631,6 +631,70 @@ export interface SofiaResponsePayload {
   isAiGenerated?: boolean;
 }
 
+// ----------------------------------------------------
+// Novas tipagens do Agente Autônomo e Resolutivo Sofia (Function Calling)
+// ----------------------------------------------------
+export type SofiaAgentToolName =
+  | 'gerarEspelhoPontoPDF'
+  | 'gerarAutorizacaoEntradaSaidaPDF'
+  | 'registrarFaltaFrequencia'
+  | 'dispararAlertaWhatsApp'
+  | 'analisarDesarranjosDoDia'
+  | 'obterResumoFrequenciaPorData'
+  | 'cadastrarAluno'
+  | 'editarAluno'
+  | 'cadastrarUsuario'
+  | 'gerarListaChamadaPDF'
+  | 'lancarFrequenciaTurma'
+  | 'cadastrarRefeicaoCardapio';
+
+export interface SofiaToolCall {
+  name: SofiaAgentToolName;
+  args: Record<string, any>;
+}
+
+export interface SofiaToolResult {
+  toolName: SofiaAgentToolName;
+  success: boolean;
+  message: string;
+  data?: any;
+  downloadUrl?: string;
+  filename?: string;
+  whatsappUrl?: string;
+}
+
+export interface SofiaChatMessage {
+  id: string;
+  sender: 'user' | 'sofia';
+  text: string;
+  timestamp: string;
+  toolCall?: SofiaToolCall;
+  toolResult?: SofiaToolResult;
+  toolExecuting?: boolean;
+  action?: SofiaActionPayload;
+}
+
+export interface AppStateSummary {
+  currentTime: string;
+  currentDate: string; // YYYY-MM-DD
+  dayOfWeek: string;
+  formattedDate: string;
+  totalAlunosAtivos: number;
+  totalPresentesHoje: number;
+  totalFaltasHoje: number;
+  totalAlunosEsperadosHoje: number;
+  totalChamadasPendentesBlocoAtual: number;
+  turmasComChamadaPendenteHoje: string[];
+  currentUser: {
+    id?: string;
+    name: string;
+    email: string;
+    role: string;
+    cargoLabel?: string;
+    isAdmin: boolean;
+  };
+}
+
 export interface BlockConfirmation {
   id: string; // e.g. "conf_${date}_${turma}_${activityId}_${timeSlot}"
   turma: string;
@@ -641,3 +705,4 @@ export interface BlockConfirmation {
   confirmedBy?: string; // Nome ou ID do monitor responsável
   confirmadoNoBloco: boolean;
 }
+

@@ -943,6 +943,301 @@ Responda estritamente em formato JSON:
   }
 });
 
+// Catálogo de declarações de funções oficiais da Sofia para o Gemini
+const SOFIA_SERVER_TOOL_DECLARATIONS = [
+  {
+    name: 'gerarEspelhoPontoPDF',
+    description: 'Gera o Espelho de Ponto oficial em PDF de um colaborador para determinado mês e ano.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        colaboradorId: { type: 'STRING', description: 'Nome completo ou e-mail do colaborador' },
+        mesAno: { type: 'STRING', description: 'Mês e ano no formato MM/AAAA ou YYYY-MM (ex: 09/2026)' },
+      },
+      required: ['colaboradorId', 'mesAno'],
+    },
+  },
+  {
+    name: 'gerarAutorizacaoEntradaSaidaPDF',
+    description: 'Gera documento oficial do Colégio Crescer de autorização de entrada (atraso) ou saída antecipada de um aluno em PDF.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'Nome completo ou ID do aluno' },
+        motivo: { type: 'STRING', description: 'Motivo: "atraso" ou "saida_antecipada"' },
+        horario: { type: 'STRING', description: 'Horário do registro (ex: "14:15")' },
+        justificativa: { type: 'STRING', description: 'Justificativa ou observação apresentada' },
+      },
+      required: ['alunoId', 'motivo', 'horario'],
+    },
+  },
+  {
+    name: 'registrarFaltaFrequencia',
+    description: 'Registra a falta de um aluno na chamada da escola com justificativa opcional.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'Nome completo ou ID do aluno' },
+        data: { type: 'STRING', description: 'Data da falta no formato YYYY-MM-DD' },
+        justificativa: { type: 'STRING', description: 'Justificativa ou motivo da falta' },
+      },
+      required: ['alunoId', 'data'],
+    },
+  },
+  {
+    name: 'dispararAlertaWhatsApp',
+    description: 'Prepara e envia um alerta institucional via WhatsApp para um responsável ou para a coordenação.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        destinatario: { type: 'STRING', description: 'Telefone, nome ou "coordenacao"' },
+        mensagem: { type: 'STRING', description: 'Texto da mensagem do alerta' },
+      },
+      required: ['destinatario', 'mensagem'],
+    },
+  },
+  {
+    name: 'analisarDesarranjosDoDia',
+    description: 'Diagnostica turmas com chamada pendente no bloco atual, ausências inesperadas e inconsistências de ponto.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        foco: { type: 'STRING', description: 'Foco da análise ("geral", "frequencia", "ponto")' },
+      },
+    },
+  },
+  {
+    name: 'obterResumoFrequenciaPorData',
+    description: 'Consulta o histórico de frequência de alunos e relatório de faltas e presenças para uma data específica passada ou informada (ex: ontem, anteontem, dia 28 ou data YYYY-MM-DD / DD/MM/YYYY). Retorna o total de alunos faltantes, lista de faltas por turma e aluno, e o total de presenças consolidadas.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        data: { type: 'STRING', description: 'Data da consulta no formato YYYY-MM-DD ou DD/MM/YYYY (ex: ontem calculado ou data solicitada)' },
+      },
+      required: ['data'],
+    },
+  },
+  {
+    name: 'cadastrarAluno',
+    description: 'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        nome: { type: 'STRING', description: 'Nome completo do aluno' },
+        turmaId: { type: 'STRING', description: 'Identificador ou nome da turma (ex: "1º Ano Azul", "Maternal")' },
+        responsavel: { type: 'STRING', description: 'Nome do responsável legal pelo aluno' },
+        telefone: { type: 'STRING', description: 'Telefone ou WhatsApp de contato do responsável' },
+        horarioEntradaSaida: { type: 'STRING', description: 'Horário contratual de entrada e saída (ex: "11:40 - 17:40" ou "17:30")' },
+      },
+      required: ['nome', 'turmaId', 'responsavel', 'telefone'],
+    },
+  },
+  {
+    name: 'editarAluno',
+    description: 'Atualiza os dados cadastrais de um aluno existente no sistema.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'ID ou nome completo do aluno a ser editado' },
+        dadosAtualizados: {
+          type: 'OBJECT',
+          description: 'Campos atualizados do aluno (nome, turma, status, horarioSaida, notes, etc.)',
+        },
+      },
+      required: ['alunoId', 'dadosAtualizados'],
+    },
+  },
+  {
+    name: 'cadastrarUsuario',
+    description: 'Registra um novo usuário ou colaborador institucional no sistema do Colégio Crescer com perfil e cargo.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        nome: { type: 'STRING', description: 'Nome completo do colaborador' },
+        email: { type: 'STRING', description: 'E-mail institucional ou pessoal do colaborador' },
+        funcao: { type: 'STRING', description: 'Função desempenhada no Integral' },
+        cargo: { type: 'STRING', description: 'Cargo oficial' },
+        perfil: {
+          type: 'STRING',
+          description: 'Perfil de acesso institucional: "ADMIN", "MONITOR" ou "ADI"',
+          enum: ['ADMIN', 'MONITOR', 'ADI'],
+        },
+      },
+      required: ['nome', 'email', 'funcao', 'cargo', 'perfil'],
+    },
+  },
+  {
+    name: 'gerarListaChamadaPDF',
+    description: 'Gera o PDF oficial da lista de chamada nominal de uma turma específica para download imediato.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turmaId: { type: 'STRING', description: 'Nome da turma (ex: "1º Ano Azul", "Mini Maternal", "5º Ano")' },
+      },
+      required: ['turmaId'],
+    },
+  },
+  {
+    name: 'lancarFrequenciaTurma',
+    description: 'Realiza a chamada completa em lote de uma turma em determinada data, marcando presença ou falta de cada aluno.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turmaId: { type: 'STRING', description: 'Nome ou identificador da turma' },
+        data: { type: 'STRING', description: 'Data da chamada no formato YYYY-MM-DD' },
+        chamadas: {
+          type: 'ARRAY',
+          description: 'Lista de registros contendo alunoId e booleano presente (true/false)',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              alunoId: { type: 'STRING', description: 'ID ou nome do aluno' },
+              presente: { type: 'BOOLEAN', description: 'true para presença, false para falta' },
+              observation: { type: 'STRING', description: 'Observação opcional' },
+            },
+            required: ['alunoId', 'presente'],
+          },
+        },
+      },
+      required: ['turmaId', 'data', 'chamadas'],
+    },
+  },
+  {
+    name: 'cadastrarRefeicaoCardapio',
+    description: 'Cadastra ou atualiza uma refeição (Almoço ou Lanche) no cardápio de uma data específica.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        data: { type: 'STRING', description: 'Data da refeição no formato YYYY-MM-DD ou DD/MM/YYYY' },
+        tipo: {
+          type: 'STRING',
+          description: 'Tipo da refeição: "Almoço" ou "Lanche"',
+          enum: ['Almoço', 'Lanche'],
+        },
+        descricao: { type: 'STRING', description: 'Descrição detalhada do prato ou lanche' },
+      },
+      required: ['data', 'tipo', 'descricao'],
+    },
+  },
+];
+
+// API Route: Agente Autônomo e Resolutivo Sofia (Chat com Function Calling e RAG Local)
+app.post('/api/sofia/chat', async (req, res) => {
+  try {
+    const { message, history = [], appState, toolResult, toolCall } = req.body;
+
+    const systemInstruction = `Você é a Sofia, a Assistente Inteligente Oficial do Programa Integral do Colégio Crescer. Você possui conhecimento total da estrutura pedagógica, rotinas de ponto, chamadas de frequência, normas internas, cardápio e gestão de turmas. Seu tom de voz é profissional, acolhedor, resolutivo e seguro. Você não é um bot rígido de menus: você conversa de forma natural, analisa a situação atual da escola, identifica inconsistências proativamente e executa ações diretas no sistema quando solicitada.
+
+PERMISSÕES E CAPACIDADE ADMINISTRATIVA PLENA:
+Você possui permissões administrativas totais para criar alunos, cadastrar usuários, lançar chamadas, alterar cardápios e gerar qualquer PDF do sistema. Quando o usuário pedir para cadastrar, editar ou lançar qualquer dado, invoque a ferramenta correspondente imediatamente e confirme a execução com os detalhes do registro efetuado.
+
+ESTADO GLOBAL EM TEMPO REAL DA ESCOLA (RAG LOCAL):
+- Horário Atual: ${appState?.currentTime || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+- Data Atual: ${appState?.formattedDate || appState?.currentDate || new Date().toLocaleDateString('pt-BR')} (${appState?.dayOfWeek || ''})
+- Total de Alunos Ativos: ${appState?.totalAlunosAtivos ?? 'Carregado no sistema'}
+- Presenças Confirmadas Hoje: ${appState?.totalPresentesHoje ?? 0}
+- Faltas Registradas Hoje: ${appState?.totalFaltasHoje ?? 0}
+- Chamadas Pendentes no Bloco Atual: ${appState?.totalChamadasPendentesBlocoAtual ?? 0}
+- Turmas com Chamada Pendente Hoje: ${(appState?.turmasComChamadaPendenteHoje || []).join(', ') || 'Nenhuma'}
+- Usuário Atual: ${appState?.currentUser?.name || 'Administrador'} (${appState?.currentUser?.cargoLabel || appState?.currentUser?.role || 'Coordenação'})
+
+DIRETRIZES DE ATUAÇÃO E RESOLUÇÃO:
+1. Responda em português brasileiro fluente, claro, profissional e acolhedor.
+2. Quando a solicitação envolver criar/editar aluno, cadastrar usuário, lançar chamada da turma, cadastrar refeição no cardápio, gerar lista nominal em PDF ou espelho de ponto, chame a ferramenta correspondente imediatamente através de function calling.
+3. CONSULTA DE HISTÓRICO DE FREQUÊNCIA E TERMOS TEMPORAIS:
+   - Interprete termos temporais como "ontem", "anteontem", "dia anterior", "semana passada" ou datas numéricas específicas (ex: "dia 28", "28/10", "15 de setembro").
+   - REGRA OBRIGATÓRIA: Quando o usuário perguntar pelas faltas, presenças ou chamada de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (por exemplo, a data de ontem correspondente à data atual), e NUNCA retornar o diagnóstico em tempo real do momento atual ("analisarDesarranjosDoDia").
+4. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
+
+    const ai = getAIClient();
+    if (!ai) {
+      return res.json({
+        success: false,
+        isFallback: true,
+        message: 'Assistente operando em modo de processamento local integrado.',
+      });
+    }
+
+    // Se estiver reportando o resultado de uma ferramenta já executada
+    if (toolResult && toolCall) {
+      const toolFollowUpPrompt = `O usuário havia solicitado uma ação e a ferramenta "${toolCall.name}" foi executada com sucesso pelo sistema local.
+Resultado da execução: ${JSON.stringify(toolResult)}
+Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário confirmando o resultado da ação e orientando sobre os próximos passos.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [toolFollowUpPrompt],
+        config: {
+          systemInstruction,
+          temperature: 0.25,
+        },
+      });
+
+      return res.json({
+        success: true,
+        text: response.text || toolResult.message,
+      });
+    }
+
+    // Monta o histórico de conversa
+    const contentsPayload: any[] = [];
+    if (Array.isArray(history)) {
+      history.slice(-6).forEach((h: any) => {
+        if (h.text && h.sender) {
+          contentsPayload.push({
+            role: h.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: h.text }],
+          });
+        }
+      });
+    }
+
+    if (message) {
+      contentsPayload.push({
+        role: 'user',
+        parts: [{ text: message }],
+      });
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: contentsPayload,
+      config: {
+        systemInstruction,
+        tools: [{ functionDeclarations: SOFIA_SERVER_TOOL_DECLARATIONS as any }],
+        temperature: 0.25,
+      },
+    });
+
+    // Se o modelo invocou uma ferramenta
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      const call = response.functionCalls[0];
+      return res.json({
+        success: true,
+        hasFunctionCall: true,
+        toolCall: {
+          name: call.name,
+          args: call.args || {},
+        },
+        text: response.text || '',
+      });
+    }
+
+    return res.json({
+      success: true,
+      hasFunctionCall: false,
+      text: response.text || 'Como posso te auxiliar com as rotinas do Integral hoje?',
+    });
+  } catch (error: any) {
+    console.warn('[Sofia Agent API] Erro na rota de chat com Gemini:', error?.message || error);
+    return res.json({
+      success: false,
+      isFallback: true,
+      error: error?.message || 'Falha temporária de comunicação',
+    });
+  }
+});
+
 // API Route: Agente de Voz Sofia — Guia do Integral com Function Calling (Exclusivo Administrador)
 app.post('/api/gemini/voice-agent', async (req, res) => {
   try {
