@@ -115,7 +115,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newAnoLetivo, setNewAnoLetivo] = useState<number>(2027);
   const [newTipoSaida, setNewTipoSaida] = useState<'PAIS' | 'TRANSPORTE_ESCOLAR'>('PAIS');
   const [newNomeCondutor, setNewNomeCondutor] = useState<string>('');
-  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
+  const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina']);
   const [newHasReforco, setNewHasReforco] = useState(false);
   const [newReforcoStartDate, setNewReforcoStartDate] = useState<string>('');
   const [newReforcoEndDate, setNewReforcoEndDate] = useState<string>('');
@@ -432,7 +432,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
         const isReforco = selectedActivity === 'Reforço';
         const matchesActivity =
-          selectedActivity === 'TODAS'
+          selectedActivity === 'TODAS' || (selectedActivity as string) === 'TODOS'
             ? true
             : isReforco
             ? ((student.modalidadesEspeciais || []).includes('Reforço') || studentActs.includes('Reforço'))
@@ -570,6 +570,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         })
       );
       setNewName('');
+      setNewActivities(['Rotina']);
       setNewHasReforco(false);
       setNewReforcoStartDate('');
       setNewReforcoEndDate('');
@@ -825,6 +826,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <button
                 id="btn-toggle-add-student"
                 onClick={() => {
+                  if (!showAddForm) {
+                    setNewActivities(['Rotina']);
+                  }
                   setShowAddForm(!showAddForm);
                   setShowBatchForm(false);
                 }}
@@ -2518,7 +2522,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span>Todos ({students.length})</span>
+                <span>Todos ({studentsForSelectedYear.length})</span>
               </button>
             </div>
           </div>
@@ -2564,11 +2568,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 <option value="TODAS">
                   {isCoordenador
                     ? `Todas as Turmas (${totalAtivosCount} Alunos Ativos)`
-                    : `Todas Minhas Turmas (${students.filter((s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && allowedTurmas.includes(s.turma)).length} Alunos Ativos)`}
+                    : `Todas Minhas Turmas (${studentsForSelectedYear.filter((s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && allowedTurmas.includes(s.turma)).length} Alunos Ativos)`}
                 </option>
               )}
               {turmasList.map((t) => {
-                const count = students.filter(
+                const count = studentsForSelectedYear.filter(
                   (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
                 ).length;
                 return (
@@ -2603,9 +2607,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               onChange={(e) => setSelectedActivity(e.target.value as ActivityType | 'TODAS')}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-800 font-medium"
             >
-              <option value="TODOS">Todas as Atividades ({totalAtivosCount} alunos)</option>
+              <option value="TODAS">Todas as Atividades ({totalAtivosCount} alunos)</option>
               {extracurricularRollCallActivities.map((a) => {
-                const count = students.filter(
+                const count = studentsForSelectedYear.filter(
                   (s) =>
                     (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
                     ((s.activities || []).includes(a.id) ||
