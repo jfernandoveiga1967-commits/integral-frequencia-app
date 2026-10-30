@@ -6,7 +6,7 @@ import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGe
 import { PdfViewerModal } from './PdfViewerModal';
 import { RosterReportModal } from './RosterReportModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
-import { sortTurmasPedagogical } from '../utils/turmaUtils';
+import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
 import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer } from 'lucide-react';
 
@@ -183,6 +183,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [originalStudentForEdit, setOriginalStudentForEdit] = useState<Student | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
@@ -307,7 +308,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
     setEditFormError(null);
     const today = toISODateString(new Date());
-    setEditingStudent({
+    const prepared: Student = {
       ...student,
       tipoContrato: student.tipoContrato || 'regular',
       dataInicioContrato: student.dataInicioContrato || today,
@@ -326,7 +327,59 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       anoLetivo: student.anoLetivo || 2026,
       tipoSaida: student.tipoSaida || 'PAIS',
       nomeCondutor: student.nomeCondutor || '',
-    });
+    };
+    setOriginalStudentForEdit(prepared);
+    setEditingStudent(prepared);
+  };
+
+  const handleToggleEditAnoLetivo = (targetYear: number) => {
+    if (!editingStudent) return;
+    const currentYear = editingStudent.anoLetivo || 2026;
+    if (currentYear === targetYear) return;
+
+    if (targetYear === 2027) {
+      // a) Promoção Automática de Turma:
+      // Identifica a turma atual (ex: 1º Ano Azul) e seleciona a turma do ano seguinte preservando cor/linha
+      const baseTurma = originalStudentForEdit?.turma || editingStudent.turma;
+      const nextTurma = (getNextAcademicTurma(baseTurma, turmasList) || baseTurma) as TurmaType;
+
+      setEditingStudent({
+        ...editingStudent,
+        anoLetivo: 2027,
+        turma: nextTurma,
+        // b) Reset de Modalidades Extracurriculares: apenas ['Rotina']
+        activities: ['Rotina'],
+        modalidadesEspeciais: [],
+        specialties: [],
+        reforcoStartDate: undefined,
+        reforcoEndDate: undefined,
+        // c) Limpeza dos Horários de Saída: zera horários individuais
+        horariosSaida: {},
+        // d) Reset de Status e Contrato: Ativo e Regular
+        status: 'ativo',
+        statusMatricula: 'ativo',
+        inactivationDate: undefined,
+        inactivationReason: undefined,
+        tipoContrato: 'regular',
+        dataInicioContrato: undefined,
+        dataTerminoContrato: undefined,
+        diasContratados: undefined,
+      });
+    } else {
+      // e) Se o usuário alternar de volta para "2026", restaura os dados e horários originais do cadastro do aluno
+      if (originalStudentForEdit) {
+        setEditingStudent({
+          ...originalStudentForEdit,
+          name: editingStudent.name || originalStudentForEdit.name,
+          anoLetivo: 2026,
+        });
+      } else {
+        setEditingStudent({
+          ...editingStudent,
+          anoLetivo: 2026,
+        });
+      }
+    }
   };
 
   const handleOpenDelete = (student: Student) => {
@@ -738,6 +791,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         type: 'success',
       });
       setEditingStudent(null);
+      setOriginalStudentForEdit(null);
       setEditFormError(null);
     } catch (err: any) {
       console.error('Error saving student modifications:', err);
@@ -1635,6 +1689,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 disabled={isSavingEdit}
                 onClick={() => {
                   setEditingStudent(null);
+                  setOriginalStudentForEdit(null);
                   setEditFormError(null);
                 }}
                 className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 p-1 rounded-lg hover:bg-slate-100 transition-colors"
@@ -1719,7 +1774,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       value={2026}
                       checked={(editingStudent.anoLetivo || 2026) === 2026}
                       disabled={isSavingEdit}
-                      onChange={() => setEditingStudent({ ...editingStudent, anoLetivo: 2026 })}
+                      onChange={() => handleToggleEditAnoLetivo(2026)}
                       className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
                     />
                     <span>2026</span>
@@ -1731,13 +1786,24 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       value={2027}
                       checked={(editingStudent.anoLetivo || 2026) === 2027}
                       disabled={isSavingEdit}
-                      onChange={() => setEditingStudent({ ...editingStudent, anoLetivo: 2027 })}
+                      onChange={() => handleToggleEditAnoLetivo(2027)}
                       className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
                     />
                     <span>2027</span>
                   </label>
                 </div>
               </div>
+              {(editingStudent.anoLetivo || 2026) === 2027 && (
+                <div className="p-2.5 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 space-y-1 animate-in fade-in duration-150">
+                  <div className="flex items-center space-x-1.5 font-bold text-indigo-800">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Preparando Rematrícula para 2027:</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-950/80 leading-relaxed pl-5">
+                    Turma promovida para <strong>{editingStudent.turma}</strong>. Modalidades resetadas para <em>Rotina</em> e horários de saída liberados para preenchimento.
+                  </p>
+                </div>
+              )}
 
               {/* Bloco Logística de Deslocamento / Saída */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
@@ -2403,6 +2469,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 disabled={isSavingEdit}
                 onClick={() => {
                   setEditingStudent(null);
+                  setOriginalStudentForEdit(null);
                   setEditFormError(null);
                 }}
                 className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"

@@ -117,3 +117,116 @@ export function sortTurmasPedagogical(turmas: string[]): string[] {
     return a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 }
+
+const ORDERED_STAGE_LABELS = [
+  'Mini Maternal',
+  'Maternal',
+  'Infantil 1',
+  'Infantil 2',
+  '1º Ano',
+  '2º Ano',
+  '3º Ano',
+  '4º Ano',
+  '5º Ano',
+  '6º Ano',
+  '7º Ano',
+  '8º Ano',
+  '9º Ano',
+];
+
+function parseTurmaStage(turma: string): { stageIndex: number; color: string } {
+  const t = (turma || '').trim();
+  const lower = t.toLowerCase();
+
+  const colorMatch = t.match(/\b(azul|vermelho|amarelo|verde|laranja|branco|rosa|ouro|prata)\b/i);
+  const color = colorMatch ? colorMatch[0] : '';
+
+  if (
+    lower.includes('mini maternal') ||
+    lower.includes('mini-maternal') ||
+    lower.includes('minimaternal') ||
+    lower.startsWith('mini')
+  ) {
+    return { stageIndex: 0, color };
+  }
+  if (lower.includes('maternal')) {
+    return { stageIndex: 1, color };
+  }
+  if (
+    lower.includes('infantil 1') ||
+    (lower.includes('infantil i') && !lower.includes('infantil ii') && !lower.includes('infantil iii')) ||
+    lower.includes('pré 1') ||
+    lower.includes('pre 1') ||
+    lower.includes('pré i') ||
+    lower.includes('pre i')
+  ) {
+    return { stageIndex: 2, color };
+  }
+  if (
+    lower.includes('infantil 2') ||
+    (lower.includes('infantil ii') && !lower.includes('infantil iii')) ||
+    lower.includes('pré 2') ||
+    lower.includes('pre 2') ||
+    lower.includes('pré ii') ||
+    lower.includes('pre ii')
+  ) {
+    return { stageIndex: 3, color };
+  }
+  if (
+    lower.includes('infantil 3') ||
+    lower.includes('infantil iii') ||
+    lower.includes('pré 3') ||
+    lower.includes('pre 3')
+  ) {
+    return { stageIndex: 4, color };
+  }
+
+  const anoMatch = lower.match(/(\d+)\s*(?:º|°|o|ª|\.|\-)?\s*(?:ano|série|serie)?/);
+  if (anoMatch) {
+    const num = parseInt(anoMatch[1], 10);
+    if (num >= 1 && num <= 9) {
+      // 1º Ano -> stageIndex 4, 2º Ano -> 5, 3º Ano -> 6, ..., 6º Ano -> 9
+      return { stageIndex: 3 + num, color };
+    }
+  }
+
+  return { stageIndex: -1, color };
+}
+
+/**
+ * Returns the next academic year class for rematriculation (e.g. 2026 -> 2027),
+ * preserving segment progression and class color/branch (e.g. "1º Ano Azul" -> "2º Ano Azul").
+ */
+export function getNextAcademicTurma(currentTurma: string, availableTurmas?: string[]): string {
+  if (!currentTurma) return availableTurmas?.[0] || '';
+  const parsed = parseTurmaStage(currentTurma);
+  if (parsed.stageIndex < 0) return currentTurma;
+
+  const nextStageIndex = parsed.stageIndex + 1;
+  if (nextStageIndex >= ORDERED_STAGE_LABELS.length) return currentTurma;
+
+  const nextLabel = ORDERED_STAGE_LABELS[nextStageIndex];
+  const list = availableTurmas && availableTurmas.length > 0 ? availableTurmas : [];
+
+  // 1. Try to find an exact match with the same color in availableTurmas
+  if (parsed.color && list.length > 0) {
+    const exactColorMatch = list.find((t) => {
+      const p = parseTurmaStage(t);
+      return p.stageIndex === nextStageIndex && p.color.toLowerCase() === parsed.color.toLowerCase();
+    });
+    if (exactColorMatch) return exactColorMatch;
+  }
+
+  // 2. Try to find any turma matching the next stage in availableTurmas
+  if (list.length > 0) {
+    const stageMatch = list.find((t) => {
+      const p = parseTurmaStage(t);
+      return p.stageIndex === nextStageIndex;
+    });
+    if (stageMatch) return stageMatch;
+  }
+
+  // 3. Fallback: construct standard name
+  return parsed.color ? `${nextLabel} ${parsed.color}` : nextLabel;
+}
+
