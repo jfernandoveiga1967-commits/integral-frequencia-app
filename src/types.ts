@@ -22,6 +22,14 @@ export type AttendanceStatus =
   | 'sem_equipamento'
   | 'saida_antecipada';
 
+export type AttendanceFilterStatus =
+  | 'TODOS'
+  | 'PRESENTE'
+  | 'SEM_EQUIPAMENTO'
+  | 'FALTA'
+  | 'SAIDA_ANTECIPADA'
+  | 'PENDENTE';
+
 export type StudentStatus = 'ativo' | 'inativo' | 'cancelado';
 
 export type ContractType = 'regular' | 'avulso';
@@ -46,6 +54,9 @@ export interface Student {
   statusMatricula?: StudentStatus; // Alias de compatibilidade com sistemas legados/importações
   inactivationDate?: string; // Data da inativação/cancelamento (YYYY-MM-DD)
   inactivationReason?: string; // Motivo opcional da inativação/cancelamento (ex: 'Contrato Concluído')
+  anoLetivo?: number; // Ano letivo da matrícula (padrão: 2026)
+  tipoSaida?: 'PAIS' | 'TRANSPORTE_ESCOLAR'; // Logística de deslocamento/saída (padrão: 'PAIS')
+  nomeCondutor?: string; // Nome do Condutor / Tio(a) do Transporte Escolar
   notes?: string;
 }
 

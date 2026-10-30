@@ -1743,8 +1743,11 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             <div className="text-[10.5px] text-amber-950 flex flex-wrap gap-1 items-center">
                               <span className="font-semibold text-amber-900">Alunos:</span>
                               {reforcoStudentsInTurma.map((st) => (
-                                <span key={st.id} className="bg-white border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-950 shadow-2xs">
-                                  {st.name}
+                                <span key={st.id} className="bg-white border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-950 shadow-2xs inline-flex items-center gap-1">
+                                  <span>{st.name}</span>
+                                  <span className="text-[9px] font-semibold text-slate-500">
+                                    ({st.tipoSaida === 'TRANSPORTE_ESCOLAR' ? `🚌 ${st.nomeCondutor || 'Transp'}` : '🚗 Pais'})
+                                  </span>
                                 </span>
                               ))}
                             </div>
@@ -2441,6 +2444,15 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             <span className="text-xs font-bold text-slate-900 truncate">
                               {student.name}
                             </span>
+                            {student.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (
+                              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs">
+                                <span>🚌 Transp: {student.nomeCondutor || 'Escolar'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                <span>🚗 Pais</span>
+                              </span>
+                            )}
                             {isReforcoStudent && (
                               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white shadow-xs animate-pulse">
                                 <span>⚡ ENVIAR PARA O REFORÇO</span>

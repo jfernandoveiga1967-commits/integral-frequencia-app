@@ -57,6 +57,7 @@ export interface NominalListModalProps {
   defaultStartDate?: string;
   defaultEndDate?: string;
   holidays?: HolidayItem[];
+  anoLetivo?: number;
 }
 
 /**
@@ -104,6 +105,7 @@ export const NominalListModal: React.FC<NominalListModalProps> = ({
   defaultDate,
   defaultStartDate,
   defaultEndDate,
+  anoLetivo,
 }) => {
   const todayStr = useMemo(() => toISODateString(new Date()), []);
 
@@ -393,6 +395,7 @@ export const NominalListModal: React.FC<NominalListModalProps> = ({
       endDate: endDate,
       metrics: metrics,
       processedItems: finalFilteredStudents,
+      anoLetivo: anoLetivo || 2026,
     });
 
     setPdfPreviewState({
@@ -422,6 +425,7 @@ export const NominalListModal: React.FC<NominalListModalProps> = ({
       endDate: endDate,
       metrics: metrics,
       processedItems: finalFilteredStudents,
+      anoLetivo: anoLetivo || 2026,
       saveImmediately: true,
     });
   };
@@ -449,6 +453,11 @@ export const NominalListModal: React.FC<NominalListModalProps> = ({
                   <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded-full">
                     Presentes vs. Faltosos
                   </span>
+                  {anoLetivo && (
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-950 text-indigo-300 border border-indigo-700 px-2 py-0.5 rounded-full">
+                      Exercício {anoLetivo}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-300 mt-0.5">
                   Motor de relatórios nominais comparativo de alunos previstos vs. registros de chamada (Regulares e Avulsos)

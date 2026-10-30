@@ -45,6 +45,17 @@ export const StudentCheckoutAlert: React.FC<StudentCheckoutAlertProps> = ({
               <span className="font-bold text-slate-900">
                 • {student.name}
               </span>
+              {student.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (
+                <span className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-amber-100 text-amber-950 border border-amber-300">
+                  <span>🚌</span>
+                  <span>{student.nomeCondutor || 'Transp'}</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[9.5px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                  <span>🚗</span>
+                  <span>Pais</span>
+                </span>
+              )}
               <span className="font-extrabold text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded text-[10px]">
                 ({departureTime})
               </span>

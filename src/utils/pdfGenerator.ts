@@ -4349,6 +4349,7 @@ export interface GenerateNominalListPDFOptions {
   endDate?: string;
   metrics?: NominalReportMetrics;
   processedItems?: NominalProcessedStudent[];
+  anoLetivo?: number;
 }
 
 export function generateNominalListPDF({
@@ -4368,6 +4369,7 @@ export function generateNominalListPDF({
   endDate,
   metrics,
   processedItems,
+  anoLetivo,
 }: GenerateNominalListPDFOptions): PDFGenerationResult {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -4638,6 +4640,9 @@ export function generateNominalListPDF({
   // Turma
   filterDetails.push(isAllTurmas ? 'Turma: Todas as Turmas' : `Turma: ${turma}`);
 
+  // Exercício
+  filterDetails.push(`Exercício: ${anoLetivo || 2026}`);
+
   // Modalidade
   if (isAllReforco) {
     filterDetails.push('Modalidade: Reforço Escolar');
@@ -4807,25 +4812,29 @@ export function generateNominalListPDF({
         });
       }
       const modalidadesStr = allMods.length > 0 ? allMods.join(', ') : 'Rotina Regular';
+      const logisticaStr =
+        st.tipoSaida === 'TRANSPORTE_ESCOLAR'
+          ? `Transp: ${st.nomeCondutor || 'Van'}`
+          : 'Pais / Resp.';
 
-      return [num, studentName, studentTurma, freqDaysStr, exitTime, modalidadesStr];
+      return [num, studentName, studentTurma, logisticaStr, freqDaysStr, exitTime, modalidadesStr];
     });
 
     autoTable(doc, {
       startY: 37,
-      head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
-      body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—']],
+      head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'LOGÍSTICA SAÍDA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
+      body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
       theme: 'striped',
       headStyles: {
         fillColor: [15, 23, 42],
         textColor: [255, 255, 255],
-        fontSize: 8,
+        fontSize: 7.8,
         fontStyle: 'bold',
         halign: 'left',
-        cellPadding: 2.8,
+        cellPadding: 2.6,
       },
       styles: {
-        fontSize: 7.8,
+        fontSize: 7.5,
         cellPadding: 2.2,
         textColor: [30, 41, 59],
         lineColor: [226, 232, 240],
@@ -4835,12 +4844,13 @@ export function generateNominalListPDF({
         fillColor: [248, 250, 252],
       },
       columnStyles: {
-        0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
-        1: { cellWidth: 62, fontStyle: 'bold' },
-        2: { cellWidth: 28, halign: 'center' },
-        3: { cellWidth: 32, halign: 'center' },
-        4: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-        5: { cellWidth: 'auto', halign: 'left' },
+        0: { cellWidth: 9, halign: 'center', fontStyle: 'bold', textColor: [71, 85, 105] },
+        1: { cellWidth: 54, fontStyle: 'bold' },
+        2: { cellWidth: 24, halign: 'center' },
+        3: { cellWidth: 26, halign: 'center', fontStyle: 'bold' },
+        4: { cellWidth: 28, halign: 'center' },
+        5: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
+        6: { cellWidth: 'auto', halign: 'left' },
       },
       margin: { left: 14, right: 14, top: 37, bottom: 14 },
       didDrawPage: (data) => {

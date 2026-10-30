@@ -112,6 +112,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
+  const [newAnoLetivo, setNewAnoLetivo] = useState<number>(2027);
+  const [newTipoSaida, setNewTipoSaida] = useState<'PAIS' | 'TRANSPORTE_ESCOLAR'>('PAIS');
+  const [newNomeCondutor, setNewNomeCondutor] = useState<string>('');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina', 'Natação', 'Flauta']);
   const [newHasReforco, setNewHasReforco] = useState(false);
   const [newReforcoStartDate, setNewReforcoStartDate] = useState<string>('');
@@ -123,6 +126,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newDiasFrequencia, setNewDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
+
+  // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
+  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
 
   // Batch Add state
   const [showBatchForm, setShowBatchForm] = useState(false);
@@ -317,6 +323,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           ? student.diasFrequencia
           : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
       horariosSaida: student.horariosSaida ? { ...student.horariosSaida } : {},
+      anoLetivo: student.anoLetivo || 2026,
+      tipoSaida: student.tipoSaida || 'PAIS',
+      nomeCondutor: student.nomeCondutor || '',
     });
   };
 
@@ -379,17 +388,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // Status Filter for Students ('ativos' | 'inativos' | 'todos')
   const [statusFilter, setStatusFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos');
 
-  const totalAtivosCount = React.useMemo(
-    () => students.filter((s) => (s.status || 'ativo') === 'ativo').length,
+  // Contagens por Ano Letivo (Exercício 2026 vs 2027)
+  const count2026 = React.useMemo(
+    () => (students || []).filter((s) => (s.anoLetivo || 2026) === 2026).length,
     [students]
   );
-  const totalInativosCount = React.useMemo(
-    () => students.filter((s) => s.status === 'inativo' || s.status === 'cancelado').length,
+  const count2027 = React.useMemo(
+    () => (students || []).filter((s) => (s.anoLetivo || 2026) === 2027).length,
     [students]
   );
 
+  // Alunos pertencentes ao exercício selecionado (2026 ou 2027)
+  const studentsForSelectedYear = React.useMemo(() => {
+    return (students || []).filter((s) => (s.anoLetivo || 2026) === selectedAnoLetivo);
+  }, [students, selectedAnoLetivo]);
+
+  const totalAtivosCount = React.useMemo(
+    () => studentsForSelectedYear.filter((s) => (s.status || 'ativo') === 'ativo').length,
+    [studentsForSelectedYear]
+  );
+  const totalInativosCount = React.useMemo(
+    () => studentsForSelectedYear.filter((s) => s.status === 'inativo' || s.status === 'cancelado').length,
+    [studentsForSelectedYear]
+  );
+
   const filteredStudents = React.useMemo(() => {
-    return (students || [])
+    return studentsForSelectedYear
       .filter((student) => {
         if (!student) return false;
         if (!isCoordenador && currentUser && !allowedTurmas.includes(student.turma)) {
@@ -423,7 +447,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
-  }, [students, selectedTurma, selectedActivity, searchTerm, statusFilter, isCoordenador, currentUser, allowedTurmas]);
+  }, [studentsForSelectedYear, selectedTurma, selectedActivity, searchTerm, statusFilter, isCoordenador, currentUser, allowedTurmas]);
 
   const handleQuickReactivate = async (student: Student) => {
     try {
@@ -507,6 +531,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       }
     }
 
+    if (newTipoSaida === 'TRANSPORTE_ESCOLAR' && !newNomeCondutor.trim()) {
+      setSingleFormError('Para Transporte Escolar, informe o Nome do Condutor / Tio(a) do Transporte.');
+      return;
+    }
+
     setIsSavingSingle(true);
     try {
       const finalActivities = newActivities.includes('Rotina')
@@ -535,6 +564,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           diasFrequencia: effectiveDias,
           horariosSaida: newHorariosSaida,
           status: 'ativo',
+          anoLetivo: newAnoLetivo,
+          tipoSaida: newTipoSaida,
+          nomeCondutor: newTipoSaida === 'TRANSPORTE_ESCOLAR' ? newNomeCondutor.trim() : undefined,
         })
       );
       setNewName('');
@@ -547,6 +579,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewHorariosSaida({});
+      setNewAnoLetivo(2027);
+      setNewTipoSaida('PAIS');
+      setNewNomeCondutor('');
       setShowAddForm(false);
       setSingleFormError(null);
     } catch (err: any) {
@@ -690,6 +725,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             : '',
         diasFrequencia: effectiveDias,
         horariosSaida: editingStudent.horariosSaida || {},
+        anoLetivo: editingStudent.anoLetivo || 2026,
+        tipoSaida: editingStudent.tipoSaida || 'PAIS',
+        nomeCondutor: editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (editingStudent.nomeCondutor?.trim() || undefined) : undefined,
       };
       (studentToSave as any).updatedAt = new Date().toISOString();
 
@@ -879,6 +917,112 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Seletor de Ano Letivo da Matrícula */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+            <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <span>Ano Letivo da Matrícula:</span>
+            </span>
+            <div className="inline-flex items-center space-x-4">
+              <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                <input
+                  type="radio"
+                  name="novoAlunoAnoLetivo"
+                  value={2026}
+                  checked={newAnoLetivo === 2026}
+                  onChange={() => setNewAnoLetivo(2026)}
+                  className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                />
+                <span>2026</span>
+              </label>
+              <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                <input
+                  type="radio"
+                  name="novoAlunoAnoLetivo"
+                  value={2027}
+                  checked={newAnoLetivo === 2027}
+                  onChange={() => setNewAnoLetivo(2027)}
+                  className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                />
+                <span>2027</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Bloco Logística de Deslocamento / Saída */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                <span>Logística de Deslocamento / Saída:</span>
+              </label>
+              <span className="text-[11px] text-slate-500 font-medium">
+                Como o aluno retorna para casa
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setNewTipoSaida('PAIS')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                  newTipoSaida === 'PAIS'
+                    ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                  newTipoSaida === 'PAIS' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {newTipoSaida === 'PAIS' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-slate-900">🚗 Pais / Responsáveis</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Saída acompanhada pelos pais ou responsáveis autorizados.
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNewTipoSaida('TRANSPORTE_ESCOLAR')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                  newTipoSaida === 'TRANSPORTE_ESCOLAR'
+                    ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                  newTipoSaida === 'TRANSPORTE_ESCOLAR' ? 'border-amber-600 bg-amber-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {newTipoSaida === 'TRANSPORTE_ESCOLAR' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-slate-900">🚌 Transporte Escolar</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Van ou transporte escolar com condutor identificado.
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {newTipoSaida === 'TRANSPORTE_ESCOLAR' && (
+              <div className="p-3 bg-amber-50/70 border border-amber-300 rounded-xl space-y-1.5 animate-in fade-in duration-150">
+                <label className="block text-xs font-bold text-amber-950">
+                  Nome do Condutor / Tio(a) do Transporte: <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newNomeCondutor}
+                  onChange={(e) => setNewNomeCondutor(e.target.value)}
+                  placeholder="Ex: Tio Marcos / Van 12"
+                  className="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-bold focus:ring-2 focus:ring-amber-500"
+                  required={newTipoSaida === 'TRANSPORTE_ESCOLAR'}
+                />
+              </div>
+            )}
           </div>
 
           {/* Tipo de Contrato: Regular (Contínuo) ou Avulso / Temporário */}
@@ -1557,6 +1701,116 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </div>
               </div>
 
+              {/* Seletor de Ano Letivo da Matrícula */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <span>Ano Letivo da Matrícula:</span>
+                </span>
+                <div className="inline-flex items-center space-x-4">
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="editAlunoAnoLetivo"
+                      value={2026}
+                      checked={(editingStudent.anoLetivo || 2026) === 2026}
+                      disabled={isSavingEdit}
+                      onChange={() => setEditingStudent({ ...editingStudent, anoLetivo: 2026 })}
+                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                    />
+                    <span>2026</span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="editAlunoAnoLetivo"
+                      value={2027}
+                      checked={(editingStudent.anoLetivo || 2026) === 2027}
+                      disabled={isSavingEdit}
+                      onChange={() => setEditingStudent({ ...editingStudent, anoLetivo: 2027 })}
+                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                    />
+                    <span>2027</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Bloco Logística de Deslocamento / Saída */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <label className="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>Logística de Deslocamento / Saída:</span>
+                  </label>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Como o aluno retorna para casa
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={() => setEditingStudent({ ...editingStudent, tipoSaida: 'PAIS' })}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                      (editingStudent.tipoSaida || 'PAIS') === 'PAIS'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                      (editingStudent.tipoSaida || 'PAIS') === 'PAIS' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                    }`}>
+                      {(editingStudent.tipoSaida || 'PAIS') === 'PAIS' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <span className="font-bold text-xs block text-slate-900">🚗 Pais / Responsáveis</span>
+                      <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                        Saída acompanhada pelos pais ou responsáveis.
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={() => setEditingStudent({ ...editingStudent, tipoSaida: 'TRANSPORTE_ESCOLAR' })}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
+                      editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR'
+                        ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                      editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' ? 'border-amber-600 bg-amber-600 text-white' : 'border-slate-300 bg-white'
+                    }`}>
+                      {editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <span className="font-bold text-xs block text-slate-900">🚌 Transporte Escolar</span>
+                      <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                        Van ou transporte escolar com condutor identificado.
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
+                {editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' && (
+                  <div className="p-3 bg-amber-50/70 border border-amber-300 rounded-xl space-y-1.5 animate-in fade-in duration-150">
+                    <label className="block text-xs font-bold text-amber-950">
+                      Nome do Condutor / Tio(a) do Transporte: <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isSavingEdit}
+                      value={editingStudent.nomeCondutor || ''}
+                      onChange={(e) => setEditingStudent({ ...editingStudent, nomeCondutor: e.target.value })}
+                      placeholder="Ex: Tio Marcos / Van 12"
+                      className="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-bold focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Status do Aluno: Ativo / Inativo / Cancelado */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
                 <label className="block text-xs font-bold text-slate-800">
@@ -2175,6 +2429,57 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+        {/* Seletor de Exercício Exibido: 2026 | 2027 */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100">
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-black text-slate-800 flex items-center space-x-1.5">
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <span>Exercício Exibido:</span>
+            </span>
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setSelectedAnoLetivo(2026)}
+                className={`px-3.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                  selectedAnoLetivo === 2026
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>2026</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    selectedAnoLetivo === 2026 ? 'bg-indigo-800 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {count2026}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedAnoLetivo(2027)}
+                className={`px-3.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                  selectedAnoLetivo === 2027
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>2027</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    selectedAnoLetivo === 2027 ? 'bg-indigo-800 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {count2027}
+                </span>
+              </button>
+            </div>
+          </div>
+          <div className="text-[11px] font-semibold text-slate-500">
+            {selectedAnoLetivo === 2026 ? 'Alunos cadastrados no ano letivo de 2026' : 'Alunos cadastrados no ano letivo de 2027'}
+          </div>
+        </div>
+
         {/* Status Filter Toggle Pills */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div className="flex items-center space-x-2">
@@ -2344,7 +2649,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </h3>
           </div>
           <span className="text-xs font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 px-3 py-1 rounded-full">
-            {filteredStudents.length} de {students.length} alunos
+            {filteredStudents.length} de {studentsForSelectedYear.length} alunos (Exercício {selectedAnoLetivo})
           </span>
         </div>
 
@@ -2466,6 +2771,23 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           </span>
                         );
                       })()}
+
+                      {/* Selo/Chip de Logística de Deslocamento / Saída */}
+                      {student.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (
+                        <span
+                          className="text-[10.5px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                          title={`Transporte Escolar: Condutor(a) ${student.nomeCondutor || 'Van'}`}
+                        >
+                          <span>🚌 Transp: {student.nomeCondutor || 'Escolar'}</span>
+                        </span>
+                      ) : (
+                        <span
+                          className="text-[10.5px] font-medium text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md flex items-center space-x-1"
+                          title="Saída acompanhada pelos pais ou responsáveis"
+                        >
+                          <span>🚗 Pais</span>
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -2949,8 +3271,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       <RosterReportModal
         isOpen={showNominalListModal}
         onClose={() => setShowNominalListModal(false)}
-        students={students || []}
+        students={studentsForSelectedYear || []}
         records={records || []}
+        anoLetivo={selectedAnoLetivo}
         turmasList={turmasList}
         extracurricularRollCallActivities={extracurricularRollCallActivities}
         currentUser={currentUser}

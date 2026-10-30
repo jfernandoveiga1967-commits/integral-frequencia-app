@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, AttendanceFilterStatus, WeekInfo, UserProfile, ActivityItem, ScheduleBlock, HolidayItem } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
@@ -16,8 +16,9 @@ import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
 import { SaveStatusBanner } from './SaveStatusBanner';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
+import { StudentAttendanceItem } from './StudentAttendanceItem';
 
-export type AttendanceFilterStatus = 'TODOS' | 'PRESENTE' | 'SEM_EQUIPAMENTO' | 'FALTA' | 'PENDENTE';
+export type { AttendanceFilterStatus };
 
 interface AttendanceSheetProps {
   students: Student[];
@@ -392,9 +393,6 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     }
   }, [modalState.isOpen, pdfPreviewState.isOpen]);
 
-  // Observations edit state map (studentId_activity_date -> string)
-  const [obsMap, setObsMap] = useState<Record<string, string>>({});
-
   // Confirmed action for batch operations (Marcar Todos Presentes / Limpar Marcações)
   const batchAction = useConfirmedAction();
 
@@ -534,6 +532,44 @@ function getCurrentHHMM(): string {
   return `${hours}:${minutes}`;
 }
 
+  // Identifica o status atual de chamada do aluno para o filtro do Resumo do Dia
+  const getStudentAttendanceStatus = useCallback(
+    (student: Student): Exclude<AttendanceFilterStatus, 'TODOS'> => {
+      if (selectedActivity !== 'TODAS') {
+        const key = `${student.id}_${selectedActivity}_${selectedDate}`;
+        const rec = recordMap.get(key);
+        if (!rec || !rec.status) return 'PENDENTE';
+        if (rec.status === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
+        if (rec.status === 'presente') return 'PRESENTE';
+        if (rec.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+        if (rec.status === 'falta') return 'FALTA';
+        return 'PENDENTE';
+      }
+
+      // Se modalidade for 'TODAS', verifica as modalidades permitidas do aluno
+      const isReforco = isStudentInReforcoVigency(student, selectedDate);
+      const studentAllActs = [
+        ...(student.activities || []),
+        ...(isReforco ? ['Reforço'] : []),
+      ];
+      const uniqueActs = Array.from(new Set(studentAllActs)).filter((a) =>
+        allowedActivityIds.includes(a as ActivityType)
+      );
+
+      if (uniqueActs.length === 0) return 'PENDENTE';
+
+      for (const act of uniqueActs) {
+        const rec = recordMap.get(`${student.id}_${act}_${selectedDate}`);
+        if (rec?.status === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
+        if (rec?.status === 'presente') return 'PRESENTE';
+        if (rec?.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+        if (rec?.status === 'falta') return 'FALTA';
+      }
+      return 'PENDENTE';
+    },
+    [selectedActivity, selectedDate, recordMap, allowedActivityIds]
+  );
+
   // Calculate status statistics for current filter and date
   const stats = useMemo(() => {
     // Validação nos Diários de Classe:
@@ -556,60 +592,23 @@ function getCurrentHHMM(): string {
     let pendente = 0;
 
     filteredStudents.forEach((student) => {
-      const key = `${student.id}_${selectedActivity}_${selectedDate}`;
-      const rec = recordMap.get(key);
-      if (!rec) {
-        pendente++;
-      } else if (rec.status === 'presente') {
+      const status = getStudentAttendanceStatus(student);
+      if (status === 'PRESENTE') {
         presente++;
-      } else if (rec.status === 'saida_antecipada') {
+      } else if (status === 'SAIDA_ANTECIPADA') {
         saidaAntecipada++;
-      } else if (rec.status === 'falta') {
-        falta++;
-      } else if (rec.status === 'sem_equipamento') {
+      } else if (status === 'SEM_EQUIPAMENTO') {
         semEquipamento++;
+      } else if (status === 'FALTA') {
+        falta++;
+      } else {
+        pendente++;
       }
     });
 
     const total = presente + saidaAntecipada + falta + semEquipamento + pendente;
     return { presente, saidaAntecipada, falta, semEquipamento, pendente, total };
-  }, [filteredStudents, selectedActivity, selectedDate, recordMap]);
-
-  // Identifica o status atual de chamada do aluno para o filtro do Resumo do Dia
-  const getStudentAttendanceStatus = useCallback(
-    (student: Student): 'PRESENTE' | 'SEM_EQUIPAMENTO' | 'FALTA' | 'PENDENTE' => {
-      if (selectedActivity !== 'TODAS') {
-        const key = `${student.id}_${selectedActivity}_${selectedDate}`;
-        const rec = recordMap.get(key);
-        if (!rec || !rec.status) return 'PENDENTE';
-        if (rec.status === 'presente' || rec.status === 'saida_antecipada') return 'PRESENTE';
-        if (rec.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
-        if (rec.status === 'falta') return 'FALTA';
-        return 'PENDENTE';
-      }
-
-      // Se modalidade for 'TODAS', verifica as modalidades permitidas do aluno
-      const isReforco = isStudentInReforcoVigency(student, selectedDate);
-      const studentAllActs = [
-        ...(student.activities || []),
-        ...(isReforco ? ['Reforço'] : []),
-      ];
-      const uniqueActs = Array.from(new Set(studentAllActs)).filter((a) =>
-        allowedActivityIds.includes(a as ActivityType)
-      );
-
-      if (uniqueActs.length === 0) return 'PENDENTE';
-
-      for (const act of uniqueActs) {
-        const rec = recordMap.get(`${student.id}_${act}_${selectedDate}`);
-        if (rec?.status === 'presente' || rec?.status === 'saida_antecipada') return 'PRESENTE';
-        if (rec?.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
-        if (rec?.status === 'falta') return 'FALTA';
-      }
-      return 'PENDENTE';
-    },
-    [selectedActivity, selectedDate, recordMap, allowedActivityIds]
-  );
+  }, [filteredStudents, selectedDate, todayStr, getStudentAttendanceStatus]);
 
   // Array de alunos visíveis na lista de frequência após aplicação do filtro interativo de status
   const displayedStudents = useMemo(() => {
@@ -632,115 +631,139 @@ function getCurrentHHMM(): string {
     []
   );
 
-  // Handlers for status click
-  const handleStatusClick = async (
-    student: Student,
-    activity: ActivityType,
-    date: string,
-    status: AttendanceStatus,
-    equipmentDetails?: string,
-    obs?: string,
-    exitTimeParam?: string
-  ) => {
-    if (status === 'sem_equipamento' && !equipmentDetails) {
-      // Open modal to specify equipment
+  // Refs para manter callbacks estáveis sem recriar funções a cada alteração de registro
+  const recordMapRef = React.useRef(recordMap);
+  recordMapRef.current = recordMap;
+
+  const onSaveRecordRef = React.useRef(onSaveRecord);
+  onSaveRecordRef.current = onSaveRecord;
+
+  const currentUserRef = React.useRef(currentUser);
+  currentUserRef.current = currentUser;
+
+  const currentWeekRef = React.useRef(currentWeek);
+  currentWeekRef.current = currentWeek;
+
+  // Handlers for status click memoizado com useCallback
+  const onStatusChange = useCallback(
+    async (
+      student: Student,
+      activity: ActivityType,
+      date: string,
+      status: AttendanceStatus,
+      equipmentDetails?: string,
+      obs?: string,
+      exitTimeParam?: string
+    ) => {
+      const activeRecordMap = recordMapRef.current;
+      const activeSaveRecord = onSaveRecordRef.current;
+      const activeUser = currentUserRef.current;
+      const activeWeek = currentWeekRef.current;
+
+      if (status === 'sem_equipamento' && !equipmentDetails) {
+        // Open modal to specify equipment
+        const key = `${student.id}_${activity}_${date}`;
+        const existingRec = activeRecordMap.get(key);
+        setModalState({
+          isOpen: true,
+          studentId: student.id,
+          studentName: student.name,
+          activity,
+          date,
+          initialDetails: existingRec?.equipmentMissingDetails || '',
+        });
+        return;
+      }
+
       const key = `${student.id}_${activity}_${date}`;
-      const existingRec = recordMap.get(key);
-      setModalState({
-        isOpen: true,
+      const existingRec = activeRecordMap.get(key);
+      const currentObs = obs !== undefined ? obs : existingRec?.observation || '';
+
+      let exitTime = exitTimeParam;
+      if (status === 'saida_antecipada' && !exitTime) {
+        exitTime = existingRec?.exitTime || getCurrentHHMM();
+      }
+
+      if (status === 'saida_antecipada') {
+        playDepartureAlertSound();
+      }
+
+      const recordPayload = {
         studentId: student.id,
-        studentName: student.name,
         activity,
+        turma: student.turma,
         date,
-        initialDetails: existingRec?.equipmentMissingDetails || '',
-      });
-      return;
-    }
+        weekNumber: activeWeek.weekNumber,
+        year: activeWeek.year,
+        status,
+        exitTime: status === 'saida_antecipada' ? exitTime : undefined,
+        equipmentMissingDetails: equipmentDetails,
+        observation: currentObs || undefined,
+        instructorId: activeUser?.id || activeUser?.uid || undefined,
+        instructorName: activeUser?.name || undefined,
+      };
 
-    const key = `${student.id}_${activity}_${date}`;
-    const existingRec = recordMap.get(key);
-    const currentObs = obs !== undefined ? obs : obsMap[key] || existingRec?.observation || '';
+      // Limpa timer anterior de conclusão suave
+      if (autoClearSyncTimerRef.current) {
+        clearTimeout(autoClearSyncTimerRef.current);
+        autoClearSyncTimerRef.current = null;
+      }
 
-    let exitTime = exitTimeParam;
-    if (status === 'saida_antecipada' && !exitTime) {
-      exitTime = existingRec?.exitTime || getCurrentHHMM();
-    }
-
-    if (status === 'saida_antecipada') {
-      playDepartureAlertSound();
-    }
-
-    const recordPayload = {
-      studentId: student.id,
-      activity,
-      turma: student.turma,
-      date,
-      weekNumber: currentWeek.weekNumber,
-      year: currentWeek.year,
-      status,
-      exitTime: status === 'saida_antecipada' ? exitTime : undefined,
-      equipmentMissingDetails: equipmentDetails,
-      observation: currentObs || undefined,
-      instructorId: currentUser?.id || currentUser?.uid || undefined,
-      instructorName: currentUser?.name || undefined,
-    };
-
-    // Limpa timer anterior de conclusão suave
-    if (autoClearSyncTimerRef.current) {
-      clearTimeout(autoClearSyncTimerRef.current);
-      autoClearSyncTimerRef.current = null;
-    }
-
-    // Registra início da sincronização de forma não bloqueante
-    setIndividualSyncState((prev) => ({
-      ...prev,
-      pendingCount: prev.pendingCount + 1,
-      totalInBatch: prev.pendingCount === 0 ? 1 : prev.totalInBatch + 1,
-      syncedCount: prev.pendingCount === 0 ? 0 : prev.syncedCount,
-      isComplete: false,
-      error: null,
-    }));
-
-    try {
-      await onSaveRecord(recordPayload);
-
-      setIndividualSyncState((prev) => {
-        const nextPending = Math.max(0, prev.pendingCount - 1);
-        const nextSynced = prev.syncedCount + 1;
-        const isAllDone = nextPending === 0;
-
-        if (isAllDone) {
-          if (autoClearSyncTimerRef.current) clearTimeout(autoClearSyncTimerRef.current);
-          autoClearSyncTimerRef.current = setTimeout(() => {
-            setIndividualSyncState({
-              pendingCount: 0,
-              totalInBatch: 0,
-              syncedCount: 0,
-              isComplete: false,
-              error: null,
-            });
-          }, 3500);
-        }
-
-        return {
-          ...prev,
-          pendingCount: nextPending,
-          syncedCount: nextSynced,
-          isComplete: isAllDone,
-        };
-      });
-    } catch (err: any) {
-      console.error('Erro ao confirmar presença no Firestore:', err);
+      // Registra início da sincronização de forma não bloqueante
       setIndividualSyncState((prev) => ({
         ...prev,
-        pendingCount: Math.max(0, prev.pendingCount - 1),
-        error: {
-          message: err?.message || 'Falha ao confirmar presença deste aluno no servidor.',
-          retry: () => handleStatusClick(student, activity, date, status, equipmentDetails, obs, exitTimeParam),
-        },
+        pendingCount: prev.pendingCount + 1,
+        totalInBatch: prev.pendingCount === 0 ? 1 : prev.totalInBatch + 1,
+        syncedCount: prev.pendingCount === 0 ? 0 : prev.syncedCount,
+        isComplete: false,
+        error: null,
       }));
-    }
-  };
+
+      try {
+        await activeSaveRecord(recordPayload);
+
+        setIndividualSyncState((prev) => {
+          const nextPending = Math.max(0, prev.pendingCount - 1);
+          const nextSynced = prev.syncedCount + 1;
+          const isAllDone = nextPending === 0;
+
+          if (isAllDone) {
+            if (autoClearSyncTimerRef.current) clearTimeout(autoClearSyncTimerRef.current);
+            autoClearSyncTimerRef.current = setTimeout(() => {
+              setIndividualSyncState({
+                pendingCount: 0,
+                totalInBatch: 0,
+                syncedCount: 0,
+                isComplete: false,
+                error: null,
+              });
+            }, 3500);
+          }
+
+          return {
+            ...prev,
+            pendingCount: nextPending,
+            syncedCount: nextSynced,
+            isComplete: isAllDone,
+          };
+        });
+      } catch (err: any) {
+        console.error('Erro ao confirmar presença no Firestore:', err);
+        setIndividualSyncState((prev) => ({
+          ...prev,
+          pendingCount: Math.max(0, prev.pendingCount - 1),
+          error: {
+            message: err?.message || 'Falha ao confirmar presença deste aluno no servidor.',
+            retry: () => onStatusChange(student, activity, date, status, equipmentDetails, obs, exitTimeParam),
+          },
+        }));
+      }
+    },
+    []
+  );
+
+  // Alias para retrocompatibilidade
+  const handleStatusClick = onStatusChange;
 
   const handleEquipmentModalSave = (details: string) => {
     const student = students.find((s) => s.id === modalState.studentId);
@@ -780,15 +803,6 @@ function getCurrentHHMM(): string {
           pendingMessage: `Desmarcando presença de ${studentIds.length} alunos no Firestore...`,
           successMessage: `Presenças desmarcadas e sincronizadas no Firestore com sucesso!`,
           errorMessage: 'Falha ao desmarcar chamada no servidor.',
-          onSuccess: () => {
-            setObsMap((prev) => {
-              const next = { ...prev };
-              studentIds.forEach((sid) => {
-                delete next[`${sid}_${selectedActivity}_${selectedDate}`];
-              });
-              return next;
-            });
-          },
         }
       );
     } else {
@@ -837,19 +851,6 @@ function getCurrentHHMM(): string {
           successMessage: `Todas as marcações removidas com sucesso! Alunos retornados para Pendente.`,
           errorMessage: 'Falha ao remover marcações no servidor.',
           onSuccess: () => {
-            // Limpa o estado local de observações dos registros removidos
-            setObsMap((prev) => {
-              const next = { ...prev };
-              studentIds.forEach((sid) => {
-                Object.keys(next).forEach((k) => {
-                  if (k.startsWith(`${sid}_`) && k.endsWith(`_${selectedDate}`)) {
-                    delete next[k];
-                  }
-                });
-              });
-              return next;
-            });
-
             // Dispara evento global para recálculo instantâneo dos contadores no cabeçalho
             window.dispatchEvent(
               new CustomEvent('app_attendance_cleared', {
@@ -1303,7 +1304,26 @@ function getCurrentHHMM(): string {
               <span>{stats.presente} Presentes</span>
             </button>
 
-            {/* 2. Sem Equip. */}
+            {/* 2. Saída Antecipada */}
+            <button
+              type="button"
+              onClick={() => handleToggleStatusFilter('SAIDA_ANTECIPADA')}
+              className={`px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 font-bold transition-all cursor-pointer ${
+                filterStatus === 'SAIDA_ANTECIPADA'
+                  ? 'bg-amber-600 text-white border-amber-700 shadow-md ring-2 ring-amber-500 ring-offset-1 scale-105'
+                  : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300/80 hover:scale-102 shadow-2xs'
+              }`}
+              title={
+                filterStatus === 'SAIDA_ANTECIPADA'
+                  ? 'Filtro ativo: exibindo apenas Saídas Antecipadas. Clique para ver todos.'
+                  : 'Clique para filtrar apenas alunos com Saída Antecipada'
+              }
+            >
+              <Clock className={`w-3.5 h-3.5 ${filterStatus === 'SAIDA_ANTECIPADA' ? 'text-white' : 'text-amber-700'}`} />
+              <span>{stats.saidaAntecipada} Saída Ant.</span>
+            </button>
+
+            {/* 3. Sem Equip. */}
             <button
               type="button"
               onClick={() => handleToggleStatusFilter('SEM_EQUIPAMENTO')}
@@ -1322,7 +1342,7 @@ function getCurrentHHMM(): string {
               <span>{stats.semEquipamento} Sem Equip.</span>
             </button>
 
-            {/* 3. Faltas */}
+            {/* 4. Faltas */}
             <button
               type="button"
               onClick={() => handleToggleStatusFilter('FALTA')}
@@ -1660,7 +1680,7 @@ function getCurrentHHMM(): string {
                 {selectedActivity !== 'TODAS' && <ActivityBadge activity={selectedActivity} size="sm" />}
               </h2>
               <p className="text-xs text-slate-400">
-                {displayedStudents.length} {filterStatus !== 'TODOS' ? `de ${filteredStudents.length}` : ''} aluno(s) listado(s) {filterStatus !== 'TODOS' ? `• Filtro ativo: ${filterStatus === 'PRESENTE' ? 'Presentes' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Faltas' : 'Pendentes'}` : ''} • Clique nos botões para registrar a presença ou justificativa de ausência.
+                {displayedStudents.length} {filterStatus !== 'TODOS' ? `de ${filteredStudents.length}` : ''} aluno(s) listado(s) {filterStatus !== 'TODOS' ? `• Filtro ativo: ${filterStatus === 'PRESENTE' ? 'Presentes' : filterStatus === 'SAIDA_ANTECIPADA' ? 'Saída Antecipada' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Faltas' : 'Pendentes'}` : ''} • Clique nos botões para registrar a presença ou justificativa de ausência.
               </p>
             </div>
             <div className="flex items-center space-x-2 print:hidden no-print">
@@ -1717,7 +1737,7 @@ function getCurrentHHMM(): string {
                 <h3 className="text-base font-bold text-slate-700">
                   Nenhum aluno com status{' '}
                   <span className="text-indigo-600 font-extrabold">
-                    "{filterStatus === 'PRESENTE' ? 'Presente' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Falta' : 'Pendente'}"
+                    "{filterStatus === 'PRESENTE' ? 'Presente' : filterStatus === 'SAIDA_ANTECIPADA' ? 'Saída Antecipada' : filterStatus === 'SEM_EQUIPAMENTO' ? 'Sem Equipamento' : filterStatus === 'FALTA' ? 'Falta' : 'Pendente'}"
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -1741,293 +1761,68 @@ function getCurrentHHMM(): string {
               </div>
             ) : (
               displayedStudents.map((student) => {
-              const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
+                const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
 
-              // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
-              const studentAllActs = [
-                ...(student.activities || []),
-                ...(isReforcoStudent ? ['Reforço'] : [])
-              ];
-              const uniqueActs = Array.from(new Set(studentAllActs));
-              const activitiesToDisplay = uniqueActs.filter(
-                (a) =>
-                  allowedActivityIds.includes(a as ActivityType) &&
-                  (selectedActivity === 'TODAS' || a === selectedActivity)
-              );
+                // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
+                const studentAllActs = [
+                  ...(student.activities || []),
+                  ...(isReforcoStudent ? ['Reforço'] : []),
+                ];
+                const uniqueActs = Array.from(new Set(studentAllActs));
+                const activitiesToDisplay = uniqueActs.filter(
+                  (a) =>
+                    allowedActivityIds.includes(a as ActivityType) &&
+                    (selectedActivity === 'TODAS' || a === selectedActivity)
+                ) as ActivityType[];
 
-              const departureTimeToday = getStudentDepartureTimeForDate(student, selectedDate);
+                const departureTimeToday = getStudentDepartureTimeForDate(student, selectedDate);
 
-              return (
-                <div
-                  key={student.id}
-                  className={`p-4 transition-colors space-y-3 ${
-                    isReforcoStudent ? 'bg-amber-50/40 border-l-4 border-l-amber-500' : 'hover:bg-slate-50/80'
-                  }`}
-                >
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    {/* Student Info */}
-                    <div className="flex items-start space-x-3">
-                      <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 font-bold text-sm flex items-center justify-center shrink-0 border border-indigo-200">
-                        {student.name.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <h3 className="font-bold text-slate-900 text-sm md:text-base">
-                            {student.name}
-                          </h3>
-                          {isReforcoStudent && (
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-xs animate-pulse flex items-center space-x-1">
-                              <span>⚡ ENVIAR PARA O REFORÇO</span>
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
-                          <span className="font-medium px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
-                            {student.turma}
-                          </span>
-                          {isReforcoStudent && (() => {
-                            const targetAct = selectedActivity === 'TODAS' ? 'Rotina' : selectedActivity;
-                            const reforcoRec = recordMap.get(`${student.id}_${targetAct}_${selectedDate}`) ||
-                              recordMap.get(`${student.id}_Reforço_${selectedDate}`);
-                            const isEncaminhado = Boolean(
-                              reforcoRec?.observation?.includes('Reforço') || reforcoRec?.observation?.includes('Encaminhado')
-                            );
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onSaveRecord({
-                                    studentId: student.id,
-                                    activity: targetAct as ActivityType,
-                                    turma: student.turma,
-                                    date: selectedDate,
-                                    weekNumber: currentWeek.weekNumber,
-                                    year: currentWeek.year,
-                                    status: 'presente',
-                                    observation: 'Encaminhado para a sala de Reforço',
-                                  });
-                                }}
-                                className={`text-[10px] font-black px-2.5 py-0.5 rounded-lg border transition-all cursor-pointer shadow-2xs flex items-center space-x-1 ${
-                                  isEncaminhado
-                                    ? 'bg-amber-600 text-white border-amber-700'
-                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
-                                }`}
-                                title="Registrar que o aluno foi encaminhado à sala de reforço"
-                              >
-                                <span>{isEncaminhado ? '✅ Encaminhado ao Reforço' : '👉 Confirmar Envio ao Reforço'}</span>
-                              </button>
-                            );
-                          })()}
-                          {student.tipoContrato === 'avulso' && (
-                            <span
-                              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs flex items-center space-x-0.5"
-                              title={`Contrato Avulso / Temporário (${student.dataInicioContrato ? formatDateBR(student.dataInicioContrato) : ''} até ${student.dataTerminoContrato ? formatDateBR(student.dataTerminoContrato) : ''})`}
-                            >
-                              <span>⚡ Avulso</span>
-                            </span>
-                          )}
-                          {student.diasFrequencia && student.diasFrequencia.length < 5 && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200" title="Grade parcial de frequência semanal">
-                              {formatDiasFrequencia(student.diasFrequencia)}
-                            </span>
-                          )}
-                          {departureTimeToday && (
-                            <span
-                              className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-900 border border-indigo-200 flex items-center space-x-1 shadow-2xs"
-                              title={`Horário de saída cadastrado para ${formatDateBR(selectedDate)}: ${departureTimeToday}`}
-                            >
-                              <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                              <span>⏱️ Saída às {formatHorarioSaida(departureTimeToday)}</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                const recordsForStudent: Record<string, AttendanceRecord | undefined> = {};
+                const sigParts: string[] = [];
 
-                    {/* Extracurricular Activities badges for this student */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {student.activities.map((act) => {
-                        const isAllowed = allowedActivityIds.includes(act as ActivityType);
-                        if (!isCoordenador && !isAllowed) return null; // Hide non-assigned activities for Monitor/Professor
-                        const actMeta = activityMap.get(act);
-                        return (
-                          <span key={act} className="opacity-90">
-                            <ActivityBadge
-                              activity={act}
-                              iconName={actMeta?.icon}
-                              customIconUrl={actMeta?.customIconUrl}
-                              customEquipment={actMeta?.defaultEquipment}
-                              size="sm"
-                            />
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
+                activitiesToDisplay.forEach((act) => {
+                  const recKey = `${student.id}_${act}_${selectedDate}`;
+                  const rec = recordMap.get(recKey);
+                  recordsForStudent[act] = rec;
+                  sigParts.push(
+                    `${act}:${rec?.status || 'pendente'}:${rec?.exitTime || ''}:${rec?.equipmentMissingDetails || ''}:${rec?.observation || ''}`
+                  );
+                });
 
-                  {/* Attendance Controls per Activity */}
-                  <div className="space-y-2 pt-2 border-t border-slate-100">
-                    {activitiesToDisplay.map((act) => {
-                      const recKey = `${student.id}_${act}_${selectedDate}`;
-                      const rec = recordMap.get(recKey);
-                      const currentStatus = rec?.status;
-                      const actMeta = activityMap.get(act);
+                const targetReforcoAct = selectedActivity === 'TODAS' ? 'Rotina' : selectedActivity;
+                const reforcoRec =
+                  recordMap.get(`${student.id}_${targetReforcoAct}_${selectedDate}`) ||
+                  recordMap.get(`${student.id}_Reforço_${selectedDate}`);
 
-                      return (
-                        <div
-                          key={act}
-                          className={`p-3 rounded-xl border transition-all ${
-                            currentStatus === 'presente'
-                              ? 'bg-emerald-50/60 border-emerald-200'
-                              : currentStatus === 'saida_antecipada'
-                              ? 'bg-amber-50/90 border-amber-200'
-                              : currentStatus === 'sem_equipamento'
-                              ? 'bg-orange-50/80 border-orange-200'
-                              : currentStatus === 'falta'
-                              ? 'bg-rose-50/80 border-rose-200'
-                              : 'bg-amber-50/30 border-amber-200/80'
-                          }`}
-                        >
-                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                            <div className="flex items-center space-x-2">
-                              <ActivityBadge
-                                activity={act}
-                                iconName={actMeta?.icon}
-                                customIconUrl={actMeta?.customIconUrl}
-                                customEquipment={actMeta?.defaultEquipment}
-                                size="sm"
-                              />
-                              {rec ? (
-                                <StatusBadge
-                                  status={rec.status}
-                                  equipmentDetails={rec.equipmentMissingDetails}
-                                  exitTime={rec.exitTime}
-                                  size="sm"
-                                />
-                              ) : (
-                                <StatusBadge
-                                  status="pendente"
-                                  size="sm"
-                                />
-                              )}
-                            </div>
+                if (isReforcoStudent) {
+                  sigParts.push(`reforco:${reforcoRec?.observation || ''}`);
+                }
 
-                            {/* Attendance Status Action Buttons */}
-                            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 w-full lg:w-auto print:hidden no-print">
-                              {/* 1. PRESENTE */}
-                              <button
-                                type="button"
-                                onClick={() => handleStatusClick(student, act, selectedDate, 'presente')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
-                                  currentStatus === 'presente'
-                                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                                    : 'bg-white hover:bg-emerald-50 text-emerald-800 border-slate-200 hover:border-emerald-300'
-                                }`}
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Presente</span>
-                              </button>
+                const recordSignature = sigParts.join('|');
 
-                              {/* 2. SAÍDA ANTECIPADA */}
-                              <button
-                                type="button"
-                                onClick={() => handleStatusClick(student, act, selectedDate, 'saida_antecipada')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
-                                  currentStatus === 'saida_antecipada'
-                                    ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
-                                    : 'bg-white hover:bg-amber-50 text-amber-900 border-slate-200 hover:border-amber-300'
-                                }`}
-                                title="Registrar saída antecipada com horário de saída"
-                              >
-                                <Clock className="w-3.5 h-3.5" />
-                                <span>Saída Ant.</span>
-                              </button>
-
-                              {/* 3. SEM EQUIPAMENTO (Uniforme / Flauta) */}
-                              <button
-                                type="button"
-                                onClick={() => handleStatusClick(student, act, selectedDate, 'sem_equipamento')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
-                                  currentStatus === 'sem_equipamento'
-                                    ? 'bg-orange-600 text-white border-orange-700 shadow-xs'
-                                    : 'bg-white hover:bg-orange-50 text-orange-900 border-slate-200 hover:border-orange-300'
-                                }`}
-                                title="Ausência por falta de uniforme, flauta ou material"
-                              >
-                                <Shirt className="w-3.5 h-3.5" />
-                                <span>Sem Equip.</span>
-                              </button>
-
-                              {/* 4. FALTA */}
-                              <button
-                                type="button"
-                                onClick={() => handleStatusClick(student, act, selectedDate, 'falta')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 border flex-1 sm:flex-none ${
-                                  currentStatus === 'falta'
-                                    ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                                    : 'bg-white hover:bg-rose-50 text-rose-800 border-slate-200 hover:border-rose-300'
-                                }`}
-                                title="Ausência por falta geral não justificada"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                                <span>Falta</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Inline Time Picker for Saída Antecipada */}
-                          {currentStatus === 'saida_antecipada' && (
-                            <div className="mt-2.5 pt-2 border-t border-amber-200 flex items-center space-x-2 bg-amber-50/90 px-3 py-1.5 rounded-lg border border-amber-200">
-                              <Clock className="w-4 h-4 text-amber-700 shrink-0" />
-                              <span className="text-xs font-bold text-amber-900">Horário da Saída:</span>
-                              <input
-                                type="time"
-                                value={rec?.exitTime || getCurrentHHMM()}
-                                onChange={(e) => {
-                                  handleStatusClick(
-                                    student,
-                                    act,
-                                    selectedDate,
-                                    'saida_antecipada',
-                                    rec?.equipmentMissingDetails,
-                                    rec?.observation,
-                                    e.target.value
-                                  );
-                                }}
-                                className="text-xs font-bold px-2 py-0.5 border border-amber-300 rounded bg-white text-amber-950 focus:ring-2 focus:ring-amber-500 outline-none"
-                              />
-                              <span className="text-[11px] text-amber-800 font-medium hidden sm:inline">
-                                (Alteração de horário em tempo real)
-                              </span>
-                            </div>
-                          )}
-
-                          {/* Optional Observation input */}
-                          <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center space-x-2 print:hidden no-print">
-                            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <input
-                              type="text"
-                              placeholder="Observação opcional (ex: Atestado médico entregue, aviso dos pais)..."
-                              value={obsMap[recKey] !== undefined ? obsMap[recKey] : rec?.observation || ''}
-                              onChange={(e) => {
-                                setObsMap((prev) => ({ ...prev, [recKey]: e.target.value }));
-                              }}
-                              onBlur={(e) => {
-                                if (currentStatus) {
-                                  handleStatusClick(student, act, selectedDate, currentStatus, rec?.equipmentMissingDetails, e.target.value);
-                                }
-                              }}
-                              className="w-full text-xs px-2.5 py-1 border border-slate-200 rounded-md bg-white text-slate-800 focus:ring-1 focus:ring-indigo-500"
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                return (
+                  <StudentAttendanceItem
+                    key={student.id}
+                    student={student}
+                    selectedDate={selectedDate}
+                    selectedActivity={selectedActivity}
+                    allowedActivityIds={allowedActivityIds}
+                    activityMap={activityMap}
+                    isCoordenador={isCoordenador}
+                    currentWeek={currentWeek}
+                    currentUser={currentUser}
+                    isReforcoStudent={isReforcoStudent}
+                    departureTimeToday={departureTimeToday}
+                    activitiesToDisplay={activitiesToDisplay}
+                    recordSignature={recordSignature}
+                    recordsForStudent={recordsForStudent}
+                    reforcoRecord={reforcoRec}
+                    onStatusChange={onStatusChange}
+                    onSaveRecord={onSaveRecord}
+                  />
+                );
+              })
+            )}
           </div>
 
           {/* Institutional Print Signatures Footer */}

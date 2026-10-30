@@ -25,6 +25,9 @@ export async function createStudent(dados: {
   telefone?: string;
   horarioEntradaSaida?: string;
   activities?: string[];
+  anoLetivo?: number;
+  tipoSaida?: 'PAIS' | 'TRANSPORTE_ESCOLAR';
+  nomeCondutor?: string;
 }): Promise<Student> {
   const currentList = getStudents();
   const id = `st_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -37,6 +40,9 @@ export async function createStudent(dados: {
     status: 'ativo',
     statusMatricula: 'ativo',
     tipoContrato: 'regular',
+    anoLetivo: dados.anoLetivo ?? 2026,
+    tipoSaida: dados.tipoSaida ?? 'PAIS',
+    nomeCondutor: dados.tipoSaida === 'TRANSPORTE_ESCOLAR' ? dados.nomeCondutor?.trim() : undefined,
     notes: dados.responsavel || dados.telefone
       ? `Resp: ${dados.responsavel || 'Não informado'} | Tel: ${dados.telefone || 'Não informado'}`
       : undefined,

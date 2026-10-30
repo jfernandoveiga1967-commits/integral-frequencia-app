@@ -4,3 +4,4 @@ import { AttendanceSheet } from './AttendanceSheet';
 export const ChamadaFrequencia = AttendanceSheet;
 export default AttendanceSheet;
 export { AttendanceSheet };
+export type { AttendanceFilterStatus } from './AttendanceSheet';
