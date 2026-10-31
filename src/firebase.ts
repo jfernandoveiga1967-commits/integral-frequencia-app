@@ -1401,18 +1401,26 @@ export async function deleteStudentFromFirestore(
 }
 
 export async function saveRecordToFirestore(record: AttendanceRecord): Promise<void> {
-  const docRef = doc(db, 'attendanceRecords', record.id);
+  const compositeId = `${record.date}_${record.studentId}`;
+  const now = new Date();
+  const horarioAlteracao = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const statusUpper = record.status ? record.status.toUpperCase() : 'PRESENTE';
+
   const payload = {
-    id: record.id,
+    id: compositeId,
     studentId: record.studentId,
     date: record.date,
     data: record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
+    dataSelecionada: record.date,
     weekNumber: record.weekNumber,
     year: record.year,
     activity: record.activity,
+    modalidade: record.activity,
     tipo: (record as any).tipo || record.activity, // Sincroniza tipo ('ROTINA' / Oficina) para consultas estritas
     turma: record.turma,
     status: record.status,
+    statusUpper,
+    horarioAlteracao,
     exitTime: record.exitTime || '',
     equipmentMissingDetails: record.equipmentMissingDetails || '',
     observation: record.observation || '',
@@ -1424,9 +1432,17 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
   };
 
   try {
-    await setDoc(docRef, payload, { merge: true });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'attendance', compositeId), payload, { merge: true });
+    batch.set(doc(db, 'attendanceRecords', compositeId), payload, { merge: true });
+    if (record.id && record.id !== compositeId) {
+      batch.set(doc(db, 'attendanceRecords', record.id), { ...payload, id: record.id }, { merge: true });
+    }
+    await batch.commit();
+
     // Remove from outbox if it was previously queued
     removeFromAttendanceOutbox(record.id);
+    removeFromAttendanceOutbox(compositeId);
   } catch (error) {
     // If offline or network error, save to local outbox queue to be processed automatically on reconnect
     addToAttendanceOutbox({
@@ -1434,15 +1450,17 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
       record,
       recordId: record.id,
     });
-    handleFirestoreError(error, OperationType.WRITE, `attendanceRecords/${record.id}`);
+    handleFirestoreError(error, OperationType.WRITE, `attendance/${compositeId}`);
     throw error;
   }
 }
 
 export async function deleteAttendanceRecordFromFirestore(recordId: string): Promise<void> {
-  const docRef = doc(db, 'attendanceRecords', recordId);
   try {
-    await deleteDoc(docRef);
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'attendanceRecords', recordId));
+    batch.delete(doc(db, 'attendance', recordId));
+    await batch.commit();
     removeFromAttendanceOutbox(recordId);
   } catch (error) {
     addToAttendanceOutbox({
@@ -1456,40 +1474,53 @@ export async function deleteAttendanceRecordFromFirestore(recordId: string): Pro
 
 export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): Promise<void> {
   if (!records || records.length === 0) return;
+  const now = new Date();
+  const horarioAlteracao = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
   try {
-    const CHUNK_SIZE = 250;
+    const CHUNK_SIZE = 150;
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
       const chunk = records.slice(i, i + CHUNK_SIZE);
       const batch = writeBatch(db);
       for (const record of chunk) {
-        const docRef = doc(db, 'attendanceRecords', record.id);
-        batch.set(
-          docRef,
-          {
-            id: record.id,
-            studentId: record.studentId,
-            date: record.date,
-            data: record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
-            weekNumber: record.weekNumber,
-            year: record.year,
-            activity: record.activity,
-            tipo: (record as any).tipo || record.activity, // Sincroniza tipo ('ROTINA' / Oficina)
-            turma: record.turma,
-            status: record.status,
-            exitTime: record.exitTime || '',
-            equipmentMissingDetails: record.equipmentMissingDetails || '',
-            observation: record.observation || '',
-            instructorId: record.instructorId || '',
-            instructorName: record.instructorName || '',
-            timeSlot: record.timeSlot || '',
-            createdAt: record.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
+        const compositeId = `${record.date}_${record.studentId}`;
+        const statusUpper = record.status ? record.status.toUpperCase() : 'PRESENTE';
+        const docPayload = {
+          id: compositeId,
+          studentId: record.studentId,
+          date: record.date,
+          data: record.date,
+          dataSelecionada: record.date,
+          weekNumber: record.weekNumber,
+          year: record.year,
+          activity: record.activity,
+          modalidade: record.activity,
+          tipo: (record as any).tipo || record.activity,
+          turma: record.turma,
+          status: record.status,
+          statusUpper,
+          horarioAlteracao,
+          exitTime: record.exitTime || '',
+          equipmentMissingDetails: record.equipmentMissingDetails || '',
+          observation: record.observation || '',
+          instructorId: record.instructorId || '',
+          instructorName: record.instructorName || '',
+          timeSlot: record.timeSlot || '',
+          createdAt: record.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        batch.set(doc(db, 'attendance', compositeId), docPayload, { merge: true });
+        batch.set(doc(db, 'attendanceRecords', compositeId), docPayload, { merge: true });
+        if (record.id && record.id !== compositeId) {
+          batch.set(doc(db, 'attendanceRecords', record.id), { ...docPayload, id: record.id }, { merge: true });
+        }
       }
       await batch.commit();
-      chunk.forEach((r) => removeFromAttendanceOutbox(r.id));
+      chunk.forEach((r) => {
+        removeFromAttendanceOutbox(r.id);
+        removeFromAttendanceOutbox(`${r.date}_${r.studentId}`);
+      });
     }
   } catch (error) {
     records.forEach((record) => {
@@ -1499,7 +1530,7 @@ export async function batchSaveRecordsToFirestore(records: AttendanceRecord[]): 
         recordId: record.id,
       });
     });
-    handleFirestoreError(error, OperationType.WRITE, 'attendanceRecords/batchSave');
+    handleFirestoreError(error, OperationType.WRITE, 'attendance/batchSave');
     throw error;
   }
 }
@@ -1512,8 +1543,8 @@ export async function batchDeleteAttendanceRecordsFromFirestore(recordIds: strin
       const chunk = recordIds.slice(i, i + CHUNK_SIZE);
       const batch = writeBatch(db);
       for (const id of chunk) {
-        const docRef = doc(db, 'attendanceRecords', id);
-        batch.delete(docRef);
+        batch.delete(doc(db, 'attendanceRecords', id));
+        batch.delete(doc(db, 'attendance', id));
       }
       await batch.commit();
       chunk.forEach((id) => removeFromAttendanceOutbox(id));
@@ -1546,6 +1577,7 @@ export async function deleteAttendanceRecordsForStudentsOnDate(
 
   // 1. Gera chaves determinísticas conhecidas para garantir limpeza instantânea
   studentIds.forEach((sid) => {
+    idsToDelete.add(`${date}_${sid}`);
     if (!activity || activity === 'TODAS') {
       ['Rotina', 'Reforço', ...OFFICIAL_ROLL_CALL_MODALITIES].forEach((act) => {
         idsToDelete.add(`${sid}_${act}_${date}`);
@@ -1558,24 +1590,39 @@ export async function deleteAttendanceRecordsForStudentsOnDate(
     }
   });
 
-  // 2. Consulta Firestore na coleção attendanceRecords para capturar qualquer documento existente
+  // 2. Consulta Firestore nas coleções attendance e attendanceRecords para capturar qualquer documento existente
   try {
-    const colRef = collection(db, 'attendanceRecords');
-    const q = query(colRef, or(where('data', '==', date), where('date', '==', date)));
-    const snap = await getDocs(q);
-    snap.docs.forEach((d) => {
-      const data = d.data();
-      if (studentIdSet.has(data.studentId)) {
-        if (!activity || activity === 'TODAS' || data.activity === activity) {
-          idsToDelete.add(d.id);
+    const [snapRecords, snapAttendance] = await Promise.allSettled([
+      getDocs(query(collection(db, 'attendanceRecords'), or(where('data', '==', date), where('date', '==', date)))),
+      getDocs(query(collection(db, 'attendance'), or(where('data', '==', date), where('date', '==', date)))),
+    ]);
+
+    if (snapRecords.status === 'fulfilled') {
+      snapRecords.value.docs.forEach((d) => {
+        const data = d.data();
+        if (studentIdSet.has(data.studentId)) {
+          if (!activity || activity === 'TODAS' || data.activity === activity) {
+            idsToDelete.add(d.id);
+          }
         }
-      }
-    });
+      });
+    }
+
+    if (snapAttendance.status === 'fulfilled') {
+      snapAttendance.value.docs.forEach((d) => {
+        const data = d.data();
+        if (studentIdSet.has(data.studentId)) {
+          if (!activity || activity === 'TODAS' || data.activity === activity) {
+            idsToDelete.add(d.id);
+          }
+        }
+      });
+    }
   } catch (err) {
-    console.warn('Aviso ao consultar attendanceRecords para exclusão no Firestore:', err);
+    console.warn('Aviso ao consultar attendance/attendanceRecords para exclusão no Firestore:', err);
   }
 
-  // 3. Executa exclusão em lote atômica no Firestore
+  // 3. Executa exclusão em lote atômica no Firestore em ambas as coleções
   const idList = Array.from(idsToDelete);
   await batchDeleteAttendanceRecordsFromFirestore(idList);
   return idList;
@@ -3150,6 +3197,38 @@ export async function autoConsolidateAndClosePastPendingCalls(
   for (const day of effectiveDays) {
     const dateStr = day.dateStr;
     if (dateStr >= todayStr) continue;
+
+    // Recupera registros reais do Firestore para dateStr para nunca sobrescrever presenças já gravadas
+    try {
+      const snapDate = await getDocs(
+        query(
+          collection(db, 'attendanceRecords'),
+          or(where('data', '==', dateStr), where('date', '==', dateStr))
+        )
+      );
+      snapDate.forEach((d) => {
+        const dData = d.data();
+        if (dData && dData.studentId) {
+          const parsed: AttendanceRecord = {
+            id: d.id,
+            studentId: dData.studentId,
+            date: dData.date || dData.data || dateStr,
+            weekNumber: Number(dData.weekNumber) || 1,
+            year: Number(dData.year) || 2026,
+            activity: dData.activity || dData.tipo || 'Rotina',
+            turma: dData.turma || '',
+            status: normalizeAttendanceStatus(dData.status),
+            exitTime: dData.exitTime,
+            equipmentMissingDetails: dData.equipmentMissingDetails,
+            observation: dData.observation,
+            createdAt: dData.createdAt || new Date().toISOString(),
+          };
+          currentRecordsPool.push(parsed);
+        }
+      });
+    } catch (e) {
+      console.warn(`Aviso ao ler registros prévios do dia ${dateStr}:`, e);
+    }
 
     const metrics = getDailyConsolidatedMetrics(
       dateStr,

@@ -17,6 +17,7 @@ import { useConfirmedAction } from '../hooks/useConfirmedAction';
 import { SaveStatusBanner } from './SaveStatusBanner';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
 import { StudentAttendanceItem } from './StudentAttendanceItem';
+import { subscribeAttendanceByDate, getCurrentHHMM } from '../services/attendanceService';
 
 export type { AttendanceFilterStatus };
 
@@ -244,6 +245,35 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Estado de filtro de status interativo acionado pelos cards do Resumo do Dia
   const [filterStatus, setFilterStatus] = useState<AttendanceFilterStatus>('TODOS');
   const rosterListRef = React.useRef<HTMLDivElement>(null);
+
+  // Registros recuperados do Firestore específicos para selectedDate (inclusive retroativos)
+  const [dateFirestoreRecords, setDateFirestoreRecords] = useState<AttendanceRecord[]>([]);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [isLoadingDateRecords, setIsLoadingDateRecords] = useState<boolean>(false);
+
+  // Snapshot em tempo real para a data selecionada: recupera e recalcula chamadas retroativas
+  useEffect(() => {
+    let isSubscribed = true;
+    setIsLoadingDateRecords(true);
+
+    const unsub = subscribeAttendanceByDate(
+      selectedDate,
+      (recordsFromFirestore) => {
+        if (!isSubscribed) return;
+        setDateFirestoreRecords(recordsFromFirestore);
+        setIsLoadingDateRecords(false);
+      },
+      (err) => {
+        console.warn('Erro ao carregar registros do Firestore para a data selecionada:', selectedDate, err);
+        if (isSubscribed) setIsLoadingDateRecords(false);
+      }
+    );
+
+    return () => {
+      isSubscribed = false;
+      unsub();
+    };
+  }, [selectedDate]);
 
   // Reseta o filtro de status caso o usuário alterne de turma, modalidade ou data
   useEffect(() => {
@@ -513,36 +543,40 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       });
   }, [students, selectedDate, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
 
-  // Create a fast map for quick record lookup: `${studentId}_${activity}_${date}`
+  // Mapa de busca rápida integrando o estado global e o snapshot do Firestore da data selecionada
   const recordMap = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
-    (records || []).forEach((rec) => {
-      if (rec && rec.studentId && rec.activity && rec.date) {
-        const key = `${rec.studentId}_${rec.activity}_${rec.date}`;
-        map.set(key, rec);
+    const pool = [...(records || []), ...(dateFirestoreRecords || [])];
+    pool.forEach((rec) => {
+      if (rec && rec.studentId && rec.date) {
+        const act = (rec.activity || (rec as any).modalidade || 'Rotina').trim();
+        // Mapeamento multi-chave com suporte para chave composta attendance/${date}_${studentId}
+        map.set(`${rec.studentId}_${act}_${rec.date}`, rec);
+        map.set(`${rec.studentId}_${act.toLowerCase()}_${rec.date}`, rec);
+        map.set(`${rec.date}_${rec.studentId}`, rec);
+        map.set(`${rec.studentId}_${rec.date}`, rec);
+        map.set(`${rec.date}_${rec.studentId}_${act}`, rec);
       }
     });
     return map;
-  }, [records]);
-
-function getCurrentHHMM(): string {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
-}
+  }, [records, dateFirestoreRecords]);
 
   // Identifica o status atual de chamada do aluno para o filtro do Resumo do Dia
   const getStudentAttendanceStatus = useCallback(
     (student: Student): Exclude<AttendanceFilterStatus, 'TODOS'> => {
       if (selectedActivity !== 'TODAS') {
-        const key = `${student.id}_${selectedActivity}_${selectedDate}`;
-        const rec = recordMap.get(key);
+        const rec =
+          recordMap.get(`${student.id}_${selectedActivity}_${selectedDate}`) ||
+          recordMap.get(`${student.id}_${selectedActivity.toLowerCase()}_${selectedDate}`) ||
+          recordMap.get(`${selectedDate}_${student.id}`) ||
+          recordMap.get(`${student.id}_${selectedDate}`);
+
         if (!rec || !rec.status) return 'PENDENTE';
-        if (rec.status === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
-        if (rec.status === 'presente') return 'PRESENTE';
-        if (rec.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
-        if (rec.status === 'falta') return 'FALTA';
+        const st = String(rec.status).toLowerCase().trim();
+        if (st === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
+        if (st === 'presente' || st === 'concluido' || st === 'concluído') return 'PRESENTE';
+        if (st === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+        if (st === 'falta') return 'FALTA';
         return 'PENDENTE';
       }
 
@@ -559,11 +593,19 @@ function getCurrentHHMM(): string {
       if (uniqueActs.length === 0) return 'PENDENTE';
 
       for (const act of uniqueActs) {
-        const rec = recordMap.get(`${student.id}_${act}_${selectedDate}`);
-        if (rec?.status === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
-        if (rec?.status === 'presente') return 'PRESENTE';
-        if (rec?.status === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
-        if (rec?.status === 'falta') return 'FALTA';
+        const rec =
+          recordMap.get(`${student.id}_${act}_${selectedDate}`) ||
+          recordMap.get(`${student.id}_${act.toLowerCase()}_${selectedDate}`) ||
+          recordMap.get(`${selectedDate}_${student.id}`) ||
+          recordMap.get(`${student.id}_${selectedDate}`);
+
+        if (rec?.status) {
+          const st = String(rec.status).toLowerCase().trim();
+          if (st === 'saida_antecipada') return 'SAIDA_ANTECIPADA';
+          if (st === 'presente' || st === 'concluido' || st === 'concluído') return 'PRESENTE';
+          if (st === 'sem_equipamento') return 'SEM_EQUIPAMENTO';
+          if (st === 'falta') return 'FALTA';
+        }
       }
       return 'PENDENTE';
     },
@@ -721,6 +763,7 @@ function getCurrentHHMM(): string {
 
       try {
         await activeSaveRecord(recordPayload);
+        setLastSavedTime(getCurrentHHMM());
 
         setIndividualSyncState((prev) => {
           const nextPending = Math.max(0, prev.pendingCount - 1);
@@ -809,6 +852,7 @@ function getCurrentHHMM(): string {
       await batchAction.execute(
         async () => {
           await onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
+          setLastSavedTime(getCurrentHHMM());
         },
         {
           pendingMessage: `Gravando chamada de ${studentIds.length} alunos no Firestore...`,
@@ -1403,6 +1447,23 @@ function getCurrentHHMM(): string {
                 <span>🔄 Ver Todos</span>
               </button>
             )}
+
+            {/* Feedback Visual: [ 💾 Gravado às hh:mm ] */}
+            {lastSavedTime && (
+              <span
+                className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs transition-all animate-in fade-in"
+                title="Última alteração salva e persistida com sucesso no Firestore"
+              >
+                <span>💾 Gravado às {lastSavedTime}</span>
+              </span>
+            )}
+
+            {isLoadingDateRecords && (
+              <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                <span>Carregando data...</span>
+              </span>
+            )}
           </div>
 
           {/* Quick Buttons */}
@@ -1782,7 +1843,11 @@ function getCurrentHHMM(): string {
 
                 activitiesToDisplay.forEach((act) => {
                   const recKey = `${student.id}_${act}_${selectedDate}`;
-                  const rec = recordMap.get(recKey);
+                  const rec =
+                    recordMap.get(recKey) ||
+                    recordMap.get(`${student.id}_${act.toLowerCase()}_${selectedDate}`) ||
+                    recordMap.get(`${selectedDate}_${student.id}`) ||
+                    recordMap.get(`${student.id}_${selectedDate}`);
                   recordsForStudent[act] = rec;
                   sigParts.push(
                     `${act}:${rec?.status || 'pendente'}:${rec?.exitTime || ''}:${rec?.equipmentMissingDetails || ''}:${rec?.observation || ''}`

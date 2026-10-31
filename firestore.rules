@@ -17,6 +17,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /attendance/{recordId} {
+      allow read, write: if true;
+    }
+
     match /turmas/{turmaId} {
       allow read, write: if true;
     }

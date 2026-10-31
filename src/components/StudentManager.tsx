@@ -62,6 +62,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return sorted.filter((t) => userTurmaSet.has(t));
   }, [turmas, isCoordenador, currentUser, userAssignedTurmas]);
 
+  const allSchoolTurmas = React.useMemo(() => {
+    const rawList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+    return sortTurmasPedagogical(rawList);
+  }, [turmas]);
+
   const activityMap = React.useMemo(() => {
     const map = new Map<string, ActivityItem>();
     activeActivities.forEach((item) => {
@@ -185,6 +190,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [originalStudentForEdit, setOriginalStudentForEdit] = useState<Student | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const editTurmasList = React.useMemo(() => {
+    const baseList = isCoordenador || (editingStudent?.anoLetivo || 2026) === 2027 ? allSchoolTurmas : allowedTurmas;
+    if (editingStudent?.turma && !baseList.includes(editingStudent.turma as any)) {
+      return [...baseList, editingStudent.turma as TurmaType];
+    }
+    return baseList;
+  }, [isCoordenador, allSchoolTurmas, allowedTurmas, editingStudent?.anoLetivo, editingStudent?.turma]);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -334,50 +347,49 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleToggleEditAnoLetivo = (targetYear: number) => {
     if (!editingStudent) return;
-    const currentYear = editingStudent.anoLetivo || 2026;
-    if (currentYear === targetYear) return;
 
     if (targetYear === 2027) {
       // a) Promoção Automática de Turma:
       // Identifica a turma atual (ex: 1º Ano Azul) e seleciona a turma do ano seguinte preservando cor/linha
       const baseTurma = originalStudentForEdit?.turma || editingStudent.turma;
-      const nextTurma = (getNextAcademicTurma(baseTurma, turmasList) || baseTurma) as TurmaType;
+      const allSchoolTurmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
+      const nextTurma = (getNextAcademicTurma(baseTurma, allSchoolTurmasList) || baseTurma) as TurmaType;
 
-      setEditingStudent({
-        ...editingStudent,
-        anoLetivo: 2027,
-        turma: nextTurma,
-        // b) Reset de Modalidades Extracurriculares: apenas ['Rotina']
-        activities: ['Rotina'],
-        modalidadesEspeciais: [],
-        specialties: [],
-        reforcoStartDate: undefined,
-        reforcoEndDate: undefined,
-        // c) Limpeza dos Horários de Saída: zera horários individuais
-        horariosSaida: {},
-        // d) Reset de Status e Contrato: Ativo e Regular
-        status: 'ativo',
-        statusMatricula: 'ativo',
-        inactivationDate: undefined,
-        inactivationReason: undefined,
-        tipoContrato: 'regular',
-        dataInicioContrato: undefined,
-        dataTerminoContrato: undefined,
-        diasContratados: undefined,
+      setEditingStudent((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          anoLetivo: 2027,
+          turma: nextTurma,
+          // b) Reset de Modalidades Extracurriculares: apenas ['Rotina']
+          activities: ['Rotina'],
+          modalidadesEspeciais: [],
+          specialties: [],
+          reforcoStartDate: undefined,
+          reforcoEndDate: undefined,
+          // c) Limpeza dos Horários de Saída: zera horários individuais
+          horariosSaida: {},
+          // d) Reset de Status e Contrato: Ativo e Regular
+          status: 'ativo',
+          statusMatricula: 'ativo',
+          inactivationDate: undefined,
+          inactivationReason: undefined,
+          tipoContrato: 'regular',
+          dataInicioContrato: undefined,
+          dataTerminoContrato: undefined,
+          diasContratados: undefined,
+        };
       });
     } else {
       // e) Se o usuário alternar de volta para "2026", restaura os dados e horários originais do cadastro do aluno
       if (originalStudentForEdit) {
-        setEditingStudent({
+        setEditingStudent((prev) => ({
           ...originalStudentForEdit,
-          name: editingStudent.name || originalStudentForEdit.name,
+          name: prev?.name || originalStudentForEdit.name,
           anoLetivo: 2026,
-        });
+        }));
       } else {
-        setEditingStudent({
-          ...editingStudent,
-          anoLetivo: 2026,
-        });
+        setEditingStudent((prev) => (prev ? { ...prev, anoLetivo: 2026 } : null));
       }
     }
   };
@@ -1729,22 +1741,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 <select
                   value={editingStudent.turma}
                   onChange={(e) =>
-                    setEditingStudent({ ...editingStudent, turma: e.target.value as TurmaType })
+                    setEditingStudent((prev) => prev ? { ...prev, turma: e.target.value as TurmaType } : null)
                   }
-                  disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1)}
+                  disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027)}
                   className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
-                    !isCoordenador && allowedTurmas.length === 1
+                    !isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027
                       ? 'bg-slate-100 cursor-not-allowed text-slate-600'
                       : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
                   }`}
                 >
-                  {turmasList.map((t) => (
+                  {editTurmasList.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>
                   ))}
                 </select>
-                {!isCoordenador && allowedTurmas.length === 1 && (
+                {!isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027 && (
                   <p className="text-[11px] text-slate-500 mt-1 font-medium">
                     🔒 Turma fixada conforme suas permissões de acesso.
                   </p>
@@ -1766,31 +1778,49 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   <Calendar className="w-4 h-4 text-indigo-600" />
                   <span>Ano Letivo da Matrícula:</span>
                 </span>
-                <div className="inline-flex items-center space-x-4">
-                  <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    id="btn-edit-ano-2026"
+                    disabled={isSavingEdit}
+                    onClick={() => handleToggleEditAnoLetivo(2026)}
+                    className={`px-3.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      (editingStudent.anoLetivo || 2026) === 2026
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 bg-transparent'
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="editAlunoAnoLetivo"
                       value={2026}
                       checked={(editingStudent.anoLetivo || 2026) === 2026}
-                      disabled={isSavingEdit}
                       onChange={() => handleToggleEditAnoLetivo(2026)}
-                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                      className="w-3.5 h-3.5 text-indigo-600 focus:ring-0 border-slate-300 cursor-pointer"
                     />
                     <span>2026</span>
-                  </label>
-                  <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-edit-ano-2027"
+                    disabled={isSavingEdit}
+                    onClick={() => handleToggleEditAnoLetivo(2027)}
+                    className={`px-3.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      (editingStudent.anoLetivo || 2026) === 2027
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 bg-transparent'
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="editAlunoAnoLetivo"
                       value={2027}
                       checked={(editingStudent.anoLetivo || 2026) === 2027}
-                      disabled={isSavingEdit}
                       onChange={() => handleToggleEditAnoLetivo(2027)}
-                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                      className="w-3.5 h-3.5 text-indigo-600 focus:ring-0 border-slate-300 cursor-pointer"
                     />
                     <span>2027</span>
-                  </label>
+                  </button>
                 </div>
               </div>
               {(editingStudent.anoLetivo || 2026) === 2027 && (

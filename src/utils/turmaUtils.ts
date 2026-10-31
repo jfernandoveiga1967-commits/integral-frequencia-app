@@ -139,7 +139,7 @@ function parseTurmaStage(turma: string): { stageIndex: number; color: string } {
   const lower = t.toLowerCase();
 
   const colorMatch = t.match(/\b(azul|vermelho|amarelo|verde|laranja|branco|rosa|ouro|prata)\b/i);
-  const color = colorMatch ? colorMatch[0] : '';
+  const color = colorMatch ? (colorMatch[0].charAt(0).toUpperCase() + colorMatch[0].slice(1).toLowerCase()) : '';
 
   if (
     lower.includes('mini maternal') ||
