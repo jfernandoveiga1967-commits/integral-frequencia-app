@@ -8,7 +8,8 @@ import { RosterReportModal } from './RosterReportModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface StudentManagerProps {
   students?: Student[];
@@ -142,6 +143,60 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
   const [batchDiasFrequencia, setBatchDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleProcessFile = async (file: File) => {
+    try {
+      setUploadedFileName(file.name);
+      setBatchFormError(null);
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<any>(firstSheet, { header: 1 });
+
+      const extracted: string[] = [];
+      const stopWords = new Set([
+        'nome', 'aluno', 'turma', 'matricula', 'matrícula', 'codigo', 'código',
+        'sexo', 'data', 'nascimento', 'relatorio', 'relatório', 'sistema', 'e1',
+        'colegio', 'colégio', 'escola', 'total', 'quantidade', 'situação', 'situacao',
+        'status', 'chamada', 'ano', 'serie', 'série'
+      ]);
+
+      rows.forEach((row: any) => {
+        if (Array.isArray(row)) {
+          for (const cell of row) {
+            if (typeof cell === 'string') {
+              const clean = cell.trim();
+              const lower = clean.toLowerCase();
+              if (
+                clean.length >= 3 &&
+                !stopWords.has(lower) &&
+                !/^\d+$/.test(clean) &&
+                !lower.includes('relatório') &&
+                !lower.includes('sistema e1') &&
+                !lower.startsWith('página') &&
+                !lower.startsWith('pagina')
+              ) {
+                extracted.push(clean);
+                break;
+              }
+            }
+          }
+        }
+      });
+
+      if (extracted.length > 0) {
+        setBatchNamesText(extracted.join('\n'));
+      } else {
+        setBatchFormError('Nenhum nome de aluno foi identificado no arquivo .xls selecionado.');
+      }
+    } catch (err: any) {
+      console.warn('Erro ao processar arquivo .xls:', err);
+      setBatchFormError('Falha ao processar o arquivo .xls. Verifique se o arquivo foi exportado do relatório de turmas do Sistema E1.');
+    }
+  };
 
   const toggleDayInList = (currentDays: DayOfWeek[] | undefined, day: DayOfWeek): DayOfWeek[] => {
     const allWeekdays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
@@ -912,7 +967,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1.5"
               >
                 <FileText className="w-4 h-4 text-indigo-600" />
-                <span>+ Importar Lista em Lote</span>
+                <span>+ Importar Lote (E1)</span>
               </button>
             </>
           )}
@@ -1497,19 +1552,27 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           onSubmit={handleBatchAddSubmit}
           className="bg-slate-900 text-white rounded-2xl p-5 space-y-4 animate-in fade-in duration-150"
         >
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 className="font-bold text-indigo-300 text-sm flex items-center space-x-2">
-              <FileText className="w-4 h-4" />
-              <span>Importação de Alunos em Lote por Turma</span>
-            </h3>
-            <button
-              type="button"
-              disabled={isSavingBatch}
-              onClick={() => setShowBatchForm(false)}
-              className="text-slate-400 hover:text-white cursor-pointer disabled:opacity-50"
-            >
-              <X className="w-4 h-4" />
-            </button>
+          <div className="border-b border-slate-800 pb-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-indigo-300 text-sm flex items-center space-x-2">
+                <FileText className="w-4 h-4" />
+                <span>Importação de Alunos em Lote — Sistema E1</span>
+              </h3>
+              <button
+                type="button"
+                disabled={isSavingBatch}
+                onClick={() => {
+                  setShowBatchForm(false);
+                  setUploadedFileName(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Selecione ou arraste o arquivo .xls exportado do relatório de turmas do Sistema E1.
+            </p>
           </div>
 
           {batchFormError && (
@@ -1638,9 +1701,58 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
           </div>
 
+          {/* Dropzone do Arquivo .xls Sistema E1 */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) {
+                handleProcessFile(file);
+              }
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+              isDraggingFile
+                ? 'border-indigo-400 bg-indigo-950/40'
+                : 'border-slate-700 hover:border-indigo-500 bg-slate-800/50 hover:bg-slate-800'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xls,.xlsx"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleProcessFile(file);
+                }
+              }}
+            />
+            <div className="flex flex-col items-center justify-center space-y-1">
+              <Upload className="w-5 h-5 text-indigo-400" />
+              <p className="text-xs font-semibold text-slate-200">
+                {uploadedFileName ? (
+                  <span className="text-emerald-400 font-bold">Arquivo carregado: {uploadedFileName}</span>
+                ) : (
+                  <span>Clique para selecionar ou arraste o arquivo <strong className="text-indigo-300">.xls</strong> do Sistema E1</span>
+                )}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Os nomes serão preenchidos na lista abaixo, onde você também pode editar ou colar manualmente.
+              </p>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Cole a Relação de Nomes dos Alunos (1 nome por linha):
+              Relação de Nomes dos Alunos (1 nome por linha):
             </label>
             <textarea
               rows={5}
