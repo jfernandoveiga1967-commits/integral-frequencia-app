@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
-import { generateStudentPDFReport, generateTurmaPDFReport } from '../utils/pdfGenerator';
+import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { RosterReportModal } from './RosterReportModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { writeBatch, doc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { saveStudents, loadStudents, normalizeStudent } from '../utils/storageUtils';
+import { broadcastSyncEvent } from '../services/syncService';
 
 interface StudentManagerProps {
   students?: Student[];
@@ -136,21 +140,217 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
   const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
 
+  // E1 Multi-Turma Parser Types & State
+  interface E1ExtractedStudent {
+    name: string;
+    turma: string;
+  }
+
+  const E1_TURMA_MAP: Record<string, string> = {
+    'KIDS - Mini-Maternal': 'Mini Maternal Azul',
+    'KIDS - Maternal': 'Maternal Azul',
+    'KIDS - Infantil I': 'Infantil 1 Azul',
+    'KIDS - Infantil II': 'Infantil 2 Azul',
+    'KIDS - 1 Ano': '1º Ano Azul',
+    'TEENS - 2 Ano': '2º Ano Azul',
+    'TEENS - 3 Ano': '3º Ano Azul',
+    'TEENS - 4 Ano': '4º Ano Azul',
+    'TEENS - 5 Ano': '5º Ano Azul',
+    'TEENS - 6 Ano': '6º Ano Azul',
+  };
+
+  const mapE1TurmaNameToOfficial = (rawName: string): string => {
+    const clean = (rawName || '').trim();
+    if (E1_TURMA_MAP[clean]) return E1_TURMA_MAP[clean];
+
+    // Normalização sem acentos, minúscula e espaços uniformes
+    const norm = clean
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ');
+
+    if (norm.includes('mini') && norm.includes('maternal')) return 'Mini Maternal Azul';
+    if (norm.includes('maternal')) return 'Maternal Azul';
+    if (norm.includes('infantil') && (norm.includes('ii') || norm.includes(' 2'))) return 'Infantil 2 Azul';
+    if (norm.includes('infantil') && (norm.includes('i') || norm.includes(' 1'))) return 'Infantil 1 Azul';
+    if (norm.includes('1') && norm.includes('ano')) return '1º Ano Azul';
+    if (norm.includes('2') && norm.includes('ano')) return '2º Ano Azul';
+    if (norm.includes('3') && norm.includes('ano')) return '3º Ano Azul';
+    if (norm.includes('4') && norm.includes('ano')) return '4º Ano Azul';
+    if (norm.includes('5') && norm.includes('ano')) return '5º Ano Azul';
+    if (norm.includes('6') && norm.includes('ano')) return '6º Ano Azul';
+
+    return clean;
+  };
+
+  const parseE1HtmlReport = (htmlContent: string): E1ExtractedStudent[] => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const results: E1ExtractedStudent[] = [];
+
+    const extractNameFromCell = (td: Element): string | null => {
+      const raw = (td.textContent || '').trim().replace(/\s+/g, ' ');
+      const lower = raw.toLowerCase();
+      if (!raw || raw.length < 3) return null;
+      if (lower === 'nome' || lower === 'aluno' || lower === 'nome do aluno') return null;
+      if (lower === 'situação' || lower === 'situacao' || lower === 'status' || lower === 'matrícula' || lower === 'matricula') return null;
+      if (lower.startsWith('página') || lower.startsWith('pagina') || lower.includes('relatório') || lower.includes('sistema e1')) return null;
+      if (/^\d+$/.test(raw)) return null;
+      if (lower.startsWith('turma:')) return null;
+      if (!/[a-zA-ZÀ-ÿ]/.test(raw)) return null;
+      return raw;
+    };
+
+    const parseTurmaFromText = (text: string): string | null => {
+      if (!text.includes('Turma:')) return null;
+      const parts = text.split(/Turma:/i);
+      let after = parts[1]?.trim() || '';
+      if (after) {
+        const cutoff = after.search(/(Turno|Sala|Período|Periodo|Horário|Horario|Professor|Data|Ano|Série|Serie|Data da Emissão):/i);
+        if (cutoff > 0) {
+          after = after.substring(0, cutoff).trim();
+        }
+        after = after.replace(/[-–—\s]+$/, '').trim();
+        if (after.length > 0) {
+          return after;
+        }
+      }
+      return null;
+    };
+
+    // Coleta todas as tabelas
+    const tables = Array.from(doc.querySelectorAll('table'));
+    let currentOfficialTurma = '';
+
+    tables.forEach((table) => {
+      // 1. Procura se há cabeçalho Turma: precedendo a tabela
+      let precedingTurma = '';
+      let prev = table.previousElementSibling;
+      while (prev && !precedingTurma) {
+        const bTags = prev.querySelectorAll('b, strong');
+        for (const b of Array.from(bTags)) {
+          const found = parseTurmaFromText(b.parentElement?.textContent || b.textContent || '');
+          if (found) {
+            precedingTurma = found;
+            break;
+          }
+        }
+        if (!precedingTurma && prev.textContent?.includes('Turma:')) {
+          precedingTurma = parseTurmaFromText(prev.textContent) || '';
+        }
+        prev = prev.previousElementSibling;
+      }
+
+      if (precedingTurma) {
+        currentOfficialTurma = mapE1TurmaNameToOfficial(precedingTurma);
+      }
+
+      // 2. Analisa as linhas da tabela
+      const rows = Array.from(table.querySelectorAll('tr'));
+      rows.forEach((row) => {
+        const rowText = row.textContent || '';
+        if (rowText.includes('Turma:')) {
+          const foundTurma = parseTurmaFromText(rowText);
+          if (foundTurma) {
+            currentOfficialTurma = mapE1TurmaNameToOfficial(foundTurma);
+            return;
+          }
+        }
+
+        if (currentOfficialTurma) {
+          const cells = Array.from(row.querySelectorAll('td'));
+          // Dentro da tabela tabela_relatorio, seleciona células com text-align: left
+          const leftCells = cells.filter((td) => {
+            const style = (td.getAttribute('style') || '').toLowerCase().replace(/\s/g, '');
+            return style.includes('text-align:left') || style.includes('text-align:start');
+          });
+
+          const candidates = leftCells.length > 0 ? leftCells : cells;
+          for (const td of candidates) {
+            const name = extractNameFromCell(td);
+            if (name) {
+              const exists = results.some((r) => r.name === name && r.turma === currentOfficialTurma);
+              if (!exists) {
+                results.push({
+                  name,
+                  turma: currentOfficialTurma,
+                });
+              }
+              break; // Um nome de aluno por linha
+            }
+          }
+        }
+      });
+    });
+
+    return results;
+  };
+
   // Batch Add state
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [batchNamesText, setBatchNamesText] = useState('');
   const [batchTurma, setBatchTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina', 'Natação']);
+  const [batchActivities, setBatchActivities] = useState<ActivityType[]>(['Rotina']);
   const [batchDiasFrequencia, setBatchDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [e1ParsedStudents, setE1ParsedStudents] = useState<E1ExtractedStudent[]>([]);
+  const [expandedTurmaDetails, setExpandedTurmaDetails] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const e1TurmaCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    e1ParsedStudents.forEach((st) => {
+      counts[st.turma] = (counts[st.turma] || 0) + 1;
+    });
+    return counts;
+  }, [e1ParsedStudents]);
 
   const handleProcessFile = async (file: File) => {
     try {
       setUploadedFileName(file.name);
       setBatchFormError(null);
+
+      // Lê o conteúdo textual (HTML) do arquivo
+      let textContent = '';
+      try {
+        textContent = await file.text();
+      } catch (e) {
+        console.warn('Fallback file.text():', e);
+      }
+
+      const isHtml =
+        textContent.includes('<') &&
+        (textContent.includes('<table') ||
+          textContent.includes('Turma:') ||
+          textContent.includes('tabela_relatorio') ||
+          textContent.includes('<html'));
+
+      if (isHtml) {
+        // Suporte para encoding Latin1 / ISO-8859-1 se houver caracteres especiais corrompidos
+        if (textContent.includes('')) {
+          try {
+            const buf = await file.arrayBuffer();
+            const dec = new TextDecoder('iso-8859-1');
+            const decoded = dec.decode(buf);
+            if (!decoded.includes('')) {
+              textContent = decoded;
+            }
+          } catch (err) {}
+        }
+
+        const e1Students = parseE1HtmlReport(textContent);
+        if (e1Students.length > 0) {
+          setE1ParsedStudents(e1Students);
+          setBatchNamesText(e1Students.map((s) => s.name).join('\n'));
+          return;
+        }
+      }
+
+      // Fallback para arquivos binários .xls/.xlsx via SheetJS
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: 'array' });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -188,9 +388,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       });
 
       if (extracted.length > 0) {
+        setE1ParsedStudents([]);
         setBatchNamesText(extracted.join('\n'));
       } else {
-        setBatchFormError('Nenhum nome de aluno foi identificado no arquivo .xls selecionado.');
+        setBatchFormError('Nenhum aluno foi identificado no arquivo .xls selecionado.');
       }
     } catch (err: any) {
       console.warn('Erro ao processar arquivo .xls:', err);
@@ -337,6 +538,23 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     filename: '',
     title: '',
   });
+
+  const handleOpenFichaMatriculaPDF = (targetStudent: Student) => {
+    const targetYear = targetStudent.anoLetivo || selectedAnoLetivo || 2026;
+    const result = generateFichaMatriculaPDF({
+      student: targetStudent,
+      schoolYear: targetYear,
+    });
+    setPdfPreviewState({
+      isOpen: true,
+      doc: result.doc,
+      dataUrl: result.dataUrl || result.dataUri,
+      blobUrl: result.blobUrl,
+      filename: result.filename,
+      title: `Ficha de Matrícula e Autorização de Saída - ${targetStudent.name}`,
+      onDownload: result.download,
+    });
+  };
 
   // Estado do Módulo de Relações Nominais Cadastrais
   const [showNominalListModal, setShowNominalListModal] = useState(false);
@@ -716,6 +934,80 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const handleBatchAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBatchFormError(null);
+
+    // Caso 1: Importação Multi-Turmas do Sistema E1
+    if (e1ParsedStudents.length > 0) {
+      setIsSavingBatch(true);
+      try {
+        const targetYear = selectedAnoLetivo;
+        const newStudentsList: Student[] = e1ParsedStudents.map((st, idx) => ({
+          id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+          name: st.name.trim(),
+          turma: st.turma,
+          anoLetivo: targetYear,
+          activities: ['Rotina'],
+          tipoSaida: 'PAIS',
+          status: 'ativo',
+          statusMatricula: 'ativo',
+          tipoContrato: 'regular',
+          diasFrequencia: batchDiasFrequencia && batchDiasFrequencia.length > 0
+            ? batchDiasFrequencia
+            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+          horariosSaida: {},
+        }));
+
+        // Gravação atômica em lotes (writeBatch) no Firestore (coleções 'alunos' e 'students')
+        const BATCH_CHUNK_SIZE = 150;
+        for (let i = 0; i < newStudentsList.length; i += BATCH_CHUNK_SIZE) {
+          const chunk = newStudentsList.slice(i, i + BATCH_CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach((student) => {
+            const payload = {
+              id: student.id,
+              name: student.name,
+              turma: student.turma,
+              anoLetivo: student.anoLetivo,
+              activities: ['Rotina'],
+              tipoSaida: 'PAIS',
+              status: 'ativo',
+              statusMatricula: 'ativo',
+              tipoContrato: 'regular',
+              diasFrequencia: student.diasFrequencia,
+              horariosSaida: {},
+              updatedAt: new Date().toISOString(),
+            };
+            batch.set(doc(db, 'alunos', student.id), payload, { merge: true });
+            batch.set(doc(db, 'students', student.id), payload, { merge: true });
+          });
+          await batch.commit();
+        }
+
+        // Atualização síncrona do cache local e estado
+        const currentLocal = loadStudents();
+        const updatedList = [...newStudentsList, ...currentLocal];
+        saveStudents(updatedList);
+        setStudents(updatedList);
+        broadcastSyncEvent('SYNC_STUDENTS', updatedList);
+
+        // Limpeza dos estados do modal e feedback
+        setE1ParsedStudents([]);
+        setUploadedFileName(null);
+        setBatchNamesText('');
+        setShowBatchForm(false);
+        setToastMsg({
+          text: `Sucesso! ${newStudentsList.length} alunos importados do Sistema E1 para o Ano Letivo ${targetYear}.`,
+          type: 'success',
+        });
+      } catch (err: any) {
+        console.error('Erro na gravação em lote no Firestore:', err);
+        setBatchFormError(err?.message || 'Erro ao gravar alunos no Firestore. Verifique sua conexão e tente novamente.');
+      } finally {
+        setIsSavingBatch(false);
+      }
+      return;
+    }
+
+    // Caso 2: Importação Manual por Nomes (fallback)
     const names = batchNamesText
       .split('\n')
       .map((n) => n.trim())
@@ -735,9 +1027,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         ? Array.from(new Set(batchActivities))
         : ['Rotina', ...Array.from(new Set(batchActivities))];
 
-      await Promise.resolve(
-        onBatchAddStudents(names, batchTurma, finalActivities, batchDiasFrequencia)
-      );
+      if (onBatchAddStudents) {
+        await Promise.resolve(
+          onBatchAddStudents(names, batchTurma, finalActivities, batchDiasFrequencia)
+        );
+      }
       setBatchNamesText('');
       setBatchDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setShowBatchForm(false);
@@ -1581,65 +1875,99 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Turma de Destino:
-              </label>
-              <select
-                value={batchTurma}
-                onChange={(e) => setBatchTurma(e.target.value as TurmaType)}
-                disabled={isSavingBatch || (!isCoordenador && allowedTurmas.length === 1)}
-                className={`w-full px-3 py-2 text-sm border border-slate-700 bg-slate-800 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 font-medium ${
-                  !isCoordenador && allowedTurmas.length === 1 ? 'opacity-75 cursor-not-allowed' : ''
-                }`}
+          {e1ParsedStudents.length > 0 ? (
+            <div className="bg-indigo-950/70 border border-indigo-700/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start space-x-3">
+                <div className="p-2 bg-indigo-500/20 text-indigo-300 rounded-lg shrink-0 mt-0.5">
+                  <School className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-indigo-200">
+                      Modo Multi-Turmas (Sistema E1 Reconhecido)
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      Automático
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    A turma de cada aluno será vinculada dinamicamente com base nas <strong>{Object.keys(e1TurmaCounts).length} turmas</strong> do relatório para o Ano Letivo <strong>{selectedAnoLetivo}</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setE1ParsedStudents([]);
+                  setUploadedFileName(null);
+                  setBatchNamesText('');
+                }}
+                className="text-xs text-rose-300 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/50 px-2.5 py-1.5 rounded-lg border border-rose-800 transition-colors shrink-0 font-semibold cursor-pointer"
               >
-                {turmasList.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              {!isCoordenador && allowedTurmas.length === 1 && (
-                <p className="text-[11px] text-slate-400 mt-1 font-medium">
-                  🔒 Turma fixada conforme suas permissões de acesso.
-                </p>
-              )}
+                Limpar / Descartar
+              </button>
             </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-semibold text-slate-300">
-                  Atividades com Chamada (Turma):
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Turma de Destino:
                 </label>
-                <span className="text-[10px] text-indigo-300 font-medium">
-                  {extracurricularRollCallActivities.filter(a => a.id !== 'Rotina').length} opções
-                </span>
+                <select
+                  value={batchTurma}
+                  onChange={(e) => setBatchTurma(e.target.value as TurmaType)}
+                  disabled={isSavingBatch || (!isCoordenador && allowedTurmas.length === 1)}
+                  className={`w-full px-3 py-2 text-sm border border-slate-700 bg-slate-800 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 font-medium ${
+                    !isCoordenador && allowedTurmas.length === 1 ? 'opacity-75 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {turmasList.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                {!isCoordenador && allowedTurmas.length === 1 && (
+                  <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                    🔒 Turma fixada conforme suas permissões de acesso.
+                  </p>
+                )}
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {extracurricularRollCallActivities.map((act) => {
-                  const isSelected = batchActivities.includes(act.id);
-                  return (
-                    <button
-                      type="button"
-                      key={act.id}
-                      disabled={isSavingBatch}
-                      onClick={() =>
-                        setBatchActivities(toggleActivityInList(batchActivities, act.id))
-                      }
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border transition-all ${
-                        isSelected
-                          ? 'bg-indigo-500 text-white border-indigo-400'
-                          : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                      }`}
-                    >
-                      {act.name || act.id}
-                    </button>
-                  );
-                })}
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Atividades com Chamada (Turma):
+                  </label>
+                  <span className="text-[10px] text-indigo-300 font-medium">
+                    {extracurricularRollCallActivities.filter(a => a.id !== 'Rotina').length} opções
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {extracurricularRollCallActivities.map((act) => {
+                    const isSelected = batchActivities.includes(act.id);
+                    return (
+                      <button
+                        type="button"
+                        key={act.id}
+                        disabled={isSavingBatch}
+                        onClick={() =>
+                          setBatchActivities(toggleActivityInList(batchActivities, act.id))
+                        }
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border transition-all ${
+                          isSelected
+                            ? 'bg-indigo-500 text-white border-indigo-400'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        {act.name || act.id}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Batch Dias de Frequência */}
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-3 space-y-2">
@@ -1745,23 +2073,97 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 )}
               </p>
               <p className="text-[11px] text-slate-400">
-                Os nomes serão preenchidos na lista abaixo, onde você também pode editar ou colar manualmente.
+                O relatório de turmas será processado dinamicamente vinculando cada aluno à sua respectiva turma.
               </p>
             </div>
           </div>
 
+          {/* Pré-visualização Detalhada do Sistema E1 (129 alunos em 10 turmas) */}
+          {e1ParsedStudents.length > 0 && (
+            <div className="bg-slate-800/90 border border-slate-700 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-slate-700/80 gap-2">
+                <div className="flex items-center space-x-2">
+                  <FileCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-emerald-300">
+                    Pré-visualização da Importação ({e1ParsedStudents.length} alunos encontrados em {Object.keys(e1TurmaCounts).length} turmas)
+                  </span>
+                </div>
+                <span className="text-[11px] font-semibold text-slate-400">
+                  Ano Letivo Ativo: <strong className="text-white">{selectedAnoLetivo}</strong>
+                </span>
+              </div>
+
+              {/* Lista expansível de total por turma */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Clique em uma turma para expandir e verificar os alunos identificados:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                  {Object.entries(e1TurmaCounts).map(([turmaName, count]) => {
+                    const isExpanded = expandedTurmaDetails === turmaName;
+                    const studentsInThisTurma = e1ParsedStudents.filter((s) => s.turma === turmaName);
+
+                    return (
+                      <div
+                        key={turmaName}
+                        className={`border rounded-xl transition-colors overflow-hidden ${
+                          isExpanded ? 'border-indigo-500 bg-slate-900' : 'border-slate-700 bg-slate-800/60 hover:border-slate-600'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedTurmaDetails(isExpanded ? null : turmaName)}
+                          className="w-full flex items-center justify-between p-2.5 text-left cursor-pointer"
+                        >
+                          <div className="flex items-center space-x-2 truncate">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                            <span className="text-xs font-bold text-slate-200 truncate">{turmaName}</span>
+                          </div>
+                          <div className="flex items-center space-x-2 shrink-0">
+                            <span className="text-xs font-extrabold px-2 py-0.5 rounded-md bg-indigo-900/60 text-indigo-300 border border-indigo-700/50">
+                              {count} {count === 1 ? 'aluno' : 'alunos'}
+                            </span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                            )}
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="p-2.5 pt-0 border-t border-slate-800/80 mt-1 max-h-32 overflow-y-auto">
+                            <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 font-mono">
+                              {studentsInThisTurma.map((st, i) => (
+                                <li key={i} className="truncate">
+                                  {st.name}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Relação de Nomes dos Alunos (1 nome por linha):
+              {e1ParsedStudents.length > 0
+                ? `Relação de Nomes dos Alunos (${e1ParsedStudents.length} alunos extraídos do relatório):`
+                : 'Relação de Nomes dos Alunos (1 nome por linha):'}
             </label>
             <textarea
-              rows={5}
+              rows={4}
               placeholder={`Exemplo:\nAna Julia Santos\nBruno Henrique Lima\nCarolina Mendes\nDaniel Oliveira`}
               value={batchNamesText}
               disabled={isSavingBatch}
               onChange={(e) => setBatchNamesText(e.target.value)}
               className="w-full px-3 py-2 text-xs font-mono border border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
-              required
+              required={e1ParsedStudents.length === 0}
             />
           </div>
 
@@ -1769,7 +2171,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <button
               type="button"
               disabled={isSavingBatch}
-              onClick={() => setShowBatchForm(false)}
+              onClick={() => {
+                setShowBatchForm(false);
+                setE1ParsedStudents([]);
+                setUploadedFileName(null);
+              }}
               className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer disabled:opacity-50"
             >
               Cancelar
@@ -1782,12 +2188,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               {isSavingBatch ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Importando...</span>
+                  <span>
+                    {e1ParsedStudents.length > 0
+                      ? `Gravando ${e1ParsedStudents.length} Alunos no Firestore...`
+                      : 'Importando...'}
+                  </span>
                 </>
               ) : (
                 <>
                   <Check className="w-4 h-4" />
-                  <span>Importar Alunos</span>
+                  <span>
+                    {e1ParsedStudents.length > 0
+                      ? `Importar ${e1ParsedStudents.length} Alunos (Ano ${selectedAnoLetivo})`
+                      : 'Importar Alunos'}
+                  </span>
                 </>
               )}
             </button>
@@ -1808,18 +2222,29 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 <Edit3 className="w-5 h-5 text-indigo-600" />
                 <span>Editar Cadastro do Aluno</span>
               </h3>
-              <button
-                type="button"
-                disabled={isSavingEdit}
-                onClick={() => {
-                  setEditingStudent(null);
-                  setOriginalStudentForEdit(null);
-                  setEditFormError(null);
-                }}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
+                  className="px-2.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg cursor-pointer flex items-center space-x-1.5 transition-colors shadow-2xs"
+                  title="Emitir Ficha Cadastral de Matrícula e Termo de Autorização de Saída (PDF)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>📄 Ficha de Matrícula (PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => {
+                    setEditingStudent(null);
+                    setOriginalStudentForEdit(null);
+                    setEditFormError(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Scrollable Body */}
@@ -2605,36 +3030,49 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
 
             {/* Modal Fixed/Sticky Footer */}
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex justify-end space-x-2 shrink-0 shadow-xs">
-              <button
-                type="button"
-                disabled={isSavingEdit}
-                onClick={() => {
-                  setEditingStudent(null);
-                  setOriginalStudentForEdit(null);
-                  setEditFormError(null);
-                }}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={isSavingEdit}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
-              >
-                {isSavingEdit ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Salvando...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>Salvar Alterações</span>
-                  </>
-                )}
-              </button>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-xs">
+              <div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
+                  className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
+                  title="Emitir Ficha Cadastral de Matrícula e Termo de Autorização de Saída (PDF)"
+                >
+                  <FileText className="w-4 h-4 text-emerald-600" />
+                  <span>📄 Ficha de Matrícula (PDF)</span>
+                </button>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => {
+                    setEditingStudent(null);
+                    setOriginalStudentForEdit(null);
+                    setEditFormError(null);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Salvar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </form>
         </div>
@@ -3055,6 +3493,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     >
                       <Download className="w-3.5 h-3.5 text-blue-600" />
                       <span className="hidden sm:inline">Relatório PDF</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleOpenFichaMatriculaPDF(student)}
+                      className="p-2 rounded-lg text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
+                      title="Emitir Ficha Cadastral de Matrícula e Termo de Autorização de Saída (PDF)"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>📄 Ficha de Matrícula (PDF)</span>
                     </button>
 
                     {userCanManageStudents && (

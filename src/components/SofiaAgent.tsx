@@ -121,16 +121,15 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
     appState,
   };
 
+  const userFirstName = effectiveUser?.name ? effectiveUser.name.split(' ')[0] : 'Fernando';
+  const initialGreeting = `Olá, ${userFirstName}! Como posso te ajudar hoje?`;
+
   // Histórico de Mensagens da Sessão
   const [messages, setMessages] = useState<SofiaChatMessage[]>([
     {
       id: 'welcome',
       sender: 'sofia',
-      text: `Olá, ${effectiveUser?.name?.split(' ')[0] || 'Coordenador(a)'}! Sou a Sofia, a Assistente Inteligente Oficial do Programa Integral do Colégio Crescer.
-
-Estou conectada ao estado ao vivo da escola neste momento (${appState.currentTime} • ${appState.formattedDate}). Posso gerar espelhos de ponto em PDF, emitir autorizações de portaria (atraso/saída), lançar faltas, disparar alertas ou diagnosticar as chamadas e turmas de hoje.
-
-Como posso te auxiliar agora?`,
+      text: initialGreeting,
       timestamp: appState.currentTime,
     },
   ]);
@@ -198,7 +197,7 @@ Como posso te auxiliar agora?`,
         {
           id: `err_${Date.now()}`,
           sender: 'sofia',
-          text: 'Ocorreu uma oscilação na resposta. Pode repetir seu comando ou selecionar um dos atalhos rápidos abaixo?',
+          text: 'Ocorreu uma oscilação na resposta. Pode repetir seu comando, por favor?',
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -210,6 +209,17 @@ Como posso te auxiliar agora?`,
 
   // Reconhecimento de Voz
   const toggleListening = () => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          id: 'welcome',
+          sender: 'sofia',
+          text: initialGreeting,
+          timestamp: appState.currentTime,
+        },
+      ]);
+    }
+
     if (isListening) {
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch {}
@@ -246,17 +256,22 @@ Como posso te auxiliar agora?`,
     }
   };
 
+  const handleOpenSofia = () => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          id: 'welcome',
+          sender: 'sofia',
+          text: initialGreeting,
+          timestamp: appState.currentTime,
+        },
+      ]);
+    }
+    setIsOpen(true);
+  };
+
   // Restrito à Coordenação / Administrador
   if (!isUserAdmin) return null;
-
-  const quickActions = [
-    { label: '📊 Diagnóstico do Dia', prompt: 'Sofia, analise os desarranjos e a situação da escola hoje' },
-    { label: '📄 Espelho de Ponto (Danyel)', prompt: 'Gerar o espelho de ponto de Danyel Pereira de 09/2026 em PDF' },
-    { label: '📄 Espelho de Ponto (Thaís)', prompt: 'Gerar o espelho de ponto de Thaís Grisoni de 09/2026 em PDF' },
-    { label: '🎫 Autorização de Portaria', prompt: 'Gerar autorização de saída antecipada em PDF para o primeiro aluno' },
-    { label: '📋 Registrar Falta', prompt: 'Registrar falta com justificativa médica hoje' },
-    { label: '💬 Alerta WhatsApp', prompt: 'Disparar alerta via WhatsApp para a Coordenação sobre o fechamento do dia' },
-  ];
 
   return (
     <>
@@ -264,28 +279,20 @@ Como posso te auxiliar agora?`,
       {!isOpen && (
         <button
           type="button"
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-5 right-5 z-40 p-3.5 bg-gradient-to-r from-teal-700 via-indigo-900 to-slate-900 text-white rounded-3xl shadow-2xl border border-teal-400/40 hover:scale-105 active:scale-95 transition-all flex items-center space-x-3 cursor-pointer group"
-          title="Abrir Assistente Sofia com IA Resolutiva"
+          onClick={handleOpenSofia}
+          className="fixed bottom-5 right-5 z-40 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl shadow-2xl border border-teal-500/40 hover:border-teal-400/80 hover:scale-105 active:scale-95 transition-all flex items-center space-x-2.5 cursor-pointer group"
+          title="Abrir Sofia"
         >
           <div className="relative">
-            <div className="w-9 h-9 rounded-2xl bg-teal-500/20 text-teal-300 flex items-center justify-center border border-teal-400/40 shadow-inner">
-              <Sparkles className="w-5 h-5 text-teal-300 group-hover:rotate-12 transition-transform duration-300" />
+            <div className="w-7 h-7 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center border border-teal-400/40 shadow-inner">
+              <Sparkles className="w-4 h-4 text-teal-300 group-hover:rotate-12 transition-transform duration-300" />
             </div>
-            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-slate-900 animate-ping" />
-            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-1 ring-slate-900 animate-ping" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-1 ring-slate-900" />
           </div>
-          <div className="text-left pr-2">
-            <span className="block text-xs font-black tracking-tight text-white flex items-center gap-1.5">
-              Sofia • IA
-              <span className="text-[9px] bg-teal-500/30 text-teal-200 px-1.5 py-0.5 rounded-full font-bold">
-                Resolutiva
-              </span>
-            </span>
-            <span className="block text-[10px] text-teal-200/90 font-medium">
-              Ações e Ferramentas ao Vivo
-            </span>
-          </div>
+          <span className="text-xs font-bold text-white tracking-wide pr-1">
+            💬 Sofia
+          </span>
         </button>
       )}
 
@@ -488,20 +495,6 @@ Como posso te auxiliar agora?`,
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Atalhos Rápidos (Chips) */}
-          <div className="bg-white border-t border-slate-200/80 px-3 py-2 flex items-center space-x-2 overflow-x-auto shrink-0 scrollbar-none">
-            {quickActions.map((action, idx) => (
-              <button
-                key={idx}
-                type="button"
-                disabled={isProcessing}
-                onClick={() => handleSendMessage(action.prompt)}
-                className="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-100 hover:bg-teal-50 hover:text-teal-900 hover:border-teal-300 text-slate-700 text-[11px] font-medium border border-slate-200/80 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
 
           {/* Campo de Entrada de Mensagem */}
           <div className="p-3 bg-white border-t border-slate-200/80 shrink-0">

@@ -41,6 +41,8 @@ export interface Student {
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
   modalidadesEspeciais?: string[]; // Modalidades paralelas especiais (ex: ['Reforço'])
   specialties?: string[]; // Modalidades paralelas especiais (alias de compatibilidade)
+  dataNascimento?: string; // Data de nascimento do aluno (DD/MM/AAAA ou AAAA-MM-DD)
+  birthDate?: string; // Data de nascimento (alias de compatibilidade)
   reforcoStartDate?: string; // Data de início do Reforço Escolar (YYYY-MM-DD)
   reforcoEndDate?: string; // Data final do Reforço Escolar (YYYY-MM-DD)
   tipoContrato?: ContractType; // 'regular' | 'avulso' (padrão: 'regular')

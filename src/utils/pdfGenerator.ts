@@ -5890,5 +5890,404 @@ export function generateRelatorioFeedbacksPDF(
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
 
+// ---------------------------------------------------------------------------
+// 41. FICHA CADASTRAL DE MATRÍCULA E TERMO DE AUTORIZAÇÃO DE SAÍDA (A4)
+// ---------------------------------------------------------------------------
+
+export interface GenerateFichaMatriculaPDFOptions {
+  student: Student;
+  schoolYear?: number | string;
+  saveImmediately?: boolean;
+}
+
+export function generateFichaMatriculaPDF({
+  student,
+  schoolYear = student.anoLetivo || new Date().getFullYear(),
+  saveImmediately = false,
+}: GenerateFichaMatriculaPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const resolvedYear = String(schoolYear);
+  const pageWidth = 210;
+  const leftX = 14;
+  const rightX = 196;
+  const contentWidth = 182;
+
+  // 1. CABEÇALHO INSTITUCIONAL
+  drawOfficialHeader(
+    doc,
+    `FICHA CADASTRAL DE MATRÍCULA E AUTORIZAÇÃO DE SAÍDA — ${resolvedYear}`,
+    'Colégio Crescer • Programa do Integral',
+    [
+      `Aluno(a): ${student.name}`,
+      `Turma: ${student.turma}`,
+      `Ano Letivo: ${resolvedYear}`,
+      `Matrícula: ${student.id || 'N/A'}`,
+    ],
+    'portrait'
+  );
+
+  let currentY = 36;
+
+  // Helper para desenhar títulos de blocos com tarja de alto contraste
+  const drawSectionHeader = (title: string, y: number): number => {
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.roundedRect(leftX, y, contentWidth, 5.8, 1, 1, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.8);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title.toUpperCase(), leftX + 4, y + 4.1);
+    return y + 7.2;
+  };
+
+  // -------------------------------------------------------------------------
+  // BLOCO 1: DADOS DO ALUNO E MATRÍCULA
+  // -------------------------------------------------------------------------
+  currentY = drawSectionHeader('1. Identificação do Aluno e Matrícula', currentY);
+
+  const block1StartY = currentY;
+  const block1Height = 31;
+
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.setLineWidth(0.3);
+  doc.roundedRect(leftX, block1StartY, contentWidth, block1Height, 1.5, 1.5, 'FD');
+
+  const col1X = leftX + 4;
+  const col2X = leftX + 96;
+
+  // Linha 1: Nome Completo & Matrícula/ID
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105); // slate-600
+  doc.text('NOME COMPLETO DO ESTUDANTE:', col1X, block1StartY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text(student.name.toUpperCase(), col1X, block1StartY + 9.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('CÓDIGO / MATRÍCULA:', col2X, block1StartY + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(student.id || 'N/A', col2X, block1StartY + 9.5);
+
+  // Linha 2: Turma de Destino & Ano Letivo
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('TURMA DE DESTINO / ENTURMAÇÃO:', col1X, block1StartY + 15);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(79, 70, 229); // indigo-600
+  doc.text(student.turma, col1X, block1StartY + 19);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('ANO LETIVO DA MATRÍCULA:', col2X, block1StartY + 15);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Exercício ${resolvedYear}`, col2X, block1StartY + 19);
+
+  // Linha 3: Data de Nascimento & Status da Matrícula
+  const rawBirth = student.dataNascimento || student.birthDate;
+  const formattedBirth = rawBirth
+    ? (rawBirth.includes('-') ? formatDateBR(rawBirth) : rawBirth)
+    : 'Conforme prontuário escolar';
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('DATA DE NASCIMENTO:', col1X, block1StartY + 24);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(30, 41, 59);
+  doc.text(formattedBirth, col1X, block1StartY + 28);
+
+  const statusLabel =
+    student.status === 'inativo'
+      ? 'Inativo'
+      : student.status === 'cancelado'
+      ? 'Cancelado'
+      : 'Ativo Regular';
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('SITUAÇÃO DA MATRÍCULA:', col2X, block1StartY + 24);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  if (student.status === 'inativo' || student.status === 'cancelado') {
+    doc.setTextColor(220, 38, 38);
+  } else {
+    doc.setTextColor(22, 163, 74);
+  }
+  doc.text(statusLabel.toUpperCase(), col2X, block1StartY + 28);
+
+  currentY = block1StartY + block1Height + 3.5;
+
+  // -------------------------------------------------------------------------
+  // BLOCO 2: LOGÍSTICA DE DESLOCAMENTO E AUTORIZAÇÃO DE SAÍDA (EM DESTAQUE)
+  // -------------------------------------------------------------------------
+  currentY = drawSectionHeader('2. Logística de Deslocamento e Autorização de Saída (DESTAQUE)', currentY);
+
+  const block2StartY = currentY;
+  const isTransporte = student.tipoSaida === 'TRANSPORTE_ESCOLAR';
+
+  if (isTransporte) {
+    const block2Height = 35;
+    doc.setFillColor(254, 252, 232); // amber-50
+    doc.setDrawColor(217, 119, 6); // amber-600
+    doc.setLineWidth(0.7); // Borda destacada
+    doc.roundedRect(leftX, block2StartY, contentWidth, block2Height, 2, 2, 'FD');
+
+    // Badge de modalidade
+    doc.setFillColor(217, 119, 6);
+    doc.roundedRect(leftX + 4, block2StartY + 3, 75, 4.8, 1, 1, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    doc.text('MODALIDADE: TRANSPORTE ESCOLAR (VAN)', leftX + 6, block2StartY + 6.5);
+
+    // Condutor em destaque
+    const condutorNome = (student.nomeCondutor || '').trim().toUpperCase();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(146, 64, 14);
+    doc.text('CONDUTOR(A) / VAN AUTORIZADA PARA RETIRADA DO ESTUDANTE:', leftX + 4, block2StartY + 12.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(180, 83, 9);
+    doc.text(
+      condutorNome.length > 0 ? `Condutor(a) / Tio(a): ${condutorNome}` : 'NÃO ESPECIFICADO NO CADASTRO',
+      leftX + 4,
+      block2StartY + 17.5
+    );
+
+    // Aviso de segurança institucional
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(120, 53, 15);
+    const alertText =
+      'AVISO DE SEGURANÇA E PROTOCOLO INSTITUCIONAL: A equipe de monitoria e portaria do Colégio Crescer está formalmente instruída a liberar o estudante única e exclusivamente mediante a identificação e presença física do(a) condutor(a) credenciado(a) acima. Qualquer alteração ou eventual substituição de condutor deverá ser previamente comunicada por escrito pela família à coordenação pedagógica.';
+    const splitAlert = doc.splitTextToSize(alertText, contentWidth - 8);
+    doc.text(splitAlert, leftX + 4, block2StartY + 22.5);
+
+    currentY = block2StartY + block2Height + 3.5;
+  } else {
+    const block2Height = 32;
+    doc.setFillColor(239, 246, 255); // blue-50
+    doc.setDrawColor(79, 70, 229); // indigo-600
+    doc.setLineWidth(0.7);
+    doc.roundedRect(leftX, block2StartY, contentWidth, block2Height, 2, 2, 'FD');
+
+    // Badge de modalidade
+    doc.setFillColor(79, 70, 229);
+    doc.roundedRect(leftX + 4, block2StartY + 3, 75, 4.8, 1, 1, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    doc.text('MODALIDADE: PAIS / RESPONSÁVEIS LEGAIS', leftX + 6, block2StartY + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(67, 56, 202);
+    doc.text('LIBERAÇÃO AUTORIZADA:', leftX + 4, block2StartY + 12.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(30, 27, 75);
+    doc.text('SAÍDA ACOMPANHADA EXCLUSIVAMENTE PELOS PAIS OU PORTADORES AUTORIZADOS', leftX + 4, block2StartY + 17);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(51, 65, 85);
+    const alertText =
+      'AVISO DE SEGURANÇA E PROTOCOLO INSTITUCIONAL: A liberação do estudante será efetuada diretamente aos responsáveis legais cadastrados. Caso a saída venha a ser feita por terceiros (familiares ou portadores temporários), a portaria exigirá autorização prévia assinada ou via canal oficial do colégio, acompanhada da apresentação de documento original com foto.';
+    const splitAlert = doc.splitTextToSize(alertText, contentWidth - 8);
+    doc.text(splitAlert, leftX + 4, block2StartY + 21.8);
+
+    currentY = block2StartY + block2Height + 3.5;
+  }
+
+  // -------------------------------------------------------------------------
+  // BLOCO 3: MODALIDADES EXTRACURRICULARES E HORÁRIOS CONTRATUAIS
+  // -------------------------------------------------------------------------
+  currentY = drawSectionHeader('3. Modalidades Extracurriculares e Horários Contratuais', currentY);
+
+  const enrolledActivities = (student.activities || []).filter(Boolean);
+  const activitiesDisplay =
+    enrolledActivities.length > 0 ? enrolledActivities.join('  •  ') : 'Rotina Regular do Integral';
+
+  const specialList = (student.modalidadesEspeciais || student.specialties || []).filter(Boolean);
+  const specialDisplay = specialList.length > 0 ? `  •  Especiais: ${specialList.join(', ')}` : '';
+
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(leftX, currentY, contentWidth, 10, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text('MODALIDADES CONTRATADAS / ATIVIDADES:', leftX + 4, currentY + 3.8);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${activitiesDisplay}${specialDisplay}`, leftX + 4, currentY + 7.8);
+
+  currentY += 12;
+
+  // Quadro de Horários de Saída (Segunda a Sexta)
+  const daysInfo: { id: DayOfWeek; label: string }[] = [
+    { id: 'segunda', label: 'SEGUNDA-FEIRA' },
+    { id: 'terca', label: 'TERÇA-FEIRA' },
+    { id: 'quarta', label: 'QUARTA-FEIRA' },
+    { id: 'quinta', label: 'QUINTA-FEIRA' },
+    { id: 'sexta', label: 'SEXTA-FEIRA' },
+  ];
+
+  const diasFreq = student.diasFrequencia && student.diasFrequencia.length > 0
+    ? student.diasFrequencia
+    : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+
+  const tableHead = daysInfo.map((d) => d.label);
+  const statusRow = daysInfo.map((d) => {
+    const isEnrolled = diasFreq.includes(d.id);
+    return isEnrolled ? 'Atendimento' : 'Folga';
+  });
+
+  const hoursRow = daysInfo.map((d) => {
+    const isEnrolled = diasFreq.includes(d.id);
+    if (!isEnrolled) return 'Não frequenta';
+    const specificTime = student.horariosSaida?.[d.id];
+    if (specificTime && specificTime.trim()) return `Saída: ${specificTime}`;
+    if (student.horarioSaida && student.horarioSaida.trim()) return `Saída: ${student.horarioSaida}`;
+    return 'Saída: 18:00';
+  });
+
+  const colWidth = contentWidth / 5;
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [tableHead],
+    body: [statusRow, hoursRow],
+    theme: 'grid',
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 2,
+      halign: 'center',
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.2,
+    },
+    columnStyles: {
+      0: { cellWidth: colWidth },
+      1: { cellWidth: colWidth },
+      2: { cellWidth: colWidth },
+      3: { cellWidth: colWidth },
+      4: { cellWidth: colWidth },
+    },
+    margin: { left: leftX, right: leftX },
+    didParseCell: (data) => {
+      if (data.section === 'body') {
+        const day = daysInfo[data.column.index];
+        const isEnrolled = day && diasFreq.includes(day.id);
+        if (!isEnrolled) {
+          data.cell.styles.fillColor = [248, 250, 252];
+          data.cell.styles.textColor = [148, 163, 184];
+        } else {
+          if (data.row.index === 0) {
+            data.cell.styles.textColor = [22, 163, 74];
+            data.cell.styles.fontStyle = 'bold';
+          } else {
+            data.cell.styles.textColor = [15, 23, 42];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      }
+    },
+  });
+
+  currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 3.5 : currentY + 22;
+
+  // -------------------------------------------------------------------------
+  // BLOCO 4: TERMO DE RESPONSABILIDADE E CAMPO DE ASSINATURA
+  // -------------------------------------------------------------------------
+  currentY = drawSectionHeader('4. Termo de Declaração, Ciência e Autorização', currentY);
+
+  const block4StartY = currentY;
+  const block4Height = 52;
+
+  doc.setFillColor(250, 250, 250);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(leftX, block4StartY, contentWidth, block4Height, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(30, 41, 59);
+  const legalText =
+    'Declaro que as informações acima prestadas são verdadeiras e que estou ciente das normas de saída do Colégio Crescer. Autorizo a liberação do(a) estudante estritamente de acordo com a modalidade logística e condutores especificados nesta ficha cadastral.';
+  const splitLegal = doc.splitTextToSize(legalText, contentWidth - 8);
+  doc.text(splitLegal, leftX + 4, block4StartY + 5);
+
+  // Linha de assinatura
+  const sigY = block4StartY + 25;
+  doc.setDrawColor(100, 116, 139);
+  doc.setLineWidth(0.4);
+  doc.line(leftX + 24, sigY, rightX - 24, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text('Assinatura do(a) Responsável Legal', pageWidth / 2, sigY + 4, { align: 'center' });
+
+  // Campos preenchíveis
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+
+  doc.text('Nome do Responsável: __________________________________________________', leftX + 4, block4StartY + 38);
+  doc.text('CPF: ___________________________', rightX - 58, block4StartY + 38);
+
+  doc.text(`Data: _____ / _____ / ${resolvedYear}`, leftX + 4, block4StartY + 45.5);
+  doc.text('Telefone / Contato: (_____) __________________', leftX + 65, block4StartY + 45.5);
+  doc.text('Grau de Parentesco: ____________________', rightX - 68, block4StartY + 45.5);
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const cleanName = student.name.replace(/[^a-zA-Z0-9À-ÿ]/g, '_').slice(0, 30);
+  const filename = `Ficha_Matricula_${cleanName}_${resolvedYear}.pdf`;
+
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+
 
 
