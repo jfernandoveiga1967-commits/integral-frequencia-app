@@ -21,6 +21,8 @@ import {
   NominalPeriodMode,
   NominalReportMetrics,
   NominalProcessedStudent,
+  StudentFinancialProfile,
+  FinancialMetricSummary,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
@@ -6287,6 +6289,227 @@ export function generateFichaMatriculaPDF({
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
+
+// ---------------------------------------------------------------------------
+// 42. DEMONSTRATIVO FINANCEIRO E CONTROLE DE MENSALIDADES (A4 LANDSCAPE)
+// ---------------------------------------------------------------------------
+
+export interface GenerateFinancialReportPDFOptions {
+  profiles: StudentFinancialProfile[];
+  metrics: FinancialMetricSummary;
+  schoolYear: number | string;
+  monthRef?: string;
+  turmaFilter?: string;
+  statusFilter?: string;
+  saveImmediately?: boolean;
+}
+
+export function generateFinancialReportPDF({
+  profiles,
+  metrics,
+  schoolYear,
+  monthRef = 'Exercício Corrente',
+  turmaFilter = 'Todas',
+  statusFilter = 'Todos',
+  saveImmediately = false,
+}: GenerateFinancialReportPDFOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const leftX = 14;
+  const contentWidth = 269;
+
+  // Cabeçalho Oficial
+  drawOfficialHeader(
+    doc,
+    `DEMONSTRATIVO FINANCEIRO E CONTROLE DE MENSALIDADES — ${schoolYear}`,
+    'Colégio Crescer • Gestão Contratual e Receitas do Integral',
+    [
+      `Ano Letivo: ${schoolYear}`,
+      `Mês/Período: ${monthRef}`,
+      `Turma: ${turmaFilter}`,
+      `Status: ${statusFilter}`,
+      `Total Contratos: ${profiles.length}`,
+    ],
+    'landscape'
+  );
+
+  let startY = 36;
+
+  // 4 Cards de Indicadores Financeiros no Topo
+  const cardWidth = (contentWidth - 9) / 4; // ~65mm cada
+  const cardHeight = 16.5;
+
+  // Card 1: Receita Prevista
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text('RECEITA PREVISTA MENSAL', leftX + 4, startY + 5.2);
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrencyBR(metrics.receitaPrevistaMensal), leftX + 4, startY + 12.2);
+
+  // Card 2: Receita Confirmada / Em Dia
+  const card2X = leftX + cardWidth + 3;
+  doc.setFillColor(240, 253, 244);
+  doc.setDrawColor(187, 247, 208);
+  doc.roundedRect(card2X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(22, 101, 52);
+  doc.text('RECEITA CONFIRMADA (EM DIA)', card2X + 4, startY + 5.2);
+  doc.setFontSize(10);
+  doc.setTextColor(21, 128, 61);
+  doc.text(formatCurrencyBR(metrics.receitaConfirmada), card2X + 4, startY + 12.2);
+
+  // Card 3: Total em Atraso / Inadimplência
+  const card3X = card2X + cardWidth + 3;
+  doc.setFillColor(254, 242, 242);
+  doc.setDrawColor(254, 202, 202);
+  doc.roundedRect(card3X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(153, 27, 27);
+  doc.text('EM ATRASO / INADIMPLÊNCIA', card3X + 4, startY + 5.2);
+  doc.setFontSize(10);
+  doc.setTextColor(185, 28, 28);
+  doc.text(formatCurrencyBR(metrics.totalEmAtraso), card3X + 4, startY + 12.2);
+
+  // Card 4: Taxa de Adimplência
+  const card4X = card3X + cardWidth + 3;
+  doc.setFillColor(238, 242, 255);
+  doc.setDrawColor(199, 210, 254);
+  doc.roundedRect(card4X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(55, 48, 163);
+  doc.text('TAXA DE ADIMPLÊNCIA', card4X + 4, startY + 5.2);
+  doc.setFontSize(10);
+  doc.setTextColor(79, 70, 229);
+  doc.text(`${metrics.taxaAdimplencia}% (${metrics.totalEmDia} adimplentes)`, card4X + 4, startY + 12.2);
+
+  startY += cardHeight + 4;
+
+  // Tabela Analítica de Contratos dos Alunos
+  const tableData = profiles.map((p, idx) => {
+    const planoLabel =
+      p.planoHora === 'INTEGRAL_8H'
+        ? 'Integral (8h)'
+        : p.planoHora === 'PARCIAL_4H'
+        ? 'Parcial (4h)'
+        : p.planoHora === 'EXTENDIDO_12H'
+        ? 'Estendido (12h)'
+        : 'Personalizado';
+
+    const statusLabel =
+      p.statusPagamento === 'EM_DIA'
+        ? 'EM DIA'
+        : p.statusPagamento === 'EM_ATRASO'
+        ? 'EM ATRASO'
+        : p.statusPagamento === 'ISENTO'
+        ? 'ISENTO'
+        : 'PENDENTE';
+
+    return [
+      String(idx + 1).padStart(2, '0'),
+      p.studentName || 'Aluno',
+      p.turma || '-',
+      planoLabel,
+      formatCurrencyBR(p.valorMensalidadeBase),
+      formatCurrencyBR(p.valorModalidadesExtras),
+      p.descontoPercentual > 0 ? `${p.descontoPercentual}%` : '-',
+      formatCurrencyBR(p.valorTotalMensal),
+      `Dia ${String(p.diaVencimento).padStart(2, '0')}`,
+      statusLabel,
+      p.formaPagamentoPadrao || 'Boleto',
+    ];
+  });
+
+  autoTable(doc, {
+    startY,
+    head: [
+      [
+        '#',
+        'Nome do Estudante',
+        'Turma',
+        'Plano Contratual',
+        'Base',
+        'Oficinas Extras',
+        'Desconto',
+        'Valor Total',
+        'Vencimento',
+        'Situação',
+        'Forma',
+      ],
+    ],
+    body:
+      tableData.length > 0
+        ? tableData
+        : [['-', 'Nenhum contrato localizado para os filtros informados', '', '', '', '', '', '', '', '', '']],
+    theme: 'grid',
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 2,
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'center',
+    },
+    columnStyles: {
+      0: { cellWidth: 10, halign: 'center' },
+      1: { cellWidth: 55, fontStyle: 'bold' },
+      2: { cellWidth: 32 },
+      3: { cellWidth: 30 },
+      4: { cellWidth: 22, halign: 'right' },
+      5: { cellWidth: 22, halign: 'right' },
+      6: { cellWidth: 16, halign: 'center' },
+      7: { cellWidth: 25, halign: 'right', fontStyle: 'bold' },
+      8: { cellWidth: 20, halign: 'center' },
+      9: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+      10: { cellWidth: 15, halign: 'center' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 9) {
+        const text = String(data.cell.raw || '');
+        if (text === 'EM DIA') {
+          data.cell.styles.textColor = [22, 163, 74];
+        } else if (text === 'EM ATRASO') {
+          data.cell.styles.textColor = [220, 38, 38];
+        } else if (text === 'PENDENTE') {
+          data.cell.styles.textColor = [217, 119, 6];
+        } else if (text === 'ISENTO') {
+          data.cell.styles.textColor = [100, 116, 139];
+        }
+      }
+    },
+  });
+
+  applyPageNumbersAndFooters(doc, 'landscape');
+
+  const filename = `Demonstrativo_Financeiro_Integral_${schoolYear}.pdf`;
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
 
 
 

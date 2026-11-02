@@ -14,6 +14,7 @@ import {
   Utensils,
   LogOut,
   User,
+  CreditCard,
 } from 'lucide-react';
 import { UserProfile, TabType } from '../types';
 import { ConnectionState } from '../services/syncService';
@@ -319,7 +320,23 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* 7. Relatório Semanal */}
+          {/* 7. Financeiro (Gestão Financeira e Contratos) */}
+          {isTabAllowed('financeiro', currentUser) && (
+            <button
+              id="tab-financeiro"
+              onClick={() => setActiveTab('financeiro')}
+              className={`flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'financeiro'
+                  ? 'bg-slate-800 text-emerald-400 border-emerald-500'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+              }`}
+            >
+              <CreditCard className="w-4 h-4 text-emerald-400" />
+              <span>Financeiro</span>
+            </button>
+          )}
+
+          {/* 8. Relatório Semanal */}
           {isTabAllowed('relatorio', currentUser) && (
             <button
               onClick={() => setActiveTab('relatorio')}

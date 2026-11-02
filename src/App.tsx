@@ -49,6 +49,7 @@ import { LivroPonto } from './components/LivroPonto';
 import { SemanarioMain } from './components/Semanario/SemanarioMain';
 import { CardapioCulinaria } from './components/CardapioCulinaria';
 import { ManualOrientacoes } from './components/ManualOrientacoes';
+import { FinancialManagement } from './components/FinancialManagement';
 import { LoginScreen } from './components/LoginScreen';
 import { DepartureAlertBanner } from './components/DepartureAlertBanner';
 import { UserNotificationBanner } from './components/UserNotificationBanner';
@@ -2358,6 +2359,15 @@ export default function App() {
             onDeleteStudent={handleDeleteStudent}
             onAddTurma={handleAddTurma}
             onDeleteTurma={handleDeleteTurma}
+          />
+        )}
+
+        {/* Tab: Gestão Financeira e Contratos */}
+        {activeTab === 'financeiro' && isTabAllowed('financeiro', currentUser) && (
+          <FinancialManagement
+            students={students}
+            currentUser={currentUser}
+            turmas={turmas}
           />
         )}
 

@@ -123,6 +123,7 @@ export type TabType =
   | 'ponto'
   | 'cardapio'
   | 'alunos'
+  | 'financeiro'
   | 'relatorio'
   | 'biblioteca'
   | 'usuarios'
@@ -141,13 +142,54 @@ export const AVAILABLE_APP_TABS: AppTabOption[] = [
   { id: 'ponto', label: 'Livro Ponto', description: 'Registro de ponto eletrônico e folha de frequência' },
   { id: 'cardapio', label: 'Cardápio e Culinária', description: 'Cardápio semanal e oficina de receitas' },
   { id: 'alunos', label: 'Alunos e Turmas', description: 'Cadastro e gestão de alunos e turmas' },
-  { id: 'relatorio', label: 'Relatório / Demonstrativo Financeiro', description: 'Relatório analítico semanal de frequência e Demonstrativo Financeiro' },
+  { id: 'financeiro', label: 'Financeiro', description: 'Gestão Financeira, Contratos e Mensalidades do Integral' },
+  { id: 'relatorio', label: 'Relatório Semanal', description: 'Relatório analítico semanal de frequência' },
   { id: 'biblioteca', label: 'Biblioteca de Semanas', description: 'Histórico consolidado de semanas anteriores' },
   { id: 'usuarios', label: 'Gerenciamento de Usuários', description: 'Administração de colaboradores e permissões' },
   { id: 'manual', label: 'Manual e Normas', description: 'Orientações, normas internas e guia de abordagem sensível' },
 ];
 
 export const ALL_APP_TAB_IDS: TabType[] = AVAILABLE_APP_TABS.map((t) => t.id);
+
+// ---------------------------------------------------------------------------
+// GESTÃO FINANCEIRA E CONTRATOS DO INTEGRAL
+// ---------------------------------------------------------------------------
+export type FinancialPlanHour = 'PARCIAL_4H' | 'INTEGRAL_8H' | 'EXTENDIDO_12H' | 'CUSTOMIZADO';
+
+export type FinancialPaymentStatus = 'EM_DIA' | 'PENDENTE' | 'EM_ATRASO' | 'ISENTO';
+
+export interface StudentFinancialProfile {
+  id?: string; // id composto: `${anoLetivo}_${studentId}`
+  studentId: string;
+  studentName?: string;
+  turma?: string;
+  anoLetivo: number; // 2026 ou 2027
+  planoHora: FinancialPlanHour;
+  valorMensalidadeBase: number;
+  valorModalidadesExtras: number; // soma dos valores das oficinas extras (Natação, Balé, Judô, etc.)
+  descontoPercentual: number;
+  valorTotalMensal: number; // (base + extras) * (1 - desconto/100)
+  diaVencimento: number; // ex: 5 ou 10
+  statusPagamento: FinancialPaymentStatus;
+  mesReferencia?: string; // ex: "2026-08"
+  dataUltimoPagamento?: string; // YYYY-MM-DD
+  observacoes?: string;
+  formaPagamentoPadrao?: string; // 'Boleto' | 'PIX' | 'Cartão' | 'Transferência'
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface FinancialMetricSummary {
+  receitaPrevistaMensal: number;
+  receitaConfirmada: number;
+  totalEmAtraso: number;
+  taxaAdimplencia: number;
+  totalContratos: number;
+  totalEmDia: number;
+  totalPendentes: number;
+  totalAtrasados: number;
+  totalIsentos: number;
+}
 
 export type RegimeTrabalho = 'mensalista' | 'professor_horista' | 'prestador_aula_efetiva';
 
