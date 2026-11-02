@@ -2368,6 +2368,7 @@ export default function App() {
             students={students}
             currentUser={currentUser}
             turmas={turmas}
+            users={users}
           />
         )}
 

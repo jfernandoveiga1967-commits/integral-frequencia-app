@@ -23,6 +23,7 @@ import {
   NominalProcessedStudent,
   StudentFinancialProfile,
   FinancialMetricSummary,
+  FinancialExpense,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
@@ -6296,6 +6297,7 @@ export function generateFichaMatriculaPDF({
 
 export interface GenerateFinancialReportPDFOptions {
   profiles: StudentFinancialProfile[];
+  expenses?: FinancialExpense[];
   metrics: FinancialMetricSummary;
   schoolYear: number | string;
   monthRef?: string;
@@ -6306,6 +6308,7 @@ export interface GenerateFinancialReportPDFOptions {
 
 export function generateFinancialReportPDF({
   profiles,
+  expenses = [],
   metrics,
   schoolYear,
   monthRef = 'Exercício Corrente',
@@ -6325,76 +6328,109 @@ export function generateFinancialReportPDF({
   // Cabeçalho Oficial
   drawOfficialHeader(
     doc,
-    `DEMONSTRATIVO FINANCEIRO E CONTROLE DE MENSALIDADES — ${schoolYear}`,
-    'Colégio Crescer • Gestão Contratual e Receitas do Integral',
+    `DEMONSTRATIVO FINANCEIRO E FLUXO DE CAIXA — ${schoolYear}`,
+    'Colégio Crescer • Gestão de Receitas, Custos Operacionais e Saldo Líquido',
     [
       `Ano Letivo: ${schoolYear}`,
       `Mês/Período: ${monthRef}`,
       `Turma: ${turmaFilter}`,
       `Status: ${statusFilter}`,
       `Total Contratos: ${profiles.length}`,
+      `Despesas Cadastradas: ${expenses.length}`,
     ],
     'landscape'
   );
 
   let startY = 36;
 
-  // 4 Cards de Indicadores Financeiros no Topo
+  // 4 Cards de Indicadores Financeiros no Topo (Dashboard de Fluxo de Caixa)
   const cardWidth = (contentWidth - 9) / 4; // ~65mm cada
-  const cardHeight = 16.5;
+  const cardHeight = 17;
 
-  // Card 1: Receita Prevista
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(71, 85, 105);
-  doc.text('RECEITA PREVISTA MENSAL', leftX + 4, startY + 5.2);
-  doc.setFontSize(10);
-  doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrencyBR(metrics.receitaPrevistaMensal), leftX + 4, startY + 12.2);
-
-  // Card 2: Receita Confirmada / Em Dia
-  const card2X = leftX + cardWidth + 3;
+  // Card 1: Receita Confirmada / Prevista
   doc.setFillColor(240, 253, 244);
   doc.setDrawColor(187, 247, 208);
-  doc.roundedRect(card2X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(22, 101, 52);
-  doc.text('RECEITA CONFIRMADA (EM DIA)', card2X + 4, startY + 5.2);
+  doc.setFontSize(6.8);
+  doc.setTextColor(21, 128, 61);
+  doc.text('RECEITA CONFIRMADA (EM DIA)', leftX + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(21, 128, 61);
-  doc.text(formatCurrencyBR(metrics.receitaConfirmada), card2X + 4, startY + 12.2);
+  doc.text(formatCurrencyBR(metrics.receitaConfirmada), leftX + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Prevista: ${formatCurrencyBR(metrics.receitaPrevistaMensal)}`, leftX + 4, startY + 15);
 
-  // Card 3: Total em Atraso / Inadimplência
-  const card3X = card2X + cardWidth + 3;
+  // Card 2: Total de Despesas do Mês
+  const card2X = leftX + cardWidth + 3;
   doc.setFillColor(254, 242, 242);
   doc.setDrawColor(254, 202, 202);
-  doc.roundedRect(card3X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.roundedRect(card2X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(153, 27, 27);
-  doc.text('EM ATRASO / INADIMPLÊNCIA', card3X + 4, startY + 5.2);
+  doc.setFontSize(6.8);
+  doc.setTextColor(185, 28, 28);
+  doc.text('TOTAL DE DESPESAS DO MÊS', card2X + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(185, 28, 28);
-  doc.text(formatCurrencyBR(metrics.totalEmAtraso), card3X + 4, startY + 12.2);
+  doc.text(formatCurrencyBR(metrics.totalDespesasMes), card2X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(153, 27, 27);
+  doc.text(`Pagas: ${formatCurrencyBR(metrics.totalDespesasPagas)} • Pend: ${formatCurrencyBR(metrics.totalDespesasPendentes)}`, card2X + 4, startY + 15);
+
+  // Card 3: Saldo Líquido Operacional (Receitas - Despesas)
+  const card3X = card2X + cardWidth + 3;
+  const isPositiveBalance = metrics.saldoLiquidoOperacional >= 0;
+  if (isPositiveBalance) {
+    doc.setFillColor(238, 242, 255);
+    doc.setDrawColor(199, 210, 254);
+  } else {
+    doc.setFillColor(255, 241, 242);
+    doc.setDrawColor(254, 205, 211);
+  }
+  doc.roundedRect(card3X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(isPositiveBalance ? 67 : 190, isPositiveBalance ? 56 : 18, isPositiveBalance ? 202 : 60);
+  doc.text('SALDO LÍQUIDO OPERACIONAL', card3X + 4, startY + 4.8);
+  doc.setFontSize(10);
+  doc.setTextColor(isPositiveBalance ? 49 : 190, isPositiveBalance ? 46 : 18, isPositiveBalance ? 129 : 60);
+  doc.text(formatCurrencyBR(metrics.saldoLiquidoOperacional), card3X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(isPositiveBalance ? 22 : 220, isPositiveBalance ? 101 : 38, isPositiveBalance ? 52 : 38);
+  doc.text(isPositiveBalance ? 'Superávit Operacional do Período' : 'Atenção: Déficit no Período', card3X + 4, startY + 15);
 
   // Card 4: Taxa de Adimplência
   const card4X = card3X + cardWidth + 3;
-  doc.setFillColor(238, 242, 255);
-  doc.setDrawColor(199, 210, 254);
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
   doc.roundedRect(card4X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(55, 48, 163);
-  doc.text('TAXA DE ADIMPLÊNCIA', card4X + 4, startY + 5.2);
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text('TAXA DE ADIMPLÊNCIA', card4X + 4, startY + 4.8);
   doc.setFontSize(10);
-  doc.setTextColor(79, 70, 229);
-  doc.text(`${metrics.taxaAdimplencia}% (${metrics.totalEmDia} adimplentes)`, card4X + 4, startY + 12.2);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${metrics.taxaAdimplencia}%`, card4X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`${metrics.totalEmDia} adimplentes (${metrics.totalAtrasados} em atraso)`, card4X + 4, startY + 15);
 
   startY += cardHeight + 4;
+
+  // Seção 1: Demonstrativo de Receitas & Mensalidades
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(leftX, startY, contentWidth, 5.5, 1, 1, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('1. RECEITAS: CONTRATOS E MENSALIDADES DOS ALUNOS', leftX + 4, startY + 3.8);
+
+  startY += 7;
 
   // Tabela Analítica de Contratos dos Alunos
   const tableData = profiles.map((p, idx) => {
@@ -6454,29 +6490,29 @@ export function generateFinancialReportPDF({
         : [['-', 'Nenhum contrato localizado para os filtros informados', '', '', '', '', '', '', '', '', '']],
     theme: 'grid',
     styles: {
-      fontSize: 7.2,
-      cellPadding: 2,
+      fontSize: 6.8,
+      cellPadding: 1.8,
       valign: 'middle',
     },
     headStyles: {
-      fillColor: [15, 23, 42],
+      fillColor: [30, 41, 59],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 7.5,
+      fontSize: 7.2,
       halign: 'center',
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 55, fontStyle: 'bold' },
-      2: { cellWidth: 32 },
+      0: { cellWidth: 9, halign: 'center' },
+      1: { cellWidth: 54, fontStyle: 'bold' },
+      2: { cellWidth: 30 },
       3: { cellWidth: 30 },
       4: { cellWidth: 22, halign: 'right' },
       5: { cellWidth: 22, halign: 'right' },
       6: { cellWidth: 16, halign: 'center' },
       7: { cellWidth: 25, halign: 'right', fontStyle: 'bold' },
-      8: { cellWidth: 20, halign: 'center' },
-      9: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
-      10: { cellWidth: 15, halign: 'center' },
+      8: { cellWidth: 21, halign: 'center' },
+      9: { cellWidth: 23, halign: 'center', fontStyle: 'bold' },
+      10: { cellWidth: 17, halign: 'center' },
     },
     didParseCell: (data) => {
       if (data.section === 'body' && data.column.index === 9) {
@@ -6494,9 +6530,161 @@ export function generateFinancialReportPDF({
     },
   });
 
+  let afterReceitasY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : startY + 60;
+
+  // Seção 2: Demonstrativo de Despesas e Custos Operacionais
+  if (expenses.length > 0) {
+    // Se o espaço na página atual for insuficiente para cabeçalho + tabela, quebra de página
+    if (afterReceitasY > 165) {
+      doc.addPage('a4', 'landscape');
+      drawOfficialHeader(
+        doc,
+        `DEMONSTRATIVO DE DESPESAS E SALDO LÍQUIDO — ${schoolYear}`,
+        'Colégio Crescer • Custos Operacionais e Saídas do Período',
+        [`Ano Letivo: ${schoolYear}`, `Total de Lançamentos: ${expenses.length}`],
+        'landscape'
+      );
+      afterReceitasY = 36;
+    }
+
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(leftX, afterReceitasY, contentWidth, 5.5, 1, 1, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('2. DESPESAS: CUSTOS OPERACIONAIS E SAÍDAS DO PROGRAMA INTEGRAL', leftX + 4, afterReceitasY + 3.8);
+
+    const expenseTableData = expenses.map((exp, idx) => {
+      const catLabel =
+        exp.categoria === 'FOLHA_PAGAMENTO'
+          ? 'Folha / Salários'
+          : exp.categoria === 'OFICINAS_TERCEIRIZADAS'
+          ? 'Oficinas Especialistas'
+          : exp.categoria === 'OFICINAS_CULINARIA'
+          ? 'Oficinas de Culinária'
+          : exp.categoria === 'ALIMENTACAO_HORTIFRUTI'
+          ? 'Alimentação & Cantina'
+          : exp.categoria === 'MATERIAIS_DIDATICOS'
+          ? 'Materiais Pedagógicos'
+          : exp.categoria === 'MANUTENCAO_INFRA'
+          ? 'Manutenção & Infra'
+          : 'Outros Custos';
+
+      const statusExpLabel = exp.status === 'PAGO' ? 'PAGO' : 'PENDENTE';
+
+      const autoTag = exp.isAutoGenerated || exp.autoSyncKey ? ' [Auto-Sync]' : '';
+
+      return [
+        String(idx + 1).padStart(2, '0'),
+        catLabel,
+        `${exp.descricao}${autoTag}`,
+        exp.fornecedorOuBeneficiario || '-',
+        formatDateBR(exp.dataVencimento),
+        formatCurrencyBR(exp.valor),
+        exp.formaPagamento || 'Boleto',
+        statusExpLabel,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: afterReceitasY + 7,
+      head: [
+        [
+          '#',
+          'Categoria Operacional',
+          'Descrição do Custo / Despesa',
+          'Fornecedor / Beneficiário',
+          'Vencimento',
+          'Valor (R$)',
+          'Forma de Pagamento',
+          'Situação',
+        ],
+      ],
+      body: expenseTableData,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.8,
+        cellPadding: 1.8,
+        valign: 'middle',
+      },
+      headStyles: {
+        fillColor: [185, 28, 28], // red-700
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.2,
+        halign: 'center',
+      },
+      columnStyles: {
+        0: { cellWidth: 9, halign: 'center' },
+        1: { cellWidth: 42, fontStyle: 'bold' },
+        2: { cellWidth: 80 },
+        3: { cellWidth: 48 },
+        4: { cellWidth: 24, halign: 'center' },
+        5: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
+        6: { cellWidth: 24, halign: 'center' },
+        7: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 7) {
+          const text = String(data.cell.raw || '');
+          if (text === 'PAGO') {
+            data.cell.styles.textColor = [22, 163, 74];
+          } else {
+            data.cell.styles.textColor = [220, 38, 38];
+          }
+        }
+      },
+    });
+  }
+
+  // Seção de Fechamento de Caixa e Assinaturas
+  const finalTableY = (doc as any).lastAutoTable?.finalY || 165;
+  const sigPage = (doc as any).internal.getNumberOfPages();
+  const spaceLeft = 200 - finalTableY;
+
+  if (spaceLeft < 28) {
+    doc.addPage('a4', 'landscape');
+    drawOfficialHeader(
+      doc,
+      `FECHAMENTO DE CAIXA E TERMO DE HOMOLOGAÇÃO — ${schoolYear}`,
+      'Colégio Crescer • Assinatura da Coordenação e Direção Financeira',
+      [`Ano Letivo: ${schoolYear}`],
+      'landscape'
+    );
+  }
+
+  const boxY = spaceLeft < 28 ? 40 : finalTableY + 6;
+
+  // Box Resumo do Saldo Líquido
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(leftX, boxY, contentWidth, 12, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(
+    `FECHAMENTO OPERACIONAL:   Receita Confirmada: ${formatCurrencyBR(metrics.receitaConfirmada)}   (-)   Despesas Totais: ${formatCurrencyBR(metrics.totalDespesasMes)}   (=)   Saldo Líquido Operacional: ${formatCurrencyBR(metrics.saldoLiquidoOperacional)}`,
+    leftX + 4,
+    boxY + 7.5
+  );
+
+  // Linhas de Assinatura
+  const sigY = boxY + 22;
+  if (sigY < 192) {
+    doc.setDrawColor(203, 213, 225);
+    doc.line(leftX + 20, sigY, leftX + 110, sigY);
+    doc.line(leftX + 159, sigY, leftX + 249, sigY);
+
+    doc.setFontSize(7.2);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Coordenação Geral do Programa Integral', leftX + 65, sigY + 4, { align: 'center' });
+    doc.text('Diretoria Administrativa e Financeira', leftX + 204, sigY + 4, { align: 'center' });
+  }
+
   applyPageNumbersAndFooters(doc, 'landscape');
 
-  const filename = `Demonstrativo_Financeiro_Integral_${schoolYear}.pdf`;
+  const filename = `Demonstrativo_Financeiro_Consolidado_${schoolYear}.pdf`;
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');
@@ -6509,6 +6697,7 @@ export function generateFinancialReportPDF({
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
+
 
 
 
