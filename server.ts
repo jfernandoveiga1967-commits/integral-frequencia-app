@@ -1040,6 +1040,44 @@ const SOFIA_SERVER_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'gerarTermoSaidaAvulsa',
+    description: 'Registra a liberação antecipada de um aluno na portaria e gera o Termo de Saída Avulsa oficial em PDF pronto para impressão.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'Nome do aluno (com busca aproximada)' },
+        nomeRetirante: { type: 'STRING', description: 'Nome completo da pessoa retirando' },
+        documentoRetirante: { type: 'STRING', description: 'RG ou CPF do retirante' },
+        parentesco: { type: 'STRING', description: 'Grau de parentesco ou vínculo' },
+        motivoSaida: { type: 'STRING', description: 'Motivo da liberação' },
+        horarioSaida: { type: 'STRING', description: 'Horário do registro' },
+      },
+      required: ['alunoId', 'nomeRetirante'],
+    },
+  },
+  {
+    name: 'alterarAnoLetivoAluno',
+    description: 'Realiza a rematrícula ou troca de ano letivo do aluno (ex: 2026 ou 2027).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'Nome ou ID do aluno' },
+        novoAnoLetivo: { type: 'INTEGER', description: 'Novo ano letivo (2026 ou 2027)' },
+      },
+      required: ['alunoId', 'novoAnoLetivo'],
+    },
+  },
+  {
+    name: 'consultarResumoFinanceiro',
+    description: 'Retorna a receita confirmada, despesas operacionais e taxa de adimplência do exercício contábil.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        anoLetivo: { type: 'INTEGER', description: 'Ano letivo contábil (2026 ou 2027)' },
+      },
+    },
+  },
+  {
     name: 'cadastrarAluno',
     description: 'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
     parameters: {
@@ -1173,7 +1211,13 @@ DIRETRIZES DE ATUAÇÃO E RESOLUÇÃO:
    - Quando o usuário perguntar sobre a frequência de hoje, quantos alunos vieram ou o resumo da chamada (ex: "qual a frequência de hoje?", "quantos alunos vieram hoje?", "qual o resumo da chamada do Maternal?"), invoque obrigatoriamente a ferramenta "consultarFrequenciaHoje" (passando a turma se informada).
 5. ALERTAS E CONSULTAS DE SAÍDAS DE HOJE:
    - Quando o usuário perguntar sobre saídas, transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".
-6. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
+6. TERMO DE SAÍDA AVULSA E LIBERAÇÕES:
+   - Quando o usuário solicitar termo de saída, saída avulsa ou registrar que alguém veio retirar um aluno (ex: "prepare o termo de saída do aluno Lyan Adolpho retirado por Marcos Silva RG 12345"), invoque imediatamente "gerarTermoSaidaAvulsa".
+7. REMATRÍCULA E ANO LETIVO:
+   - Quando o usuário pedir para mudar o ano letivo ou rematricular aluno (ex: "mude o ano letivo do aluno Bernardo para 2027"), invoque "alterarAnoLetivoAluno".
+8. GESTÃO FINANCEIRA:
+   - Quando o usuário perguntar sobre resumo financeiro, receitas confirmadas, despesas ou inadimplência/adimplência, invoque "consultarResumoFinanceiro".
+9. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
 
     const ai = getAIClient();
     if (!ai) {

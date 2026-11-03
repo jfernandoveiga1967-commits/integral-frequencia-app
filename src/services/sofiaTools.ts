@@ -16,10 +16,15 @@ import {
   AppStateSummary,
   ALL_APP_TAB_IDS,
 } from '../types';
-import { generateLivroPontoPDFReport, generateNominalListPDF } from '../utils/pdfGenerator';
+import {
+  generateLivroPontoPDFReport,
+  generateNominalListPDF,
+  generateTermoSaidaAvulsaPDF,
+} from '../utils/pdfGenerator';
 import {
   calculateMonthlyPontoFinancials,
   getMonthNameBR,
+  formatCurrencyBR,
 } from '../utils/pontoUtils';
 import { formatDateBR, toISODateString, getDayOfWeekFromDate } from '../utils/dateUtils';
 import { formatPhoneDisplay } from '../utils/whatsappUtils';
@@ -27,6 +32,12 @@ import { getUsers, saveUser } from './userService';
 import { getAttendanceSummaryByDate, lancarFrequenciaTurma } from './frequencyService';
 import { createStudent, updateStudent } from './studentService';
 import { cadastrarRefeicaoCardapio as cadastrarRefeicaoCardapioService } from './menuService';
+import {
+  loadLocalFinancialProfiles,
+  loadLocalFinancialExpenses,
+  calculateFinancialMetrics,
+  buildDefaultFinancialProfile,
+} from './financialService';
 
 export interface SofiaToolExecutionContext {
   students: Student[];
@@ -203,6 +214,74 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'gerarTermoSaidaAvulsa',
+    description:
+      'Registra a liberação antecipada de um aluno na portaria e gera o Termo de Saída Avulsa oficial em PDF pronto para impressão e assinatura.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: {
+          type: 'STRING',
+          description: 'Nome completo ou ID do aluno (suporta busca aproximada, ex: "Lyan Adolpho").',
+        },
+        nomeRetirante: {
+          type: 'STRING',
+          description: 'Nome completo da pessoa que está retirando o aluno (ex: "Marcos Silva").',
+        },
+        documentoRetirante: {
+          type: 'STRING',
+          description: 'RG ou CPF do retirante (ex: "RG 12345").',
+        },
+        parentesco: {
+          type: 'STRING',
+          description: 'Grau de parentesco ou vínculo com o aluno (ex: "Pai", "Mãe", "Tio", "Responsável").',
+        },
+        motivoSaida: {
+          type: 'STRING',
+          description: 'Motivo da saída antecipada (ex: "Consulta médica", "Solicitação dos pais").',
+        },
+        horarioSaida: {
+          type: 'STRING',
+          description: 'Horário do registro da liberação (ex: "14:30").',
+        },
+      },
+      required: ['alunoId', 'nomeRetirante'],
+    },
+  },
+  {
+    name: 'alterarAnoLetivoAluno',
+    description:
+      'Realiza a rematrícula ou troca de ano letivo de um aluno no sistema (ex: 2026 ou 2027).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: {
+          type: 'STRING',
+          description: 'Nome completo ou ID do aluno a ser rematriculado.',
+        },
+        novoAnoLetivo: {
+          type: 'INTEGER',
+          description: 'Ano letivo de destino da matrícula (2026 ou 2027).',
+        },
+      },
+      required: ['alunoId', 'novoAnoLetivo'],
+    },
+  },
+  {
+    name: 'consultarResumoFinanceiro',
+    description:
+      'Retorna os indicadores financeiros do Programa Integral para determinado exercício (receita confirmada, despesas operacionais e taxa de adimplência).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        anoLetivo: {
+          type: 'INTEGER',
+          description: 'Ano letivo do exercício contábil (ex: 2026 ou 2027, padrão 2026).',
+        },
+      },
+    },
+  },
+  {
     name: 'cadastrarAluno',
     description:
       'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
@@ -313,9 +392,9 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
 ];
 
 /**
- * Normaliza strings para busca insensível a maiúsculas e acentos
+ * Normaliza strings para busca insensível a maiúsculas, acentos e pontuações
  */
-function normalizeStr(str?: string): string {
+export function normalizeStr(str?: string): string {
   return (str || '')
     .trim()
     .toLowerCase()
@@ -324,17 +403,102 @@ function normalizeStr(str?: string): string {
 }
 
 /**
- * Localiza aluno por ID ou correspondência de nome
+ * Realiza verificação aproximada (Fuzzy Match) entre duas expressões
  */
-function findStudent(students: Student[], query: string): Student | undefined {
+export function fuzzyMatch(target: string, query: string): boolean {
+  const tNorm = normalizeStr(target);
+  const qNorm = normalizeStr(query);
+  if (!tNorm || !qNorm) return false;
+  if (tNorm.includes(qNorm) || qNorm.includes(tNorm)) return true;
+
+  const queryWords = qNorm.split(/\s+/).filter((w) => w.length >= 3);
+  if (queryWords.length > 0 && queryWords.every((w) => tNorm.includes(w))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Localiza turma por busca aproximada (Fuzzy Search)
+ * Ex: "Maternal" bate com "Maternal Azul", "Mini" bate com "Mini Maternal Azul"
+ */
+export function findTurmaFuzzy(turmas: string[], query: string): string | undefined {
   if (!query) return undefined;
   const qNorm = normalizeStr(query);
-  return students.find(
-    (s) =>
-      s.id === query ||
-      normalizeStr(s.name) === qNorm ||
-      normalizeStr(s.name).includes(qNorm)
+
+  // 1. Match exato
+  const exact = turmas.find((t) => normalizeStr(t) === qNorm);
+  if (exact) return exact;
+
+  // 2. Substring direta
+  const sub = turmas.find((t) => normalizeStr(t).includes(qNorm) || qNorm.includes(normalizeStr(t)));
+  if (sub) return sub;
+
+  // 3. Regras de mapeamento semântico
+  if (qNorm.includes('mini')) return turmas.find((t) => normalizeStr(t).includes('mini')) || 'Mini Maternal Azul';
+  if (qNorm.includes('maternal')) return turmas.find((t) => normalizeStr(t).includes('maternal') && !normalizeStr(t).includes('mini')) || 'Maternal Azul';
+  if (qNorm.includes('infantil 1') || qNorm.includes('infantil i')) return turmas.find((t) => normalizeStr(t).includes('infantil 1') || normalizeStr(t).includes('infantil i')) || 'Infantil 1';
+  if (qNorm.includes('infantil 2') || qNorm.includes('infantil ii')) return turmas.find((t) => normalizeStr(t).includes('infantil 2') || normalizeStr(t).includes('infantil ii')) || 'Infantil 2';
+  if (qNorm.includes('1') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('1') && normalizeStr(t).includes('ano')) || '1º Ano Azul';
+  if (qNorm.includes('2') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('2') && normalizeStr(t).includes('ano')) || '2º Ano';
+  if (qNorm.includes('3') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('3') && normalizeStr(t).includes('ano')) || '3º Ano';
+  if (qNorm.includes('4') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('4') && normalizeStr(t).includes('ano')) || '4º Ano';
+  if (qNorm.includes('5') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('5') && normalizeStr(t).includes('ano')) || '5º Ano';
+
+  return undefined;
+}
+
+/**
+ * Localiza aluno por ID ou correspondência de nome aproximada (Fuzzy Search)
+ * Ex: "Lyan Adolpho" -> localiza "Lyan Adolpho ..."
+ */
+export function findStudent(students: Student[], query: string): Student | undefined {
+  if (!query || !students || students.length === 0) return undefined;
+  const qClean = query.trim();
+  const qNorm = normalizeStr(qClean);
+
+  // 1. Busca por ID exato
+  const byId = students.find((s) => s.id === qClean);
+  if (byId) return byId;
+
+  // 2. Nome completo exato
+  const exactName = students.find((s) => normalizeStr(s.name) === qNorm);
+  if (exactName) return exactName;
+
+  // 3. Substring direta
+  const substringMatch = students.find(
+    (s) => normalizeStr(s.name).includes(qNorm) || qNorm.includes(normalizeStr(s.name))
   );
+  if (substringMatch) return substringMatch;
+
+  // 4. Quebra de tokens da busca (ex: "Lyan Adolpho" busca aluno que contenha "lyan" e "adolpho")
+  const queryTokens = qNorm.split(/\s+/).filter((t) => t.length >= 3);
+  if (queryTokens.length > 0) {
+    const allTokensMatch = students.find((s) => {
+      const sNorm = normalizeStr(s.name);
+      return queryTokens.every((token) => sNorm.includes(token));
+    });
+    if (allTokensMatch) return allTokensMatch;
+
+    // Se mais de 1 token, testa se a maioria bate
+    if (queryTokens.length >= 2) {
+      const majorityMatch = students.find((s) => {
+        const sNorm = normalizeStr(s.name);
+        const matchCount = queryTokens.filter((token) => sNorm.includes(token)).length;
+        return matchCount >= Math.ceil(queryTokens.length / 2);
+      });
+      if (majorityMatch) return majorityMatch;
+    }
+
+    // Primeiro token apenas (primeiro nome)
+    const firstNameMatch = students.find((s) => {
+      const sNorm = normalizeStr(s.name);
+      return sNorm.startsWith(queryTokens[0]) || sNorm.split(' ')[0] === queryTokens[0];
+    });
+    if (firstNameMatch) return firstNameMatch;
+  }
+
+  return undefined;
 }
 
 /**
@@ -1018,6 +1182,185 @@ export async function executeSofiaTool(
           alunosVan: alunosVan.map((s) => ({ id: s.id, name: s.name, turma: s.turma, condutor: s.nomeCondutor })),
           alunosSaidaAntecipada: alunosSaidaAntecipada.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
           alunosLiberados: alunosLiberados.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
+        },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // gerarTermoSaidaAvulsa(alunoId, nomeRetirante, documentoRetirante, parentesco, motivoSaida, horarioSaida)
+    // -------------------------------------------------------------------
+    case 'gerarTermoSaidaAvulsa': {
+      const alunoQuery = args.alunoId || args.nomeAluno || '';
+      const nomeRetirante = args.nomeRetirante || args.retirante || 'Responsável Autorizado';
+      const documentoRetirante = args.documentoRetirante || args.documento || args.rg || 'Não informado';
+      const parentesco = args.parentesco || args.vinculo || 'Responsável Autorizado';
+      const motivoSaida = args.motivoSaida || args.motivo || 'Liberação Excepcional de Balcão';
+      const targetDate = args.data || context.selectedDate || toISODateString(new Date());
+      const horarioSaida = args.horarioSaida || args.horario || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      const student = findStudent(context.students, alunoQuery);
+      if (!student) {
+        return {
+          toolName,
+          success: false,
+          message: `Não localizei o aluno(a) "${alunoQuery}" no cadastro escolar ativo para emitir o termo de saída.`,
+        };
+      }
+
+      try {
+        const pdfResult = generateTermoSaidaAvulsaPDF({
+          student,
+          nomeRetirante,
+          documentoRetirante,
+          parentesco,
+          motivoSaida,
+          dataSaida: targetDate,
+          horarioSaida,
+          responsavelLiberacao: context.currentUser?.name || 'Coordenação do Integral',
+        }, false);
+
+        // Se houver manipulador de registro, registra no diário de frequência como saída antecipada confirmada
+        if (context.onSaveRecord) {
+          const now = new Date();
+          const year = now.getFullYear();
+          const firstJan = new Date(year, 0, 1);
+          const pastDaysOfYear = (now.getTime() - firstJan.getTime()) / 86400000;
+          const weekNumber = Math.max(1, Math.ceil((pastDaysOfYear + firstJan.getDay() + 1) / 7)) || 1;
+
+          await context.onSaveRecord({
+            studentId: student.id,
+            turma: (student.turma as any) || '1º Ano Azul',
+            date: targetDate,
+            weekNumber,
+            year,
+            status: 'saida_antecipada',
+            activity: 'Rotina',
+            exitTime: horarioSaida,
+            checkoutConfirmed: true,
+            observation: `Termo de Saída Avulsa: retirado por ${nomeRetirante} (${parentesco} - Doc: ${documentoRetirante}) às ${horarioSaida}.`,
+          });
+        }
+
+        const msgTexto = `Termo de Liberação de Saída Avulsa do aluno ${student.name} preparado com sucesso!\n• Retirante: ${nomeRetirante} (${documentoRetirante})\n• Grau de Parentesco: ${parentesco}\n• Horário de Saída: ${horarioSaida}\nO documento PDF já está pronto para download e assinatura física.`;
+        const spokenText = `Termo de liberação de saída do aluno ${student.name} preparado com sucesso. O documento já está pronto para impressão.`;
+
+        return {
+          toolName,
+          success: true,
+          message: msgTexto,
+          spokenText,
+          filename: pdfResult.filename,
+          downloadUrl: pdfResult.blobUrl,
+          data: {
+            alunoId: student.id,
+            alunoNome: student.name,
+            turma: student.turma,
+            retirante: nomeRetirante,
+            documento: documentoRetirante,
+            horario: horarioSaida,
+          },
+        };
+      } catch (err: any) {
+        return {
+          toolName,
+          success: false,
+          message: `Erro ao gerar o Termo de Saída Avulsa: ${err?.message || 'erro interno'}.`,
+        };
+      }
+    }
+
+    // -------------------------------------------------------------------
+    // alterarAnoLetivoAluno(alunoId, novoAnoLetivo)
+    // -------------------------------------------------------------------
+    case 'alterarAnoLetivoAluno': {
+      const alunoQuery = args.alunoId || args.nomeAluno || '';
+      let novoAno = Number(args.novoAnoLetivo || args.anoLetivo || 2027);
+      if (isNaN(novoAno) || (novoAno !== 2026 && novoAno !== 2027)) {
+        novoAno = 2027;
+      }
+
+      const student = findStudent(context.students, alunoQuery);
+      if (!student) {
+        return {
+          toolName,
+          success: false,
+          message: `Aluno(a) "${alunoQuery}" não encontrado para alteração de ano letivo.`,
+        };
+      }
+
+      const updated = await updateStudent(student.id, { anoLetivo: novoAno });
+      if (!updated) {
+        return {
+          toolName,
+          success: false,
+          message: `Falha ao persistir a atualização de ano letivo do aluno ${student.name}.`,
+        };
+      }
+
+      // Atualiza no contexto local
+      const idx = context.students.findIndex((s) => s.id === student.id);
+      if (idx !== -1) {
+        context.students[idx] = updated;
+      }
+
+      const msgTexto = `Ano letivo do aluno ${student.name} alterado com sucesso para ${novoAno}!\n• Matrícula atualizada no sistema.\n• Turma: ${student.turma}`;
+      const spokenText = `Ano letivo do aluno ${student.name} alterado com sucesso para ${novoAno}.`;
+
+      return {
+        toolName,
+        success: true,
+        message: msgTexto,
+        spokenText,
+        data: updated,
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarResumoFinanceiro(anoLetivo?)
+    // -------------------------------------------------------------------
+    case 'consultarResumoFinanceiro': {
+      let targetAno = Number(args.anoLetivo || 2026);
+      if (isNaN(targetAno)) targetAno = 2026;
+
+      const allProfiles = loadLocalFinancialProfiles();
+      let profiles = allProfiles.filter((p) => p.anoLetivo === targetAno);
+
+      // Se ainda não houver perfis no local storage, gera a partir dos estudantes do ano
+      if (profiles.length === 0) {
+        const studentsAno = context.students.filter((s) => (s.anoLetivo || 2026) === targetAno);
+        profiles = (studentsAno.length > 0 ? studentsAno : context.students).map((s) =>
+          buildDefaultFinancialProfile(s, targetAno)
+        );
+      }
+
+      const allExpenses = loadLocalFinancialExpenses();
+      const expenses = allExpenses.filter((e) => e.anoLetivo === targetAno);
+
+      const metrics = calculateFinancialMetrics(profiles, expenses);
+
+      const recConfBR = formatCurrencyBR(metrics.receitaConfirmada);
+      const recPrevBR = formatCurrencyBR(metrics.receitaPrevistaMensal);
+      const despesasBR = formatCurrencyBR(metrics.totalDespesasMes);
+      const saldoLiqBR = formatCurrencyBR(metrics.saldoLiquidoOperacional);
+
+      const msgTexto = `Resumo Financeiro do Programa Integral — Ano Letivo ${targetAno}:\n` +
+        `• Receita Confirmada: ${recConfBR}\n` +
+        `• Receita Prevista Mensal: ${recPrevBR}\n` +
+        `• Despesas Operacionais: ${despesasBR}\n` +
+        `• Saldo Líquido Operacional: ${saldoLiqBR}\n` +
+        `• Taxa de Adimplência: ${metrics.taxaAdimplencia}%\n` +
+        `• Total de Contratos: ${metrics.totalContratos} (${metrics.totalEmDia} em dia, ${metrics.totalPendentes} pendentes, ${metrics.totalAtrasados} em atraso)`;
+
+      const spokenText = `Para o ano letivo de ${targetAno}, temos ${recConfBR} de receita confirmada, ${despesasBR} em despesas operacionais e taxa de adimplência de ${metrics.taxaAdimplencia}%.`;
+
+      return {
+        toolName,
+        success: true,
+        message: msgTexto,
+        spokenText,
+        data: {
+          anoLetivo: targetAno,
+          ...metrics,
         },
       };
     }

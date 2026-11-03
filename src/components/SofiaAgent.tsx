@@ -41,6 +41,7 @@ import {
   SofiaToolResult,
 } from '../types';
 import { isAdmin, getStoredUser } from '../utils/authUtils';
+import { toISODateString, getDayOfWeekFromDate } from '../utils/dateUtils';
 import {
   sendSofiaMessage,
   buildLiveAppStateSummary,
@@ -143,6 +144,98 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
       scrollToBottom();
     }
   }, [messages, isOpen, executingToolName]);
+
+  // Conjunto de alertas proativos de saída antecipada já emitidos para evitar repetições
+  const spokenDepartureAlertsRef = useRef<Set<string>>(new Set());
+
+  // Motor de Alertas Proativos em Segundo Plano (Background Speech Trigger)
+  // Monitora a proximidade de 10-15 minutos de saídas antecipadas agendadas no dia
+  useEffect(() => {
+    const checkUpcomingDepartures = () => {
+      const now = new Date();
+      const nowHours = now.getHours();
+      const nowMinutes = now.getMinutes();
+      const currentTotalMinutes = nowHours * 60 + nowMinutes;
+      const todayISO = toISODateString(now);
+      const dayOfWeek = getDayOfWeekFromDate(todayISO);
+
+      const activeStudents = (students || []).filter(
+        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      );
+
+      const recordMap = new Map<string, AttendanceRecord>();
+      (records || []).forEach((r) => {
+        if (r.date === todayISO) {
+          recordMap.set(r.studentId, r);
+        }
+      });
+
+      activeStudents.forEach((student) => {
+        const rec = recordMap.get(student.id);
+
+        // Se o checkout já foi confirmado ou o aluno já foi liberado, não dispara
+        if (rec?.checkoutConfirmed) {
+          return;
+        }
+
+        let departureTimeStr = '';
+        if (rec && (rec.status === 'saida_antecipada' || rec.exitTime)) {
+          departureTimeStr = rec.exitTime || '';
+        }
+
+        if (!departureTimeStr) {
+          const sHorario = student.horariosSaida?.[dayOfWeek as any] || student.horarioSaida;
+          if (sHorario) {
+            const cleanH = sHorario.trim();
+            // Saída antecipada em relação ao fim do turno regular (17:30)
+            if (cleanH < '17:00' && cleanH >= '12:00') {
+              departureTimeStr = cleanH;
+            }
+          }
+        }
+
+        if (!departureTimeStr || !departureTimeStr.includes(':')) {
+          return;
+        }
+
+        const [depH, depM] = departureTimeStr.split(':').map((v) => parseInt(v, 10));
+        if (isNaN(depH) || isNaN(depM)) return;
+
+        const depTotalMinutes = depH * 60 + depM;
+        const diffMinutes = depTotalMinutes - currentTotalMinutes;
+
+        // Janela de 10-15 minutos antes da Saída Antecipada cadastrada
+        if (diffMinutes >= 10 && diffMinutes <= 15) {
+          const alertKey = `${todayISO}_${student.id}_${departureTimeStr}`;
+          if (!spokenDepartureAlertsRef.current.has(alertKey)) {
+            spokenDepartureAlertsRef.current.add(alertKey);
+
+            const spokenNotice = `Aviso de Portaria: A saída antecipada de ${student.name} está agendada para às ${departureTimeStr}.`;
+
+            // Adiciona aviso proativo no histórico da Sofia
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `dep_alert_${Date.now()}_${student.id}`,
+                sender: 'sofia',
+                text: `⏰ **Aviso de Portaria (Saída Antecipada)**\nA saída antecipada do(a) aluno(a) **${student.name}** (${student.turma}) está agendada para às **${departureTimeStr}** (em aproximadamente ${diffMinutes} minutos).`,
+                timestamp: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+            ]);
+
+            // Emite aviso de voz curto caso áudio esteja ativo
+            if (!isMuted) {
+              TextToSpeechManager.speak(spokenNotice);
+            }
+          }
+        }
+      });
+    };
+
+    checkUpcomingDepartures();
+    const intervalTimer = setInterval(checkUpcomingDepartures, 30000);
+    return () => clearInterval(intervalTimer);
+  }, [students, records, isMuted]);
 
   // Envio de Mensagem
   const handleSendMessage = async (customPrompt?: string) => {

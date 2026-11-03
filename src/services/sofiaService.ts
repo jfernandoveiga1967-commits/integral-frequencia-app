@@ -17,7 +17,7 @@ import {
   SofiaToolResult,
 } from '../types';
 import { formatDateBR, getDayOfWeekFromDate, toISODateString } from '../utils/dateUtils';
-import { executeSofiaTool, SofiaToolExecutionContext } from './sofiaTools';
+import { executeSofiaTool, SofiaToolExecutionContext, findStudent, findTurmaFuzzy, normalizeStr } from './sofiaTools';
 import { NORMAS_DATA } from '../data/normasData';
 
 export const SOFIA_SYSTEM_INSTRUCTION = `Você é a Sofia, a Assistente Inteligente Oficial do Programa Integral do Colégio Crescer. Você possui conhecimento total da estrutura pedagógica, rotinas de ponto, chamadas de frequência, normas internas, cardápio e gestão de turmas. Seu tom de voz é profissional, acolhedor, resolutivo e seguro. Você não é um bot rígido de menus: você conversa de forma natural, analisa a situação atual da escola, identifica inconsistências proativamente e executa ações diretas no sistema quando solicitada.
@@ -29,7 +29,10 @@ REGRAS DE TEMPO E CONSULTAS HISTÓRICAS:
 - Interprete com precisão termos temporais como "ontem", "anteontem", "dia anterior", "semana passada" ou datas numéricas específicas no texto do usuário.
 - REGRA OBRIGATÓRIA: Quando o usuário perguntar sobre faltas, presenças ou relatórios de frequência de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (ex: data de ontem) em vez de retornar o diagnóstico em tempo real do momento atual.
 - REGRA DE FREQUÊNCIA DE HOJE: Quando o usuário perguntar sobre a frequência de hoje, quantos alunos vieram ou o resumo da chamada (ex: "qual a frequência de hoje?", "quantos alunos vieram hoje?", "qual o resumo da chamada do Maternal?"), invoque obrigatoriamente a ferramenta "consultarFrequenciaHoje" (filtrando por turma se especificado).
-- REGRA DE ALERTAS E SAÍDAS: Quando o usuário perguntar sobre transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".`;
+- REGRA DE ALERTAS E SAÍDAS: Quando o usuário perguntar sobre transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".
+- REGRA DE TERMO DE SAÍDA AVULSA: Quando o usuário solicitar termo de saída, saída avulsa ou registrar que alguém veio retirar um aluno (ex: "prepare o termo de saída do aluno Lyan Adolpho retirado por Marcos Silva RG 12345"), invoque imediatamente "gerarTermoSaidaAvulsa".
+- REGRA DE REMATRÍCULA E ANO LETIVO: Quando o usuário pedir para mudar o ano letivo ou rematricular aluno (ex: "mude o ano letivo do aluno Bernardo para 2027"), invoque "alterarAnoLetivoAluno".
+- REGRA DE GESTÃO FINANCEIRA: Quando o usuário perguntar sobre resumo financeiro, receitas confirmadas, despesas ou inadimplência/adimplência, invoque "consultarResumoFinanceiro".`;
 
 /**
  * Extrai data e contexto temporal de consultas em linguagem natural (ex: "ontem", "anteontem", "dia 28")
@@ -204,7 +207,140 @@ async function resolveLocalSofiaIntent(
     };
   }
 
-  // 2. Intenção: Autorização de Entrada ou Saída Antecipada
+  // 2. Intenção: Termo de Saída Avulsa / Liberação de Balcão
+  if (
+    q.includes('termo de saida') ||
+    q.includes('termo de liberacao') ||
+    q.includes('saida avulsa') ||
+    (q.includes('termo') && (q.includes('aluno') || q.includes('saida') || q.includes('retirad'))) ||
+    q.includes('retirado por') ||
+    q.includes('retirada por')
+  ) {
+    let student = context.students[0];
+    const matchAlunoDirect = userQuery.match(/(?:aluno|estudante|crianca)\s+([A-Za-zÀ-ú\s]+?)(?:retirad|por|as|às|rg|cpf|\.|$)/i);
+    if (matchAlunoDirect && matchAlunoDirect[1].trim()) {
+      const found = findStudent(context.students, matchAlunoDirect[1].trim());
+      if (found) student = found;
+    }
+    if (!matchAlunoDirect) {
+      for (const s of context.students) {
+        if (q.includes(cleanText(s.name))) {
+          student = s;
+          break;
+        }
+        const parts = cleanText(s.name).split(' ');
+        if (parts.length >= 2 && q.includes(parts[0]) && q.includes(parts[1])) {
+          student = s;
+          break;
+        }
+      }
+    }
+
+    const matchRetirante = userQuery.match(/retirad[oa]\s+por\s+([A-Za-zÀ-ú\s]+?)(?:(?:com\s+)?(?:rg|cpf|doc)|parentesco|as|às|\.|$)/i);
+    const nomeRetirante = matchRetirante ? matchRetirante[1].trim() : 'Responsável Autorizado';
+
+    const matchDoc = userQuery.match(/(?:rg|cpf|doc(?:umento)?)\s*[:=]?\s*([0-9A-Za-z\.\-\/\s]+?)(?:parentesco|as|às|\.|$)/i);
+    const docDigits = matchDoc ? matchDoc[1].trim() : 'RG Informado Presencialmente';
+
+    let parentesco = 'Responsável Autorizado';
+    if (q.includes('pai')) parentesco = 'Pai';
+    else if (q.includes('mae')) parentesco = 'Mãe';
+    else if (q.includes('tio') || q.includes('tia')) parentesco = 'Tio(a)';
+    else if (q.includes('avo') || q.includes('avó') || q.includes('avô')) parentesco = 'Avô/Avó';
+    else if (q.includes('irmao') || q.includes('irma')) parentesco = 'Irmão/Irmã';
+
+    const horarioMatch = userQuery.match(/(\d{1,2}:\d{2})/);
+    const horarioSaida = horarioMatch ? horarioMatch[1] : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const toolCall: SofiaToolCall = {
+      name: 'gerarTermoSaidaAvulsa',
+      args: {
+        alunoId: student?.name || 'Aluno',
+        nomeRetirante,
+        documentoRetirante: docDigits,
+        parentesco,
+        motivoSaida: 'Liberação Excepcional de Balcão',
+        horarioSaida,
+      },
+    };
+    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
+
+    return {
+      text: toolResult.message,
+      toolCall,
+      toolResult,
+    };
+  }
+
+  // 3. Intenção: Alterar Ano Letivo / Rematrícula do Aluno
+  if (
+    (q.includes('ano letivo') && (q.includes('mudar') || q.includes('mude') || q.includes('alterar') || q.includes('trocar') || q.includes('passar') || q.includes('aluno'))) ||
+    q.includes('rematricul')
+  ) {
+    let student = context.students[0];
+    for (const s of context.students) {
+      if (q.includes(cleanText(s.name))) {
+        student = s;
+        break;
+      }
+      const parts = cleanText(s.name).split(' ');
+      if (parts.length >= 2 && q.includes(parts[0]) && q.includes(parts[1])) {
+        student = s;
+        break;
+      }
+      if (parts[0].length >= 4 && q.includes(parts[0])) {
+        student = s;
+        break;
+      }
+    }
+
+    const matchAno = userQuery.match(/\b(2026|2027)\b/);
+    const novoAno = matchAno ? Number(matchAno[1]) : 2027;
+
+    const toolCall: SofiaToolCall = {
+      name: 'alterarAnoLetivoAluno',
+      args: {
+        alunoId: student?.name || 'Aluno',
+        novoAnoLetivo: novoAno,
+      },
+    };
+    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
+
+    return {
+      text: toolResult.message,
+      toolCall,
+      toolResult,
+    };
+  }
+
+  // 4. Intenção: Consultar Resumo Financeiro / Finanças
+  if (
+    q.includes('financeiro') ||
+    q.includes('financas') ||
+    q.includes('receita') ||
+    q.includes('adimplencia') ||
+    q.includes('inadimplencia') ||
+    (q.includes('despesas') && !q.includes('lancar') && !q.includes('cadastrar') && !q.includes('sincronizar'))
+  ) {
+    const matchAno = userQuery.match(/\b(2026|2027)\b/);
+    const anoLetivo = matchAno ? Number(matchAno[1]) : 2026;
+
+    const toolCall: SofiaToolCall = {
+      name: 'consultarResumoFinanceiro',
+      args: {
+        anoLetivo,
+      },
+    };
+    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
+
+    return {
+      text: toolResult.message,
+      toolCall,
+      toolResult,
+    };
+  }
+
+  // 5. Intenção: Autorização de Entrada ou Saída Antecipada (Documento Geral)
   if (
     q.includes('autorizacao') ||
     q.includes('atraso') ||
