@@ -552,7 +552,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       dataUrl: result.dataUrl || result.dataUri,
       blobUrl: result.blobUrl,
       filename: result.filename,
-      title: `Ficha de Matrícula e Autorização de Saída - ${targetStudent.name}`,
+      title: `Ficha Cadastral de Matrícula - ${targetStudent.name}`,
       onDownload: result.download,
     });
   };
@@ -3046,7 +3046,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   type="button"
                   onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
                   className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
-                  title="Emitir Ficha Cadastral de Matrícula e Termo de Autorização de Saída (PDF)"
+                  title="Emitir Ficha Cadastral de Matrícula (PDF)"
                 >
                   <FileText className="w-4 h-4 text-emerald-600" />
                   <span>📄 Ficha de Matrícula (PDF)</span>
@@ -3517,7 +3517,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     <button
                       onClick={() => handleOpenFichaMatriculaPDF(student)}
                       className="p-2 rounded-lg text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer flex items-center space-x-1 text-xs font-semibold"
-                      title="Emitir Ficha Cadastral de Matrícula e Termo de Autorização de Saída (PDF)"
+                      title="Emitir Ficha Cadastral de Matrícula (PDF)"
                     >
                       <FileText className="w-3.5 h-3.5 text-emerald-600" />
                       <span>📄 Ficha de Matrícula (PDF)</span>
