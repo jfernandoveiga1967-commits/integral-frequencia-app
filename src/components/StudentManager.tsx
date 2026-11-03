@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
-import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF } from '../utils/pdfGenerator';
+import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF, generateTermoSaidaAvulsaPDF } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { RosterReportModal } from './RosterReportModal';
+import { SaidaAvulsaModal } from './SaidaAvulsaModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck, Car } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -554,6 +555,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       title: `Ficha de Matrícula e Autorização de Saída - ${targetStudent.name}`,
       onDownload: result.download,
     });
+  };
+
+  // Estado para Emissão do Termo de Liberação Excepcional / Saída Avulsa
+  const [saidaAvulsaModalOpen, setSaidaAvulsaModalOpen] = useState(false);
+  const [studentForSaidaAvulsa, setStudentForSaidaAvulsa] = useState<Student | null>(null);
+
+  const handleOpenTermoSaidaAvulsa = (targetStudent: Student) => {
+    setStudentForSaidaAvulsa(targetStudent);
+    setSaidaAvulsaModalOpen(true);
   };
 
   // Estado do Módulo de Relações Nominais Cadastrais
@@ -3031,7 +3041,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
             {/* Modal Fixed/Sticky Footer */}
             <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-xs">
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
@@ -3040,6 +3050,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 >
                   <FileText className="w-4 h-4 text-emerald-600" />
                   <span>📄 Ficha de Matrícula (PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenTermoSaidaAvulsa(editingStudent)}
+                  className="px-3 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
+                  title="Emitir Termo de Liberação Excepcional / Ficha de Saída de Balcão (PDF)"
+                >
+                  <Car className="w-4 h-4 text-amber-600" />
+                  <span>🚗 Termo de Saída Avulsa</span>
                 </button>
               </div>
               <div className="flex items-center space-x-2">
@@ -3504,6 +3523,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       <span>📄 Ficha de Matrícula (PDF)</span>
                     </button>
 
+                    <button
+                      onClick={() => handleOpenTermoSaidaAvulsa(student)}
+                      className="p-2 rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
+                      title="Emitir Termo de Liberação Excepcional / Ficha de Saída de Balcão (PDF)"
+                    >
+                      <Car className="w-3.5 h-3.5 text-amber-600" />
+                      <span>🚗 Termo de Saída Avulsa</span>
+                    </button>
+
                     {userCanManageStudents && (
                       <>
                         <button
@@ -3954,6 +3982,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         title={pdfPreviewState.title}
         onDownload={pdfPreviewState.onDownload}
       />
+
+      {/* Modal de Emissão do Termo de Liberação Excepcional / Saída Avulsa */}
+      {saidaAvulsaModalOpen && studentForSaidaAvulsa && (
+        <SaidaAvulsaModal
+          isOpen={saidaAvulsaModalOpen}
+          onClose={() => {
+            setSaidaAvulsaModalOpen(false);
+            setStudentForSaidaAvulsa(null);
+          }}
+          student={studentForSaidaAvulsa}
+          currentUser={currentUser}
+        />
+      )}
     </div>
   );
 };

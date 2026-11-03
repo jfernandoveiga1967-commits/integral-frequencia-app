@@ -27,7 +27,9 @@ Você possui permissões administrativas totais para criar alunos, cadastrar usu
 
 REGRAS DE TEMPO E CONSULTAS HISTÓRICAS:
 - Interprete com precisão termos temporais como "ontem", "anteontem", "dia anterior", "semana passada" ou datas numéricas específicas no texto do usuário.
-- REGRA OBRIGATÓRIA: Quando o usuário perguntar sobre faltas, presenças ou relatórios de frequência de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (ex: data de ontem) em vez de retornar o diagnóstico em tempo real do momento atual.`;
+- REGRA OBRIGATÓRIA: Quando o usuário perguntar sobre faltas, presenças ou relatórios de frequência de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (ex: data de ontem) em vez de retornar o diagnóstico em tempo real do momento atual.
+- REGRA DE FREQUÊNCIA DE HOJE: Quando o usuário perguntar sobre a frequência de hoje, quantos alunos vieram ou o resumo da chamada (ex: "qual a frequência de hoje?", "quantos alunos vieram hoje?", "qual o resumo da chamada do Maternal?"), invoque obrigatoriamente a ferramenta "consultarFrequenciaHoje" (filtrando por turma se especificado).
+- REGRA DE ALERTAS E SAÍDAS: Quando o usuário perguntar sobre transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".`;
 
 /**
  * Extrai data e contexto temporal de consultas em linguagem natural (ex: "ontem", "anteontem", "dia 28")
@@ -336,7 +338,109 @@ async function resolveLocalSofiaIntent(
     };
   }
 
-  // 6. Intenção: Análise de Desarranjos / Diagnóstico Geral do Momento Atual
+  // 6. Intenção: Consultas de Frequência do Dia (Hoje)
+  // Ex: "Sofia, qual a frequência de hoje?", "Quantos alunos vieram hoje?", "Qual o resumo da chamada do Maternal?"
+  const isChamadaFrequencia =
+    q.includes('frequencia') ||
+    q.includes('chamada') ||
+    q.includes('vieram') ||
+    q.includes('presenca') ||
+    q.includes('presentes') ||
+    q.includes('compareceram');
+
+  const isTodayOrGeneral =
+    q.includes('hoje') ||
+    q.includes('agora') ||
+    q.includes('do dia') ||
+    !temporal.isHistorical;
+
+  if (
+    isChamadaFrequencia &&
+    isTodayOrGeneral &&
+    !q.includes('fazer chamada') &&
+    !q.includes('lancar chamada') &&
+    !q.includes('registrar falta') &&
+    !q.includes('marcar falta') &&
+    !q.includes('lista') &&
+    !q.includes('pdf')
+  ) {
+    let detectedTurma: string | undefined = undefined;
+    const turmasList = context.activeTurmas && context.activeTurmas.length > 0
+      ? context.activeTurmas
+      : ['Mini Maternal', 'Maternal', 'Infantil 1', 'Infantil 2', '1º Ano Azul', '1º Ano Laranja', '2º Ano', '3º Ano', '4º Ano', '5º Ano'];
+
+    for (const t of turmasList) {
+      if (q.includes(cleanText(t))) {
+        detectedTurma = t;
+        break;
+      }
+    }
+
+    if (!detectedTurma) {
+      if (q.includes('mini maternal') || q.includes('minimaternal')) detectedTurma = 'Mini Maternal';
+      else if (q.includes('maternal')) detectedTurma = 'Maternal';
+      else if (q.includes('infantil 1') || q.includes('infantil i')) detectedTurma = 'Infantil 1';
+      else if (q.includes('infantil 2') || q.includes('infantil ii')) detectedTurma = 'Infantil 2';
+      else if (q.includes('1º ano') || q.includes('1 ano') || q.includes('primeiro ano')) detectedTurma = '1º Ano Azul';
+      else if (q.includes('2º ano') || q.includes('2 ano') || q.includes('segundo ano')) detectedTurma = '2º Ano';
+      else if (q.includes('3º ano') || q.includes('3 ano') || q.includes('terceiro ano')) detectedTurma = '3º Ano';
+      else if (q.includes('4º ano') || q.includes('4 ano') || q.includes('quarto ano')) detectedTurma = '4º Ano';
+      else if (q.includes('5º ano') || q.includes('5 ano') || q.includes('quinto ano')) detectedTurma = '5º Ano';
+    }
+
+    const toolCall: SofiaToolCall = {
+      name: 'consultarFrequenciaHoje',
+      args: {
+        turma: detectedTurma,
+      },
+    };
+    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
+
+    return {
+      text: toolResult.message,
+      toolCall,
+      toolResult,
+    };
+  }
+
+  // 7. Intenção: Alertas e Consultas de Saída (Van, Saídas Antecipadas e Portaria)
+  // Ex: "Sofia, quem sai de van hoje?", "Quais são as saídas antecipadas de hoje?", "Quantos alunos já foram liberados?"
+  if (
+    q.includes('van') ||
+    q.includes('transporte escolar') ||
+    q.includes('transporte') ||
+    q.includes('saida antecipada') ||
+    q.includes('saidas antecipadas') ||
+    q.includes('sair mais cedo') ||
+    q.includes('liberado') ||
+    q.includes('liberados') ||
+    q.includes('liberacao') ||
+    (q.includes('saida') && (q.includes('quem') || q.includes('quais') || q.includes('quantos') || q.includes('hoje')))
+  ) {
+    let tipo: 'van' | 'antecipada' | 'geral' = 'geral';
+    if (q.includes('van') || q.includes('transporte')) {
+      tipo = 'van';
+    } else if (q.includes('antecipada') || q.includes('sair mais cedo')) {
+      tipo = 'antecipada';
+    }
+
+    const toolCall: SofiaToolCall = {
+      name: 'consultarAlertasSaidaHoje',
+      args: {
+        tipo,
+        detalhesVan: q.includes('quem') || q.includes('quais') || q.includes('listar'),
+      },
+    };
+    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
+
+    return {
+      text: toolResult.message,
+      toolCall,
+      toolResult,
+    };
+  }
+
+  // 8. Intenção: Análise de Desarranjos / Diagnóstico Geral do Momento Atual
   if (
     q.includes('desarranjo') ||
     q.includes('diagnostico') ||

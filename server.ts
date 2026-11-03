@@ -1018,6 +1018,28 @@ const SOFIA_SERVER_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'consultarFrequenciaHoje',
+    description: 'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: { type: 'STRING', description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal")' },
+      },
+    },
+  },
+  {
+    name: 'consultarAlertasSaidaHoje',
+    description: 'Consulta os alertas e relatórios de saídas de hoje: alunos de transporte escolar (van), saídas antecipadas agendadas e alunos já liberados pela portaria.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        tipo: { type: 'STRING', description: 'Foco da consulta: "van", "antecipada" ou "geral"' },
+        turma: { type: 'STRING', description: 'Nome da turma opcional para filtro' },
+        detalhesVan: { type: 'BOOLEAN', description: 'Se verdadeiro, lista os nomes de cada aluno e condutor de van' },
+      },
+    },
+  },
+  {
     name: 'cadastrarAluno',
     description: 'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
     parameters: {
@@ -1147,7 +1169,11 @@ DIRETRIZES DE ATUAÇÃO E RESOLUÇÃO:
 3. CONSULTA DE HISTÓRICO DE FREQUÊNCIA E TERMOS TEMPORAIS:
    - Interprete termos temporais como "ontem", "anteontem", "dia anterior", "semana passada" ou datas numéricas específicas (ex: "dia 28", "28/10", "15 de setembro").
    - REGRA OBRIGATÓRIA: Quando o usuário perguntar pelas faltas, presenças ou chamada de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (por exemplo, a data de ontem correspondente à data atual), e NUNCA retornar o diagnóstico em tempo real do momento atual ("analisarDesarranjosDoDia").
-4. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
+4. CONSULTAS DE FREQUÊNCIA DE HOJE:
+   - Quando o usuário perguntar sobre a frequência de hoje, quantos alunos vieram ou o resumo da chamada (ex: "qual a frequência de hoje?", "quantos alunos vieram hoje?", "qual o resumo da chamada do Maternal?"), invoque obrigatoriamente a ferramenta "consultarFrequenciaHoje" (passando a turma se informada).
+5. ALERTAS E CONSULTAS DE SAÍDAS DE HOJE:
+   - Quando o usuário perguntar sobre saídas, transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".
+6. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
 
     const ai = getAIClient();
     if (!ai) {

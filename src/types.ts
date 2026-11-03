@@ -733,6 +733,8 @@ export type SofiaAgentToolName =
   | 'dispararAlertaWhatsApp'
   | 'analisarDesarranjosDoDia'
   | 'obterResumoFrequenciaPorData'
+  | 'consultarFrequenciaHoje'
+  | 'consultarAlertasSaidaHoje'
   | 'cadastrarAluno'
   | 'editarAluno'
   | 'cadastrarUsuario'
@@ -753,6 +755,7 @@ export interface SofiaToolResult {
   downloadUrl?: string;
   filename?: string;
   whatsappUrl?: string;
+  spokenText?: string;
 }
 
 export interface SofiaChatMessage {

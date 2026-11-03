@@ -182,13 +182,16 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
 
       setMessages((prev) => [...prev, sofiaMessage]);
 
-      // Leitura por voz opcional
-      if (!isMuted && response.text) {
-        // Remove URLs ou markdown excessivo para síntese mais limpa
-        const cleanSpeakText = response.text
+      // Leitura por voz (Text-to-Speech) direta e natural
+      if (!isMuted && (response.toolResult?.spokenText || response.text)) {
+        const textToSpeak = response.toolResult?.spokenText || response.text;
+        const cleanSpeakText = textToSpeak
           .replace(/http[^\s]+/g, '')
           .replace(/[#*`_]/g, '')
-          .slice(0, 280);
+          .replace(/\n•/g, ', ')
+          .replace(/\n+/g, '. ')
+          .trim()
+          .slice(0, 320);
         TextToSpeechManager.speak(cleanSpeakText);
       }
     } catch (err: any) {

@@ -166,6 +166,43 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'consultarFrequenciaHoje',
+    description:
+      'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal").',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarAlertasSaidaHoje',
+    description:
+      'Consulta os alertas e relatórios de saídas de hoje: alunos de transporte escolar (van), saídas antecipadas agendadas e alunos já liberados pela portaria.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        tipo: {
+          type: 'STRING',
+          description: 'Foco da consulta: "van" (transporte escolar), "antecipada" (saídas antecipadas) ou "geral" (todos os alertas de saída).',
+          enum: ['van', 'antecipada', 'geral'],
+        },
+        turma: {
+          type: 'STRING',
+          description: 'Nome da turma opcional para filtro.',
+        },
+        detalhesVan: {
+          type: 'BOOLEAN',
+          description: 'Se verdadeiro, lista os nomes de cada aluno e condutor de van.',
+        },
+      },
+    },
+  },
+  {
     name: 'cadastrarAluno',
     description:
       'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
@@ -792,6 +829,195 @@ export async function executeSofiaTool(
           faltasPorTurma: summary.faltasPorTurma,
           alunosFaltantes: summary.alunosFaltantes,
           turmasComRegistro: summary.turmasComRegistro,
+        },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarFrequenciaHoje(turma?)
+    // -------------------------------------------------------------------
+    case 'consultarFrequenciaHoje': {
+      const targetDate = context.selectedDate || toISODateString(new Date());
+      const dayOfWeek = getDayOfWeekFromDate(targetDate);
+      const filterTurma = args.turma ? normalizeStr(args.turma) : '';
+
+      const activeStudents = (context.students || []).filter(
+        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      );
+
+      // Filtra por turma se informada
+      const filteredStudents = filterTurma
+        ? activeStudents.filter((s) => {
+            const sTurma = normalizeStr(s.turma);
+            return sTurma.includes(filterTurma) || filterTurma.includes(sTurma);
+          })
+        : activeStudents;
+
+      // Alunos esperados no dia da semana correspondente
+      const expectedStudents = filteredStudents.filter((s) => {
+        const dias = s.diasFrequencia || s.diasContratados;
+        if (Array.isArray(dias) && dias.length > 0) {
+          return dias.includes(dayOfWeek as any);
+        }
+        return true;
+      });
+
+      // Mapeamento dos registros de frequência de hoje
+      const recordMap = new Map<string, AttendanceRecord>();
+      (context.records || []).forEach((r) => {
+        if (r.date === targetDate) {
+          recordMap.set(r.studentId, r);
+        }
+      });
+
+      let presentes = 0;
+      let faltas = 0;
+      let saidasAntecipadas = 0;
+      let pendentes = 0;
+
+      expectedStudents.forEach((s) => {
+        const rec = recordMap.get(s.id);
+        if (!rec || !rec.status) {
+          pendentes++;
+        } else if (rec.status === 'presente') {
+          presentes++;
+        } else if (rec.status === 'falta') {
+          faltas++;
+        } else if (rec.status === 'saida_antecipada') {
+          saidasAntecipadas++;
+        } else {
+          presentes++;
+        }
+      });
+
+      const turmaLabel = filterTurma
+        ? (filteredStudents[0]?.turma || args.turma)
+        : '';
+
+      const respostaTexto = turmaLabel
+        ? `Na turma ${turmaLabel}, temos ${presentes} alunos presentes, ${faltas} faltas, ${saidasAntecipadas} saídas antecipadas e ${pendentes} pendentes.`
+        : `Hoje temos ${presentes} alunos presentes, ${faltas} faltas, ${saidasAntecipadas} saídas antecipadas e ${pendentes} pendentes.`;
+
+      return {
+        toolName,
+        success: true,
+        message: respostaTexto,
+        spokenText: respostaTexto,
+        data: {
+          data: targetDate,
+          turma: turmaLabel || 'TODAS',
+          totalEsperados: expectedStudents.length,
+          presentes,
+          faltas,
+          saidasAntecipadas,
+          pendentes,
+        },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarAlertasSaidaHoje(tipo?, turma?)
+    // -------------------------------------------------------------------
+    case 'consultarAlertasSaidaHoje': {
+      const targetDate = context.selectedDate || toISODateString(new Date());
+      const dayOfWeek = getDayOfWeekFromDate(targetDate);
+      const filterTurma = args.turma ? normalizeStr(args.turma) : '';
+      const tipoConsulta = args.tipo || 'geral';
+
+      const activeStudents = (context.students || []).filter(
+        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      );
+
+      const targetStudents = filterTurma
+        ? activeStudents.filter((s) => {
+            const sTurma = normalizeStr(s.turma);
+            return sTurma.includes(filterTurma) || filterTurma.includes(sTurma);
+          })
+        : activeStudents;
+
+      const expectedStudents = targetStudents.filter((s) => {
+        const dias = s.diasFrequencia || s.diasContratados;
+        if (Array.isArray(dias) && dias.length > 0) {
+          return dias.includes(dayOfWeek as any);
+        }
+        return true;
+      });
+
+      const recordMap = new Map<string, AttendanceRecord>();
+      (context.records || []).forEach((r) => {
+        if (r.date === targetDate) {
+          recordMap.set(r.studentId, r);
+        }
+      });
+
+      // 1. Alunos de Transporte Escolar (Van)
+      const alunosVan = expectedStudents.filter(
+        (s) => s.tipoSaida === 'TRANSPORTE_ESCOLAR' || Boolean(s.nomeCondutor)
+      );
+
+      // 2. Saídas antecipadas (agendadas ou com registro de saída antecipada)
+      const alunosSaidaAntecipada = expectedStudents.filter((s) => {
+        const rec = recordMap.get(s.id);
+        if (rec && (rec.status === 'saida_antecipada' || rec.exitTime)) {
+          return true;
+        }
+        const horarioDia = s.horariosSaida?.[dayOfWeek as any] || s.horarioSaida;
+        if (horarioDia) {
+          const cleanH = horarioDia.trim();
+          if (cleanH < '17:00' && cleanH >= '12:00') {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      // 3. Alunos já liberados pela portaria / checkout confirmado
+      const alunosLiberados = expectedStudents.filter((s) => {
+        const rec = recordMap.get(s.id);
+        return Boolean(rec && (rec.checkoutConfirmed || rec.status === 'saida_antecipada'));
+      });
+
+      const totalVan = alunosVan.length;
+      const totalAntecipadas = alunosSaidaAntecipada.length;
+      const totalLiberados = alunosLiberados.length;
+
+      let baseMsg = `Para hoje, temos ${totalVan} alunos cadastrados para Transporte Escolar (Van) e ${totalAntecipadas} saídas antecipadas agendadas.`;
+      let spokenText = baseMsg;
+
+      if (tipoConsulta === 'van' || args.detalhesVan) {
+        if (totalVan > 0) {
+          baseMsg += `\n\nAlunos do Transporte Escolar (Van):\n` +
+            alunosVan.map((s) => `• ${s.name} (${s.turma}${s.nomeCondutor ? ` - Condutor: ${s.nomeCondutor}` : ''})`).join('\n');
+          spokenText = `Para hoje, temos ${totalVan} alunos cadastrados para Transporte Escolar e ${totalAntecipadas} saídas antecipadas. Os alunos de van são: ${alunosVan.slice(0, 5).map((s) => s.name).join(', ')}${totalVan > 5 ? ' entre outros' : ''}.`;
+        }
+      } else if (tipoConsulta === 'antecipada') {
+        if (totalAntecipadas > 0) {
+          baseMsg += `\n\nAlunos com Saída Antecipada:\n` +
+            alunosSaidaAntecipada.map((s) => {
+              const rec = recordMap.get(s.id);
+              const hora = rec?.exitTime || s.horariosSaida?.[dayOfWeek as any] || s.horarioSaida || 'Horário especial';
+              return `• ${s.name} (${s.turma}) - Horário: ${hora}`;
+            }).join('\n');
+        }
+      }
+
+      if (totalLiberados > 0) {
+        baseMsg += `\n• Alunos já liberados na portaria: ${totalLiberados}.`;
+      }
+
+      return {
+        toolName,
+        success: true,
+        message: baseMsg,
+        spokenText,
+        data: {
+          data: targetDate,
+          totalVan,
+          totalAntecipadas,
+          totalLiberados,
+          alunosVan: alunosVan.map((s) => ({ id: s.id, name: s.name, turma: s.turma, condutor: s.nomeCondutor })),
+          alunosSaidaAntecipada: alunosSaidaAntecipada.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
+          alunosLiberados: alunosLiberados.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
         },
       };
     }
