@@ -131,7 +131,7 @@ export const SaidaAvulsaModal: React.FC<SaidaAvulsaModalProps> = ({
       horarioSaida: horarioSaida || getCurrentTimeHHMM(),
       observacoes: observacoes.trim(),
       responsavelLiberacao: currentUser?.name
-        ? `${currentUser.name} (${currentUser.cargoLabel || 'Coordenação'})`
+        ? currentUser.name
         : 'Coordenação Geral do Programa Integral',
     };
 

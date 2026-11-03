@@ -6605,7 +6605,7 @@ export function generateTermoSaidaAvulsaPDF(
   drawOfficialHeader(
     doc,
     'TERMO DE LIBERAÇÃO DE ALUNO • SAÍDA AVULSA',
-    'Colégio Crescer — Programa do Integral | Registro de Saída Excepcional de Balcão',
+    '',
     [
       `Estudante: ${data.student.name}`,
       `Turma: ${data.student.turma}`,
@@ -6777,7 +6777,7 @@ export function generateTermoSaidaAvulsaPDF(
   doc.setTextColor(69, 26, 3); // amber-950
 
   const termoText =
-    'Declaro para os devidos fins de direito e controle da rotina escolar que, nesta data e horário, procedi à retirada do(a) estudante acima qualificado(a) das dependências do Colégio Crescer (Programa do Integral). Declaro estar ciente de que a responsabilidade pela guarda, segurança e integridade física do(a) aluno(a) transfere-se integralmente a mim a partir do ato desta liberação excepcional de balcão/portaria.';
+    'Declaro para os devidos fins de direito e controle da rotina escolar que, nesta data e horário, procedi à retirada do(a) estudante acima qualificado(a) das dependências do Colégio Crescer (Programa do Integral). Declaro estar ciente de que a responsabilidade pela guarda, segurança e integridade física do(a) aluno(a) transfere-se integralmente a mim a partir do ato desta liberação excepcional de Portaria.';
   const splitTermo = doc.splitTextToSize(termoText, contentWidth - 8);
   doc.text(splitTermo, leftX + 4, block3StartY + 6);
 
@@ -6831,8 +6831,10 @@ export function generateTermoSaidaAvulsaPDF(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(71, 85, 105);
-  const respName = data.responsavelLiberacao || 'Coordenação Geral do Programa Integral';
-  doc.text(respName, col2X + halfWidth / 2, lineY + 9, { align: 'center' });
+  // Remove qualquer exibição textual entre parênteses do cargo/função (ex: "(Coordenador (Administrador))")
+  const rawRespName = data.responsavelLiberacao || 'Coordenação Geral do Programa Integral';
+  const cleanRespName = rawRespName.replace(/\s*\([^)]*\)/g, '').trim() || 'Coordenação Geral do Programa Integral';
+  doc.text(cleanRespName, col2X + halfWidth / 2, lineY + 9, { align: 'center' });
   doc.text('Colégio Crescer — Campinas/SP', col2X + halfWidth / 2, lineY + 13, { align: 'center' });
   doc.text(`Liberado presencialmente em ${dataFormatada} às ${horaFormatada}`, col2X + halfWidth / 2, lineY + 17, { align: 'center' });
 
