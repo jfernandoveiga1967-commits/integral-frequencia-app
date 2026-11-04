@@ -34,8 +34,72 @@ export type StudentStatus = 'ativo' | 'inativo' | 'cancelado';
 
 export type ContractType = 'regular' | 'avulso';
 
+export type PlanoContratualType =
+  | 'Integral Semana (18:30h)'
+  | 'Integral Especial - IV (4x 18:30h)'
+  | 'Integral Especial - III (3x 18:30h)'
+  | 'Integral Especial - II (2x 18:30h)'
+  | 'Integral Especial - I (1x 18:30h)'
+  | 'Integral Especial - V (5x 14:00h)'
+  | 'Diária Integral'
+  | 'Personalizado';
+
+export interface PlanoContratualInfo {
+  nome: PlanoContratualType;
+  valorBase: number;
+  horarioPadrao: string;
+  descricao?: string;
+}
+
+export const PLANOS_CONTRATUAIS_TABELA: Record<
+  PlanoContratualType,
+  { valorBase: number; horarioPadrao: string; descricao?: string }
+> = {
+  'Integral Semana (18:30h)': {
+    valorBase: 1250,
+    horarioPadrao: '18:30h',
+    descricao: '5 dias por semana até 18:30h',
+  },
+  'Integral Especial - IV (4x 18:30h)': {
+    valorBase: 1100,
+    horarioPadrao: '18:30h',
+    descricao: '4 dias por semana até 18:30h',
+  },
+  'Integral Especial - III (3x 18:30h)': {
+    valorBase: 935,
+    horarioPadrao: '18:30h',
+    descricao: '3 dias por semana até 18:30h',
+  },
+  'Integral Especial - II (2x 18:30h)': {
+    valorBase: 670,
+    horarioPadrao: '18:30h',
+    descricao: '2 dias por semana até 18:30h',
+  },
+  'Integral Especial - I (1x 18:30h)': {
+    valorBase: 365,
+    horarioPadrao: '18:30h',
+    descricao: '1 dia por semana até 18:30h',
+  },
+  'Integral Especial - V (5x 14:00h)': {
+    valorBase: 810,
+    horarioPadrao: '14:00h',
+    descricao: '5 dias por semana até 14:00h',
+  },
+  'Diária Integral': {
+    valorBase: 120,
+    horarioPadrao: '18:30h',
+    descricao: 'Diária avulsa integral até 18:30h',
+  },
+  'Personalizado': {
+    valorBase: 0,
+    horarioPadrao: '18:30h',
+    descricao: 'Valor e horário negociados',
+  },
+};
+
 export interface Student {
   id: string;
+  matricula?: string; // Código/RA numérico de matrícula do aluno (ex: '2026123' ou 'st-178...')
   name: string;
   turma: TurmaType;
   activities: ActivityType[]; // Extracurricular activities student is enrolled in
@@ -60,6 +124,12 @@ export interface Student {
   tipoSaida?: 'PAIS' | 'TRANSPORTE_ESCOLAR'; // Logística de deslocamento/saída (padrão: 'PAIS')
   nomeCondutor?: string; // Nome do Condutor / Tio(a) do Transporte Escolar
   notes?: string;
+  // Estrutura Financeira dos Planos Contratuais (Válida para 2026 e 2027)
+  planoContratual?: PlanoContratualType;
+  horarioPermanenciaLimite?: string; // ex: '18:30h' ou '14:00h'
+  valorPlanoBase?: number; // Valor de tabela oficial do plano
+  descontoBolsa?: number; // Valor em R$ de desconto concedido/bolsa
+  valorMensalidadeFinal?: number; // Cálculo automático: Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0))
 }
 
 export interface AttendanceRecord {
@@ -175,6 +245,9 @@ export interface StudentFinancialProfile {
   dataUltimoPagamento?: string; // YYYY-MM-DD
   observacoes?: string;
   formaPagamentoPadrao?: string; // 'Boleto' | 'PIX' | 'Cartão' | 'Transferência'
+  studentStatus?: StudentStatus; // 'ativo' | 'inativo' | 'cancelado'
+  planoContratual?: string; // Nome do plano contratual oficial
+  descontoBolsa?: number; // Valor em R$ de bolsa concedida
   updatedAt?: string;
   updatedBy?: string;
 }

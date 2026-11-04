@@ -20,6 +20,7 @@ import {
   FinancialExpense,
   ExpenseCategory,
   ExpenseStatus,
+  PLANOS_CONTRATUAIS_TABELA,
 } from '../types';
 
 const FINANCIAL_COLLECTION = 'studentFinancialProfiles';
@@ -250,11 +251,21 @@ export function buildDefaultFinancialProfile(
 ): StudentFinancialProfile {
   const isAvulso = student.tipoContrato === 'avulso';
   const plano: FinancialPlanHour = isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H';
-  const base = BASE_PLAN_PRICES[plano];
+
+  // Prioriza a tabela oficial de Planos Contratuais do estudante
+  const base =
+    student.valorPlanoBase !== undefined
+      ? student.valorPlanoBase
+      : student.planoContratual
+      ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase ?? BASE_PLAN_PRICES[plano]
+      : BASE_PLAN_PRICES[plano];
 
   const extras = calculateModalidadesExtrasTotal(student.activities || []);
-  const desconto = 0;
-  const total = calculateValorTotalMensal(base, extras, desconto);
+  const desconto = student.descontoBolsa || 0;
+  const total =
+    student.valorMensalidadeFinal !== undefined
+      ? student.valorMensalidadeFinal
+      : calculateValorTotalMensal(base, extras, desconto);
 
   return {
     id: `${anoLetivo}_${student.id}`,
@@ -271,7 +282,10 @@ export function buildDefaultFinancialProfile(
     statusPagamento: 'EM_DIA',
     mesReferencia: `${anoLetivo}-08`,
     formaPagamentoPadrao: 'Boleto',
-    observacoes: '',
+    observacoes: student.planoContratual ? `Plano Contratual: ${student.planoContratual}` : '',
+    studentStatus: student.status || 'ativo',
+    planoContratual: student.planoContratual,
+    descontoBolsa: student.descontoBolsa,
     updatedAt: new Date().toISOString(),
     updatedBy: 'Sistema Automático',
   };
@@ -544,6 +558,11 @@ export function calculateFinancialMetrics(
   let totalIsentos = 0;
 
   profiles.forEach((p) => {
+    // Apenas alunos com matrícula ATIVA contribuem para as receitas do Integral
+    if (p.studentStatus && p.studentStatus !== 'ativo') {
+      return;
+    }
+
     const valor = p.valorTotalMensal || 0;
 
     if (p.statusPagamento === 'ISENTO') {

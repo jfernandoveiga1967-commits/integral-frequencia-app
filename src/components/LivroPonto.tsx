@@ -304,7 +304,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Lock background scroll when any modal is open & handle Escape key
+  // Referência do contêiner principal da aba Livro Ponto para foco e restauração de scroll
+  const mainContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Helper de Desbloqueio Forçado de Rolagem Vertical (Scroll Unlock)
+  const unlockBodyScroll = () => {
+    if (typeof document !== 'undefined') {
+      document.body.style.overflow = 'unset';
+      document.body.style.removeProperty('overflow');
+      document.body.classList.remove('overflow-hidden');
+      document.documentElement.style.overflow = 'unset';
+      document.documentElement.style.removeProperty('overflow');
+      document.documentElement.classList.remove('overflow-hidden');
+    }
+    // Devolve o foco ao contêiner principal da tela sem travar a viewport
+    if (mainContainerRef.current) {
+      mainContainerRef.current.focus({ preventScroll: true });
+    }
+  };
+
+  // Lock background scroll when any modal is open & handle Escape key, com desbloqueio explícito e garantido
   useEffect(() => {
     const isAnyModalOpen = Boolean(
       showTimesheetPrintModal ||
@@ -315,9 +334,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       pdfPreviewState?.isOpen ||
       wifiModal?.isOpen
     );
+
     if (isAnyModalOpen) {
-      const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
+      document.body.classList.add('overflow-hidden');
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -328,16 +348,26 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           setShowEditUserModal(false);
           setPdfPreviewState(null);
           setWifiModal(null);
+          unlockBodyScroll();
         }
       };
       window.addEventListener('keydown', handleKeyDown);
 
       return () => {
-        document.body.style.overflow = originalOverflow;
+        unlockBodyScroll();
         window.removeEventListener('keydown', handleKeyDown);
       };
+    } else {
+      unlockBodyScroll();
     }
   }, [showTimesheetPrintModal, showReceiptModal, showHolidayModal, showEditDayModal, showEditUserModal, pdfPreviewState?.isOpen, wifiModal?.isOpen]);
+
+  // Garante liberação de rolagem ao desmontar o componente
+  useEffect(() => {
+    return () => {
+      unlockBodyScroll();
+    };
+  }, []);
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -597,6 +627,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
       await onSaveUser(updatedUser);
     }
     setShowEditUserModal(false);
+    unlockBodyScroll();
     setPunchFeedback({
       text: `Dados contratuais de ${updatedUser.name} salvos com sucesso no Livro Ponto e sincronizados com todos os dispositivos!`,
       type: 'success',
@@ -1392,10 +1423,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     try {
       await onSavePontoRecord(finalRecord);
       setShowEditDayModal(null);
+      unlockBodyScroll();
       setPunchFeedback({ text: 'Registro do dia atualizado e recálculo financeiro aplicado com sucesso!', type: 'success' });
     } catch (err) {
       console.error('Erro ao salvar registro de ponto:', err);
       setPunchFeedback({ text: 'Erro ao salvar registro de ponto no banco.', type: 'error' });
+      unlockBodyScroll();
     }
     setTimeout(() => setPunchFeedback(null), 3500);
   };
@@ -1794,7 +1827,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div
+      ref={mainContainerRef}
+      id="livro-ponto-main-container"
+      tabIndex={-1}
+      className="space-y-6 overflow-y-auto min-h-screen h-auto focus:outline-none"
+    >
       {/* Top Notification Toast */}
       {punchFeedback && (
         <div
@@ -3379,7 +3417,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowReceiptModal(false)}
+                  onClick={() => {
+                    setShowReceiptModal(false);
+                    unlockBodyScroll();
+                  }}
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer active:scale-95"
                   title="Fechar recibo e voltar ao painel"
                 >
@@ -3673,7 +3714,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowTimesheetPrintModal(false)}
+                  onClick={() => {
+                    setShowTimesheetPrintModal(false);
+                    unlockBodyScroll();
+                  }}
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-sm transition cursor-pointer active:scale-95"
                   title="Fechar espelho e voltar ao painel"
                 >
@@ -3839,7 +3883,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowTimesheetPrintModal(false)}
+                    onClick={() => {
+                      setShowTimesheetPrintModal(false);
+                      unlockBodyScroll();
+                    }}
                     className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs shadow-sm transition cursor-pointer active:scale-95"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -3867,7 +3914,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 Ajustar Batidas: {formatDateBR(showEditDayModal.date)}
               </h3>
               <button
-                onClick={() => setShowEditDayModal(null)}
+                onClick={() => {
+                  setShowEditDayModal(null);
+                  unlockBodyScroll();
+                }}
                 className="p-1 text-slate-400 hover:text-white rounded-lg"
               >
                 <X className="w-4 h-4" />
@@ -4198,7 +4248,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
 
             <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
               <button
-                onClick={() => setShowEditDayModal(null)}
+                onClick={() => {
+                  setShowEditDayModal(null);
+                  unlockBodyScroll();
+                }}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg text-xs"
               >
                 Cancelar
@@ -4226,7 +4279,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 <h3 className="font-bold text-base text-white">Gerenciador de Feriados, Recessos e Pontes</h3>
               </div>
               <button
-                onClick={() => setShowHolidayModal(false)}
+                onClick={() => {
+                  setShowHolidayModal(false);
+                  unlockBodyScroll();
+                }}
                 className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
               >
                 <X className="w-5 h-5" />
@@ -4252,7 +4308,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
           blobUrl={pdfPreviewState.blobUrl}
           filename={pdfPreviewState.filename}
           title={pdfPreviewState.title}
-          onClose={() => setPdfPreviewState(null)}
+          onClose={() => {
+            setPdfPreviewState(null);
+            unlockBodyScroll();
+          }}
           onDownload={pdfPreviewState.onDownload}
         >
           <div className="space-y-4 text-slate-800 text-xs">
@@ -4463,7 +4522,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setShowEditUserModal(false)}
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  unlockBodyScroll();
+                }}
                 className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
               >
                 <X className="w-5 h-5" />
@@ -4812,7 +4874,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
               <div className="flex justify-end space-x-2 pt-4 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowEditUserModal(false)}
+                  onClick={() => {
+                    setShowEditUserModal(false);
+                    unlockBodyScroll();
+                  }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg text-xs transition cursor-pointer"
                 >
                   Cancelar
@@ -4891,7 +4956,10 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             <div className="flex items-center justify-end space-x-2 pt-2">
               <button
                 type="button"
-                onClick={() => setWifiModal(null)}
+                onClick={() => {
+                  setWifiModal(null);
+                  unlockBodyScroll();
+                }}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
               >
                 Entendido
@@ -4900,6 +4968,7 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                 type="button"
                 onClick={() => {
                   setWifiModal(null);
+                  unlockBodyScroll();
                   handleQuickPunch();
                 }}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center space-x-1.5 cursor-pointer active:scale-95"

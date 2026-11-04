@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF, generateTermoSaidaAvulsaPDF } from '../utils/pdfGenerator';
@@ -9,12 +9,22 @@ import { SaidaAvulsaModal } from './SaidaAvulsaModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck, Car } from 'lucide-react';
+import { formatCurrencyBR } from '../utils/pontoUtils';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck, Car, BadgeDollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { saveStudents, loadStudents, normalizeStudent } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
+import {
+  E1ExtractedStudent,
+  readE1FileAsText,
+  sanitizeE1String,
+  mapE1TurmaNameToOfficial,
+  parseE1HtmlReport,
+  parseE1SheetRows,
+  cleanMatriculaValue,
+} from '../utils/e1Parser';
 
 interface StudentManagerProps {
   students?: Student[];
@@ -138,156 +148,29 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
 
+  // Plano Contratual & Financeiro do Novo Aluno (Válido para 2026 e 2027)
+  const [newPlanoContratual, setNewPlanoContratual] = useState<PlanoContratualType>('Integral Semana (18:30h)');
+  const [newHorarioPermanenciaLimite, setNewHorarioPermanenciaLimite] = useState<string>('18:30h');
+  const [newValorPlanoBase, setNewValorPlanoBase] = useState<number>(1250);
+  const [newDescontoBolsa, setNewDescontoBolsa] = useState<number>(0);
+
+  const handleSelectNewPlano = (plano: PlanoContratualType) => {
+    setNewPlanoContratual(plano);
+    if (plano !== 'Personalizado') {
+      const info = PLANOS_CONTRATUAIS_TABELA[plano];
+      if (info) {
+        setNewValorPlanoBase(info.valorBase);
+        setNewHorarioPermanenciaLimite(info.horarioPadrao);
+      }
+    }
+  };
+
+  const newValorMensalidadeFinal = Math.max(0, (newValorPlanoBase || 0) - (newDescontoBolsa || 0));
+
   // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
   const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
 
-  // E1 Multi-Turma Parser Types & State
-  interface E1ExtractedStudent {
-    name: string;
-    turma: string;
-  }
-
-  const E1_TURMA_MAP: Record<string, string> = {
-    'KIDS - Mini-Maternal': 'Mini Maternal Azul',
-    'KIDS - Maternal': 'Maternal Azul',
-    'KIDS - Infantil I': 'Infantil 1 Azul',
-    'KIDS - Infantil II': 'Infantil 2 Azul',
-    'KIDS - 1 Ano': '1º Ano Azul',
-    'TEENS - 2 Ano': '2º Ano Azul',
-    'TEENS - 3 Ano': '3º Ano Azul',
-    'TEENS - 4 Ano': '4º Ano Azul',
-    'TEENS - 5 Ano': '5º Ano Azul',
-    'TEENS - 6 Ano': '6º Ano Azul',
-  };
-
-  const mapE1TurmaNameToOfficial = (rawName: string): string => {
-    const clean = (rawName || '').trim();
-    if (E1_TURMA_MAP[clean]) return E1_TURMA_MAP[clean];
-
-    // Normalização sem acentos, minúscula e espaços uniformes
-    const norm = clean
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[-_]/g, ' ')
-      .replace(/\s+/g, ' ');
-
-    if (norm.includes('mini') && norm.includes('maternal')) return 'Mini Maternal Azul';
-    if (norm.includes('maternal')) return 'Maternal Azul';
-    if (norm.includes('infantil') && (norm.includes('ii') || norm.includes(' 2'))) return 'Infantil 2 Azul';
-    if (norm.includes('infantil') && (norm.includes('i') || norm.includes(' 1'))) return 'Infantil 1 Azul';
-    if (norm.includes('1') && norm.includes('ano')) return '1º Ano Azul';
-    if (norm.includes('2') && norm.includes('ano')) return '2º Ano Azul';
-    if (norm.includes('3') && norm.includes('ano')) return '3º Ano Azul';
-    if (norm.includes('4') && norm.includes('ano')) return '4º Ano Azul';
-    if (norm.includes('5') && norm.includes('ano')) return '5º Ano Azul';
-    if (norm.includes('6') && norm.includes('ano')) return '6º Ano Azul';
-
-    return clean;
-  };
-
-  const parseE1HtmlReport = (htmlContent: string): E1ExtractedStudent[] => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const results: E1ExtractedStudent[] = [];
-
-    const extractNameFromCell = (td: Element): string | null => {
-      const raw = (td.textContent || '').trim().replace(/\s+/g, ' ');
-      const lower = raw.toLowerCase();
-      if (!raw || raw.length < 3) return null;
-      if (lower === 'nome' || lower === 'aluno' || lower === 'nome do aluno') return null;
-      if (lower === 'situação' || lower === 'situacao' || lower === 'status' || lower === 'matrícula' || lower === 'matricula') return null;
-      if (lower.startsWith('página') || lower.startsWith('pagina') || lower.includes('relatório') || lower.includes('sistema e1')) return null;
-      if (/^\d+$/.test(raw)) return null;
-      if (lower.startsWith('turma:')) return null;
-      if (!/[a-zA-ZÀ-ÿ]/.test(raw)) return null;
-      return raw;
-    };
-
-    const parseTurmaFromText = (text: string): string | null => {
-      if (!text.includes('Turma:')) return null;
-      const parts = text.split(/Turma:/i);
-      let after = parts[1]?.trim() || '';
-      if (after) {
-        const cutoff = after.search(/(Turno|Sala|Período|Periodo|Horário|Horario|Professor|Data|Ano|Série|Serie|Data da Emissão):/i);
-        if (cutoff > 0) {
-          after = after.substring(0, cutoff).trim();
-        }
-        after = after.replace(/[-–—\s]+$/, '').trim();
-        if (after.length > 0) {
-          return after;
-        }
-      }
-      return null;
-    };
-
-    // Coleta todas as tabelas
-    const tables = Array.from(doc.querySelectorAll('table'));
-    let currentOfficialTurma = '';
-
-    tables.forEach((table) => {
-      // 1. Procura se há cabeçalho Turma: precedendo a tabela
-      let precedingTurma = '';
-      let prev = table.previousElementSibling;
-      while (prev && !precedingTurma) {
-        const bTags = prev.querySelectorAll('b, strong');
-        for (const b of Array.from(bTags)) {
-          const found = parseTurmaFromText(b.parentElement?.textContent || b.textContent || '');
-          if (found) {
-            precedingTurma = found;
-            break;
-          }
-        }
-        if (!precedingTurma && prev.textContent?.includes('Turma:')) {
-          precedingTurma = parseTurmaFromText(prev.textContent) || '';
-        }
-        prev = prev.previousElementSibling;
-      }
-
-      if (precedingTurma) {
-        currentOfficialTurma = mapE1TurmaNameToOfficial(precedingTurma);
-      }
-
-      // 2. Analisa as linhas da tabela
-      const rows = Array.from(table.querySelectorAll('tr'));
-      rows.forEach((row) => {
-        const rowText = row.textContent || '';
-        if (rowText.includes('Turma:')) {
-          const foundTurma = parseTurmaFromText(rowText);
-          if (foundTurma) {
-            currentOfficialTurma = mapE1TurmaNameToOfficial(foundTurma);
-            return;
-          }
-        }
-
-        if (currentOfficialTurma) {
-          const cells = Array.from(row.querySelectorAll('td'));
-          // Dentro da tabela tabela_relatorio, seleciona células com text-align: left
-          const leftCells = cells.filter((td) => {
-            const style = (td.getAttribute('style') || '').toLowerCase().replace(/\s/g, '');
-            return style.includes('text-align:left') || style.includes('text-align:start');
-          });
-
-          const candidates = leftCells.length > 0 ? leftCells : cells;
-          for (const td of candidates) {
-            const name = extractNameFromCell(td);
-            if (name) {
-              const exists = results.some((r) => r.name === name && r.turma === currentOfficialTurma);
-              if (!exists) {
-                results.push({
-                  name,
-                  turma: currentOfficialTurma,
-                });
-              }
-              break; // Um nome de aluno por linha
-            }
-          }
-        }
-      });
-    });
-
-    return results;
-  };
+  // E1 Multi-Turma Parser State (processado via src/utils/e1Parser.ts com codificação ISO-8859-1 e separação de Matrícula x Turma)
 
   // Batch Add state
   const [showBatchForm, setShowBatchForm] = useState(false);
@@ -315,12 +198,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setUploadedFileName(file.name);
       setBatchFormError(null);
 
-      // Lê o conteúdo textual (HTML) do arquivo
+      // 1. Leitura nativa com FileReader e codificação ISO-8859-1 (Windows-1252) para correta acentuação
       let textContent = '';
       try {
-        textContent = await file.text();
-      } catch (e) {
-        console.warn('Fallback file.text():', e);
+        textContent = await readE1FileAsText(file, 'ISO-8859-1');
+      } catch (readErr) {
+        console.warn('Falha no FileReader com ISO-8859-1, tentando fallback file.text():', readErr);
+        try {
+          textContent = await file.text();
+        } catch (e) {}
       }
 
       const isHtml =
@@ -328,21 +214,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         (textContent.includes('<table') ||
           textContent.includes('Turma:') ||
           textContent.includes('tabela_relatorio') ||
-          textContent.includes('<html'));
+          textContent.includes('<html') ||
+          textContent.includes('<tr') ||
+          textContent.includes('<body'));
 
       if (isHtml) {
-        // Suporte para encoding Latin1 / ISO-8859-1 se houver caracteres especiais corrompidos
-        if (textContent.includes('')) {
-          try {
-            const buf = await file.arrayBuffer();
-            const dec = new TextDecoder('iso-8859-1');
-            const decoded = dec.decode(buf);
-            if (!decoded.includes('')) {
-              textContent = decoded;
-            }
-          } catch (err) {}
-        }
-
         const e1Students = parseE1HtmlReport(textContent);
         if (e1Students.length > 0) {
           setE1ParsedStudents(e1Students);
@@ -351,49 +227,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         }
       }
 
-      // Fallback para arquivos binários .xls/.xlsx via SheetJS
+      // 2. Fallback para arquivos binários .xls/.xlsx via SheetJS com mapeamento estrito
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: 'array' });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<any>(firstSheet, { header: 1 });
+      const rows = XLSX.utils.sheet_to_json<any[]>(firstSheet, { header: 1 });
 
-      const extracted: string[] = [];
-      const stopWords = new Set([
-        'nome', 'aluno', 'turma', 'matricula', 'matrícula', 'codigo', 'código',
-        'sexo', 'data', 'nascimento', 'relatorio', 'relatório', 'sistema', 'e1',
-        'colegio', 'colégio', 'escola', 'total', 'quantidade', 'situação', 'situacao',
-        'status', 'chamada', 'ano', 'serie', 'série'
-      ]);
-
-      rows.forEach((row: any) => {
-        if (Array.isArray(row)) {
-          for (const cell of row) {
-            if (typeof cell === 'string') {
-              const clean = cell.trim();
-              const lower = clean.toLowerCase();
-              if (
-                clean.length >= 3 &&
-                !stopWords.has(lower) &&
-                !/^\d+$/.test(clean) &&
-                !lower.includes('relatório') &&
-                !lower.includes('sistema e1') &&
-                !lower.startsWith('página') &&
-                !lower.startsWith('pagina')
-              ) {
-                extracted.push(clean);
-                break;
-              }
-            }
-          }
-        }
-      });
-
-      if (extracted.length > 0) {
-        setE1ParsedStudents([]);
-        setBatchNamesText(extracted.join('\n'));
-      } else {
-        setBatchFormError('Nenhum aluno foi identificado no arquivo .xls selecionado.');
+      const sheetStudents = parseE1SheetRows(rows, batchTurma);
+      if (sheetStudents.length > 0) {
+        setE1ParsedStudents(sheetStudents);
+        setBatchNamesText(sheetStudents.map((s) => s.name).join('\n'));
+        return;
       }
+
+      setBatchFormError('Nenhum aluno foi identificado no arquivo .xls selecionado. Verifique se o relatório contém alunos cadastrados.');
     } catch (err: any) {
       console.warn('Erro ao processar arquivo .xls:', err);
       setBatchFormError('Falha ao processar o arquivo .xls. Verifique se o arquivo foi exportado do relatório de turmas do Sistema E1.');
@@ -623,9 +470,87 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       anoLetivo: student.anoLetivo || 2026,
       tipoSaida: student.tipoSaida || 'PAIS',
       nomeCondutor: student.nomeCondutor || '',
+      planoContratual: student.planoContratual || 'Integral Semana (18:30h)',
+      horarioPermanenciaLimite:
+        student.horarioPermanenciaLimite ||
+        (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.horarioPadrao : '18:30h') ||
+        '18:30h',
+      valorPlanoBase:
+        student.valorPlanoBase !== undefined
+          ? student.valorPlanoBase
+          : (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase : 1250) ?? 1250,
+      descontoBolsa: student.descontoBolsa || 0,
+      valorMensalidadeFinal:
+        student.valorMensalidadeFinal !== undefined
+          ? student.valorMensalidadeFinal
+          : Math.max(
+              0,
+              (student.valorPlanoBase !== undefined
+                ? student.valorPlanoBase
+                : (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase : 1250) ?? 1250) -
+                (student.descontoBolsa || 0)
+            ),
     };
     setOriginalStudentForEdit(prepared);
     setEditingStudent(prepared);
+  };
+
+  const handleSelectEditPlano = (plano: PlanoContratualType) => {
+    if (!editingStudent) return;
+    if (plano !== 'Personalizado') {
+      const info = PLANOS_CONTRATUAIS_TABELA[plano];
+      const base = info?.valorBase ?? 1250;
+      const horario = info?.horarioPadrao ?? '18:30h';
+      const desconto = editingStudent.descontoBolsa || 0;
+      setEditingStudent((prev) =>
+        prev
+          ? {
+              ...prev,
+              planoContratual: plano,
+              valorPlanoBase: base,
+              horarioPermanenciaLimite: horario,
+              valorMensalidadeFinal: Math.max(0, base - desconto),
+            }
+          : null
+      );
+    } else {
+      setEditingStudent((prev) =>
+        prev
+          ? {
+              ...prev,
+              planoContratual: plano,
+            }
+          : null
+      );
+    }
+  };
+
+  const handleChangeEditBase = (baseVal: number) => {
+    if (!editingStudent) return;
+    const desconto = editingStudent.descontoBolsa || 0;
+    setEditingStudent((prev) =>
+      prev
+        ? {
+            ...prev,
+            valorPlanoBase: baseVal,
+            valorMensalidadeFinal: Math.max(0, baseVal - desconto),
+          }
+        : null
+    );
+  };
+
+  const handleChangeEditDesconto = (descVal: number) => {
+    if (!editingStudent) return;
+    const base = editingStudent.valorPlanoBase || 0;
+    setEditingStudent((prev) =>
+      prev
+        ? {
+            ...prev,
+            descontoBolsa: descVal,
+            valorMensalidadeFinal: Math.max(0, base - descVal),
+          }
+        : null
+    );
   };
 
   const handleToggleEditAnoLetivo = (targetYear: number) => {
@@ -915,6 +840,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           anoLetivo: newAnoLetivo,
           tipoSaida: newTipoSaida,
           nomeCondutor: newTipoSaida === 'TRANSPORTE_ESCOLAR' ? newNomeCondutor.trim() : undefined,
+          planoContratual: newPlanoContratual,
+          horarioPermanenciaLimite: newHorarioPermanenciaLimite,
+          valorPlanoBase: newValorPlanoBase,
+          descontoBolsa: newDescontoBolsa,
+          valorMensalidadeFinal: newValorMensalidadeFinal,
         })
       );
       setNewName('');
@@ -931,6 +861,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setNewAnoLetivo(2027);
       setNewTipoSaida('PAIS');
       setNewNomeCondutor('');
+      setNewPlanoContratual('Integral Semana (18:30h)');
+      setNewHorarioPermanenciaLimite('18:30h');
+      setNewValorPlanoBase(1250);
+      setNewDescontoBolsa(0);
       setShowAddForm(false);
       setSingleFormError(null);
     } catch (err: any) {
@@ -950,21 +884,38 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setIsSavingBatch(true);
       try {
         const targetYear = selectedAnoLetivo;
-        const newStudentsList: Student[] = e1ParsedStudents.map((st, idx) => ({
-          id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-          name: st.name.trim(),
-          turma: st.turma,
-          anoLetivo: targetYear,
-          activities: ['Rotina'],
-          tipoSaida: 'PAIS',
-          status: 'ativo',
-          statusMatricula: 'ativo',
-          tipoContrato: 'regular',
-          diasFrequencia: batchDiasFrequencia && batchDiasFrequencia.length > 0
-            ? batchDiasFrequencia
-            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-          horariosSaida: {},
-        }));
+        const newStudentsList: Student[] = e1ParsedStudents.map((st, idx) => {
+          // Extração estrita da Matrícula (exclusivamente código/RA numérico, NUNCA turma)
+          const cleanMat = cleanMatriculaValue(
+            st.matricula,
+            `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`
+          );
+          const studentId = cleanMat.startsWith('st-') ? cleanMat : `st-${cleanMat}`;
+          const cleanName = sanitizeE1String(st.name);
+          const cleanTurma = mapE1TurmaNameToOfficial(st.turma) as TurmaType;
+
+          return {
+            id: studentId,
+            matricula: cleanMat,
+            name: cleanName,
+            turma: cleanTurma,
+            anoLetivo: targetYear,
+            activities: ['Rotina'],
+            tipoSaida: 'PAIS',
+            status: 'ativo',
+            statusMatricula: 'ativo',
+            tipoContrato: 'regular',
+            diasFrequencia: batchDiasFrequencia && batchDiasFrequencia.length > 0
+              ? batchDiasFrequencia
+              : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+            horariosSaida: {},
+            planoContratual: 'Integral Semana (18:30h)',
+            horarioPermanenciaLimite: '18:30h',
+            valorPlanoBase: 1250,
+            descontoBolsa: 0,
+            valorMensalidadeFinal: 1250,
+          };
+        });
 
         // Gravação atômica em lotes (writeBatch) no Firestore (coleções 'alunos' e 'students')
         const BATCH_CHUNK_SIZE = 150;
@@ -974,6 +925,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           chunk.forEach((student) => {
             const payload = {
               id: student.id,
+              matricula: student.matricula || student.id,
               name: student.name,
               turma: student.turma,
               anoLetivo: student.anoLetivo,
@@ -984,6 +936,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               tipoContrato: 'regular',
               diasFrequencia: student.diasFrequencia,
               horariosSaida: {},
+              planoContratual: student.planoContratual || 'Integral Semana (18:30h)',
+              horarioPermanenciaLimite: student.horarioPermanenciaLimite || '18:30h',
+              valorPlanoBase: student.valorPlanoBase ?? 1250,
+              descontoBolsa: student.descontoBolsa ?? 0,
+              valorMensalidadeFinal: student.valorMensalidadeFinal ?? 1250,
               updatedAt: new Date().toISOString(),
             };
             batch.set(doc(db, 'alunos', student.id), payload, { merge: true });
@@ -1020,7 +977,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     // Caso 2: Importação Manual por Nomes (fallback)
     const names = batchNamesText
       .split('\n')
-      .map((n) => n.trim())
+      .map((n) => sanitizeE1String(n.trim()))
       .filter((n) => n.length > 0);
 
     if (names.length === 0) {
@@ -1153,6 +1110,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         anoLetivo: editingStudent.anoLetivo || 2026,
         tipoSaida: editingStudent.tipoSaida || 'PAIS',
         nomeCondutor: editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (editingStudent.nomeCondutor?.trim() || undefined) : undefined,
+        planoContratual: editingStudent.planoContratual || 'Integral Semana (18:30h)',
+        horarioPermanenciaLimite: editingStudent.horarioPermanenciaLimite || '18:30h',
+        valorPlanoBase: editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250,
+        descontoBolsa: editingStudent.descontoBolsa || 0,
+        valorMensalidadeFinal: Math.max(
+          0,
+          (editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250) -
+            (editingStudent.descontoBolsa || 0)
+        ),
       };
       (studentToSave as any).updatedAt = new Date().toISOString();
 
@@ -1614,14 +1580,137 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             )}
           </div>
 
+          {/* Estrutura Financeira dos Planos Contratuais (Válida para 2026 e 2027) */}
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 space-y-3.5 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-emerald-200/70 pb-2.5">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 bg-emerald-600 text-white rounded-lg">
+                  <BadgeDollarSign className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-emerald-950">
+                    Plano Contratual & Condição Financeira
+                  </h4>
+                  <p className="text-[11px] text-emerald-700">
+                    Tabela oficial de mensalidades com sincronização automática no Módulo Financeiro
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Exercício {newAnoLetivo}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Seletor do Plano Contratual */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Plano Contratual Oficial: <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newPlanoContratual}
+                  onChange={(e) => handleSelectNewPlano(e.target.value as PlanoContratualType)}
+                  className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                >
+                  {(Object.keys(PLANOS_CONTRATUAIS_TABELA) as PlanoContratualType[]).map((planoKey) => {
+                    const info = PLANOS_CONTRATUAIS_TABELA[planoKey];
+                    return (
+                      <option key={planoKey} value={planoKey}>
+                        {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-[10.5px] text-emerald-800 mt-1">
+                  {PLANOS_CONTRATUAIS_TABELA[newPlanoContratual]?.descricao || 'Configuração customizada'}
+                </p>
+              </div>
+
+              {/* Horário Limite de Permanência */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Horário Limite de Permanência: <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newHorarioPermanenciaLimite}
+                    onChange={(e) => setNewHorarioPermanenciaLimite(e.target.value)}
+                    placeholder="Ex: 18:30h ou 14:00h"
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    required
+                  />
+                  <Clock className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+                <p className="text-[10.5px] text-slate-500 mt-1">
+                  Preenchido automaticamente pelo plano selecionado
+                </p>
+              </div>
+            </div>
+
+            {/* Valores Financeiros: Base, Desconto/Bolsa e Mensalidade Final */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                  Valor Base (Tabela R$):
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newValorPlanoBase}
+                  onChange={(e) => setNewValorPlanoBase(parseFloat(e.target.value) || 0)}
+                  disabled={newPlanoContratual !== 'Personalizado'}
+                  className={`w-full px-2.5 py-1.5 text-xs font-bold border rounded-lg ${
+                    newPlanoContratual === 'Personalizado'
+                      ? 'bg-white border-emerald-400 text-slate-900 focus:ring-2 focus:ring-emerald-500'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 cursor-not-allowed'
+                  }`}
+                />
+              </div>
+
+              <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                  Desconto / Bolsa (R$):
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newDescontoBolsa}
+                  onChange={(e) => setNewDescontoBolsa(parseFloat(e.target.value) || 0)}
+                  placeholder="0,00"
+                  className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-emerald-400 text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="bg-emerald-600 text-white p-2.5 rounded-xl shadow-xs flex flex-col justify-center">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">
+                  Mensalidade Final:
+                </span>
+                <span className="text-base font-extrabold text-white mt-0.5">
+                  {formatCurrencyBR(newValorMensalidadeFinal)}
+                </span>
+                <span className="text-[9.5px] text-emerald-200">
+                  Base - Bolsa ({formatCurrencyBR(newValorPlanoBase)} - {formatCurrencyBR(newDescontoBolsa)})
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
               <label className="block text-xs font-semibold text-slate-700">
                 Atividades Extracurriculares (Apenas com Chamada):
               </label>
-              <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                {extracurricularRollCallActivities.length} modalidades oficiais
-              </span>
+              <div className="flex items-center space-x-1.5">
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                  Inclusas no Plano Contratual
+                </span>
+                <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                  {extracurricularRollCallActivities.length} modalidades oficiais
+                </span>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {extracurricularRollCallActivities.map((act) => {
@@ -2145,8 +2234,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           <div className="p-2.5 pt-0 border-t border-slate-800/80 mt-1 max-h-32 overflow-y-auto">
                             <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 font-mono">
                               {studentsInThisTurma.map((st, i) => (
-                                <li key={i} className="truncate">
-                                  {st.name}
+                                <li key={i} className="truncate flex items-center justify-between py-0.5">
+                                  <span>{st.name}</span>
+                                  {st.matricula && !st.matricula.startsWith('st-') && (
+                                    <span className="text-[10px] text-emerald-300 bg-emerald-950/70 border border-emerald-800/60 px-1.5 py-0.5 rounded font-sans font-semibold shrink-0 ml-2">
+                                      Matrícula: {st.matricula}
+                                    </span>
+                                  )}
                                 </li>
                               ))}
                             </ol>
@@ -2774,14 +2868,146 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 )}
               </div>
 
+              {/* Estrutura Financeira dos Planos Contratuais (Válida para 2026 e 2027) */}
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 space-y-3.5 shadow-2xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-emerald-200/70 pb-2.5">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1.5 bg-emerald-600 text-white rounded-lg">
+                      <BadgeDollarSign className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-950">
+                        Plano Contratual & Condição Financeira
+                      </h4>
+                      <p className="text-[11px] text-emerald-700">
+                        Tabela oficial de mensalidades com sincronização automática no Módulo Financeiro
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Exercício {editingStudent.anoLetivo || 2026}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Seletor do Plano Contratual */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Plano Contratual Oficial: <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={editingStudent.planoContratual || 'Integral Semana (18:30h)'}
+                      onChange={(e) => handleSelectEditPlano(e.target.value as PlanoContratualType)}
+                      disabled={isSavingEdit}
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                    >
+                      {(Object.keys(PLANOS_CONTRATUAIS_TABELA) as PlanoContratualType[]).map((planoKey) => {
+                        const info = PLANOS_CONTRATUAIS_TABELA[planoKey];
+                        return (
+                          <option key={planoKey} value={planoKey}>
+                            {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p className="text-[10.5px] text-emerald-800 mt-1">
+                      {PLANOS_CONTRATUAIS_TABELA[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.descricao || 'Configuração customizada'}
+                    </p>
+                  </div>
+
+                  {/* Horário Limite de Permanência */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Horário Limite de Permanência: <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={editingStudent.horarioPermanenciaLimite || '18:30h'}
+                        onChange={(e) => setEditingStudent({ ...editingStudent, horarioPermanenciaLimite: e.target.value })}
+                        disabled={isSavingEdit}
+                        placeholder="Ex: 18:30h ou 14:00h"
+                        className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        required
+                      />
+                      <Clock className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <p className="text-[10.5px] text-slate-500 mt-1">
+                      Preenchido automaticamente pelo plano selecionado
+                    </p>
+                  </div>
+                </div>
+
+                {/* Valores Financeiros: Base, Desconto/Bolsa e Mensalidade Final */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                      Valor Base (Tabela R$):
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editingStudent.valorPlanoBase ?? 1250}
+                      onChange={(e) => handleChangeEditBase(parseFloat(e.target.value) || 0)}
+                      disabled={isSavingEdit || (editingStudent.planoContratual || 'Integral Semana (18:30h)') !== 'Personalizado'}
+                      className={`w-full px-2.5 py-1.5 text-xs font-bold border rounded-lg ${
+                        editingStudent.planoContratual === 'Personalizado'
+                          ? 'bg-white border-emerald-400 text-slate-900 focus:ring-2 focus:ring-emerald-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-700 cursor-not-allowed'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                      Desconto / Bolsa (R$):
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editingStudent.descontoBolsa ?? 0}
+                      onChange={(e) => handleChangeEditDesconto(parseFloat(e.target.value) || 0)}
+                      disabled={isSavingEdit}
+                      placeholder="0,00"
+                      className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-emerald-400 text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div className="bg-emerald-600 text-white p-2.5 rounded-xl shadow-xs flex flex-col justify-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">
+                      Mensalidade Final:
+                    </span>
+                    <span className="text-base font-extrabold text-white mt-0.5">
+                      {formatCurrencyBR(
+                        Math.max(
+                          0,
+                          (editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250) -
+                            (editingStudent.descontoBolsa || 0)
+                        )
+                      )}
+                    </span>
+                    <span className="text-[9.5px] text-emerald-200">
+                      Base - Bolsa ({formatCurrencyBR(editingStudent.valorPlanoBase ?? 1250)} - {formatCurrencyBR(editingStudent.descontoBolsa ?? 0)})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
                   <label className="block text-xs font-semibold text-slate-700">
                     Atividades Extracurriculares (Apenas com Chamada):
                   </label>
-                  <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                    {extracurricularRollCallActivities.length} modalidades oficiais
-                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                      Inclusas no Plano Contratual
+                    </span>
+                    <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                      {extracurricularRollCallActivities.length} modalidades oficiais
+                    </span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto p-1">
                   {extracurricularRollCallActivities.map((act) => {
@@ -3354,6 +3580,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                         {student.turma}
                       </span>
+                      {student.matricula && !student.matricula.startsWith('st-') && (
+                        <span
+                          className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
+                          title={`Código de Matrícula / RA: ${student.matricula}`}
+                        >
+                          RA: {student.matricula}
+                        </span>
+                      )}
 
                       {/* Contract Type Badge */}
                       {student.tipoContrato === 'avulso' ? (
@@ -3458,6 +3692,26 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           <span>🚗 Pais</span>
                         </span>
                       )}
+
+                      {/* Selo/Chip do Plano Contratual e Mensalidade Final */}
+                      {(() => {
+                        const plano = student.planoContratual || 'Integral Semana (18:30h)';
+                        const valorFinal =
+                          student.valorMensalidadeFinal !== undefined
+                            ? student.valorMensalidadeFinal
+                            : student.valorPlanoBase !== undefined
+                            ? Math.max(0, student.valorPlanoBase - (student.descontoBolsa || 0))
+                            : PLANOS_CONTRATUAIS_TABELA[plano]?.valorBase || 1250;
+                        return (
+                          <span
+                            className="text-[10.5px] font-bold text-emerald-900 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                            title={`Plano: ${plano} | Horário: ${student.horarioPermanenciaLimite || PLANOS_CONTRATUAIS_TABELA[plano]?.horarioPadrao || '18:30h'} | Mensalidade: ${formatCurrencyBR(valorFinal)}`}
+                          >
+                            <BadgeDollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>{plano}: <strong>{formatCurrencyBR(valorFinal)}</strong></span>
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">

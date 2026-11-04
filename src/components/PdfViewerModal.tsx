@@ -61,11 +61,11 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
   const activeContent = children || htmlContent;
 
-  // Lock background scroll when modal is open and handle ESC key
+  // Lock background scroll when modal is open and handle ESC key with safe unlock
   useEffect(() => {
     if (isOpen) {
-      const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
+      document.body.classList.add('overflow-hidden');
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -75,9 +75,15 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       window.addEventListener('keydown', handleKeyDown);
 
       return () => {
-        document.body.style.overflow = originalOverflow;
+        document.body.style.overflow = 'unset';
+        document.body.style.removeProperty('overflow');
+        document.body.classList.remove('overflow-hidden');
         window.removeEventListener('keydown', handleKeyDown);
       };
+    } else {
+      document.body.style.overflow = 'unset';
+      document.body.style.removeProperty('overflow');
+      document.body.classList.remove('overflow-hidden');
     }
   }, [isOpen, onClose]);
 

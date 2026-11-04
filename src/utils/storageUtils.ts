@@ -158,6 +158,7 @@ export function normalizeStudent(
 
   const s = rawStudent || {};
   const id = String(s.id || existingStudent?.id || `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`).trim();
+  const matricula = s.matricula !== undefined ? (s.matricula ? String(s.matricula).trim() : undefined) : existingStudent?.matricula;
   const name = String(s.name !== undefined ? s.name : (existingStudent?.name || '')).trim();
   const turma = String(s.turma !== undefined ? s.turma : (existingStudent?.turma || '')) as TurmaType;
 
@@ -256,8 +257,23 @@ export function normalizeStudent(
   const reforcoStartDate = s.reforcoStartDate !== undefined ? s.reforcoStartDate : (existingStudent?.reforcoStartDate || undefined);
   const reforcoEndDate = s.reforcoEndDate !== undefined ? s.reforcoEndDate : (existingStudent?.reforcoEndDate || undefined);
 
+  const anoLetivo = s.anoLetivo !== undefined ? Number(s.anoLetivo) : (existingStudent?.anoLetivo !== undefined ? Number(existingStudent.anoLetivo) : 2026);
+  const tipoSaida = s.tipoSaida || existingStudent?.tipoSaida || 'PAIS';
+  const nomeCondutor = s.nomeCondutor !== undefined ? s.nomeCondutor : existingStudent?.nomeCondutor;
+
+  const planoContratual = s.planoContratual || existingStudent?.planoContratual;
+  const horarioPermanenciaLimite = s.horarioPermanenciaLimite || existingStudent?.horarioPermanenciaLimite;
+  const valorPlanoBase = s.valorPlanoBase !== undefined ? s.valorPlanoBase : existingStudent?.valorPlanoBase;
+  const descontoBolsa = s.descontoBolsa !== undefined ? s.descontoBolsa : existingStudent?.descontoBolsa;
+  const valorMensalidadeFinal = s.valorMensalidadeFinal !== undefined
+    ? s.valorMensalidadeFinal
+    : (existingStudent?.valorMensalidadeFinal !== undefined
+        ? existingStudent.valorMensalidadeFinal
+        : (valorPlanoBase !== undefined ? Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0)) : undefined));
+
   return {
     id,
+    matricula,
     name,
     turma,
     activities,
@@ -275,6 +291,14 @@ export function normalizeStudent(
     statusMatricula: status,
     inactivationDate,
     inactivationReason,
+    anoLetivo,
+    tipoSaida,
+    nomeCondutor,
+    planoContratual,
+    horarioPermanenciaLimite,
+    valorPlanoBase,
+    descontoBolsa,
+    valorMensalidadeFinal,
     notes,
   };
 }
@@ -369,6 +393,16 @@ export function mergeStudentData(
     statusMatricula: status,
     inactivationDate,
     inactivationReason,
+    anoLetivo: incomingStudent.anoLetivo !== undefined ? incomingStudent.anoLetivo : existingStudent.anoLetivo,
+    tipoSaida: incomingStudent.tipoSaida !== undefined ? incomingStudent.tipoSaida : existingStudent.tipoSaida,
+    nomeCondutor: incomingStudent.nomeCondutor !== undefined ? incomingStudent.nomeCondutor : existingStudent.nomeCondutor,
+    planoContratual: incomingStudent.planoContratual !== undefined ? incomingStudent.planoContratual : existingStudent.planoContratual,
+    horarioPermanenciaLimite: incomingStudent.horarioPermanenciaLimite !== undefined ? incomingStudent.horarioPermanenciaLimite : existingStudent.horarioPermanenciaLimite,
+    valorPlanoBase: incomingStudent.valorPlanoBase !== undefined ? incomingStudent.valorPlanoBase : existingStudent.valorPlanoBase,
+    descontoBolsa: incomingStudent.descontoBolsa !== undefined ? incomingStudent.descontoBolsa : existingStudent.descontoBolsa,
+    valorMensalidadeFinal: incomingStudent.valorMensalidadeFinal !== undefined
+      ? incomingStudent.valorMensalidadeFinal
+      : existingStudent.valorMensalidadeFinal,
     notes: incomingStudent.notes !== undefined ? incomingStudent.notes : existingStudent.notes,
   };
 }
