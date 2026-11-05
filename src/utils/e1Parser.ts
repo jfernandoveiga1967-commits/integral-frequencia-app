@@ -3,6 +3,7 @@
  * 
  * Especialista em parsing de relatórios e planilhas exportadas pelo Sistema E1.
  * Trata codificação de caracteres ISO-8859-1 / Windows-1252, higienização de mojibake,
+ * descarte de cabeçalhos/rodapés institucionais (datas, meses, cidades e metadados)
  * e alinhamento estrito de colunas (Matrícula numérica/RA x Nome da Turma Oficial).
  */
 
@@ -149,18 +150,129 @@ export function mapE1TurmaNameToOfficial(rawName: string): string {
 }
 
 /**
+ * Verifica se um texto corresponde a cabeçalho, rodapé ou metadados do relatório do Sistema E1
+ * (ex: datas com meses, nomes de cidade como "Campinas", termos de sistema como "Curso:", "Turno:").
+ * Impede categoricamente que linhas informativas sejam confundidas com estudantes ou turmas.
+ */
+export function isHeaderOrSystemText(text: string): boolean {
+  if (!text) return true;
+  const clean = sanitizeE1String(text).trim();
+  if (clean.length < 2) return true;
+
+  const lower = clean.toLowerCase();
+
+  // 1. Termos de cabeçalho com dois-pontos ou palavras-chave de campos de relatório
+  if (
+    lower.includes('curso:') ||
+    lower.includes('série:') ||
+    lower.includes('serie:') ||
+    lower.includes('turno:') ||
+    lower.includes('período:') ||
+    lower.includes('periodo:') ||
+    lower.includes('sala:') ||
+    lower.includes('horário:') ||
+    lower.includes('horario:') ||
+    lower.includes('turma:') ||
+    lower.includes('quantidade de alunos') ||
+    lower.includes('total de alunos') ||
+    lower.includes('qtd de alunos') ||
+    lower.includes('número de alunos') ||
+    lower.includes('numero de alunos') ||
+    lower.includes('total geral') ||
+    lower.includes('subtotal')
+  ) {
+    return true;
+  }
+
+  // 2. Cidades e locais típicos de cabeçalhos timbrados
+  if (
+    lower.includes('campinas') ||
+    lower.includes('são paulo') ||
+    lower.includes('sao paulo') ||
+    lower.includes('valinhos') ||
+    lower.includes('vinhedo') ||
+    lower.includes('hortolândia') ||
+    lower.includes('hortolandia') ||
+    lower.includes('sumaré') ||
+    lower.includes('sumare') ||
+    lower.includes('paulínia') ||
+    lower.includes('paulinia')
+  ) {
+    return true;
+  }
+
+  // 3. Meses do ano por extenso (típico de "Campinas, 04 de Novembro de 2026")
+  const MESES_REGEX = /\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i;
+  if (MESES_REGEX.test(lower)) {
+    return true;
+  }
+
+  // 4. Datas formatadas (ex: 04/11/2026, 04-11-2026, ou "04 de Novembro")
+  if (/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(lower)) {
+    return true;
+  }
+  if (/\b\d{1,2}\s+de\s+[a-z]+/i.test(lower)) {
+    return true;
+  }
+
+  // 5. Nomes institucionais ou do software
+  if (
+    lower.includes('instituto educacional') ||
+    lower.includes('colégio crescer') ||
+    lower.includes('colegio crescer') ||
+    lower.includes('sistema e1') ||
+    lower.includes('relatório') ||
+    lower.includes('relatorio') ||
+    lower.includes('data da emissão') ||
+    lower.includes('data de emissão') ||
+    lower.includes('hora da emissão') ||
+    lower.includes('impresso por') ||
+    lower.includes('impresso em') ||
+    lower.includes('página') ||
+    lower.includes('pagina') ||
+    lower.includes('listagem') ||
+    lower.includes('coordenação') ||
+    lower.includes('coordenacao') ||
+    lower.includes('diretoria') ||
+    lower.includes('responsável') ||
+    lower.includes('responsavel') ||
+    lower.includes('assinatura')
+  ) {
+    return true;
+  }
+
+  // 6. Nomes de alunos legítimos nunca possuem dois-pontos ':'
+  if (clean.includes(':')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Identifica se uma célula representa o nome ou cabeçalho de uma Turma.
  */
 export function isTurmaString(val: string): boolean {
   if (!val) return false;
-  const clean = sanitizeE1String(val);
+  const clean = sanitizeE1String(val).trim();
   const lower = clean.toLowerCase();
 
+  // Se contiver dois-pontos e não começar com turma:
+  if (clean.includes(':') && !lower.startsWith('turma:')) {
+    return false;
+  }
+
+  // Não pode ser texto de cabeçalho geral (cidade, data, etc.)
+  if (isHeaderOrSystemText(clean) && !lower.includes('turma:')) {
+    return false;
+  }
+
   if (lower.startsWith('turma:')) return true;
-  if (lower.includes('ano azul') || lower.includes('maternal') || lower.includes('infantil')) return true;
+  if (lower.includes('ano azul') || lower.includes('maternal azul') || lower.includes('infantil 1 azul') || lower.includes('infantil 2 azul')) return true;
   if (lower.includes('kids -') || lower.includes('teens -')) return true;
   if (clean in E1_TURMA_MAP) return true;
-  if (/^[1-6][º°]?\s*ano/i.test(clean)) return true;
+  if (/^[1-6][º°]?\s*ano(\s+azul)?$/i.test(clean)) return true;
+  if (/^(mini\s+maternal|maternal|infantil\s+[12iI]{1,2})(\s+azul)?$/i.test(clean)) return true;
 
   return false;
 }
@@ -168,14 +280,14 @@ export function isTurmaString(val: string): boolean {
 /**
  * Identifica se uma célula representa exclusivamente um código/RA de matrícula de aluno.
  * Regra: Deve ser numérico (ex: '2026123', '84521') ou prefixo de id 'st-178...'.
- * JAMAIS deve conter referências a turmas ('ano', 'azul', 'maternal', etc.).
+ * JAMAIS deve conter referências a turmas ('ano', 'azul', 'maternal', etc.) ou cabeçalhos.
  */
 export function isNumericMatricula(val: string): boolean {
   if (!val) return false;
   const clean = val.trim();
   const lower = clean.toLowerCase();
 
-  // Rejeição estrita de palavras pedagógicas e turmas
+  // Rejeição estrita de palavras pedagógicas, turmas e cabeçalhos
   if (
     lower.includes('ano') ||
     lower.includes('azul') ||
@@ -187,7 +299,8 @@ export function isNumericMatricula(val: string): boolean {
     lower.includes('situa') ||
     lower.includes('status') ||
     lower.includes('aluno') ||
-    lower.includes('nome')
+    lower.includes('nome') ||
+    isHeaderOrSystemText(clean)
   ) {
     return false;
   }
@@ -213,14 +326,14 @@ export function isNumericMatricula(val: string): boolean {
 /**
  * Higieniza o valor da matrícula para garantir que contenha exclusivamente
  * código/RA numérico do aluno (ex: '2026123' ou 'st-178...').
- * Rejeita turmas ou nomes acidentais.
+ * Rejeita turmas, cabeçalhos ou nomes acidentais.
  */
 export function cleanMatriculaValue(val: string, fallbackId?: string): string {
   if (!val) return fallbackId || '';
   const clean = val.trim();
 
-  // Se for turma ou não contiver dígitos, rejeita categoricamente
-  if (isTurmaString(clean) || !/[0-9]/.test(clean)) {
+  // Se for turma, cabeçalho ou não contiver dígitos, rejeita categoricamente
+  if (isTurmaString(clean) || isHeaderOrSystemText(clean) || !/[0-9]/.test(clean)) {
     return fallbackId || '';
   }
 
@@ -233,22 +346,68 @@ export function cleanMatriculaValue(val: string, fallbackId?: string): string {
 }
 
 /**
- * Valida se um valor de texto de célula representa o nome do estudante.
+ * Valida se um valor de texto de célula representa legitimamente o nome do estudante.
+ * Aplica sanitização estrita, descartando cabeçalhos de sistema, datas, cidades e termos do E1.
  */
 export function isStudentNameCell(val: string): boolean {
   if (!val) return false;
-  const clean = sanitizeE1String(val);
+  const clean = sanitizeE1String(val).trim();
   const lower = clean.toLowerCase();
 
+  // Tamanho mínimo razoável para nome de pessoa
   if (clean.length < 3) return false;
+  // Apenas números não é nome de aluno
   if (/^\d+$/.test(clean)) return false;
-  if (lower === 'nome' || lower === 'aluno' || lower === 'nome do aluno' || lower === 'estudante') return false;
-  if (lower === 'situação' || lower === 'situacao' || lower === 'status' || lower === 'matrícula' || lower === 'matricula') return false;
-  if (lower === 'nº' || lower === 'no' || lower === 'ordem' || lower === 'código' || lower === 'codigo' || lower === 'ra') return false;
-  if (lower.startsWith('página') || lower.startsWith('pagina') || lower.includes('relatório') || lower.includes('sistema e1')) return false;
+
+  // Rejeição categórica de cabeçalhos, datas, meses e metadados de sistema
+  if (isHeaderOrSystemText(clean)) return false;
+
+  // Cabeçalhos de coluna de tabela
+  if (
+    lower === 'nome' ||
+    lower === 'aluno' ||
+    lower === 'nome do aluno' ||
+    lower === 'estudante' ||
+    lower === 'aluno(a)' ||
+    lower === 'estudantes' ||
+    lower === 'alunos' ||
+    lower === 'nome completo'
+  ) {
+    return false;
+  }
+
+  if (
+    lower === 'situação' ||
+    lower === 'situacao' ||
+    lower === 'status' ||
+    lower === 'matrícula' ||
+    lower === 'matricula' ||
+    lower === 'código' ||
+    lower === 'codigo' ||
+    lower === 'ra' ||
+    lower === 'nº' ||
+    lower === 'no' ||
+    lower === 'ordem' ||
+    lower === 'seq'
+  ) {
+    return false;
+  }
+
   if (isTurmaString(clean)) return false;
   if (isNumericMatricula(clean)) return false;
+
+  // Deve conter caracteres alfabéticos
   if (!/[a-zA-ZÀ-ÿ]/.test(clean)) return false;
+
+  // Um nome real não contém dois pontos ':'
+  if (clean.includes(':')) return false;
+
+  // Um nome real não contém barras ou números de data
+  if (/\d{1,2}\/\d{1,2}/.test(clean)) return false;
+
+  // Quantidade mínima de letras para um nome válido
+  const letterCount = (clean.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+  if (letterCount < 3) return false;
 
   return true;
 }
@@ -257,28 +416,39 @@ export function isStudentNameCell(val: string): boolean {
  * Extrai a turma a partir de texto de cabeçalho ou linha separadora (ex: 'Turma: KIDS - 1 Ano').
  */
 export function parseTurmaFromHeaderText(text: string): string | null {
-  if (!text || !text.includes('Turma:')) return null;
-  const parts = text.split(/Turma:/i);
-  let after = parts[1]?.trim() || '';
-  if (after) {
-    const cutoff = after.search(/(Turno|Sala|Período|Periodo|Horário|Horario|Professor|Data|Ano|Série|Serie|Data da Emissão):/i);
-    if (cutoff > 0) {
-      after = after.substring(0, cutoff).trim();
-    }
-    after = after.replace(/[-–—\s]+$/, '').trim();
-    if (after.length > 0) {
-      return mapE1TurmaNameToOfficial(after);
+  if (!text) return null;
+  const clean = sanitizeE1String(text).trim();
+
+  // Se contiver 'Turma:'
+  if (/turma\s*:/i.test(clean)) {
+    const parts = clean.split(/turma\s*:/i);
+    let after = parts[1]?.trim() || '';
+    if (after) {
+      const cutoff = after.search(/(Turno|Sala|Período|Periodo|Horário|Horario|Professor|Data|Ano|Série|Serie|Data da Emissão|Qtd|Quantidade):/i);
+      if (cutoff > 0) {
+        after = after.substring(0, cutoff).trim();
+      }
+      after = after.replace(/[-–—\s]+$/, '').trim();
+      if (after.length > 0) {
+        return mapE1TurmaNameToOfficial(after);
+      }
     }
   }
+
+  // Se o próprio texto for estritamente uma turma reconhecida diretamente
+  if (!isHeaderOrSystemText(clean) && isTurmaString(clean)) {
+    return mapE1TurmaNameToOfficial(clean);
+  }
+
   return null;
 }
 
 /**
  * Parser principal para relatórios em HTML do Sistema E1.
- * Extrai os alunos garantindo alinhamento estrito:
- * - matricula: código/RA numérico (ex: '2026123' ou 'st-178...')
- * - turma: nome oficial da turma (ex: '1º Ano Azul', 'Maternal Azul')
- * - name: nome higienizado do aluno
+ * Extrai os alunos garantindo:
+ * - Descarte de todas as linhas pré-turma (cabeçalhos, datas, "Campinas", etc.)
+ * - Descarte de expressões de metadados ("Curso:", "Série:", "Turno:", "Quantidade de alunos", etc.)
+ * - Extração estrita de Matrícula x Nome x Turma Oficial
  */
 export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
   const parser = new DOMParser();
@@ -287,28 +457,31 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
 
   const tables = Array.from(doc.querySelectorAll('table'));
   let currentSectionTurma = '';
+  let hasEncounteredFirstTurma = false;
 
   tables.forEach((table) => {
-    // 1. Procura se há cabeçalho "Turma:" precedendo a tabela
+    // 1. Procura se há cabeçalho "Turma:" precedendo a tabela no DOM
     let precedingTurma = '';
-    let prev = table.previousElementSibling;
-    while (prev && !precedingTurma) {
-      const bTags = prev.querySelectorAll('b, strong');
-      for (const b of Array.from(bTags)) {
-        const found = parseTurmaFromHeaderText(b.parentElement?.textContent || b.textContent || '');
-        if (found) {
-          precedingTurma = found;
-          break;
+    let cursor: Element | null = table;
+    while (cursor && cursor !== doc.body && !precedingTurma) {
+      let sibling = cursor.previousElementSibling;
+      while (sibling && !precedingTurma) {
+        const text = sibling.textContent || '';
+        if (/turma\s*:/i.test(text) || (isTurmaString(text) && !isHeaderOrSystemText(text))) {
+          const found = parseTurmaFromHeaderText(text);
+          if (found) {
+            precedingTurma = found;
+            break;
+          }
         }
+        sibling = sibling.previousElementSibling;
       }
-      if (!precedingTurma && prev.textContent?.includes('Turma:')) {
-        precedingTurma = parseTurmaFromHeaderText(prev.textContent) || '';
-      }
-      prev = prev.previousElementSibling;
+      cursor = cursor.parentElement;
     }
 
     if (precedingTurma) {
       currentSectionTurma = precedingTurma;
+      hasEncounteredFirstTurma = true;
     }
 
     // 2. Analisa as linhas da tabela
@@ -320,16 +493,32 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
     let colTurmaIdx = -1;
     let colStatusIdx = -1;
 
-    rows.forEach((row, rowIndex) => {
+    rows.forEach((row) => {
       const rowText = row.textContent || '';
 
       // Verifica se a própria linha é um cabeçalho de turma
-      if (rowText.includes('Turma:')) {
+      if (/turma\s*:/i.test(rowText) || (isTurmaString(rowText) && !isHeaderOrSystemText(rowText))) {
         const foundTurma = parseTurmaFromHeaderText(rowText);
         if (foundTurma) {
           currentSectionTurma = foundTurma;
+          hasEncounteredFirstTurma = true;
+          // Reseta índices de coluna de cabeçalho para a nova turma
+          colMatriculaIdx = -1;
+          colNomeIdx = -1;
+          colTurmaIdx = -1;
+          colStatusIdx = -1;
           return;
         }
+      }
+
+      // REGRA A: Antes do primeiro cabeçalho válido de turma, ignore qualquer linha
+      if (!hasEncounteredFirstTurma) {
+        return;
+      }
+
+      // Se a linha inteira for texto de sistema/cabeçalho/rodapé (ex: "Quantidade de alunos: 15", "Campinas,...")
+      if (isHeaderOrSystemText(rowText)) {
+        return;
       }
 
       const thCells = Array.from(row.querySelectorAll('th'));
@@ -347,9 +536,18 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
       const tdCells = Array.from(row.querySelectorAll('td'));
       if (tdCells.length === 0) return;
 
-      // Se a linha tiver texto de cabeçalho disfarçado em <td>
+      // Se a linha tiver texto de cabeçalho de coluna disfarçado em <td>
       const firstRowText = sanitizeE1String(tdCells[0]?.textContent || '').toLowerCase();
-      if (firstRowText === 'matrícula' || firstRowText === 'matricula' || firstRowText === 'nome' || firstRowText === 'nº') {
+      if (
+        firstRowText === 'matrícula' ||
+        firstRowText === 'matricula' ||
+        firstRowText === 'nome' ||
+        firstRowText === 'nº' ||
+        firstRowText === 'no' ||
+        firstRowText === 'código' ||
+        firstRowText === 'codigo' ||
+        firstRowText === 'ordem'
+      ) {
         tdCells.forEach((td, idx) => {
           const text = sanitizeE1String(td.textContent || '').toLowerCase();
           if (/matr[ií]cula|c[oó]d(igo)?|ra\b/i.test(text)) colMatriculaIdx = idx;
@@ -392,9 +590,9 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
           const cleanCell = sanitizeE1String(rawCell);
 
           // 1. Se for uma Turma: ATRIBUI EXCLUSIVAMENTE A rowTurma
-          if (isTurmaString(cleanCell)) {
+          if (isTurmaString(cleanCell) && !isHeaderOrSystemText(cleanCell)) {
             rowTurma = mapE1TurmaNameToOfficial(cleanCell);
-            return; // Continua a iteração sem tocar em rowMatricula!
+            return;
           }
 
           // 2. Se for uma Matrícula numérica/RA: ATRIBUI EXCLUSIVAMENTE A rowMatricula
@@ -411,30 +609,34 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
         });
       }
 
-      // Se encontrou nome do estudante válido na linha
-      if (rowName) {
-        // Fallback de matrícula se o relatório não tiver coluna de RA
-        if (!rowMatricula) {
-          rowMatricula = `st-${Date.now()}-${results.length + 1}-${Math.random().toString(36).substring(2, 6)}`;
-        }
+      // REGRA B: A linha só é tratada como aluno se houver nome válido e turma atribuída
+      if (!rowName || isHeaderOrSystemText(rowName) || !isStudentNameCell(rowName)) {
+        return;
+      }
 
-        // Garante que a matrícula nunca receba o nome da turma
-        rowMatricula = cleanMatriculaValue(
-          rowMatricula,
-          `st-${Date.now()}-${results.length + 1}`
-        );
+      const finalTurma = rowTurma ? mapE1TurmaNameToOfficial(rowTurma) : currentSectionTurma;
+      // Se não tiver turma atribuída, descarta a linha em vez de criar grupo vazio ou "Sem Turma"
+      if (!finalTurma || finalTurma.trim().length === 0) {
+        return;
+      }
 
-        // Garante que a turma esteja normalizada
-        const finalTurma = rowTurma ? mapE1TurmaNameToOfficial(rowTurma) : currentSectionTurma;
+      // Fallback de matrícula se o relatório não tiver coluna de RA
+      if (!rowMatricula) {
+        rowMatricula = `st-${Date.now()}-${results.length + 1}-${Math.random().toString(36).substring(2, 6)}`;
+      }
 
-        const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
-        if (!exists) {
-          results.push({
-            matricula: rowMatricula,
-            name: rowName,
-            turma: finalTurma,
-          });
-        }
+      rowMatricula = cleanMatriculaValue(
+        rowMatricula,
+        `st-${Date.now()}-${results.length + 1}`
+      );
+
+      const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
+      if (!exists) {
+        results.push({
+          matricula: rowMatricula,
+          name: rowName,
+          turma: finalTurma,
+        });
       }
     });
   });
@@ -444,11 +646,24 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
 
 /**
  * Parser para planilhas em array de linhas (SheetJS / XLSX).
- * Garante que colunas de Turma e Matrícula sejam tratadas de forma desacoplada.
+ * Garante que colunas de Turma e Matrícula sejam tratadas de forma desacoplada
+ * e que cabeçalhos/rodapés pré-turma sejam estritamente descartados.
  */
 export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1ExtractedStudent[] {
   const results: E1ExtractedStudent[] = [];
-  let currentSectionTurma = defaultTurma ? mapE1TurmaNameToOfficial(defaultTurma) : '';
+
+  // Verifica se a planilha possui cabeçalhos explícitos de Turma
+  const hasExplicitTurmaHeaders = rows.some((row) => {
+    if (!Array.isArray(row)) return false;
+    const rowJoined = row.map((c) => String(c || '').trim()).join(' ');
+    return /turma\s*:/i.test(rowJoined) || (isTurmaString(rowJoined) && !isHeaderOrSystemText(rowJoined));
+  });
+
+  let currentSectionTurma = hasExplicitTurmaHeaders
+    ? ''
+    : (defaultTurma ? mapE1TurmaNameToOfficial(defaultTurma) : '');
+
+  let hasEncounteredFirstTurma = !hasExplicitTurmaHeaders && Boolean(currentSectionTurma);
 
   let colMatriculaIdx = -1;
   let colNomeIdx = -1;
@@ -459,18 +674,42 @@ export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1Extrac
 
     // Linha de texto único ou título de seção
     const rowJoined = row.map((c) => String(c || '').trim()).join(' ');
-    if (rowJoined.includes('Turma:')) {
+
+    if (/turma\s*:/i.test(rowJoined) || (isTurmaString(rowJoined) && !isHeaderOrSystemText(rowJoined))) {
       const found = parseTurmaFromHeaderText(rowJoined);
       if (found) {
         currentSectionTurma = found;
+        hasEncounteredFirstTurma = true;
+        colMatriculaIdx = -1;
+        colNomeIdx = -1;
+        colTurmaIdx = -1;
         return;
       }
     }
 
-    // Detecção de cabeçalho
+    // REGRA A: Antes do primeiro cabeçalho válido de turma, ignore qualquer texto ou célula
+    if (!hasEncounteredFirstTurma) {
+      return;
+    }
+
+    // Ignora linhas que contenham cabeçalhos, datas, meses ou termos de sistema
+    if (isHeaderOrSystemText(rowJoined)) {
+      return;
+    }
+
+    // Detecção de cabeçalho de colunas
     const isHeaderRow = row.some((cell) => {
       const text = sanitizeE1String(String(cell || '')).toLowerCase();
-      return text === 'matrícula' || text === 'matricula' || text === 'nome' || text === 'aluno' || text === 'turma';
+      return (
+        text === 'matrícula' ||
+        text === 'matricula' ||
+        text === 'nome' ||
+        text === 'aluno' ||
+        text === 'turma' ||
+        text === 'ra' ||
+        text === 'código' ||
+        text === 'codigo'
+      );
     });
 
     if (isHeaderRow) {
@@ -513,7 +752,7 @@ export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1Extrac
         const cleanCell = sanitizeE1String(rawCell);
 
         // Se for Turma: atribui estritamente a rowTurma
-        if (isTurmaString(cleanCell)) {
+        if (isTurmaString(cleanCell) && !isHeaderOrSystemText(cleanCell)) {
           rowTurma = mapE1TurmaNameToOfficial(cleanCell);
           return;
         }
@@ -532,26 +771,32 @@ export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1Extrac
       });
     }
 
-    if (rowName) {
-      if (!rowMatricula) {
-        rowMatricula = `st-${Date.now()}-${rowIndex + 1}-${Math.random().toString(36).substring(2, 6)}`;
-      }
+    // REGRA B: A linha só é tratada como aluno se houver nome válido e turma atribuída
+    if (!rowName || isHeaderOrSystemText(rowName) || !isStudentNameCell(rowName)) {
+      return;
+    }
 
-      rowMatricula = cleanMatriculaValue(
-        rowMatricula,
-        `st-${Date.now()}-${results.length + 1}`
-      );
+    const finalTurma = rowTurma ? mapE1TurmaNameToOfficial(rowTurma) : currentSectionTurma;
+    if (!finalTurma || finalTurma.trim().length === 0) {
+      return;
+    }
 
-      const finalTurma = rowTurma ? mapE1TurmaNameToOfficial(rowTurma) : currentSectionTurma;
+    if (!rowMatricula) {
+      rowMatricula = `st-${Date.now()}-${rowIndex + 1}-${Math.random().toString(36).substring(2, 6)}`;
+    }
 
-      const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
-      if (!exists) {
-        results.push({
-          matricula: rowMatricula,
-          name: rowName,
-          turma: finalTurma,
-        });
-      }
+    rowMatricula = cleanMatriculaValue(
+      rowMatricula,
+      `st-${Date.now()}-${results.length + 1}`
+    );
+
+    const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
+    if (!exists) {
+      results.push({
+        matricula: rowMatricula,
+        name: rowName,
+        turma: finalTurma,
+      });
     }
   });
 

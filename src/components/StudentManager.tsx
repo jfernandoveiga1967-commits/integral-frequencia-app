@@ -24,6 +24,8 @@ import {
   parseE1HtmlReport,
   parseE1SheetRows,
   cleanMatriculaValue,
+  isHeaderOrSystemText,
+  isStudentNameCell,
 } from '../utils/e1Parser';
 
 interface StudentManagerProps {
@@ -188,7 +190,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const e1TurmaCounts = React.useMemo(() => {
     const counts: Record<string, number> = {};
     e1ParsedStudents.forEach((st) => {
-      counts[st.turma] = (counts[st.turma] || 0) + 1;
+      const cleanTurma = st.turma?.trim();
+      if (cleanTurma && !isHeaderOrSystemText(st.name) && isStudentNameCell(st.name)) {
+        counts[cleanTurma] = (counts[cleanTurma] || 0) + 1;
+      }
     });
     return counts;
   }, [e1ParsedStudents]);
@@ -220,9 +225,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
       if (isHtml) {
         const e1Students = parseE1HtmlReport(textContent);
-        if (e1Students.length > 0) {
-          setE1ParsedStudents(e1Students);
-          setBatchNamesText(e1Students.map((s) => s.name).join('\n'));
+        const validStudents = e1Students.filter(
+          (s) => s.turma && s.turma.trim() && !isHeaderOrSystemText(s.name) && isStudentNameCell(s.name)
+        );
+        if (validStudents.length > 0) {
+          setE1ParsedStudents(validStudents);
+          setBatchNamesText(validStudents.map((s) => s.name).join('\n'));
           return;
         }
       }
@@ -234,9 +242,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       const rows = XLSX.utils.sheet_to_json<any[]>(firstSheet, { header: 1 });
 
       const sheetStudents = parseE1SheetRows(rows, batchTurma);
-      if (sheetStudents.length > 0) {
-        setE1ParsedStudents(sheetStudents);
-        setBatchNamesText(sheetStudents.map((s) => s.name).join('\n'));
+      const validStudents = sheetStudents.filter(
+        (s) => s.turma && s.turma.trim() && !isHeaderOrSystemText(s.name) && isStudentNameCell(s.name)
+      );
+      if (validStudents.length > 0) {
+        setE1ParsedStudents(validStudents);
+        setBatchNamesText(validStudents.map((s) => s.name).join('\n'));
         return;
       }
 
@@ -884,7 +895,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setIsSavingBatch(true);
       try {
         const targetYear = selectedAnoLetivo;
-        const newStudentsList: Student[] = e1ParsedStudents.map((st, idx) => {
+        const validStudentsToSave = e1ParsedStudents.filter(
+          (st) => st.turma && st.turma.trim() && !isHeaderOrSystemText(st.name) && isStudentNameCell(st.name)
+        );
+        const newStudentsList: Student[] = validStudentsToSave.map((st, idx) => {
           // Extração estrita da Matrícula (exclusivamente código/RA numérico, NUNCA turma)
           const cleanMat = cleanMatriculaValue(
             st.matricula,

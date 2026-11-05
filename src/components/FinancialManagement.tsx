@@ -197,11 +197,24 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     const list: StudentFinancialProfile[] = [];
     yearStudents.forEach((student) => {
       const existing = profileMap.get(student.id);
+      const studentFinalVal =
+        student.valorMensalidadeFinal !== undefined
+          ? student.valorMensalidadeFinal
+          : student.valorPlanoBase !== undefined
+          ? Math.max(0, student.valorPlanoBase - (student.descontoBolsa || 0))
+          : undefined;
+
       if (existing) {
         list.push({
           ...existing,
           studentName: student.name,
           turma: student.turma,
+          studentStatus: student.status || 'ativo',
+          planoContratual: student.planoContratual || existing.planoContratual,
+          descontoBolsa: student.descontoBolsa !== undefined ? student.descontoBolsa : existing.descontoBolsa,
+          valorMensalidadeBase:
+            student.valorPlanoBase !== undefined ? student.valorPlanoBase : existing.valorMensalidadeBase,
+          valorTotalMensal: studentFinalVal !== undefined ? studentFinalVal : existing.valorTotalMensal,
         });
       } else {
         const defaultProfile = buildDefaultFinancialProfile(student, selectedAnoLetivo);
@@ -886,9 +899,14 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
                           <td className="py-3 px-3 whitespace-nowrap">
                             <span
-                              className={`inline-block px-2 py-0.5 rounded-lg text-[10.5px] font-bold border ${planoBadgeColor}`}
+                              className={`inline-block px-2 py-0.5 rounded-lg text-[10.5px] font-bold border ${
+                                profile.planoContratual
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  : planoBadgeColor
+                              }`}
+                              title={profile.planoContratual || planoName}
                             >
-                              {planoName}
+                              {profile.planoContratual || planoName}
                             </span>
                           </td>
 

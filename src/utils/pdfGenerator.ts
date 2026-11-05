@@ -24,6 +24,7 @@ import {
   StudentFinancialProfile,
   FinancialMetricSummary,
   FinancialExpense,
+  PLANOS_CONTRATUAIS_TABELA,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
@@ -5953,7 +5954,7 @@ export function generateFichaMatriculaPDF({
   currentY = drawSectionHeader('1. Identificação do Aluno e Matrícula', currentY);
 
   const block1StartY = currentY;
-  const block1Height = 31;
+  const block1Height = 50;
 
   doc.setFillColor(248, 250, 252); // slate-50
   doc.setDrawColor(226, 232, 240); // slate-200
@@ -5971,7 +5972,7 @@ export function generateFichaMatriculaPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42); // slate-900
-  doc.text(student.name.toUpperCase(), col1X, block1StartY + 9.5);
+  doc.text(student.name.toUpperCase(), col1X, block1StartY + 9.2);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
@@ -5980,26 +5981,26 @@ export function generateFichaMatriculaPDF({
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(student.id || 'N/A', col2X, block1StartY + 9.5);
+  doc.text(student.id || 'N/A', col2X, block1StartY + 9.2);
 
   // Linha 2: Turma de Destino & Ano Letivo
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
   doc.setTextColor(71, 85, 105);
-  doc.text('TURMA DE DESTINO / ENTURMAÇÃO:', col1X, block1StartY + 15);
+  doc.text('TURMA DE DESTINO / ENTURMAÇÃO:', col1X, block1StartY + 14);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(79, 70, 229); // indigo-600
-  doc.text(student.turma, col1X, block1StartY + 19);
+  doc.text(student.turma, col1X, block1StartY + 18.2);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
   doc.setTextColor(71, 85, 105);
-  doc.text('ANO LETIVO DA MATRÍCULA:', col2X, block1StartY + 15);
+  doc.text('ANO LETIVO DA MATRÍCULA:', col2X, block1StartY + 14);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(`Exercício ${resolvedYear}`, col2X, block1StartY + 19);
+  doc.text(`Exercício ${resolvedYear}`, col2X, block1StartY + 18.2);
 
   // Linha 3: Data de Nascimento & Status da Matrícula
   const rawBirth = student.dataNascimento || student.birthDate;
@@ -6010,11 +6011,11 @@ export function generateFichaMatriculaPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
   doc.setTextColor(71, 85, 105);
-  doc.text('DATA DE NASCIMENTO:', col1X, block1StartY + 24);
+  doc.text('DATA DE NASCIMENTO:', col1X, block1StartY + 23);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(30, 41, 59);
-  doc.text(formattedBirth, col1X, block1StartY + 28);
+  doc.text(formattedBirth, col1X, block1StartY + 27.2);
 
   const statusLabel =
     student.status === 'inativo'
@@ -6026,7 +6027,7 @@ export function generateFichaMatriculaPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
   doc.setTextColor(71, 85, 105);
-  doc.text('SITUAÇÃO DA MATRÍCULA:', col2X, block1StartY + 24);
+  doc.text('SITUAÇÃO DA MATRÍCULA:', col2X, block1StartY + 23);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   if (student.status === 'inativo' || student.status === 'cancelado') {
@@ -6034,7 +6035,64 @@ export function generateFichaMatriculaPDF({
   } else {
     doc.setTextColor(22, 163, 74);
   }
-  doc.text(statusLabel.toUpperCase(), col2X, block1StartY + 28);
+  doc.text(statusLabel.toUpperCase(), col2X, block1StartY + 27.2);
+
+  // Linha 4: Plano Contratual & Limite de Permanência
+  const planoContratual = student.planoContratual || 'Integral Semana (18:30h)';
+  const horarioLimite =
+    student.horarioPermanenciaLimite ||
+    PLANOS_CONTRATUAIS_TABELA[planoContratual]?.horarioPadrao ||
+    '18:30h';
+  const valorBase =
+    student.valorPlanoBase !== undefined
+      ? student.valorPlanoBase
+      : (PLANOS_CONTRATUAIS_TABELA[planoContratual]?.valorBase ?? 1250);
+  const descontoBolsa = student.descontoBolsa || 0;
+  const mensalidadeFinal =
+    student.valorMensalidadeFinal !== undefined
+      ? student.valorMensalidadeFinal
+      : Math.max(0, valorBase - descontoBolsa);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('PLANO CONTRATUAL OFICIAL:', col1X, block1StartY + 32);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(planoContratual, col1X, block1StartY + 36.2);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('LIMITE DE PERMANÊNCIA DIÁRIA:', col2X, block1StartY + 32);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(79, 70, 229); // indigo-600
+  doc.text(`Até às ${horarioLimite}`, col2X, block1StartY + 36.2);
+
+  // Linha 5: Valor Base / Desconto & Mensalidade Final Contratada
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('VALOR BASE DO PLANO E BOLSA:', col1X, block1StartY + 41);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(51, 65, 85);
+  doc.text(
+    `Base: ${formatCurrencyBR(valorBase)}   •   Desconto/Bolsa: ${formatCurrencyBR(descontoBolsa)}`,
+    col1X,
+    block1StartY + 45.2
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text('MENSALIDADE CONTRATUAL LÍQUIDA:', col2X, block1StartY + 41);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(22, 101, 52); // emerald-800
+  doc.text(`${formatCurrencyBR(mensalidadeFinal)} / mês`, col2X, block1StartY + 45.2);
 
   currentY = block1StartY + block1Height + 6;
 
