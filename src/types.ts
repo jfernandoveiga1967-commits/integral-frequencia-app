@@ -51,44 +51,44 @@ export interface PlanoContratualInfo {
   descricao?: string;
 }
 
-export const PLANOS_CONTRATUAIS_TABELA: Record<
+export const PLANOS_CONTRATUAIS_2026: Record<
   PlanoContratualType,
   { valorBase: number; horarioPadrao: string; descricao?: string }
 > = {
   'Integral Semana (18:30h)': {
-    valorBase: 1250,
+    valorBase: 1120,
     horarioPadrao: '18:30h',
-    descricao: '5 dias por semana até 18:30h',
+    descricao: '5 dias por semana até 18:30h (Tabela 2026)',
   },
   'Integral Especial - IV (4x 18:30h)': {
-    valorBase: 1100,
+    valorBase: 990,
     horarioPadrao: '18:30h',
-    descricao: '4 dias por semana até 18:30h',
+    descricao: '4 dias por semana até 18:30h (Tabela 2026)',
   },
   'Integral Especial - III (3x 18:30h)': {
-    valorBase: 935,
+    valorBase: 840,
     horarioPadrao: '18:30h',
-    descricao: '3 dias por semana até 18:30h',
+    descricao: '3 dias por semana até 18:30h (Tabela 2026)',
   },
   'Integral Especial - II (2x 18:30h)': {
-    valorBase: 670,
+    valorBase: 600,
     horarioPadrao: '18:30h',
-    descricao: '2 dias por semana até 18:30h',
+    descricao: '2 dias por semana até 18:30h (Tabela 2026)',
   },
   'Integral Especial - I (1x 18:30h)': {
-    valorBase: 365,
+    valorBase: 330,
     horarioPadrao: '18:30h',
-    descricao: '1 dia por semana até 18:30h',
+    descricao: '1 dia por semana até 18:30h (Tabela 2026)',
   },
   'Integral Especial - V (5x 14:00h)': {
-    valorBase: 810,
+    valorBase: 730,
     horarioPadrao: '14:00h',
-    descricao: '5 dias por semana até 14:00h',
+    descricao: '5 dias por semana até 14:00h (Tabela 2026)',
   },
   'Diária Integral': {
-    valorBase: 120,
+    valorBase: 110,
     horarioPadrao: '18:30h',
-    descricao: 'Diária avulsa integral até 18:30h',
+    descricao: 'Diária avulsa integral até 18:30h (Tabela 2026)',
   },
   'Personalizado': {
     valorBase: 0,
@@ -96,6 +96,77 @@ export const PLANOS_CONTRATUAIS_TABELA: Record<
     descricao: 'Valor e horário negociados',
   },
 };
+
+export const PLANOS_CONTRATUAIS_2027: Record<
+  PlanoContratualType,
+  { valorBase: number; horarioPadrao: string; descricao?: string }
+> = {
+  'Integral Semana (18:30h)': {
+    valorBase: 1250,
+    horarioPadrao: '18:30h',
+    descricao: '5 dias por semana até 18:30h (Tabela 2027)',
+  },
+  'Integral Especial - IV (4x 18:30h)': {
+    valorBase: 1100,
+    horarioPadrao: '18:30h',
+    descricao: '4 dias por semana até 18:30h (Tabela 2027)',
+  },
+  'Integral Especial - III (3x 18:30h)': {
+    valorBase: 935,
+    horarioPadrao: '18:30h',
+    descricao: '3 dias por semana até 18:30h (Tabela 2027)',
+  },
+  'Integral Especial - II (2x 18:30h)': {
+    valorBase: 670,
+    horarioPadrao: '18:30h',
+    descricao: '2 dias por semana até 18:30h (Tabela 2027)',
+  },
+  'Integral Especial - I (1x 18:30h)': {
+    valorBase: 365,
+    horarioPadrao: '18:30h',
+    descricao: '1 dia por semana até 18:30h (Tabela 2027)',
+  },
+  'Integral Especial - V (5x 14:00h)': {
+    valorBase: 810,
+    horarioPadrao: '14:00h',
+    descricao: '5 dias por semana até 14:00h (Tabela 2027)',
+  },
+  'Diária Integral': {
+    valorBase: 120,
+    horarioPadrao: '18:30h',
+    descricao: 'Diária avulsa integral até 18:30h (Tabela 2027)',
+  },
+  'Personalizado': {
+    valorBase: 0,
+    horarioPadrao: '18:30h',
+    descricao: 'Valor e horário negociados',
+  },
+};
+
+export const TABELAS_PLANOS_POR_ANO: Record<
+  number,
+  Record<PlanoContratualType, { valorBase: number; horarioPadrao: string; descricao?: string }>
+> = {
+  2026: PLANOS_CONTRATUAIS_2026,
+  2027: PLANOS_CONTRATUAIS_2027,
+};
+
+/**
+ * Retorna a Tabela Oficial de Planos Contratuais de acordo com o Ano Letivo especificado.
+ * Padrão: 2026 (R$ 1.120,00 para Integral Semana) / 2027 (R$ 1.250,00 para Integral Semana).
+ */
+export function getTabelaPlanosPorAno(
+  ano?: number | string
+): Record<PlanoContratualType, { valorBase: number; horarioPadrao: string; descricao?: string }> {
+  const yearKey = ano ? Number(ano) : 2026;
+  if (yearKey === 2027) {
+    return PLANOS_CONTRATUAIS_2027;
+  }
+  return PLANOS_CONTRATUAIS_2026;
+}
+
+// Fallback padrão para compatibilidade de módulos
+export const PLANOS_CONTRATUAIS_TABELA = PLANOS_CONTRATUAIS_2026;
 
 export interface Student {
   id: string;

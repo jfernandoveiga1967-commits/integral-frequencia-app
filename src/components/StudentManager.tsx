@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA, PLANOS_CONTRATUAIS_2026, PLANOS_CONTRATUAIS_2027, getTabelaPlanosPorAno } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF, generateTermoSaidaAvulsaPDF } from '../utils/pdfGenerator';
@@ -132,10 +132,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   // Single Add form state
+  // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
+  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newTurma, setNewTurma] = useState<TurmaType>(turmasList[0] || '1º Ano Azul');
-  const [newAnoLetivo, setNewAnoLetivo] = useState<number>(2027);
+  const [newAnoLetivo, setNewAnoLetivo] = useState<number>(2026);
   const [newTipoSaida, setNewTipoSaida] = useState<'PAIS' | 'TRANSPORTE_ESCOLAR'>('PAIS');
   const [newNomeCondutor, setNewNomeCondutor] = useState<string>('');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina']);
@@ -150,16 +153,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
 
-  // Plano Contratual & Financeiro do Novo Aluno (Válido para 2026 e 2027)
+  // Plano Contratual & Financeiro do Novo Aluno (Mapeamento Dinâmico 2026 vs 2027)
   const [newPlanoContratual, setNewPlanoContratual] = useState<PlanoContratualType>('Integral Semana (18:30h)');
   const [newHorarioPermanenciaLimite, setNewHorarioPermanenciaLimite] = useState<string>('18:30h');
-  const [newValorPlanoBase, setNewValorPlanoBase] = useState<number>(1250);
+  const [newValorPlanoBase, setNewValorPlanoBase] = useState<number>(() => {
+    return getTabelaPlanosPorAno(2026)['Integral Semana (18:30h)'].valorBase; // R$ 1.120,00
+  });
   const [newDescontoBolsa, setNewDescontoBolsa] = useState<number>(0);
 
   const handleSelectNewPlano = (plano: PlanoContratualType) => {
     setNewPlanoContratual(plano);
     if (plano !== 'Personalizado') {
-      const info = PLANOS_CONTRATUAIS_TABELA[plano];
+      const tabela = getTabelaPlanosPorAno(newAnoLetivo);
+      const info = tabela[plano];
       if (info) {
         setNewValorPlanoBase(info.valorBase);
         setNewHorarioPermanenciaLimite(info.horarioPadrao);
@@ -167,10 +173,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
   };
 
-  const newValorMensalidadeFinal = Math.max(0, (newValorPlanoBase || 0) - (newDescontoBolsa || 0));
+  const handleChangeNewAnoLetivo = (ano: number) => {
+    setNewAnoLetivo(ano);
+    if (newPlanoContratual !== 'Personalizado') {
+      const tabela = getTabelaPlanosPorAno(ano);
+      const info = tabela[newPlanoContratual];
+      if (info) {
+        setNewValorPlanoBase(info.valorBase);
+        setNewHorarioPermanenciaLimite(info.horarioPadrao);
+      }
+    }
+  };
 
-  // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
-  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
+  // Sincroniza o ano letivo do formulário com o exercício exibido ativo
+  useEffect(() => {
+    setNewAnoLetivo(selectedAnoLetivo);
+    if (newPlanoContratual !== 'Personalizado') {
+      const tabela = getTabelaPlanosPorAno(selectedAnoLetivo);
+      const info = tabela[newPlanoContratual];
+      if (info) {
+        setNewValorPlanoBase(info.valorBase);
+        setNewHorarioPermanenciaLimite(info.horarioPadrao);
+      }
+    }
+  }, [selectedAnoLetivo]);
+
+  const newValorMensalidadeFinal = Math.max(0, (newValorPlanoBase || 0) - (newDescontoBolsa || 0));
 
   // E1 Multi-Turma Parser State (processado via src/utils/e1Parser.ts com codificação ISO-8859-1 e separação de Matrícula x Turma)
 
@@ -478,18 +506,23 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           ? student.diasFrequencia
           : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
       horariosSaida: student.horariosSaida ? { ...student.horariosSaida } : {},
-      anoLetivo: student.anoLetivo || 2026,
+      anoLetivo: student.anoLetivo || selectedAnoLetivo || 2026,
       tipoSaida: student.tipoSaida || 'PAIS',
       nomeCondutor: student.nomeCondutor || '',
       planoContratual: student.planoContratual || 'Integral Semana (18:30h)',
       horarioPermanenciaLimite:
         student.horarioPermanenciaLimite ||
-        (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.horarioPadrao : '18:30h') ||
+        (student.planoContratual
+          ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.horarioPadrao
+          : '18:30h') ||
         '18:30h',
       valorPlanoBase:
         student.valorPlanoBase !== undefined
           ? student.valorPlanoBase
-          : (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase : 1250) ?? 1250,
+          : (student.planoContratual
+              ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
+              : getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)['Integral Semana (18:30h)'].valorBase) ??
+            (student.anoLetivo === 2027 ? 1250 : 1120),
       descontoBolsa: student.descontoBolsa || 0,
       valorMensalidadeFinal:
         student.valorMensalidadeFinal !== undefined
@@ -498,7 +531,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               0,
               (student.valorPlanoBase !== undefined
                 ? student.valorPlanoBase
-                : (student.planoContratual ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase : 1250) ?? 1250) -
+                : (student.planoContratual
+                    ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
+                    : getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)['Integral Semana (18:30h)'].valorBase) ??
+                  (student.anoLetivo === 2027 ? 1250 : 1120)) -
                 (student.descontoBolsa || 0)
             ),
     };
@@ -508,9 +544,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleSelectEditPlano = (plano: PlanoContratualType) => {
     if (!editingStudent) return;
+    const studentYear = editingStudent.anoLetivo || selectedAnoLetivo || 2026;
+    const tabela = getTabelaPlanosPorAno(studentYear);
+
     if (plano !== 'Personalizado') {
-      const info = PLANOS_CONTRATUAIS_TABELA[plano];
-      const base = info?.valorBase ?? 1250;
+      const info = tabela[plano];
+      const base = info?.valorBase ?? (studentYear === 2027 ? 1250 : 1120);
       const horario = info?.horarioPadrao ?? '18:30h';
       const desconto = editingStudent.descontoBolsa || 0;
       setEditingStudent((prev) =>
@@ -566,6 +605,16 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleToggleEditAnoLetivo = (targetYear: number) => {
     if (!editingStudent) return;
+    const targetTabela = getTabelaPlanosPorAno(targetYear);
+    const targetPlano = editingStudent.planoContratual || 'Integral Semana (18:30h)';
+    const isPersonalizado = targetPlano === 'Personalizado';
+    const targetBase = isPersonalizado
+      ? (editingStudent.valorPlanoBase || 0)
+      : targetTabela[targetPlano]?.valorBase ?? (targetYear === 2027 ? 1250 : 1120);
+    const targetHorario = isPersonalizado
+      ? (editingStudent.horarioPermanenciaLimite || '18:30h')
+      : targetTabela[targetPlano]?.horarioPadrao ?? '18:30h';
+    const desconto = editingStudent.descontoBolsa || 0;
 
     if (targetYear === 2027) {
       // a) Promoção Automática de Turma:
@@ -597,18 +646,35 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           dataInicioContrato: undefined,
           dataTerminoContrato: undefined,
           diasContratados: undefined,
+          // e) Mapeamento Dinâmico do Plano Contratual para 2027
+          valorPlanoBase: targetBase,
+          horarioPermanenciaLimite: targetHorario,
+          valorMensalidadeFinal: Math.max(0, targetBase - desconto),
         };
       });
     } else {
-      // e) Se o usuário alternar de volta para "2026", restaura os dados e horários originais do cadastro do aluno
+      // Se o usuário alternar de volta para "2026", restaura os dados originais aplicando tabela 2026
       if (originalStudentForEdit) {
         setEditingStudent((prev) => ({
           ...originalStudentForEdit,
           name: prev?.name || originalStudentForEdit.name,
           anoLetivo: 2026,
+          valorPlanoBase: targetBase,
+          horarioPermanenciaLimite: targetHorario,
+          valorMensalidadeFinal: Math.max(0, targetBase - desconto),
         }));
       } else {
-        setEditingStudent((prev) => (prev ? { ...prev, anoLetivo: 2026 } : null));
+        setEditingStudent((prev) =>
+          prev
+            ? {
+                ...prev,
+                anoLetivo: 2026,
+                valorPlanoBase: targetBase,
+                horarioPermanenciaLimite: targetHorario,
+                valorMensalidadeFinal: Math.max(0, targetBase - desconto),
+              }
+            : null
+        );
       }
     }
   };
@@ -869,12 +935,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
       setNewHorariosSaida({});
-      setNewAnoLetivo(2027);
+      const resetTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
+      setNewAnoLetivo(selectedAnoLetivo);
       setNewTipoSaida('PAIS');
       setNewNomeCondutor('');
       setNewPlanoContratual('Integral Semana (18:30h)');
-      setNewHorarioPermanenciaLimite('18:30h');
-      setNewValorPlanoBase(1250);
+      setNewHorarioPermanenciaLimite(resetTabela['Integral Semana (18:30h)'].horarioPadrao);
+      setNewValorPlanoBase(resetTabela['Integral Semana (18:30h)'].valorBase);
       setNewDescontoBolsa(0);
       setShowAddForm(false);
       setSingleFormError(null);
@@ -895,6 +962,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setIsSavingBatch(true);
       try {
         const targetYear = selectedAnoLetivo;
+        const targetTabela = getTabelaPlanosPorAno(targetYear);
+        const defaultPlanoKey: PlanoContratualType = 'Integral Semana (18:30h)';
+        const defaultPlanoInfo = targetTabela[defaultPlanoKey];
+
         const validStudentsToSave = e1ParsedStudents.filter(
           (st) => st.turma && st.turma.trim() && !isHeaderOrSystemText(st.name) && isStudentNameCell(st.name)
         );
@@ -923,11 +994,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               ? batchDiasFrequencia
               : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
             horariosSaida: {},
-            planoContratual: 'Integral Semana (18:30h)',
-            horarioPermanenciaLimite: '18:30h',
-            valorPlanoBase: 1250,
+            planoContratual: defaultPlanoKey,
+            horarioPermanenciaLimite: defaultPlanoInfo.horarioPadrao,
+            valorPlanoBase: defaultPlanoInfo.valorBase,
             descontoBolsa: 0,
-            valorMensalidadeFinal: 1250,
+            valorMensalidadeFinal: defaultPlanoInfo.valorBase,
           };
         });
 
@@ -937,6 +1008,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           const chunk = newStudentsList.slice(i, i + BATCH_CHUNK_SIZE);
           const batch = writeBatch(db);
           chunk.forEach((student) => {
+            const baseVal = student.valorPlanoBase ?? defaultPlanoInfo.valorBase;
+            const descVal = student.descontoBolsa ?? 0;
             const payload = {
               id: student.id,
               matricula: student.matricula || student.id,
@@ -950,11 +1023,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               tipoContrato: 'regular',
               diasFrequencia: student.diasFrequencia,
               horariosSaida: {},
-              planoContratual: student.planoContratual || 'Integral Semana (18:30h)',
-              horarioPermanenciaLimite: student.horarioPermanenciaLimite || '18:30h',
-              valorPlanoBase: student.valorPlanoBase ?? 1250,
-              descontoBolsa: student.descontoBolsa ?? 0,
-              valorMensalidadeFinal: student.valorMensalidadeFinal ?? 1250,
+              planoContratual: student.planoContratual || defaultPlanoKey,
+              horarioPermanenciaLimite: student.horarioPermanenciaLimite || defaultPlanoInfo.horarioPadrao,
+              valorPlanoBase: baseVal,
+              descontoBolsa: descVal,
+              valorMensalidadeFinal: student.valorMensalidadeFinal ?? Math.max(0, baseVal - descVal),
               updatedAt: new Date().toISOString(),
             };
             batch.set(doc(db, 'alunos', student.id), payload, { merge: true });
@@ -1125,12 +1198,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         tipoSaida: editingStudent.tipoSaida || 'PAIS',
         nomeCondutor: editingStudent.tipoSaida === 'TRANSPORTE_ESCOLAR' ? (editingStudent.nomeCondutor?.trim() || undefined) : undefined,
         planoContratual: editingStudent.planoContratual || 'Integral Semana (18:30h)',
-        horarioPermanenciaLimite: editingStudent.horarioPermanenciaLimite || '18:30h',
-        valorPlanoBase: editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250,
+        horarioPermanenciaLimite:
+          editingStudent.horarioPermanenciaLimite ||
+          getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026)[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.horarioPadrao ||
+          '18:30h',
+        valorPlanoBase:
+          editingStudent.valorPlanoBase !== undefined
+            ? editingStudent.valorPlanoBase
+            : (getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026)[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.valorBase ??
+                (editingStudent.anoLetivo === 2027 ? 1250 : 1120)),
         descontoBolsa: editingStudent.descontoBolsa || 0,
         valorMensalidadeFinal: Math.max(
           0,
-          (editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250) -
+          (editingStudent.valorPlanoBase !== undefined
+            ? editingStudent.valorPlanoBase
+            : (getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026)[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.valorBase ??
+                (editingStudent.anoLetivo === 2027 ? 1250 : 1120))) -
             (editingStudent.descontoBolsa || 0)
         ),
       };
@@ -1341,7 +1424,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   name="novoAlunoAnoLetivo"
                   value={2026}
                   checked={newAnoLetivo === 2026}
-                  onChange={() => setNewAnoLetivo(2026)}
+                  onChange={() => handleChangeNewAnoLetivo(2026)}
                   className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
                 />
                 <span>2026</span>
@@ -1352,7 +1435,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   name="novoAlunoAnoLetivo"
                   value={2027}
                   checked={newAnoLetivo === 2027}
-                  onChange={() => setNewAnoLetivo(2027)}
+                  onChange={() => handleChangeNewAnoLetivo(2027)}
                   className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
                 />
                 <span>2027</span>
@@ -1626,17 +1709,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   onChange={(e) => handleSelectNewPlano(e.target.value as PlanoContratualType)}
                   className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                 >
-                  {(Object.keys(PLANOS_CONTRATUAIS_TABELA) as PlanoContratualType[]).map((planoKey) => {
-                    const info = PLANOS_CONTRATUAIS_TABELA[planoKey];
-                    return (
-                      <option key={planoKey} value={planoKey}>
-                        {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
-                      </option>
-                    );
-                  })}
+                  {(() => {
+                    const currentYearTabela = getTabelaPlanosPorAno(newAnoLetivo);
+                    return (Object.keys(currentYearTabela) as PlanoContratualType[]).map((planoKey) => {
+                      const info = currentYearTabela[planoKey];
+                      return (
+                        <option key={planoKey} value={planoKey}>
+                          {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
+                        </option>
+                      );
+                    });
+                  })()}
                 </select>
                 <p className="text-[10.5px] text-emerald-800 mt-1">
-                  {PLANOS_CONTRATUAIS_TABELA[newPlanoContratual]?.descricao || 'Configuração customizada'}
+                  {getTabelaPlanosPorAno(newAnoLetivo)[newPlanoContratual]?.descricao || 'Configuração customizada'}
                 </p>
               </div>
 
@@ -2915,17 +3001,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       disabled={isSavingEdit}
                       className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                     >
-                      {(Object.keys(PLANOS_CONTRATUAIS_TABELA) as PlanoContratualType[]).map((planoKey) => {
-                        const info = PLANOS_CONTRATUAIS_TABELA[planoKey];
-                        return (
-                          <option key={planoKey} value={planoKey}>
-                            {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
-                          </option>
-                        );
-                      })}
+                      {(() => {
+                        const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026);
+                        return (Object.keys(editTabela) as PlanoContratualType[]).map((planoKey) => {
+                          const info = editTabela[planoKey];
+                          return (
+                            <option key={planoKey} value={planoKey}>
+                              {planoKey} {planoKey !== 'Personalizado' ? `— ${formatCurrencyBR(info.valorBase)}` : '(Livre)'}
+                            </option>
+                          );
+                        });
+                      })()}
                     </select>
                     <p className="text-[10.5px] text-emerald-800 mt-1">
-                      {PLANOS_CONTRATUAIS_TABELA[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.descricao || 'Configuração customizada'}
+                      {getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026)[
+                        editingStudent.planoContratual || 'Integral Semana (18:30h)'
+                      ]?.descricao || 'Configuração customizada'}
                     </p>
                   </div>
 
@@ -2953,60 +3044,66 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </div>
 
                 {/* Valores Financeiros: Base, Desconto/Bolsa e Mensalidade Final */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
-                    <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
-                      Valor Base (Tabela R$):
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={editingStudent.valorPlanoBase ?? 1250}
-                      onChange={(e) => handleChangeEditBase(parseFloat(e.target.value) || 0)}
-                      disabled={isSavingEdit || (editingStudent.planoContratual || 'Integral Semana (18:30h)') !== 'Personalizado'}
-                      className={`w-full px-2.5 py-1.5 text-xs font-bold border rounded-lg ${
-                        editingStudent.planoContratual === 'Personalizado'
-                          ? 'bg-white border-emerald-400 text-slate-900 focus:ring-2 focus:ring-emerald-500'
-                          : 'bg-slate-50 border-slate-200 text-slate-700 cursor-not-allowed'
-                      }`}
-                    />
-                  </div>
+                {(() => {
+                  const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026);
+                  const defaultEditBase =
+                    editTabela[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.valorBase ??
+                    (editingStudent.anoLetivo === 2027 ? 1250 : 1120);
+                  const currentBase = editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : defaultEditBase;
+                  const currentDesconto = editingStudent.descontoBolsa ?? 0;
+                  const currentFinal = Math.max(0, currentBase - currentDesconto);
 
-                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
-                    <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
-                      Desconto / Bolsa (R$):
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={editingStudent.descontoBolsa ?? 0}
-                      onChange={(e) => handleChangeEditDesconto(parseFloat(e.target.value) || 0)}
-                      disabled={isSavingEdit}
-                      placeholder="0,00"
-                      className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-emerald-400 text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                          Valor Base (Tabela R$):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={currentBase}
+                          onChange={(e) => handleChangeEditBase(parseFloat(e.target.value) || 0)}
+                          disabled={isSavingEdit || (editingStudent.planoContratual || 'Integral Semana (18:30h)') !== 'Personalizado'}
+                          className={`w-full px-2.5 py-1.5 text-xs font-bold border rounded-lg ${
+                            editingStudent.planoContratual === 'Personalizado'
+                              ? 'bg-white border-emerald-400 text-slate-900 focus:ring-2 focus:ring-emerald-500'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 cursor-not-allowed'
+                          }`}
+                        />
+                      </div>
 
-                  <div className="bg-emerald-600 text-white p-2.5 rounded-xl shadow-xs flex flex-col justify-center">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">
-                      Mensalidade Final:
-                    </span>
-                    <span className="text-base font-extrabold text-white mt-0.5">
-                      {formatCurrencyBR(
-                        Math.max(
-                          0,
-                          (editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : 1250) -
-                            (editingStudent.descontoBolsa || 0)
-                        )
-                      )}
-                    </span>
-                    <span className="text-[9.5px] text-emerald-200">
-                      Base - Bolsa ({formatCurrencyBR(editingStudent.valorPlanoBase ?? 1250)} - {formatCurrencyBR(editingStudent.descontoBolsa ?? 0)})
-                    </span>
-                  </div>
-                </div>
+                      <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <label className="block text-[10.5px] font-bold text-slate-600 uppercase mb-1">
+                          Desconto / Bolsa (R$):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={currentDesconto}
+                          onChange={(e) => handleChangeEditDesconto(parseFloat(e.target.value) || 0)}
+                          disabled={isSavingEdit}
+                          placeholder="0,00"
+                          className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-emerald-400 text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+
+                      <div className="bg-emerald-600 text-white p-2.5 rounded-xl shadow-xs flex flex-col justify-center">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">
+                          Mensalidade Final:
+                        </span>
+                        <span className="text-base font-extrabold text-white mt-0.5">
+                          {formatCurrencyBR(currentFinal)}
+                        </span>
+                        <span className="text-[9.5px] text-emerald-200">
+                          Base - Bolsa ({formatCurrencyBR(currentBase)} - {formatCurrencyBR(currentDesconto)})
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -3709,17 +3806,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
                       {/* Selo/Chip do Plano Contratual e Mensalidade Final */}
                       {(() => {
+                        const studentYear = student.anoLetivo || selectedAnoLetivo || 2026;
+                        const tabela = getTabelaPlanosPorAno(studentYear);
                         const plano = student.planoContratual || 'Integral Semana (18:30h)';
+                        const defaultBase = tabela[plano]?.valorBase || (studentYear === 2027 ? 1250 : 1120);
+                        const horario = student.horarioPermanenciaLimite || tabela[plano]?.horarioPadrao || '18:30h';
                         const valorFinal =
                           student.valorMensalidadeFinal !== undefined
                             ? student.valorMensalidadeFinal
                             : student.valorPlanoBase !== undefined
                             ? Math.max(0, student.valorPlanoBase - (student.descontoBolsa || 0))
-                            : PLANOS_CONTRATUAIS_TABELA[plano]?.valorBase || 1250;
+                            : defaultBase;
                         return (
                           <span
                             className="text-[10.5px] font-bold text-emerald-900 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
-                            title={`Plano: ${plano} | Horário: ${student.horarioPermanenciaLimite || PLANOS_CONTRATUAIS_TABELA[plano]?.horarioPadrao || '18:30h'} | Mensalidade: ${formatCurrencyBR(valorFinal)}`}
+                            title={`Plano: ${plano} (${studentYear}) | Horário: ${horario} | Mensalidade: ${formatCurrencyBR(valorFinal)}`}
                           >
                             <BadgeDollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             <span>{plano}: <strong>{formatCurrencyBR(valorFinal)}</strong></span>

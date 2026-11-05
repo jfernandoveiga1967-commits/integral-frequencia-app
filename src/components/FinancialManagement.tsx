@@ -10,6 +10,7 @@ import {
   FinancialExpense,
   ExpenseCategory,
   ExpenseStatus,
+  getTabelaPlanosPorAno,
 } from '../types';
 import {
   CreditCard,
@@ -195,13 +196,22 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     });
 
     const list: StudentFinancialProfile[] = [];
+    const activeTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
+
     yearStudents.forEach((student) => {
       const existing = profileMap.get(student.id);
+      const studentBaseVal =
+        student.valorPlanoBase !== undefined
+          ? student.valorPlanoBase
+          : student.planoContratual
+          ? activeTabela[student.planoContratual]?.valorBase
+          : undefined;
+
       const studentFinalVal =
         student.valorMensalidadeFinal !== undefined
           ? student.valorMensalidadeFinal
-          : student.valorPlanoBase !== undefined
-          ? Math.max(0, student.valorPlanoBase - (student.descontoBolsa || 0))
+          : studentBaseVal !== undefined
+          ? Math.max(0, studentBaseVal - (student.descontoBolsa || 0))
           : undefined;
 
       if (existing) {
@@ -213,7 +223,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           planoContratual: student.planoContratual || existing.planoContratual,
           descontoBolsa: student.descontoBolsa !== undefined ? student.descontoBolsa : existing.descontoBolsa,
           valorMensalidadeBase:
-            student.valorPlanoBase !== undefined ? student.valorPlanoBase : existing.valorMensalidadeBase,
+            studentBaseVal !== undefined ? studentBaseVal : existing.valorMensalidadeBase,
           valorTotalMensal: studentFinalVal !== undefined ? studentFinalVal : existing.valorTotalMensal,
         });
       } else {

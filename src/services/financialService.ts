@@ -21,6 +21,7 @@ import {
   ExpenseCategory,
   ExpenseStatus,
   PLANOS_CONTRATUAIS_TABELA,
+  getTabelaPlanosPorAno,
 } from '../types';
 
 const FINANCIAL_COLLECTION = 'studentFinancialProfiles';
@@ -251,13 +252,14 @@ export function buildDefaultFinancialProfile(
 ): StudentFinancialProfile {
   const isAvulso = student.tipoContrato === 'avulso';
   const plano: FinancialPlanHour = isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H';
+  const tabela = getTabelaPlanosPorAno(anoLetivo);
 
-  // Prioriza a tabela oficial de Planos Contratuais do estudante
+  // Prioriza a tabela oficial de Planos Contratuais do estudante para o Ano Letivo
   const base =
     student.valorPlanoBase !== undefined
       ? student.valorPlanoBase
       : student.planoContratual
-      ? PLANOS_CONTRATUAIS_TABELA[student.planoContratual]?.valorBase ?? BASE_PLAN_PRICES[plano]
+      ? tabela[student.planoContratual]?.valorBase ?? BASE_PLAN_PRICES[plano]
       : BASE_PLAN_PRICES[plano];
 
   const extras = calculateModalidadesExtrasTotal(student.activities || []);

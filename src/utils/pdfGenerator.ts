@@ -25,6 +25,7 @@ import {
   FinancialMetricSummary,
   FinancialExpense,
   PLANOS_CONTRATUAIS_TABELA,
+  getTabelaPlanosPorAno,
 } from '../types';
 import { MonthlyMenu, CookingRecipe, MenuItemDay } from '../types/cardapio';
 import { ManualNorma, MODULE_METADATA, NormaAceite, compareNormasBySectionNumber } from '../types/manualNormas';
@@ -6039,14 +6040,15 @@ export function generateFichaMatriculaPDF({
 
   // Linha 4: Plano Contratual & Limite de Permanência
   const planoContratual = student.planoContratual || 'Integral Semana (18:30h)';
+  const tabelaPlanosAno = getTabelaPlanosPorAno(resolvedYear);
   const horarioLimite =
     student.horarioPermanenciaLimite ||
-    PLANOS_CONTRATUAIS_TABELA[planoContratual]?.horarioPadrao ||
+    tabelaPlanosAno[planoContratual]?.horarioPadrao ||
     '18:30h';
   const valorBase =
     student.valorPlanoBase !== undefined
       ? student.valorPlanoBase
-      : (PLANOS_CONTRATUAIS_TABELA[planoContratual]?.valorBase ?? 1250);
+      : (tabelaPlanosAno[planoContratual]?.valorBase ?? (Number(resolvedYear) === 2027 ? 1250 : 1120));
   const descontoBolsa = student.descontoBolsa || 0;
   const mensalidadeFinal =
     student.valorMensalidadeFinal !== undefined
