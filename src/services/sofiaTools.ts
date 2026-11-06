@@ -1327,8 +1327,8 @@ export async function executeSofiaTool(
 
       // Se ainda não houver perfis no local storage, gera a partir dos estudantes do ano
       if (profiles.length === 0) {
-        const studentsAno = context.students.filter((s) => (s.anoLetivo || 2026) === targetAno);
-        profiles = (studentsAno.length > 0 ? studentsAno : context.students).map((s) =>
+        const studentsAno = context.students.filter((s) => s.anoLetivo === targetAno);
+        profiles = studentsAno.map((s) =>
           buildDefaultFinancialProfile(s, targetAno)
         );
       }

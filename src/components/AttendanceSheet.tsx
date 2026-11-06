@@ -203,9 +203,11 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   const countStudentsForActivityInTurma = useCallback(
     (actId: string, turmaName: string) => {
       if (!students || students.length === 0) return 0;
+      const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
+      const yearStudents = students.filter((s) => s.anoLetivo === targetAcademicYear);
       const turmaList = turmaName === 'TODAS'
-        ? students
-        : students.filter((s) => s.turma === turmaName);
+        ? yearStudents
+        : yearStudents.filter((s) => s.turma === turmaName);
       
       const activeList = turmaList.filter(
         (s) => s.status !== 'inativo' && s.status !== 'cancelado'
@@ -225,7 +227,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         (s) => Array.isArray(s.activities) && s.activities.includes(actId)
       ).length;
     },
-    [students]
+    [students, selectedDate]
   );
 
   const [selectedActivity, setSelectedActivity] = useState<ActivityType>(() => {
@@ -474,9 +476,16 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   // Filter students who are enrolled in the allowed activities, allowed turmas, and scheduled for the current selectedDate
   const filteredStudents = useMemo(() => {
+    const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
     return (students || [])
       .filter((student) => {
         if (!student) return false;
+
+        // Isolamento Rígido por Ano Letivo: garante que matrículas de 2027 não apareçam em 2026 e vice-versa
+        if (student.anoLetivo !== targetAcademicYear) {
+          return false;
+        }
+
         // Turma permission filter for professors/monitors
         if (!isCoordenador && !allowedTurmas.includes(student.turma)) {
           return false;
@@ -864,13 +873,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   };
 
   const handleClearSelected = async () => {
-    // Identifica todos os alunos da turma selecionada (ou do filtro atual se TODAS)
+    // Identifica todos os alunos da turma selecionada respeitando o ano letivo ativo
     const targetStudents =
       searchTerm.trim() !== ''
         ? filteredStudents
         : selectedTurma === 'TODAS'
         ? filteredStudents
-        : students.filter((s) => s.turma === selectedTurma);
+        : filteredStudents.filter((s) => s.turma === selectedTurma);
 
     const studentIds = Array.from(new Set(targetStudents.map((s) => s.id)));
     if (studentIds.length === 0) return;
@@ -934,11 +943,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Exporta relatório geral diário com TODOS os alunos cadastrados (botão do painel superior)
   const handleExportGeneralDailyPDF = (saveImmediately = false) => {
     try {
+      const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
+      const yearStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
       const result = generateAttendanceDailyPDFReport({
         date: selectedDate,
         activityName: 'TODAS',
         turma: selectedTurma,
-        students: students,
+        students: yearStudents,
         records,
         teacherName: currentUser?.name,
         documentTitle: 'RELATÓRIO GERAL DE FREQUÊNCIA DIÁRIA',
@@ -964,11 +975,13 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   // Imprime espelho de frequência diária geral (botão do painel superior)
   const handlePrintAttendanceDaily = () => {
     try {
+      const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
+      const yearStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
       const pdf = generateAttendanceDailyPDFReport({
         date: selectedDate,
         activityName: 'TODAS',
         turma: selectedTurma,
-        students: students,
+        students: yearStudents,
         records,
         teacherName: currentUser?.name,
         documentTitle: 'RELATÓRIO GERAL DE FREQUÊNCIA DIÁRIA',
@@ -1448,13 +1461,22 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
               </button>
             )}
 
-            {/* Feedback Visual: [ 💾 Gravado às hh:mm ] */}
-            {lastSavedTime && (
+            {/* Feedback Visual: Sacramentado ao Clicar */}
+            {lastSavedTime ? (
               <span
                 className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs transition-all animate-in fade-in"
-                title="Última alteração salva e persistida com sucesso no Firestore"
+                title="Persistência imediata ativa: última marcação salva e sacramentada com sucesso no Firestore"
               >
-                <span>💾 Gravado às {lastSavedTime}</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Sacramentado às {lastSavedTime} ✓</span>
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50/80 text-emerald-800 border border-emerald-200 shadow-2xs"
+                title="Persistência imediata ativa: cada clique no status do aluno é sacramentado instantaneamente no banco de dados"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                <span>Auto-Save Imediato no Clique</span>
               </span>
             )}
 
@@ -1493,7 +1515,9 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             {selectedTurma !== 'TODAS' && (
               <button
                 onClick={() => {
-                  const result = generateTurmaPDFReport(selectedTurma, currentWeek, students, records);
+                  const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
+                  const yearStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
+                  const result = generateTurmaPDFReport(selectedTurma, currentWeek, yearStudents, records);
                   setPdfPreviewState({
                     isOpen: true,
                     doc: result.doc,

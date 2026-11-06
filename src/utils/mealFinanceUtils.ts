@@ -213,7 +213,9 @@ export function buildMealEntriesForDateRange(
     // 1. Coluna TOTAL ESPERADOS (Alunos Efetivamente Esperados no Dia):
     let expectedStudentsCount = 0;
     if (isSchoolDay) {
+      const targetAcademicYear = parseInt(dateStr.split('-')[0], 10) || 2026;
       const scheduledStudents = students.filter((s) => {
+        if (s.anoLetivo !== targetAcademicYear) return false;
         const status = s.status || s.statusMatricula || 'ativo';
         if (status === 'inativo' || status === 'cancelado') return false;
         return isStudentScheduledForDate(s, dateStr);
@@ -232,25 +234,26 @@ export function buildMealEntriesForDateRange(
     let hasCallConcluded = false;
 
     if (isSchoolDay) {
+      // 1. Leitura direta dos registros oficiais da chamada da modalidade Rotina
       const routineRecords = records.filter((r) => {
         if (!r || (r.date !== dateStr && (r as any).data !== dateStr)) return false;
-        const isRoutine =
+        return (
           isRoutineActivity(r.activity, r) ||
           String((r as any).tipo || '').toUpperCase() === 'ROTINA' ||
           String((r as any).type || '').toUpperCase() === 'ROTINA' ||
-          !r.activity;
-        return isRoutine;
+          !r.activity
+        );
       });
       const anyDayRecords = records.filter((r) => r && (r.date === dateStr || (r as any).data === dateStr));
 
       const studentStatusMap = new Map<string, AttendanceStatus>();
-      // 1. Adiciona qualquer registro lançado no dia para o aluno (fallback resiliente de oficinas)
+      // Fallback para qualquer chamada lançada no dia caso não haja Rotina
       anyDayRecords.forEach((r) => {
         if (r && r.studentId && r.status) {
           studentStatusMap.set(r.studentId, normalizeAttendanceStatus((r as any).rawStatus || r.status));
         }
       });
-      // 2. Sobrescreve com registros oficiais da rotina (prioridade máxima)
+      // Prioridade máxima estrita para a Rotina
       routineRecords.forEach((r) => {
         if (r && r.studentId && r.status) {
           studentStatusMap.set(r.studentId, normalizeAttendanceStatus((r as any).rawStatus || r.status));
@@ -275,57 +278,32 @@ export function buildMealEntriesForDateRange(
     }
 
     const savedDay = savedEntries[dateStr];
+    const isReopenedCall = savedDay?.isReopenedCall ?? false;
+    const lastCalculatedMealsCount = savedDay?.lastCalculatedMealsCount;
+    const effectiveSystemCount = systemCount;
     const rawSavedCount = savedDay?.editableStudents !== undefined ? savedDay?.editableStudents : savedDay?.manualCount;
     const hasSavedCount = rawSavedCount !== undefined && rawSavedCount !== null;
     const savedCountNum = hasSavedCount ? Number(rawSavedCount) : undefined;
-    const isSavedZeroOrNull = savedCountNum === undefined || isNaN(savedCountNum) || savedCountNum === 0;
-
-    // Snapshot e Fallback de Histórico (Fallback de Chamada Reaberta)
-    let lastCalculatedMealsCount = savedDay?.lastCalculatedMealsCount;
-    let isReopenedCall = false;
-    let effectiveSystemCount = systemCount;
-
-    if (dayPresentes > 0) {
-      lastCalculatedMealsCount = dayPresentes;
-      effectiveSystemCount = dayPresentes;
-      isReopenedCall = false;
-    } else if (
-      isSchoolDay &&
-      dayPresentes === 0 &&
-      lastCalculatedMealsCount !== undefined &&
-      lastCalculatedMealsCount > 0
-    ) {
-      isReopenedCall = true;
-      effectiveSystemCount = lastCalculatedMealsCount;
-    }
+    const isSavedZeroOrNull = savedCountNum === undefined || isNaN(savedCountNum);
 
     let manualCount = 0;
     let isManualOverride = false;
 
     if (isSchoolDay) {
-      // Conexão direta com a chamada da Rotina diária:
-      // Se houver override manual explícito e intencional do usuário, preserva
-      if (savedDay?.isManualOverride === true && !isSavedZeroOrNull) {
+      // Regra "Sacramentado ao Clicar":
+      // A leitura direta da Rotina alimenta automaticamente o relatório de refeições.
+      // O campo manual só substitui a chamada automática se o usuário ativamente inseriu um ajuste/override diferente.
+      if (savedDay?.isManualOverride === true && !isSavedZeroOrNull && savedCountNum !== systemCount) {
         manualCount = savedCountNum!;
         isManualOverride = true;
-      } else if (effectiveSystemCount > 0) {
-        // Conecta a contagem de presenças apurada na chamada da Rotina diária diretamente
-        // à coluna 'Alunos Editáveis / Refeições Servidas' do módulo de almoço
-        manualCount = effectiveSystemCount;
-        isManualOverride = false;
-      } else if (!isSavedZeroOrNull) {
-        manualCount = savedCountNum!;
-        isManualOverride = Boolean(savedDay?.isManualOverride);
-      } else if (isReopenedCall && lastCalculatedMealsCount !== undefined && lastCalculatedMealsCount > 0) {
-        manualCount = lastCalculatedMealsCount;
-        isManualOverride = false;
       } else {
-        manualCount = 0;
+        // Alinhado 100% em tempo real com a presença da Rotina
+        manualCount = systemCount;
         isManualOverride = false;
       }
     } else {
       manualCount = !isSavedZeroOrNull ? savedCountNum! : 0;
-      isManualOverride = !isSavedZeroOrNull;
+      isManualOverride = !isSavedZeroOrNull && manualCount > 0;
     }
 
     const unitPrice = savedDay?.unitPrice !== undefined ? Number(savedDay.unitPrice) : effectiveUnitPrice;

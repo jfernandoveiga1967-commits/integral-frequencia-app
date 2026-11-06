@@ -1013,38 +1013,8 @@ export default function App() {
   // 12. Autosincro e Encerramento Automático de Chamadas do Dia Anterior / Pendentes / Reabertas
   const hasAutoConsolidatedRef = useRef(false);
 
-  useEffect(() => {
-    if (!isLogged) return;
-    if (students.length === 0 || !isInitialStudentsLoaded) return;
-    if (hasAutoConsolidatedRef.current) return;
-
-    hasAutoConsolidatedRef.current = true;
-
-    // Executa verificação diária automática de pendências de dias anteriores
-    autoConsolidateAndClosePastPendingCalls(students, records, holidays, {
-      currentUserEmail: currentUser?.email,
-      turmasList: TURMAS_LIST,
-    })
-      .then(({ closedCount, newRecords, updatedDates }) => {
-        if (closedCount > 0 && newRecords.length > 0) {
-          console.info(
-            `[AutoSincro] ${closedCount} pendências de chamadas passadas (${updatedDates.join(', ')}) foram encerradas e consolidadas automaticamente no Firestore.`
-          );
-          setRecords((prev) => {
-            const mergedMap = new Map<string, AttendanceRecord>();
-            prev.forEach((r) => mergedMap.set(r.id, r));
-            newRecords.forEach((r) => mergedMap.set(r.id, r));
-            const updated = Array.from(mergedMap.values());
-            saveAttendanceRecords(updated);
-            return updated;
-          });
-          broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', newRecords);
-        }
-      })
-      .catch((err) => {
-        console.warn('Erro ao executar autoConsolidateAndClosePastPendingCalls:', err);
-      });
-  }, [isLogged, students, isInitialStudentsLoaded, holidays, currentUser?.email]);
+  // Arquitetura "Sacramentado ao Clicar": A chamada é persistida imediatamente a cada clique individual,
+  // eliminando categoricamente rotinas background que convertiam pendências passadas em falta geral.
 
   // Save student modifications
   const handleAddStudent = async (newStudentData: Omit<Student, 'id'>) => {
@@ -1341,47 +1311,10 @@ export default function App() {
     }
   };
 
-  // Encerramento Oficial de Chamada com Conversão de Pendências e Trigger de Consolidação
+  // Consolidação Oficial da Chamada no Firestore sem converter pendências em faltas artificiais
   const handleFinalizeAttendanceCall = async (date: string) => {
-    const metrics = getDailyConsolidatedMetrics(date, students, records, 'all', {
-      convertPastPendingToAbsence: false,
-    });
-
-    let currentPool = [...records];
-    const newFaltas: AttendanceRecord[] = [];
-
-    if (metrics.pendentes > 0 && metrics.pendingStudents && metrics.pendingStudents.length > 0) {
-      const [y, m, d] = date.split('-').map(Number);
-      const dt = new Date(y, m - 1, d, 12, 0, 0);
-      const { weekNumber, year } = getISOWeekNumber(dt);
-
-      metrics.pendingStudents.forEach((st) => {
-        const key = `${st.id}_Rotina_${date}`;
-        newFaltas.push({
-          id: key,
-          studentId: st.id,
-          activity: 'Rotina',
-          turma: st.turma,
-          date,
-          weekNumber,
-          year,
-          status: 'falta',
-          observation: 'Encerramento de chamada pela monitora/coordenação',
-          createdAt: new Date().toISOString(),
-        });
-      });
-
-      if (newFaltas.length > 0) {
-        await batchSaveRecordsToFirestore(newFaltas);
-        currentPool = [...newFaltas, ...currentPool];
-        setRecords(currentPool);
-        saveAttendanceRecords(currentPool);
-        broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', currentPool);
-      }
-    }
-
-    // Trigger de Recálculo Instantâneo no Firestore (marcação de finalizada)
-    await recalculateAndTriggerConsolidation(date, students, currentPool, {
+    // Trigger de Recálculo Instantâneo no Firestore (marcação de consolidada com as presenças sacramentadas no clique)
+    await recalculateAndTriggerConsolidation(date, students, records, {
       currentUserEmail: currentUser?.email,
       isReopened: false,
       closedAutomatically: false,

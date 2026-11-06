@@ -217,6 +217,15 @@ export function isStudentActiveInDatabase(
   referenceDate?: string
 ): boolean {
   if (!student) return false;
+
+  // Isolamento Rígido por Ano Letivo: se há data de referência, valida o ano da matrícula
+  if (referenceDate) {
+    const targetAcademicYear = parseInt(referenceDate.split('-')[0], 10) || 2026;
+    if (student.anoLetivo !== targetAcademicYear) {
+      return false;
+    }
+  }
+
   const status = (student.status || (student as any).statusMatricula || 'ativo').toLowerCase().trim();
 
   // Aluno com status 'ativo': SEMPRE computado como matrícula ativa, inclusive os recém-adicionados
@@ -253,9 +262,11 @@ export function getDailyConsolidatedMetrics(
   options?: DailyConsolidatedOptions
 ): DailyConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
+  const targetAcademicYear = parseInt(dateStr.split('-')[0], 10) || 2026;
+  const yearFilteredStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
   const targetStudents = isAllTurmas
-    ? students
-    : students.filter((s) => s.turma === turmaFilter);
+    ? yearFilteredStudents
+    : yearFilteredStudents.filter((s) => s.turma === turmaFilter);
 
   // Total active enrolled students in the scope (alinhado rigorosamente à regra de alunos ativos no banco de dados)
   const activeEnrolledStudents = targetStudents.filter((s) => isStudentActiveInDatabase(s, dateStr));
@@ -355,8 +366,6 @@ export function getDailyConsolidatedMetrics(
   }
 
   const evaluatedStudents = Array.from(evaluatedMap.values());
-  const isCallClosed = isPastDate || (hasRecordsOnDate && Boolean(options?.lockToRoutineRecords || options?.convertPastPendingToAbsence));
-  const shouldConvertPending = Boolean(options?.convertPastPendingToAbsence && isCallClosed);
 
   evaluatedStudents.forEach((student) => {
     // Prioriza registro da Rotina; se ausente, faz fallback para qualquer registro do aluno no dia
@@ -375,15 +384,12 @@ export function getDailyConsolidatedMetrics(
     } else if (category === 'JUSTIFICADO') {
       justificados++;
     } else {
-      // Pending case (unmarked / without record)
-      if (shouldConvertPending) {
-        faltas++;
-        pendenciasConvertidas++;
-        category = 'FALTA';
-      } else {
-        pendentes++;
-        pendingStudents.push(student);
-      }
+      // Regra "Sacramentado ao Clicar":
+      // Atividades ou dias sem clique da equipe permanecem estritamente como "Pendentes" (Aguardando Chamada),
+      // sem gerar faltas automáticas ou abater a taxa de assiduidade do estudante.
+      pendentes++;
+      pendingStudents.push(student);
+      category = 'PENDENTE';
     }
 
     studentDetails.push({
@@ -404,9 +410,9 @@ export function getDailyConsolidatedMetrics(
   const apurados = presentes + faltas + justificados;
   const isAuditStrictlyValid = presentes + faltas + justificados + pendentes === totalEsperados;
 
-  // Percentage calculations
-  const taxaPresenca = totalEsperados > 0 ? Math.round((presentes / totalEsperados) * 100) : 0;
-  const taxaApurada = apurados > 0 ? Math.round((presentes / apurados) * 100) : 0;
+  // Arquitetura "Sacramentado ao Clicar": taxa de assiduidade calculada com base nos alunos com clique explícito (apurados)
+  const taxaPresenca = apurados > 0 ? Math.round((presentes / apurados) * 100) : 0;
+  const taxaApurada = taxaPresenca;
 
   const dayOfWeek = getDayOfWeekFromDate(dateStr);
   const dayName = dayOfWeek ? getDayOfWeekLabel(dayOfWeek) : '';
@@ -503,9 +509,11 @@ export function getPeriodConsolidatedMetrics(
   options?: DailyConsolidatedOptions
 ): PeriodConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
+  const targetAcademicYear = parseInt(startDate.split('-')[0], 10) || 2026;
+  const yearFilteredStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
   const targetStudents = isAllTurmas
-    ? students
-    : students.filter((s) => s.turma === turmaFilter);
+    ? yearFilteredStudents
+    : yearFilteredStudents.filter((s) => s.turma === turmaFilter);
 
   const schoolDaysInfo = getEffectiveSchoolDays(startDate, endDate, holidays);
   const effectiveDays = schoolDaysInfo.effectiveDays;
@@ -548,10 +556,9 @@ export function getPeriodConsolidatedMetrics(
   const totalApuradosAcumulados =
     totalPresentesAcumulados + totalFaltasAcumuladas + totalJustificadosAcumulados;
 
+  // Taxa de assiduidade acumulada no período calculada estritamente sobre os registros apurados (clicados)
   const taxaPresencaGeral =
-    totalEsperadosAcumulados > 0
-      ? Math.round((totalPresentesAcumulados / totalEsperadosAcumulados) * 100)
-      : totalApuradosAcumulados > 0
+    totalApuradosAcumulados > 0
       ? Math.round((totalPresentesAcumulados / totalApuradosAcumulados) * 100)
       : 0;
 

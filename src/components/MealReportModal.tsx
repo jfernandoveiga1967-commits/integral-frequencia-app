@@ -561,13 +561,15 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   // Handlers de Edição Diária
   const handleUpdateDayCount = (dateStr: string, val: string) => {
     const num = val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0);
+    const entry = activeEntries.find((e) => e.date === dateStr);
+    const isOverride = entry ? num !== entry.systemCount : true;
     const updated = {
       ...customEntries,
       [dateStr]: {
         ...customEntries[dateStr],
         manualCount: num,
         editableStudents: num,
-        isManualOverride: true,
+        isManualOverride: isOverride,
       },
     };
     setCustomEntries(updated);
@@ -1284,19 +1286,31 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                                 min="0"
                                 value={e.manualCount}
                                 onChange={(ev) => handleUpdateDayCount(e.date, ev.target.value)}
+                                title={
+                                  e.isManualOverride && e.isSchoolDay
+                                    ? `Ajuste manual sobre a chamada (${e.manualCount} refeições vs ${e.systemCount} presenças na Rotina)`
+                                    : `Sincronizado automaticamente com a chamada da Rotina (${e.systemCount} presenças)`
+                                }
                                 className={`w-18 px-2 py-1 text-center font-black rounded-lg border text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
-                                  e.manualCount !== e.systemCount && e.isSchoolDay
-                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                  e.isManualOverride && e.isSchoolDay
+                                    ? 'bg-amber-50 border-amber-300 text-amber-900 ring-1 ring-amber-300'
                                     : 'bg-white border-slate-200 text-slate-900'
                                 }`}
                               />
                               <span className="text-[10px] text-slate-400 font-bold">un</span>
                             </div>
-                            {e.isReopenedCall && !e.isManualOverride && (
-                              <span className="text-[9px] text-amber-700 font-bold mt-0.5 block">
-                                Snapshot mantido
+                            {e.isManualOverride && e.isSchoolDay ? (
+                              <span
+                                className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1 py-0.2 rounded mt-0.5 block leading-tight"
+                                title="Ajuste manual/override visual aplicado sobre a chamada automática"
+                              >
+                                Ajuste manual
                               </span>
-                            )}
+                            ) : e.isSchoolDay && e.systemCount > 0 ? (
+                              <span className="text-[9px] font-medium text-emerald-700 mt-0.5 block leading-tight">
+                                Chamada Auto ✓
+                              </span>
+                            ) : null}
                           </div>
                         </td>
 

@@ -1272,6 +1272,14 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       statusMatricula: isAtivo ? 'ativo' : (normalized.statusMatricula || normalized.status || 'ativo'),
       inactivationDate: isAtivo ? '' : (normalized.inactivationDate || ''),
       inactivationReason: isAtivo ? '' : (normalized.inactivationReason || ''),
+      anoLetivo: normalized.anoLetivo,
+      tipoSaida: normalized.tipoSaida || 'PAIS',
+      nomeCondutor: normalized.nomeCondutor || '',
+      planoContratual: normalized.planoContratual || 'Integral Semana (18:30h)',
+      horarioPermanenciaLimite: normalized.horarioPermanenciaLimite || '18:30h',
+      valorPlanoBase: normalized.valorPlanoBase !== undefined ? normalized.valorPlanoBase : null,
+      descontoBolsa: normalized.descontoBolsa !== undefined ? normalized.descontoBolsa : 0,
+      valorMensalidadeFinal: normalized.valorMensalidadeFinal !== undefined ? normalized.valorMensalidadeFinal : null,
       notes: normalized.notes || '',
       updatedAt: new Date().toISOString(),
     };
@@ -3168,135 +3176,10 @@ export async function autoConsolidateAndClosePastPendingCalls(
   newRecords: AttendanceRecord[];
   updatedDates: string[];
 }> {
-  if (!students || students.length === 0) {
-    return { closedCount: 0, newRecords: [], updatedDates: [] };
-  }
-
-  const today = new Date();
-  const todayStr = toISODateString(today);
-
-  // Escopo de busca: até 14 dias atrás
-  const pastLimitDate = new Date(today);
-  pastLimitDate.setDate(pastLimitDate.getDate() - 14);
-  const pastLimitStr = toISODateString(pastLimitDate);
-
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = toISODateString(yesterday);
-
-  if (yesterdayStr < pastLimitStr) {
-    return { closedCount: 0, newRecords: [], updatedDates: [] };
-  }
-
-  const { effectiveDays } = getEffectiveSchoolDays(pastLimitStr, yesterdayStr, holidays);
-
-  const newRecordsToSave: AttendanceRecord[] = [];
-  const updatedDates: string[] = [];
-  let currentRecordsPool = [...records];
-
-  for (const day of effectiveDays) {
-    const dateStr = day.dateStr;
-    if (dateStr >= todayStr) continue;
-
-    // Recupera registros reais do Firestore para dateStr para nunca sobrescrever presenças já gravadas
-    try {
-      const snapDate = await getDocs(
-        query(
-          collection(db, 'attendanceRecords'),
-          or(where('data', '==', dateStr), where('date', '==', dateStr))
-        )
-      );
-      snapDate.forEach((d) => {
-        const dData = d.data();
-        if (dData && dData.studentId) {
-          const parsed: AttendanceRecord = {
-            id: d.id,
-            studentId: dData.studentId,
-            date: dData.date || dData.data || dateStr,
-            weekNumber: Number(dData.weekNumber) || 1,
-            year: Number(dData.year) || 2026,
-            activity: dData.activity || dData.tipo || 'Rotina',
-            turma: dData.turma || '',
-            status: normalizeAttendanceStatus(dData.status),
-            exitTime: dData.exitTime,
-            equipmentMissingDetails: dData.equipmentMissingDetails,
-            observation: dData.observation,
-            createdAt: dData.createdAt || new Date().toISOString(),
-          };
-          currentRecordsPool.push(parsed);
-        }
-      });
-    } catch (e) {
-      console.warn(`Aviso ao ler registros prévios do dia ${dateStr}:`, e);
-    }
-
-    const metrics = getDailyConsolidatedMetrics(
-      dateStr,
-      students,
-      currentRecordsPool,
-      'all',
-      { convertPastPendingToAbsence: false }
-    );
-
-    // Se houver alunos pendentes no dia letivo passado:
-    if (metrics.pendentes > 0 && metrics.pendingStudents && metrics.pendingStudents.length > 0) {
-      const [y, m, d] = dateStr.split('-').map(Number);
-      const dt = new Date(y, m - 1, d, 12, 0, 0);
-      const { weekNumber, year } = getISOWeekNumber(dt);
-
-      const dayNewRecords: AttendanceRecord[] = metrics.pendingStudents.map((st) => ({
-        id: `${st.id}_Rotina_${dateStr}`,
-        studentId: st.id,
-        activity: 'Rotina',
-        turma: st.turma,
-        date: dateStr,
-        weekNumber,
-        year,
-        status: 'falta' as AttendanceStatus,
-        observation: 'Fechamento automático de pendência / Sistema',
-        createdAt: new Date().toISOString(),
-      }));
-
-      newRecordsToSave.push(...dayNewRecords);
-      currentRecordsPool = [...dayNewRecords, ...currentRecordsPool];
-      updatedDates.push(dateStr);
-    }
-  }
-
-  // Grava novas faltas em lote no Firestore
-  if (newRecordsToSave.length > 0) {
-    try {
-      await batchSaveRecordsToFirestore(newRecordsToSave);
-      saveAttendanceRecords(currentRecordsPool);
-    } catch (err) {
-      console.warn('Erro ao salvar fechamento automático de chamadas no Firestore:', err);
-    }
-  }
-
-  // Dispara o recálculo e consolidação em 'relatoriosConsolidados' e 'mealReports' para cada data
-  for (const dateStr of updatedDates) {
-    try {
-      await recalculateAndTriggerConsolidation(
-        dateStr,
-        students,
-        currentRecordsPool,
-        {
-          currentUserEmail: options?.currentUserEmail || 'sistema_autosincro',
-          closedAutomatically: true,
-          isReopened: false,
-          turmasList: options?.turmasList,
-        }
-      );
-    } catch (err) {
-      console.warn(`Erro ao consolidar data ${dateStr}:`, err);
-    }
-  }
-
-  return {
-    closedCount: newRecordsToSave.length,
-    newRecords: newRecordsToSave,
-    updatedDates,
-  };
+  // Arquitetura "Sacramentado ao Clicar":
+  // Faltas somente existem por clique explícito e consciente da equipe.
+  // Rotinas de conversão automática de pendências passadas em falta geral foram categoricamente eliminadas.
+  return { closedCount: 0, newRecords: [], updatedDates: [] };
 }
 
 /**

@@ -10,7 +10,7 @@ import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, School, FileCheck, Car, BadgeDollarSign } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -130,6 +130,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [selectedTurma, setSelectedTurma] = useState<TurmaType | 'TODAS'>('TODAS');
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | 'TODAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Referência e scroll suave para a barra horizontal de turmas
+  const turmasScrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollTurmasBar = (direction: 'left' | 'right') => {
+    if (turmasScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -240 : 240;
+      turmasScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Single Add form state
   // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
@@ -335,7 +344,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const editTurmasList = React.useMemo(() => {
-    const baseList = isCoordenador || (editingStudent?.anoLetivo || 2026) === 2027 ? allSchoolTurmas : allowedTurmas;
+    const baseList = isCoordenador || editingStudent?.anoLetivo === 2027 ? allSchoolTurmas : allowedTurmas;
     if (editingStudent?.turma && !baseList.includes(editingStudent.turma as any)) {
       return [...baseList, editingStudent.turma as TurmaType];
     }
@@ -738,19 +747,19 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // Status Filter for Students ('ativos' | 'inativos' | 'todos')
   const [statusFilter, setStatusFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos');
 
-  // Contagens por Ano Letivo (Exercício 2026 vs 2027)
+  // Contagens por Ano Letivo (Exercício 2026 vs 2027) com igualdade estrita
   const count2026 = React.useMemo(
-    () => (students || []).filter((s) => (s.anoLetivo || 2026) === 2026).length,
+    () => (students || []).filter((s) => s.anoLetivo === 2026).length,
     [students]
   );
   const count2027 = React.useMemo(
-    () => (students || []).filter((s) => (s.anoLetivo || 2026) === 2027).length,
+    () => (students || []).filter((s) => s.anoLetivo === 2027).length,
     [students]
   );
 
-  // Alunos pertencentes ao exercício selecionado (2026 ou 2027)
+  // Alunos pertencentes ao exercício selecionado (2026 ou 2027) com igualdade estrita
   const studentsForSelectedYear = React.useMemo(() => {
-    return (students || []).filter((s) => (s.anoLetivo || 2026) === selectedAnoLetivo);
+    return (students || []).filter((s) => s.anoLetivo === selectedAnoLetivo);
   }, [students, selectedAnoLetivo]);
 
   const totalAtivosCount = React.useMemo(
@@ -2484,9 +2493,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   onChange={(e) =>
                     setEditingStudent((prev) => prev ? { ...prev, turma: e.target.value as TurmaType } : null)
                   }
-                  disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027)}
+                  disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1 && editingStudent.anoLetivo !== 2027)}
                   className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
-                    !isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027
+                    !isCoordenador && allowedTurmas.length === 1 && editingStudent.anoLetivo !== 2027
                       ? 'bg-slate-100 cursor-not-allowed text-slate-600'
                       : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
                   }`}
@@ -2497,7 +2506,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     </option>
                   ))}
                 </select>
-                {!isCoordenador && allowedTurmas.length === 1 && (editingStudent.anoLetivo || 2026) !== 2027 && (
+                {!isCoordenador && allowedTurmas.length === 1 && editingStudent.anoLetivo !== 2027 && (
                   <p className="text-[11px] text-slate-500 mt-1 font-medium">
                     🔒 Turma fixada conforme suas permissões de acesso.
                   </p>
@@ -2526,7 +2535,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     disabled={isSavingEdit}
                     onClick={() => handleToggleEditAnoLetivo(2026)}
                     className={`px-3.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
-                      (editingStudent.anoLetivo || 2026) === 2026
+                      editingStudent.anoLetivo === 2026
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900 bg-transparent'
                     }`}
@@ -2535,7 +2544,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="radio"
                       name="editAlunoAnoLetivo"
                       value={2026}
-                      checked={(editingStudent.anoLetivo || 2026) === 2026}
+                      checked={editingStudent.anoLetivo === 2026}
                       onChange={() => handleToggleEditAnoLetivo(2026)}
                       className="w-3.5 h-3.5 text-indigo-600 focus:ring-0 border-slate-300 cursor-pointer"
                     />
@@ -2547,7 +2556,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     disabled={isSavingEdit}
                     onClick={() => handleToggleEditAnoLetivo(2027)}
                     className={`px-3.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
-                      (editingStudent.anoLetivo || 2026) === 2027
+                      editingStudent.anoLetivo === 2027
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900 bg-transparent'
                     }`}
@@ -2556,7 +2565,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="radio"
                       name="editAlunoAnoLetivo"
                       value={2027}
-                      checked={(editingStudent.anoLetivo || 2026) === 2027}
+                      checked={editingStudent.anoLetivo === 2027}
                       onChange={() => handleToggleEditAnoLetivo(2027)}
                       className="w-3.5 h-3.5 text-indigo-600 focus:ring-0 border-slate-300 cursor-pointer"
                     />
@@ -2564,7 +2573,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </button>
                 </div>
               </div>
-              {(editingStudent.anoLetivo || 2026) === 2027 && (
+              {editingStudent.anoLetivo === 2027 && (
                 <div className="p-2.5 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 space-y-1 animate-in fade-in duration-150">
                   <div className="flex items-center space-x-1.5 font-bold text-indigo-800">
                     <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
@@ -2985,7 +2994,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     </div>
                   </div>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                    Exercício {editingStudent.anoLetivo || 2026}
+                    Exercício {editingStudent.anoLetivo}
                   </span>
                 </div>
 
@@ -3002,7 +3011,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                     >
                       {(() => {
-                        const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026);
+                        const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo);
                         return (Object.keys(editTabela) as PlanoContratualType[]).map((planoKey) => {
                           const info = editTabela[planoKey];
                           return (
@@ -3014,7 +3023,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       })()}
                     </select>
                     <p className="text-[10.5px] text-emerald-800 mt-1">
-                      {getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026)[
+                      {getTabelaPlanosPorAno(editingStudent.anoLetivo)[
                         editingStudent.planoContratual || 'Integral Semana (18:30h)'
                       ]?.descricao || 'Configuração customizada'}
                     </p>
@@ -3045,7 +3054,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
                 {/* Valores Financeiros: Base, Desconto/Bolsa e Mensalidade Final */}
                 {(() => {
-                  const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo || 2026);
+                  const editTabela = getTabelaPlanosPorAno(editingStudent.anoLetivo);
                   const defaultEditBase =
                     editTabela[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.valorBase ??
                     (editingStudent.anoLetivo === 2027 ? 1250 : 1120);
@@ -3557,6 +3566,89 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           </div>
         </div>
 
+        {/* Barra de Seleção de Turmas com Rolagem Horizontal Fluida (Educação Infantil ao 6º Ano) */}
+        <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 shadow-2xs">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Turmas ({turmasList.length}):</span>
+              <span className="text-[11px] font-normal text-slate-400 lowercase hidden sm:inline">(Educação Infantil ao 6º Ano)</span>
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => scrollTurmasBar('left')}
+                className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-200/80 rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs"
+                title="Rolar turmas para a esquerda"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollTurmasBar('right')}
+                className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-200/80 rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs"
+                title="Rolar turmas para a direita"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={turmasScrollRef}
+            className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 pt-0.5 no-scrollbar overscroll-x-contain scroll-smooth w-full"
+          >
+            {(isCoordenador || turmasList.length > 1) && (
+              <button
+                type="button"
+                onClick={() => setSelectedTurma('TODAS')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center space-x-2 border ${
+                  selectedTurma === 'TODAS'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-500/20'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <span>Todas as Turmas</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    selectedTurma === 'TODAS' ? 'bg-indigo-800 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {totalAtivosCount}
+                </span>
+              </button>
+            )}
+
+            {turmasList.map((t) => {
+              const isSelected = selectedTurma === t;
+              const count = studentsForSelectedYear.filter(
+                (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
+              ).length;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSelectedTurma(t)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center space-x-2 border ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-500/20'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                  }`}
+                >
+                  <span>{t}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-indigo-800 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -3806,7 +3898,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
                       {/* Selo/Chip do Plano Contratual e Mensalidade Final */}
                       {(() => {
-                        const studentYear = student.anoLetivo || selectedAnoLetivo || 2026;
+                        const studentYear = student.anoLetivo || selectedAnoLetivo;
                         const tabela = getTabelaPlanosPorAno(studentYear);
                         const plano = student.planoContratual || 'Integral Semana (18:30h)';
                         const defaultBase = tabela[plano]?.valorBase || (studentYear === 2027 ? 1250 : 1120);

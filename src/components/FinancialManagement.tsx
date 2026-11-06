@@ -184,9 +184,9 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     };
   }, [selectedAnoLetivo]);
 
-  // 2. Consolidação de Receitas: Garante que todos os alunos cadastrados possuam perfil financeiro
+  // 2. Consolidação de Receitas: Garante que todos os alunos cadastrados no exercício ativo possuam perfil financeiro
   const resolvedProfiles = useMemo<StudentFinancialProfile[]>(() => {
-    const yearStudents = students.filter((s) => (s.anoLetivo || 2026) === selectedAnoLetivo);
+    const yearStudents = students.filter((s) => s.anoLetivo === selectedAnoLetivo);
 
     const profileMap = new Map<string, StudentFinancialProfile>();
     financialProfiles.forEach((p) => {

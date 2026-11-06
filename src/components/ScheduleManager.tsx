@@ -16,6 +16,8 @@ import {
   Copy,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Layers,
   Utensils,
   BookOpen,
@@ -105,6 +107,15 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
       setSelectedTurma(sortedTurmas[0]);
     }
   }, [sortedTurmas.join(','), selectedTurma]);
+
+  // Referência e rolagem suave para a barra de turmas da Grade Horária
+  const turmasScrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollTurmasBar = (direction: 'left' | 'right') => {
+    if (turmasScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -260 : 260;
+      turmasScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Modal State for New/Edit Block
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1068,16 +1079,38 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           </div>
         </div>
 
-        {/* Turmas Selector Strip */}
+        {/* Turmas Selector Strip com Rolagem Horizontal Fluida */}
         <div className="mt-6 pt-5 border-t border-slate-100">
           <div className="flex items-center justify-between gap-2 mb-3">
             <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-slate-400" />
-              Selecione a Turma para Visualizar:
+              <span>Selecione a Turma para Visualizar ({sortedTurmas.length}):</span>
+              <span className="text-[11px] font-normal text-slate-400 lowercase hidden sm:inline">(Educação Infantil ao 6º Ano)</span>
             </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => scrollTurmasBar('left')}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs"
+                title="Rolar turmas para a esquerda"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollTurmasBar('right')}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs"
+                title="Rolar turmas para a direita"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <div
+            ref={turmasScrollRef}
+            className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1.5 pt-0.5 no-scrollbar overscroll-x-contain scroll-smooth w-full"
+          >
             {sortedTurmas.map((t) => {
               const isSelected = selectedTurma === t;
               const blockCount = totalBlocksForTurma(t);
@@ -1087,7 +1120,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   id={`schedule-select-turma-${t.replace(/\s+/g, '-').toLowerCase()}`}
                   type="button"
                   onClick={() => setSelectedTurma(t)}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap flex items-center space-x-2 border ${
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center space-x-2 border ${
                     isSelected
                       ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-indigo-500/20'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'

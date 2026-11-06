@@ -4441,6 +4441,8 @@ export function generateNominalListPDF({
       if (studentTypeFilter === 'regular' && s.tipoContrato === 'avulso') return false;
       if (studentTypeFilter === 'avulso' && s.tipoContrato !== 'avulso') return false;
 
+      if (anoLetivo && s.anoLetivo !== anoLetivo) return false;
+
       if (!isAllTurmas && s.turma !== turma) return false;
 
       if (!isAllSpecialties) {
@@ -4522,6 +4524,8 @@ export function generateNominalListPDF({
 
       if (studentTypeFilter === 'regular' && s.tipoContrato === 'avulso') return false;
       if (studentTypeFilter === 'avulso' && s.tipoContrato !== 'avulso') return false;
+
+      if (anoLetivo && s.anoLetivo !== anoLetivo) return false;
 
       if (!isAllTurmas && s.turma !== turma) return false;
 

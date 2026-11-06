@@ -154,19 +154,6 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     return map;
   }, [activitiesList]);
 
-  const sortedStudentsForPdf = useMemo(() => {
-    const rawStudents = students || [];
-    const list =
-      isCoordenador || !currentUser
-        ? rawStudents
-        : rawStudents.filter((s) => s && turmasList.includes(s.turma));
-    return [...list].sort((a, b) => {
-      const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
-      if (turmaCompare !== 0) return turmaCompare;
-      return (a.name || '').localeCompare(b.name || '', 'pt-BR');
-    });
-  }, [students, isCoordenador, currentUser, turmasList]);
-
   // -------------------------------------------------------------------------
   // Filtering Mode State: Por Semana vs Por Período Personalizado
   // -------------------------------------------------------------------------
@@ -226,6 +213,20 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
     filterMode === 'week'
       ? `Semana ${currentWeek.weekNumber} (A partir de ${formatDateBR(effectiveStartDate)})`
       : `Período de ${formatDateBR(effectiveStartDate)} a ${formatDateBR(effectiveEndDate)}`;
+
+  const sortedStudentsForPdf = useMemo(() => {
+    const targetAcademicYear = parseInt(effectiveStartDate.split('-')[0], 10) || 2026;
+    const rawStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
+    const list =
+      isCoordenador || !currentUser
+        ? rawStudents
+        : rawStudents.filter((s) => s && turmasList.includes(s.turma));
+    return [...list].sort((a, b) => {
+      const turmaCompare = (a.turma || '').localeCompare(b.turma || '', 'pt-BR', { numeric: true });
+      if (turmaCompare !== 0) return turmaCompare;
+      return (a.name || '').localeCompare(b.name || '', 'pt-BR');
+    });
+  }, [students, isCoordenador, currentUser, turmasList, effectiveStartDate]);
 
   // Effective School Days Calculation (excluding weekends and registered holidays/recesses)
   const schoolDaysInfo = useMemo(() => {
@@ -322,8 +323,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
 
   // Stats per turma baseadas na Rotina (1 registro por dia letivo por aluno)
   const turmaStats = useMemo(() => {
+    const targetAcademicYear = parseInt(effectiveStartDate.split('-')[0], 10) || 2026;
+    const yearStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
     return turmasList.map((turma) => {
-      const turmaStudents = students.filter((s) => s.turma === turma);
+      const turmaStudents = yearStudents.filter((s) => s.turma === turma);
       const studentIdsInTurma = new Set(turmaStudents.map((s) => s.id));
       const turmaRoutineRecords = routineRecords.filter(
         (r) => r.turma === turma || studentIdsInTurma.has(r.studentId)
@@ -349,7 +352,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         rate,
       };
     });
-  }, [turmasList, students, routineRecords, activeRecords]);
+  }, [turmasList, students, routineRecords, activeRecords, effectiveStartDate]);
 
   // -------------------------------------------------------------------------
   // Modals & PDF Export State
@@ -470,13 +473,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
   const [showNominalReportModal, setShowNominalReportModal] = useState(false);
 
   const numericTargetStudents = useMemo(() => {
+    const targetAcademicYear = parseInt(effectiveStartDate.split('-')[0], 10) || 2026;
+    const yearStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
     if (numericTurmaFilter === 'all') {
       return isCoordenador || !currentUser
-        ? students
-        : students.filter((s) => s && turmasList.includes(s.turma));
+        ? yearStudents
+        : yearStudents.filter((s) => s && turmasList.includes(s.turma));
     }
-    return students.filter((s) => s.turma === numericTurmaFilter);
-  }, [students, numericTurmaFilter, isCoordenador, currentUser, turmasList]);
+    return yearStudents.filter((s) => s.turma === numericTurmaFilter);
+  }, [students, numericTurmaFilter, isCoordenador, currentUser, turmasList, effectiveStartDate]);
 
   const numericDailyStats = useMemo(() => {
     return getPeriodConsolidatedMetrics(
@@ -1717,7 +1722,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                                 disabled={finalizingDate === d.dateStr}
                                 onClick={async () => {
                                   const ok = window.confirm(
-                                    `Deseja encerrar a chamada do dia ${formatDateBR(d.dateStr)} (${d.dayName}) convertendo os ${d.pendentes} alunos pendentes em Falta e consolidando os relatórios no Firestore?`
+                                    `Deseja consolidar no Firestore o relatório do dia ${formatDateBR(d.dateStr)} (${d.dayName}) com as presenças e faltas sacramentadas na chamada?`
                                   );
                                   if (!ok) return;
                                   try {
@@ -1727,15 +1732,15 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                                     setFinalizingDate(null);
                                   }
                                 }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-extrabold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-                                title="Encerrar chamada e converter pendências deste dia em Falta"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-extrabold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                title="Consolidar relatório diário no Firestore com base nas marcações sacramentadas"
                               >
                                 {finalizingDate === d.dateStr ? (
                                   <Loader2 className="w-3 h-3 animate-spin" />
                                 ) : (
                                   <CheckCircle2 className="w-3 h-3" />
                                 )}
-                                <span>{finalizingDate === d.dateStr ? 'Gravando...' : 'Encerrar Dia'}</span>
+                                <span>{finalizingDate === d.dateStr ? 'Gravando...' : 'Consolidar Dia'}</span>
                               </button>
                             )}
                           </div>

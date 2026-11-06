@@ -661,9 +661,9 @@ export function calculateModuleExpenses(
   students: Student[] = [],
   users: UserProfile[] = []
 ): FinancialExpense[] {
-  // Filtra alunos ativos do ano letivo
+  // Filtra alunos ativos do ano letivo com igualdade estrita
   const activeStudents = students.filter(
-    (s) => (s.anoLetivo === anoLetivo || (!s.anoLetivo && anoLetivo === 2026)) && s.status !== 'inativo' && s.status !== 'cancelado'
+    (s) => s.anoLetivo === anoLetivo && s.status !== 'inativo' && s.status !== 'cancelado'
   );
   const totalAlunos = activeStudents.length > 0 ? activeStudents.length : 129;
 
