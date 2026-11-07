@@ -10,7 +10,7 @@ import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser, TrendingUp, Filter, GraduationCap } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
@@ -752,14 +752,123 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // Status Filter for Students ('ativos' | 'inativos' | 'todos')
   const [statusFilter, setStatusFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos');
 
-  // Contagens por Ano Letivo (Exercício 2026 vs 2027) com igualdade estrita
-  const count2026 = React.useMemo(
-    () => (students || []).filter((s) => s.anoLetivo === 2026).length,
+  // Filtro Rápido de Origem no Exercício 2027 ('todos' | 'rematriculados' | 'novos' | 'novos_mini' | 'novos_outros')
+  const [originFilter, setOriginFilter] = useState<'todos' | 'rematriculados' | 'novos' | 'novos_mini' | 'novos_outros'>('todos');
+
+  // Helper para verificar se a turma é 6º Ano (conclusão/saída de ciclo escolar)
+  const isTurma6Ano = React.useCallback((turma: string = '') => {
+    const t = (turma || '').toLowerCase();
+    return t.includes('6º') || t.includes('6o') || t.includes('6 ano') || (t.includes('6') && t.includes('ano'));
+  }, []);
+
+  // Helper para verificar se a turma é Mini Maternal (turma de entrada 100% nova)
+  const isTurmaMiniMaternal = React.useCallback((turma: string = '') => {
+    const t = (turma || '').toLowerCase();
+    return t.includes('mini') && t.includes('maternal');
+  }, []);
+
+  // Listas de alunos de 2026 e 2027 com igualdade estrita
+  const students2026List = React.useMemo(
+    () => (students || []).filter((s) => s.anoLetivo === 2026),
     [students]
   );
-  const count2027 = React.useMemo(
-    () => (students || []).filter((s) => s.anoLetivo === 2027).length,
+  const students2027List = React.useMemo(
+    () => (students || []).filter((s) => s.anoLetivo === 2027),
     [students]
+  );
+
+  // Mapeamento de histórico cadastral de 2026 (Lookup por RA e Nome Normalizado)
+  const history2026Lookup = React.useMemo(() => {
+    const matriculas = new Set<string>();
+    const names = new Set<string>();
+
+    students2026List.forEach((s) => {
+      const cleanMat = s.matricula ? cleanMatriculaValue(s.matricula) : '';
+      if (cleanMat && isNumericMatricula(cleanMat)) {
+        matriculas.add(cleanMat);
+      }
+      const normName = normalizeStudentNameForMatching(s.name);
+      if (normName) {
+        names.add(normName);
+      }
+    });
+
+    return { matriculas, names };
+  }, [students2026List]);
+
+  // Função para verificar se um aluno de 2027 é rematriculado com histórico confirmado em 2026
+  const isStudentRematriculadoFrom2026 = React.useCallback(
+    (student: Student) => {
+      const cleanMat = student.matricula ? cleanMatriculaValue(student.matricula) : '';
+      if (cleanMat && isNumericMatricula(cleanMat) && history2026Lookup.matriculas.has(cleanMat)) {
+        return true;
+      }
+      const normName = normalizeStudentNameForMatching(student.name);
+      if (normName && history2026Lookup.names.has(normName)) {
+        return true;
+      }
+      return false;
+    },
+    [history2026Lookup]
+  );
+
+  // Painel de Métricas Estatísticas de Renovação/Captação (2026 -> 2027)
+  const metrics2027 = React.useMemo(() => {
+    // 1. Base 2026: Total, Formandos do 6º Ano e Base Elegível Rematriculável
+    const total2026 = students2026List.length;
+    const formandos6Ano2026 = students2026List.filter((s) => isTurma6Ano(s.turma));
+    const baseElegivel2026 = students2026List.filter((s) => !isTurma6Ano(s.turma));
+    const baseElegivel2026Count = baseElegivel2026.length;
+
+    // 2. Classificação de 2027: Rematriculados vs Novos
+    const total2027 = students2027List.length;
+    const rematriculados = students2027List.filter((s) => isStudentRematriculadoFrom2026(s));
+    const novos = students2027List.filter((s) => !isStudentRematriculadoFrom2026(s));
+
+    // Detalhamento de Novos: Mini Maternal (turma de entrada 100% nova) vs Maternal ao 6º Ano
+    const novosMiniMaternal = novos.filter((s) => isTurmaMiniMaternal(s.turma));
+    const novosMaternalAo6Ano = novos.filter((s) => !isTurmaMiniMaternal(s.turma));
+
+    // 3. Taxa de Retenção/Rematrícula: % sobre a base elegível de 2026 (excluindo 6º ano)
+    const taxaRetencaoPct =
+      baseElegivel2026Count > 0 ? (rematriculados.length / baseElegivel2026Count) * 100 : 0;
+
+    // 4. Composição Percentual de 2027: % Rematriculados | % Novos Alunos
+    const composicaoRematriculadosPct =
+      total2027 > 0 ? (rematriculados.length / total2027) * 100 : 0;
+    const composicaoNovosPct =
+      total2027 > 0 ? (novos.length / total2027) * 100 : 0;
+
+    const composicaoNovosMiniPct =
+      total2027 > 0 ? (novosMiniMaternal.length / total2027) * 100 : 0;
+    const composicaoNovosMaternalAo6Pct =
+      total2027 > 0 ? (novosMaternalAo6Ano.length / total2027) * 100 : 0;
+
+    return {
+      total2026,
+      formandos6AnoCount: formandos6Ano2026.length,
+      baseElegivel2026Count,
+      total2027,
+      rematriculadosCount: rematriculados.length,
+      novosCount: novos.length,
+      novosMiniMaternalCount: novosMiniMaternal.length,
+      novosMaternalAo6AnoCount: novosMaternalAo6Ano.length,
+      taxaRetencaoPct,
+      composicaoRematriculadosPct,
+      composicaoNovosPct,
+      composicaoNovosMiniPct,
+      composicaoNovosMaternalAo6Pct,
+    };
+  }, [students2026List, students2027List, isTurma6Ano, isTurmaMiniMaternal, isStudentRematriculadoFrom2026]);
+
+  // Contagens por Ano Letivo (Exercício 2026 vs 2027) com igualdade estrita
+  const count2026 = React.useMemo(
+    () => students2026List.length,
+    [students2026List]
+  );
+  const count2027 = React.useMemo(
+    () => students2027List.length,
+    [students2027List]
   );
 
   // Alunos pertencentes ao exercício selecionado (2026 ou 2027) com igualdade estrita
@@ -880,6 +989,27 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           return false;
         }
 
+        // Filtro Rápido de Origem (Rematriculado vs. Novo) aplicável no Exercício 2027
+        if (selectedAnoLetivo === 2027 && originFilter !== 'todos') {
+          const isRematriculado = isStudentRematriculadoFrom2026(student);
+          if (originFilter === 'rematriculados' && !isRematriculado) {
+            return false;
+          }
+          if (originFilter === 'novos' && isRematriculado) {
+            return false;
+          }
+          if (originFilter === 'novos_mini') {
+            if (isRematriculado || !isTurmaMiniMaternal(student.turma)) {
+              return false;
+            }
+          }
+          if (originFilter === 'novos_outros') {
+            if (isRematriculado || isTurmaMiniMaternal(student.turma)) {
+              return false;
+            }
+          }
+        }
+
         const studentActs = Array.isArray(student.activities) ? student.activities : [];
         const matchesTurma = selectedTurma === 'TODAS' || student.turma === selectedTurma;
         const isReforco = selectedActivity === 'Reforço';
@@ -899,7 +1029,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         if (turmaCompare !== 0) return turmaCompare;
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
-  }, [studentsForSelectedYear, selectedTurma, selectedActivity, searchTerm, statusFilter, isCoordenador, currentUser, allowedTurmas]);
+  }, [
+    studentsForSelectedYear,
+    selectedTurma,
+    selectedActivity,
+    searchTerm,
+    statusFilter,
+    selectedAnoLetivo,
+    originFilter,
+    isStudentRematriculadoFrom2026,
+    isTurmaMiniMaternal,
+    isCoordenador,
+    currentUser,
+    allowedTurmas,
+  ]);
 
   const handleQuickReactivate = async (student: Student) => {
     try {
@@ -3602,7 +3745,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
               <button
                 type="button"
-                onClick={() => setSelectedAnoLetivo(2026)}
+                onClick={() => {
+                  setSelectedAnoLetivo(2026);
+                  setOriginFilter('todos');
+                }}
                 className={`px-3.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
                   selectedAnoLetivo === 2026
                     ? 'bg-indigo-600 text-white shadow-xs'
@@ -3620,7 +3766,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setSelectedAnoLetivo(2027)}
+                onClick={() => {
+                  setSelectedAnoLetivo(2027);
+                  setOriginFilter('todos');
+                }}
                 className={`px-3.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
                   selectedAnoLetivo === 2027
                     ? 'bg-indigo-600 text-white shadow-xs'
@@ -3642,6 +3791,226 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             {selectedAnoLetivo === 2026 ? 'Alunos cadastrados no ano letivo de 2026' : 'Alunos cadastrados no ano letivo de 2027'}
           </div>
         </div>
+
+        {/* Card Resumo Estatístico de Renovação / Captação (Topo do Exercício 2027) */}
+        {selectedAnoLetivo === 2027 && (
+          <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md border border-indigo-900/50 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-800/40 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 bg-indigo-600/30 border border-indigo-500/30 rounded-xl text-indigo-300">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black tracking-tight text-white flex items-center gap-2">
+                    <span>Painel Estratégico de Renovação & Captação</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-full">
+                      Exercício 2027
+                    </span>
+                  </h3>
+                  <p className="text-xs text-indigo-200/80">
+                    Métricas consolidadas de rematrícula e atração de novos alunos para o ano letivo de 2027
+                  </p>
+                </div>
+              </div>
+
+              {/* Tag Pedagógica: 6º Ano Isento de Perda */}
+              <div className="flex items-center space-x-1.5 text-xs text-amber-200 bg-amber-950/60 border border-amber-500/30 px-3 py-1 rounded-xl">
+                <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Formandos do 6º Ano (2026):</strong> {metrics2027.formandos6AnoCount} alunos excluídos da base de perda
+                </span>
+              </div>
+            </div>
+
+            {/* Grid dos Indicadores Principais */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Indicador 1: Taxa de Retenção / Rematrícula */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-indigo-200 flex items-center gap-1.5">
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Taxa de Retenção / Rematrícula</span>
+                  </span>
+                  <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                    Base Elegível 2026
+                  </span>
+                </div>
+
+                <div className="flex items-baseline space-x-3">
+                  <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                    {metrics2027.taxaRetencaoPct.toFixed(1)}%
+                  </span>
+                  <div className="text-xs text-slate-300">
+                    <span className="font-bold text-emerald-400">{metrics2027.rematriculadosCount}</span> alunos rematriculados de{' '}
+                    <span className="font-bold text-white">{metrics2027.baseElegivel2026Count}</span> elegíveis
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-400 bg-black/20 rounded-lg p-2 border border-white/5 flex items-center justify-between">
+                  <span>Total 2026: <strong>{metrics2027.total2026}</strong></span>
+                  <span>- {metrics2027.formandos6AnoCount} formandos 6º ano</span>
+                  <span>= <strong>{metrics2027.baseElegivel2026Count}</strong> base elegível</span>
+                </div>
+              </div>
+
+              {/* Indicador 2: Composição 2027 (Rematriculados vs Novos) */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-indigo-200 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Composição do Ano Letivo 2027</span>
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-300">
+                    Total: {metrics2027.total2027} alunos
+                  </span>
+                </div>
+
+                {/* Barra Proporcional de Composição */}
+                <div className="space-y-1.5">
+                  <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden flex shadow-inner">
+                    <div
+                      style={{ width: `${metrics2027.composicaoRematriculadosPct}%` }}
+                      className="bg-emerald-500 transition-all duration-500"
+                      title={`Rematriculados: ${metrics2027.composicaoRematriculadosPct.toFixed(1)}% (${metrics2027.rematriculadosCount})`}
+                    />
+                    <div
+                      style={{ width: `${metrics2027.composicaoNovosMiniPct}%` }}
+                      className="bg-sky-400 transition-all duration-500"
+                      title={`Novos Mini Maternal: ${metrics2027.composicaoNovosMiniPct.toFixed(1)}% (${metrics2027.novosMiniMaternalCount})`}
+                    />
+                    <div
+                      style={{ width: `${metrics2027.composicaoNovosMaternalAo6Pct}%` }}
+                      className="bg-purple-500 transition-all duration-500"
+                      title={`Novos Maternal ao 6º: ${metrics2027.composicaoNovosMaternalAo6Pct.toFixed(1)}% (${metrics2027.novosMaternalAo6AnoCount})`}
+                    />
+                  </div>
+
+                  {/* Legenda Resumida */}
+                  <div className="flex flex-wrap items-center justify-between text-xs gap-1">
+                    <span className="flex items-center gap-1 text-emerald-300 font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                      <span>{metrics2027.composicaoRematriculadosPct.toFixed(1)}% Rematriculados ({metrics2027.rematriculadosCount})</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-purple-300 font-bold">
+                      <span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />
+                      <span>{metrics2027.composicaoNovosPct.toFixed(1)}% Novos Alunos ({metrics2027.novosCount})</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Detalhamento de Novos Alunos (Mini Maternal vs Maternal ao 6º) */}
+                <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-white/5">
+                  <div className="bg-sky-950/40 border border-sky-500/20 rounded-lg p-1.5 flex items-center justify-between">
+                    <span className="text-sky-300 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-sky-400" />
+                      <span>Mini Maternal (Entrada):</span>
+                    </span>
+                    <strong className="text-white font-mono">{metrics2027.novosMiniMaternalCount} ({metrics2027.composicaoNovosMiniPct.toFixed(1)}%)</strong>
+                  </div>
+
+                  <div className="bg-purple-950/40 border border-purple-500/20 rounded-lg p-1.5 flex items-center justify-between">
+                    <span className="text-purple-300 flex items-center gap-1">
+                      <UserPlus className="w-3 h-3 text-purple-400" />
+                      <span>Maternal ao 6º Ano:</span>
+                    </span>
+                    <strong className="text-white font-mono">{metrics2027.novosMaternalAo6AnoCount} ({metrics2027.composicaoNovosMaternalAo6Pct.toFixed(1)}%)</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pílulas de Filtro Rápido de Origem no Ano Letivo de 2027 */}
+        {selectedAnoLetivo === 2027 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Origem do Aluno:</span>
+              </span>
+              <div className="inline-flex flex-wrap p-1 bg-slate-100 rounded-xl border border-slate-200 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setOriginFilter('todos')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    originFilter === 'todos'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Todos ({metrics2027.total2027})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOriginFilter('rematriculados')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    originFilter === 'rematriculados'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Alunos ativos em 2027 que possuem histórico cadastral em 2026"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Rematriculados ({metrics2027.rematriculadosCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOriginFilter('novos')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    originFilter === 'novos'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Alunos ativos em 2027 sem histórico em 2026"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Novos Alunos ({metrics2027.novosCount})</span>
+                </button>
+
+                {/* Detalhamento separando Mini Maternal dos demais anos */}
+                <div className="flex items-center gap-1 pl-1 border-l border-slate-300/80">
+                  <button
+                    type="button"
+                    onClick={() => setOriginFilter('novos_mini')}
+                    className={`px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-all cursor-pointer flex items-center space-x-1 ${
+                      originFilter === 'novos_mini'
+                        ? 'bg-sky-600 text-white shadow-xs'
+                        : 'text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200'
+                    }`}
+                    title="Alunos novos na turma de entrada (Mini Maternal 100% nova)"
+                  >
+                    <Sparkles className="w-3 h-3 text-sky-500" />
+                    <span>Mini Maternal ({metrics2027.novosMiniMaternalCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOriginFilter('novos_outros')}
+                    className={`px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-all cursor-pointer flex items-center space-x-1 ${
+                      originFilter === 'novos_outros'
+                        ? 'bg-violet-600 text-white shadow-xs'
+                        : 'text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200'
+                    }`}
+                    title="Alunos novos captados do Maternal ao 6º Ano"
+                  >
+                    <span>Maternal ao 6º Ano ({metrics2027.novosMaternalAo6AnoCount})</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-[11px] font-medium text-slate-500">
+              {originFilter === 'todos' && `Exibindo base total de 2027 (${metrics2027.total2027} alunos)`}
+              {originFilter === 'rematriculados' && `Exibindo ${metrics2027.rematriculadosCount} alunos rematriculados de 2026`}
+              {originFilter === 'novos' && `Exibindo ${metrics2027.novosCount} novos alunos captados em 2027`}
+              {originFilter === 'novos_mini' && `Exibindo ${metrics2027.novosMiniMaternalCount} alunos novos do Mini Maternal (turma de entrada)`}
+              {originFilter === 'novos_outros' && `Exibindo ${metrics2027.novosMaternalAo6AnoCount} alunos novos captados do Maternal ao 6º Ano`}
+            </div>
+          </div>
+        )}
 
         {/* Banner informativo de duplicidades quando detectadas */}
         {duplicateInfoCurrentYear.totalDuplicatesCount > 0 && (
@@ -3978,6 +4347,35 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         >
                           RA: {student.matricula}
                         </span>
+                      )}
+
+                      {/* Badge de Origem 2027: Rematriculado vs Novo Aluno */}
+                      {selectedAnoLetivo === 2027 && (
+                        isStudentRematriculadoFrom2026(student) ? (
+                          <span
+                            className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                            title="Rematriculado: aluno com histórico cadastral confirmado em 2026"
+                          >
+                            <RotateCcw className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>Rematriculado</span>
+                          </span>
+                        ) : isTurmaMiniMaternal(student.turma) ? (
+                          <span
+                            className="text-[10px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                            title="Novo Aluno: ingresso na turma de entrada (Mini Maternal 100% nova)"
+                          >
+                            <Sparkles className="w-3 h-3 text-sky-600 shrink-0" />
+                            <span>Novo • Mini Maternal</span>
+                          </span>
+                        ) : (
+                          <span
+                            className="text-[10px] font-bold text-purple-800 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md flex items-center space-x-1 shadow-2xs"
+                            title="Novo Aluno: captação de vaga para turmas do Maternal ao 6º Ano"
+                          >
+                            <UserPlus className="w-3 h-3 text-purple-600 shrink-0" />
+                            <span>Novo Aluno</span>
+                          </span>
+                        )
                       )}
 
                       {/* Contract Type Badge */}
