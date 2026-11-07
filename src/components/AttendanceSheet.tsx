@@ -41,6 +41,15 @@ interface AttendanceSheetProps {
   onFinalizeCall?: (date: string) => Promise<void> | void;
 }
 
+export function normalizeActivityKey(act: string): string {
+  if (!act) return '';
+  return act
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   students,
   records,
@@ -553,32 +562,71 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   }, [students, selectedDate, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
 
   // Mapa de busca rápida integrando o estado global e o snapshot do Firestore da data selecionada
+  // com ISOLAMENTO ESTRITO POR MODALIDADE (extracurriculares nunca herdam a presença da Rotina)
   const recordMap = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
     const pool = [...(records || []), ...(dateFirestoreRecords || [])];
     pool.forEach((rec) => {
       if (rec && rec.studentId && rec.date) {
         const act = (rec.activity || (rec as any).modalidade || 'Rotina').trim();
-        // Mapeamento multi-chave com suporte para chave composta attendance/${date}_${studentId}
+        const normAct = normalizeActivityKey(act);
+
+        // Mapeamento estrito por atividade
         map.set(`${rec.studentId}_${act}_${rec.date}`, rec);
         map.set(`${rec.studentId}_${act.toLowerCase()}_${rec.date}`, rec);
-        map.set(`${rec.date}_${rec.studentId}`, rec);
-        map.set(`${rec.studentId}_${rec.date}`, rec);
+        map.set(`${rec.studentId}_${normAct}_${rec.date}`, rec);
         map.set(`${rec.date}_${rec.studentId}_${act}`, rec);
+        map.set(`${rec.date}_${rec.studentId}_${normAct}`, rec);
+
+        // Chave legada genérica (sem atividade) é vinculada EXCLUSIVAMENTE à modalidade 'Rotina'
+        if (normAct === 'rotina' || !rec.activity) {
+          map.set(`${rec.date}_${rec.studentId}`, rec);
+          map.set(`${rec.studentId}_${rec.date}`, rec);
+        }
       }
     });
     return map;
   }, [records, dateFirestoreRecords]);
 
+  // Função utilitária para recuperar com isolamento estrito o registro de uma atividade específica
+  const getRecordForActivity = useCallback(
+    (studentId: string, act: string, date: string): AttendanceRecord | undefined => {
+      const normAct = normalizeActivityKey(act);
+      // 1. Busca estrita pela modalidade específica (original, lowercase e normalizada)
+      const specificRec =
+        recordMap.get(`${studentId}_${act}_${date}`) ||
+        recordMap.get(`${studentId}_${act.toLowerCase()}_${date}`) ||
+        recordMap.get(`${studentId}_${normAct}_${date}`) ||
+        recordMap.get(`${date}_${studentId}_${act}`) ||
+        recordMap.get(`${date}_${studentId}_${normAct}`);
+
+      if (specificRec) return specificRec;
+
+      // 2. Chaves legadas genéricas são permitidas EXCLUSIVAMENTE para a modalidade 'Rotina'
+      // Modalidades extracurriculares (Balé, Natação, Futebol, Judô, etc.) NUNCA herdam chamada geral ou da Rotina
+      if (normAct === 'rotina') {
+        const legacyRec =
+          recordMap.get(`${date}_${studentId}`) ||
+          recordMap.get(`${studentId}_${date}`);
+        if (legacyRec) {
+          const recNormAct = normalizeActivityKey(legacyRec.activity || '');
+          if (!recNormAct || recNormAct === 'rotina') {
+            return legacyRec;
+          }
+        }
+      }
+
+      // Nenhuma chamada realizada para esta modalidade extracurricular: estado neutro PENDENTE
+      return undefined;
+    },
+    [recordMap]
+  );
+
   // Identifica o status atual de chamada do aluno para o filtro do Resumo do Dia
   const getStudentAttendanceStatus = useCallback(
     (student: Student): Exclude<AttendanceFilterStatus, 'TODOS'> => {
       if (selectedActivity !== 'TODAS') {
-        const rec =
-          recordMap.get(`${student.id}_${selectedActivity}_${selectedDate}`) ||
-          recordMap.get(`${student.id}_${selectedActivity.toLowerCase()}_${selectedDate}`) ||
-          recordMap.get(`${selectedDate}_${student.id}`) ||
-          recordMap.get(`${student.id}_${selectedDate}`);
+        const rec = getRecordForActivity(student.id, selectedActivity, selectedDate);
 
         if (!rec || !rec.status) return 'PENDENTE';
         const st = String(rec.status).toLowerCase().trim();
@@ -602,11 +650,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       if (uniqueActs.length === 0) return 'PENDENTE';
 
       for (const act of uniqueActs) {
-        const rec =
-          recordMap.get(`${student.id}_${act}_${selectedDate}`) ||
-          recordMap.get(`${student.id}_${act.toLowerCase()}_${selectedDate}`) ||
-          recordMap.get(`${selectedDate}_${student.id}`) ||
-          recordMap.get(`${student.id}_${selectedDate}`);
+        const rec = getRecordForActivity(student.id, act, selectedDate);
 
         if (rec?.status) {
           const st = String(rec.status).toLowerCase().trim();
@@ -618,7 +662,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       }
       return 'PENDENTE';
     },
-    [selectedActivity, selectedDate, recordMap, allowedActivityIds]
+    [selectedActivity, selectedDate, getRecordForActivity, allowedActivityIds]
   );
 
   // Calculate status statistics for current filter and date
@@ -835,11 +879,10 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
     if (target.length === 0) return false;
     return target.every((student) => {
-      const key = `${student.id}_${selectedActivity}_${selectedDate}`;
-      const rec = recordMap.get(key);
+      const rec = getRecordForActivity(student.id, selectedActivity, selectedDate);
       return rec?.status === 'presente';
     });
-  }, [filterStatus, displayedStudents, filteredStudents, selectedActivity, selectedDate, recordMap]);
+  }, [filterStatus, displayedStudents, filteredStudents, selectedActivity, selectedDate, getRecordForActivity]);
 
   const handleBatchMarkAllPresent = async () => {
     const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
@@ -1866,12 +1909,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                 const sigParts: string[] = [];
 
                 activitiesToDisplay.forEach((act) => {
-                  const recKey = `${student.id}_${act}_${selectedDate}`;
-                  const rec =
-                    recordMap.get(recKey) ||
-                    recordMap.get(`${student.id}_${act.toLowerCase()}_${selectedDate}`) ||
-                    recordMap.get(`${selectedDate}_${student.id}`) ||
-                    recordMap.get(`${student.id}_${selectedDate}`);
+                  const rec = getRecordForActivity(student.id, act, selectedDate);
                   recordsForStudent[act] = rec;
                   sigParts.push(
                     `${act}:${rec?.status || 'pendente'}:${rec?.exitTime || ''}:${rec?.equipmentMissingDetails || ''}:${rec?.observation || ''}`
@@ -1880,8 +1918,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
                 const targetReforcoAct = selectedActivity === 'TODAS' ? 'Rotina' : selectedActivity;
                 const reforcoRec =
-                  recordMap.get(`${student.id}_${targetReforcoAct}_${selectedDate}`) ||
-                  recordMap.get(`${student.id}_Reforço_${selectedDate}`);
+                  getRecordForActivity(student.id, targetReforcoAct, selectedDate) ||
+                  getRecordForActivity(student.id, 'Reforço', selectedDate);
 
                 if (isReforcoStudent) {
                   sigParts.push(`reforco:${reforcoRec?.observation || ''}`);

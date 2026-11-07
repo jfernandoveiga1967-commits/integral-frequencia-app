@@ -1408,23 +1408,76 @@ export async function deleteStudentFromFirestore(
   }
 }
 
+/**
+ * Exclui múltiplos alunos em lote diretamente no Firestore (coleções 'alunos' e 'students')
+ * e sincroniza as listas de exclusão locais para evitar re-sincronizações indesejadas de cache.
+ */
+export async function batchDeleteStudentsFromFirestore(
+  studentIds: string[]
+): Promise<number> {
+  const uniqueIds = Array.from(new Set(studentIds.map((id) => (id || '').trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return 0;
+
+  let totalDeleted = 0;
+  const BATCH_SIZE = 200;
+
+  for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+    const chunk = uniqueIds.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    chunk.forEach((id) => {
+      batch.delete(doc(db, 'alunos', id));
+      batch.delete(doc(db, 'students', id));
+    });
+
+    try {
+      await batch.commit();
+      totalDeleted += chunk.length;
+    } catch (err) {
+      console.warn('Aviso no commit do batch, executando exclusão com tolerância a falhas:', err);
+      for (const id of chunk) {
+        try {
+          await Promise.allSettled([
+            deleteDoc(doc(db, 'alunos', id)),
+            deleteDoc(doc(db, 'students', id)),
+          ]);
+          totalDeleted += 1;
+        } catch (innerErr) {
+          console.error(`Falha ao excluir individualmente aluno ${id}:`, innerErr);
+        }
+      }
+    }
+  }
+
+  // Atualiza marcas de exclusão local e limpa localStorage
+  uniqueIds.forEach((id) => {
+    markStudentAsDeleted(id);
+    removeStudentFromLocalStorage(id);
+  });
+
+  return totalDeleted;
+}
+
 export async function saveRecordToFirestore(record: AttendanceRecord): Promise<void> {
+  const act = (record.activity || 'Rotina').trim();
+  const isRotina = act === 'Rotina';
+  const specificId = record.id || `${record.studentId}_${act}_${record.date}`;
   const compositeId = `${record.date}_${record.studentId}`;
   const now = new Date();
   const horarioAlteracao = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const statusUpper = record.status ? record.status.toUpperCase() : 'PRESENTE';
 
   const payload = {
-    id: compositeId,
+    id: specificId,
     studentId: record.studentId,
     date: record.date,
     data: record.date, // Sincroniza campo 'data' para filtros where('data', '==', hoje)
     dataSelecionada: record.date,
     weekNumber: record.weekNumber,
     year: record.year,
-    activity: record.activity,
-    modalidade: record.activity,
-    tipo: (record as any).tipo || record.activity, // Sincroniza tipo ('ROTINA' / Oficina) para consultas estritas
+    activity: act,
+    modalidade: act,
+    tipo: (record as any).tipo || act, // Sincroniza tipo ('ROTINA' / Oficina) para consultas estritas
     turma: record.turma,
     status: record.status,
     statusUpper,
@@ -1441,16 +1494,25 @@ export async function saveRecordToFirestore(record: AttendanceRecord): Promise<v
 
   try {
     const batch = writeBatch(db);
-    batch.set(doc(db, 'attendance', compositeId), payload, { merge: true });
-    batch.set(doc(db, 'attendanceRecords', compositeId), payload, { merge: true });
-    if (record.id && record.id !== compositeId) {
-      batch.set(doc(db, 'attendanceRecords', record.id), { ...payload, id: record.id }, { merge: true });
+    // Grava o documento específico da modalidade em attendanceRecords
+    batch.set(doc(db, 'attendanceRecords', specificId), payload, { merge: true });
+
+    if (!isRotina) {
+      // Extracurricular: grava apenas na chave específica da modalidade, NUNCA sobrepondo a Rotina
+      batch.set(doc(db, 'attendance', specificId), payload, { merge: true });
+    } else {
+      // Rotina: grava também no documento composto diário attendance/${date}_${studentId}
+      batch.set(doc(db, 'attendance', compositeId), { ...payload, id: compositeId }, { merge: true });
+      batch.set(doc(db, 'attendanceRecords', compositeId), { ...payload, id: compositeId }, { merge: true });
     }
     await batch.commit();
 
     // Remove from outbox if it was previously queued
     removeFromAttendanceOutbox(record.id);
-    removeFromAttendanceOutbox(compositeId);
+    removeFromAttendanceOutbox(specificId);
+    if (isRotina) {
+      removeFromAttendanceOutbox(compositeId);
+    }
   } catch (error) {
     // If offline or network error, save to local outbox queue to be processed automatically on reconnect
     addToAttendanceOutbox({
@@ -1585,16 +1647,16 @@ export async function deleteAttendanceRecordsForStudentsOnDate(
 
   // 1. Gera chaves determinísticas conhecidas para garantir limpeza instantânea
   studentIds.forEach((sid) => {
-    idsToDelete.add(`${date}_${sid}`);
+    if (!activity || activity === 'TODAS' || activity === 'Rotina') {
+      idsToDelete.add(`${date}_${sid}`);
+      idsToDelete.add(`${sid}_Rotina_${date}`);
+    }
     if (!activity || activity === 'TODAS') {
       ['Rotina', 'Reforço', ...OFFICIAL_ROLL_CALL_MODALITIES].forEach((act) => {
         idsToDelete.add(`${sid}_${act}_${date}`);
       });
-    } else {
+    } else if (activity !== 'Rotina') {
       idsToDelete.add(`${sid}_${activity}_${date}`);
-      if (activity === 'Rotina') {
-        idsToDelete.add(`${sid}_Rotina_${date}`);
-      }
     }
   });
 

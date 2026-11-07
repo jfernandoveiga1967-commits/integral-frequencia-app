@@ -111,21 +111,33 @@ export async function saveAttendanceRecordToFirestore(
     createdAt: recordData.createdAt || nowIso,
   };
 
-  // Grava atômica em lote em ambas as coleções (attendance/${dataSelecionada}_${studentId} e attendanceRecords)
+  const isRotina = activity === 'Rotina';
+
+  // Grava atômica em lote em ambas as coleções
   try {
     const batch = writeBatch(db);
-    batch.set(doc(db, 'attendance', compositeId), payload, { merge: true });
-    batch.set(doc(db, 'attendanceRecords', compositeId), payload, { merge: true });
-    // Mantém também o ID legado `${studentId}_${activity}_${date}` para retrocompatibilidade total
     batch.set(doc(db, 'attendanceRecords', legacyId), { ...payload, id: legacyId }, { merge: true });
+    if (isRotina) {
+      batch.set(doc(db, 'attendance', compositeId), payload, { merge: true });
+      batch.set(doc(db, 'attendanceRecords', compositeId), payload, { merge: true });
+    } else {
+      batch.set(doc(db, 'attendance', legacyId), { ...payload, id: legacyId }, { merge: true });
+    }
     await batch.commit();
   } catch (err) {
     console.warn('Erro ao salvar no Firestore (tentando gravação individual):', err);
-    await Promise.allSettled([
-      setDoc(doc(db, 'attendance', compositeId), payload, { merge: true }),
-      setDoc(doc(db, 'attendanceRecords', compositeId), payload, { merge: true }),
-      setDoc(doc(db, 'attendanceRecords', legacyId), { ...payload, id: legacyId }, { merge: true }),
-    ]);
+    if (isRotina) {
+      await Promise.allSettled([
+        setDoc(doc(db, 'attendance', compositeId), payload, { merge: true }),
+        setDoc(doc(db, 'attendanceRecords', compositeId), payload, { merge: true }),
+        setDoc(doc(db, 'attendanceRecords', legacyId), { ...payload, id: legacyId }, { merge: true }),
+      ]);
+    } else {
+      await Promise.allSettled([
+        setDoc(doc(db, 'attendance', legacyId), { ...payload, id: legacyId }, { merge: true }),
+        setDoc(doc(db, 'attendanceRecords', legacyId), { ...payload, id: legacyId }, { merge: true }),
+      ]);
+    }
   }
 
   return {

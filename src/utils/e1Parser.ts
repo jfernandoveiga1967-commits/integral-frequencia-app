@@ -7,6 +7,8 @@
  * e alinhamento estrito de colunas (Matrícula numérica/RA x Nome da Turma Oficial).
  */
 
+import { Student, TurmaType } from '../types';
+
 export interface E1ExtractedStudent {
   matricula: string; // Exclusivamente código/RA numérico do aluno (ex: '2026123' ou 'st-178...')
   name: string;      // Nome completo higienizado do aluno
@@ -620,15 +622,12 @@ export function parseE1HtmlReport(htmlContent: string): E1ExtractedStudent[] {
         return;
       }
 
-      // Fallback de matrícula se o relatório não tiver coluna de RA
-      if (!rowMatricula) {
-        rowMatricula = `st-${Date.now()}-${results.length + 1}-${Math.random().toString(36).substring(2, 6)}`;
+      // Sanitização estrita da matrícula
+      if (rowMatricula) {
+        rowMatricula = cleanMatriculaValue(rowMatricula);
+      } else {
+        rowMatricula = '';
       }
-
-      rowMatricula = cleanMatriculaValue(
-        rowMatricula,
-        `st-${Date.now()}-${results.length + 1}`
-      );
 
       const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
       if (!exists) {
@@ -781,14 +780,11 @@ export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1Extrac
       return;
     }
 
-    if (!rowMatricula) {
-      rowMatricula = `st-${Date.now()}-${rowIndex + 1}-${Math.random().toString(36).substring(2, 6)}`;
+    if (rowMatricula) {
+      rowMatricula = cleanMatriculaValue(rowMatricula);
+    } else {
+      rowMatricula = '';
     }
-
-    rowMatricula = cleanMatriculaValue(
-      rowMatricula,
-      `st-${Date.now()}-${results.length + 1}`
-    );
 
     const exists = results.some((r) => r.name === rowName && r.turma === finalTurma);
     if (!exists) {
@@ -801,4 +797,201 @@ export function parseE1SheetRows(rows: any[][], defaultTurma?: string): E1Extrac
   });
 
   return results;
+}
+
+/**
+ * Normaliza o nome do estudante para comparação e busca insensível a acentuação e espaços.
+ */
+export function normalizeStudentNameForMatching(name: string): string {
+  if (!name) return '';
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Gera um ID de documento determinístico para o aluno no Firestore com base no Ano Letivo e no RA ou Nome.
+ * Garante que reimportações do mesmo aluno nunca gerem IDs aleatórios ou registros duplicados.
+ * Exemplos:
+ * - aluno_2027_2027123
+ * - aluno_2027_joao_pedro_silva
+ */
+export function generateDeterministicStudentId(
+  anoLetivo: number,
+  matricula?: string,
+  name?: string
+): string {
+  const targetYear = anoLetivo || 2026;
+  const cleanMat = matricula ? cleanMatriculaValue(matricula) : '';
+  const isNumericOrClean = cleanMat && isNumericMatricula(cleanMat);
+
+  if (isNumericOrClean) {
+    const rawDigits = cleanMat.replace(/^st-/, '').replace(/[^a-zA-Z0-9_-]/g, '').trim();
+    if (rawDigits.length > 0) {
+      return `aluno_${targetYear}_${rawDigits}`;
+    }
+  }
+
+  const normName = normalizeStudentNameForMatching(name || '');
+  const slug = normName.replace(/\s+/g, '_').substring(0, 45) || 'sem_nome';
+  return `aluno_${targetYear}_${slug}`;
+}
+
+/**
+ * Retorna uma chave de identidade única do aluno por Ano Letivo, priorizando RA numérico limpo.
+ */
+export function getStudentIdentityKey(student: {
+  anoLetivo?: number;
+  matricula?: string;
+  name?: string;
+}): string {
+  const year = student.anoLetivo || 2026;
+  const cleanMat = student.matricula ? cleanMatriculaValue(student.matricula) : '';
+  if (cleanMat && isNumericMatricula(cleanMat)) {
+    const rawNumber = cleanMat.replace(/^st-/, '').replace(/[^a-zA-Z0-9_-]/g, '').trim();
+    if (rawNumber) {
+      return `${year}_ra_${rawNumber}`;
+    }
+  }
+  const normName = normalizeStudentNameForMatching(student.name || '');
+  return `${year}_nom_${normName}`;
+}
+
+export interface StudentDuplicateCluster {
+  key: string;
+  canonical: Student;
+  duplicates: Student[];
+  idsToDelete: string[];
+}
+
+/**
+ * Identifica grupos de alunos duplicados para um determinado Ano Letivo (ex: 2027).
+ * Agrupa por RA numérico oficial ou Nome normalizado, selecionando o registro canônico mais completo
+ * e mapeando com precisão os IDs redundantes para remoção segura do Firestore e do armazenamento local.
+ */
+export function findDuplicateStudentGroups(
+  students: Student[],
+  targetAnoLetivo?: number
+): {
+  groups: StudentDuplicateCluster[];
+  totalDuplicatesCount: number;
+  allIdsToDelete: string[];
+} {
+  const list = targetAnoLetivo
+    ? (students || []).filter((s) => s && s.anoLetivo === targetAnoLetivo)
+    : (students || []).filter((s) => s && s.id);
+
+  // Mapeamento e agrupamento com algoritmo de clusters conexos
+  const clusters: Student[][] = [];
+
+  list.forEach((student) => {
+    const cleanMat = student.matricula ? cleanMatriculaValue(student.matricula) : '';
+    const hasNumMat = Boolean(cleanMat && isNumericMatricula(cleanMat));
+    const normName = normalizeStudentNameForMatching(student.name);
+
+    // Tenta encontrar um cluster existente que corresponda a este aluno
+    let matchingClusterIndex = -1;
+
+    for (let i = 0; i < clusters.length; i++) {
+      const cluster = clusters[i];
+      const matchInCluster = cluster.some((member) => {
+        // Se ambos possuem anoLetivo definido e são diferentes, não pertencem ao mesmo grupo
+        if (student.anoLetivo && member.anoLetivo && student.anoLetivo !== member.anoLetivo) {
+          return false;
+        }
+
+        const memCleanMat = member.matricula ? cleanMatriculaValue(member.matricula) : '';
+        const memHasNumMat = Boolean(memCleanMat && isNumericMatricula(memCleanMat));
+        const memNormName = normalizeStudentNameForMatching(member.name);
+
+        // 1. Se ambos possuem RA numérico oficial limpo
+        if (hasNumMat && memHasNumMat) {
+          return cleanMat === memCleanMat;
+        }
+
+        // 2. Se possuem o mesmo nome normalizado
+        if (normName && memNormName && normName === memNormName) {
+          // Se ambos tiverem RAs numéricos diferentes, não agrupa (são homônimos reais)
+          if (hasNumMat && memHasNumMat && cleanMat !== memCleanMat) {
+            return false;
+          }
+          return true;
+        }
+
+        return false;
+      });
+
+      if (matchInCluster) {
+        matchingClusterIndex = i;
+        break;
+      }
+    }
+
+    if (matchingClusterIndex >= 0) {
+      clusters[matchingClusterIndex].push(student);
+    } else {
+      clusters.push([student]);
+    }
+  });
+
+  const duplicateGroups: StudentDuplicateCluster[] = [];
+  const allIdsToDeleteSet = new Set<string>();
+
+  clusters.forEach((members, idx) => {
+    if (members.length <= 1) return;
+
+    // Critérios de desempate para seleção do registro canônico ("vencedor"):
+    const sorted = [...members].sort((a, b) => {
+      // 1. Prioridade: possui matrícula/RA numérico oficial
+      const aHasRa = a.matricula && isNumericMatricula(a.matricula) ? 1 : 0;
+      const bHasRa = b.matricula && isNumericMatricula(b.matricula) ? 1 : 0;
+      if (bHasRa !== aHasRa) return bHasRa - aHasRa;
+
+      // 2. Prioridade: possui bolsa / desconto configurado
+      const aBolsa = a.descontoBolsa && a.descontoBolsa > 0 ? 1 : 0;
+      const bBolsa = b.descontoBolsa && b.descontoBolsa > 0 ? 1 : 0;
+      if (bBolsa !== aBolsa) return bBolsa - aBolsa;
+
+      // 3. Prioridade: tipo de contrato customizado (avulso)
+      const aAvulso = a.tipoContrato === 'avulso' ? 1 : 0;
+      const bAvulso = b.tipoContrato === 'avulso' ? 1 : 0;
+      if (bAvulso !== aAvulso) return bAvulso - aAvulso;
+
+      // 4. Prioridade: ID determinístico padronizado (aluno_${ano}_...)
+      const aDet = a.id.startsWith('aluno_') ? 1 : 0;
+      const bDet = b.id.startsWith('aluno_') ? 1 : 0;
+      if (bDet !== aDet) return bDet - aDet;
+
+      // 5. Prioridade: possui horários de saída customizados
+      const aHor = a.horariosSaida && Object.keys(a.horariosSaida).length > 0 ? 1 : 0;
+      const bHor = b.horariosSaida && Object.keys(b.horariosSaida).length > 0 ? 1 : 0;
+      if (bHor !== aHor) return bHor - aHor;
+
+      // 6. Mais recente ou ordem alfabética estável de ID
+      return a.id.localeCompare(b.id);
+    });
+
+    const canonical = sorted[0];
+    const duplicates = sorted.slice(1);
+    const idsToDelete = duplicates.map((d) => d.id).filter((id) => id !== canonical.id);
+
+    idsToDelete.forEach((id) => allIdsToDeleteSet.add(id));
+
+    duplicateGroups.push({
+      key: `cluster_${idx}_${canonical.id}`,
+      canonical,
+      duplicates,
+      idsToDelete,
+    });
+  });
+
+  return {
+    groups: duplicateGroups,
+    totalDuplicatesCount: allIdsToDeleteSet.size,
+    allIdsToDelete: Array.from(allIdsToDeleteSet),
+  };
 }
