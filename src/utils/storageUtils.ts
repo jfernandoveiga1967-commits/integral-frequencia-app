@@ -299,6 +299,10 @@ export function normalizeStudent(
     valorPlanoBase,
     descontoBolsa,
     valorMensalidadeFinal,
+    valorModalidadesExtras: s.valorModalidadesExtras !== undefined ? s.valorModalidadesExtras : existingStudent?.valorModalidadesExtras,
+    oficinasExtras: s.oficinasExtras !== undefined ? s.oficinasExtras : existingStudent?.oficinasExtras,
+    valorOficinas: s.valorOficinas !== undefined ? s.valorOficinas : existingStudent?.valorOficinas,
+    valorExtras: s.valorExtras !== undefined ? s.valorExtras : existingStudent?.valorExtras,
     notes,
   };
 }
@@ -403,6 +407,18 @@ export function mergeStudentData(
     valorMensalidadeFinal: incomingStudent.valorMensalidadeFinal !== undefined
       ? incomingStudent.valorMensalidadeFinal
       : existingStudent.valorMensalidadeFinal,
+    valorModalidadesExtras: incomingStudent.valorModalidadesExtras !== undefined
+      ? incomingStudent.valorModalidadesExtras
+      : existingStudent.valorModalidadesExtras,
+    oficinasExtras: incomingStudent.oficinasExtras !== undefined
+      ? incomingStudent.oficinasExtras
+      : existingStudent.oficinasExtras,
+    valorOficinas: incomingStudent.valorOficinas !== undefined
+      ? incomingStudent.valorOficinas
+      : existingStudent.valorOficinas,
+    valorExtras: incomingStudent.valorExtras !== undefined
+      ? incomingStudent.valorExtras
+      : existingStudent.valorExtras,
     notes: incomingStudent.notes !== undefined ? incomingStudent.notes : existingStudent.notes,
   };
 }

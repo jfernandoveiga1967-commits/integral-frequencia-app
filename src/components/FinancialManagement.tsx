@@ -10,6 +10,7 @@ import {
   FinancialExpense,
   ExpenseCategory,
   ExpenseStatus,
+  PlanoContratualType,
   getTabelaPlanosPorAno,
 } from '../types';
 import {
@@ -18,6 +19,7 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   Clock,
   Search,
@@ -53,7 +55,6 @@ import {
 import { formatCurrencyBR } from '../utils/pontoUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import {
-  BASE_PLAN_PRICES,
   EXPENSE_CATEGORIES_INFO,
   buildDefaultFinancialProfile,
   calculateFinancialMetrics,
@@ -68,6 +69,8 @@ import {
   subscribeFinancialExpenses,
   syncExpensesFromModules,
 } from '../services/financialService';
+import { saveStudentToFirestore } from '../firebase';
+import { loadStudents, saveStudents } from '../utils/storageUtils';
 import { generateFinancialReportPDF } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
@@ -78,6 +81,7 @@ interface FinancialManagementProps {
   currentUser?: UserProfile | null;
   turmas?: string[];
   users?: UserProfile[];
+  onUpdateStudents?: (students: Student[]) => void;
 }
 
 export const FinancialManagement: React.FC<FinancialManagementProps> = ({
@@ -85,6 +89,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   currentUser = null,
   turmas = TURMAS_LIST,
   users = [],
+  onUpdateStudents,
 }) => {
   // Filtro de Exercício / Ano Letivo (2026 | 2027)
   const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
@@ -184,52 +189,106 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     };
   }, [selectedAnoLetivo]);
 
-  // 2. Consolidação de Receitas: Garante que todos os alunos cadastrados no exercício ativo possuam perfil financeiro
+  // Contagens por Ano Letivo para os seletores
+  const countStudents2026 = useMemo(
+    () => (students || []).filter((s) => s.anoLetivo === 2026).length,
+    [students]
+  );
+  const countStudents2027 = useMemo(
+    () => (students || []).filter((s) => s.anoLetivo === 2027).length,
+    [students]
+  );
+
+  // 2. Consolidação de Receitas 100% Dinâmica com os Planos Contratuais dos Alunos
   const resolvedProfiles = useMemo<StudentFinancialProfile[]>(() => {
-    const yearStudents = students.filter((s) => s.anoLetivo === selectedAnoLetivo);
+    // Isolamento estrito por ano letivo selecionado
+    const yearStudents = (students || []).filter((s) => s.anoLetivo === selectedAnoLetivo);
 
     const profileMap = new Map<string, StudentFinancialProfile>();
     financialProfiles.forEach((p) => {
-      if (p.studentId) {
+      if (p.studentId && p.anoLetivo === selectedAnoLetivo) {
         profileMap.set(p.studentId, p);
       }
     });
 
     const list: StudentFinancialProfile[] = [];
     const activeTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
+    const fallbackBase = selectedAnoLetivo === 2027 ? 1250 : 1120;
 
     yearStudents.forEach((student) => {
       const existing = profileMap.get(student.id);
-      const studentBaseVal =
-        student.valorPlanoBase !== undefined
+      const isAvulso = student.tipoContrato === 'avulso';
+      const planoContratual =
+        student.planoContratual ||
+        existing?.planoContratual ||
+        (isAvulso ? 'Diária Integral' : 'Integral Semana (18:30h)');
+      const planoInfo = activeTabela[planoContratual as keyof typeof activeTabela];
+
+      const baseVal =
+        student.valorPlanoBase !== undefined && student.valorPlanoBase > 0
           ? student.valorPlanoBase
-          : student.planoContratual
-          ? activeTabela[student.planoContratual]?.valorBase
-          : undefined;
+          : existing?.valorMensalidadeBase !== undefined && existing.valorMensalidadeBase > 0
+          ? existing.valorMensalidadeBase
+          : planoInfo?.valorBase ?? fallbackBase;
 
-      const studentFinalVal =
-        student.valorMensalidadeFinal !== undefined
+      const extras =
+        student.valorModalidadesExtras !== undefined
+          ? student.valorModalidadesExtras
+          : existing?.valorModalidadesExtras !== undefined
+          ? existing.valorModalidadesExtras
+          : student.valorOficinas !== undefined
+          ? student.valorOficinas
+          : student.oficinasExtras !== undefined
+          ? student.oficinasExtras
+          : student.valorExtras !== undefined
+          ? student.valorExtras
+          : calculateModalidadesExtrasTotal(student.activities || []);
+
+      const descontoBolsa =
+        student.descontoBolsa !== undefined
+          ? Number(student.descontoBolsa) || 0
+          : existing?.descontoBolsa !== undefined
+          ? Number(existing.descontoBolsa) || 0
+          : 0;
+
+      const finalVal =
+        extras === 0
+          ? Math.max(0, baseVal - descontoBolsa)
+          : student.valorMensalidadeFinal !== undefined && student.valorMensalidadeFinal > 0
           ? student.valorMensalidadeFinal
-          : studentBaseVal !== undefined
-          ? Math.max(0, studentBaseVal - (student.descontoBolsa || 0))
-          : undefined;
+          : existing?.valorTotalMensal !== undefined && existing.valorTotalMensal > 0
+          ? existing.valorTotalMensal
+          : Math.max(0, baseVal + extras - descontoBolsa);
 
-      if (existing) {
-        list.push({
-          ...existing,
-          studentName: student.name,
-          turma: student.turma,
-          studentStatus: student.status || 'ativo',
-          planoContratual: student.planoContratual || existing.planoContratual,
-          descontoBolsa: student.descontoBolsa !== undefined ? student.descontoBolsa : existing.descontoBolsa,
-          valorMensalidadeBase:
-            studentBaseVal !== undefined ? studentBaseVal : existing.valorMensalidadeBase,
-          valorTotalMensal: studentFinalVal !== undefined ? studentFinalVal : existing.valorTotalMensal,
-        });
-      } else {
-        const defaultProfile = buildDefaultFinancialProfile(student, selectedAnoLetivo);
-        list.push(defaultProfile);
-      }
+      const isIsento = descontoBolsa >= (baseVal + extras) && (baseVal + extras) > 0;
+      const statusPagamento = existing?.statusPagamento || (isIsento ? 'ISENTO' : 'EM_DIA');
+
+      list.push({
+        id: existing?.id || `${selectedAnoLetivo}_${student.id}`,
+        studentId: student.id,
+        studentName: student.name,
+        turma: student.turma,
+        anoLetivo: selectedAnoLetivo,
+        planoHora: isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H',
+        valorMensalidadeBase: baseVal,
+        valorModalidadesExtras: extras,
+        oficinasExtras: extras,
+        valorOficinas: extras,
+        valorExtras: extras,
+        descontoPercentual: baseVal > 0 ? Math.round((descontoBolsa / baseVal) * 100) : 0,
+        valorTotalMensal: finalVal,
+        diaVencimento: existing?.diaVencimento || 10,
+        statusPagamento,
+        mesReferencia: existing?.mesReferencia || `${selectedAnoLetivo}-08`,
+        dataUltimoPagamento: existing?.dataUltimoPagamento,
+        formaPagamentoPadrao: existing?.formaPagamentoPadrao || 'Boleto',
+        observacoes: existing?.observacoes || `Plano Contratual: ${planoContratual}`,
+        studentStatus: student.status || 'ativo',
+        planoContratual,
+        descontoBolsa,
+        updatedAt: existing?.updatedAt || new Date().toISOString(),
+        updatedBy: existing?.updatedBy || 'Sincronização Contratual Dinâmica',
+      });
     });
 
     return list.sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '', 'pt-BR'));
@@ -302,20 +361,73 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
     setIsSavingEdit(true);
     try {
-      const total = calculateValorTotalMensal(
-        editingProfile.valorMensalidadeBase,
-        editingProfile.valorModalidadesExtras,
-        editingProfile.descontoPercentual
-      );
+      const base = Number(editingProfile.valorMensalidadeBase) || 0;
+      const extras = Number(editingProfile.valorModalidadesExtras) || 0;
+      const pct = Number(editingProfile.descontoPercentual) || 0;
+      const bolsa = Number(editingProfile.descontoBolsa) || 0;
+
+      // Calcular o total mensal com rigor matemático:
+      let total = 0;
+      if (bolsa > 0) {
+        total = Math.max(0, (base + extras) - bolsa);
+      } else if (pct > 0) {
+        total = Math.max(0, calculateValorTotalMensal(base, extras, pct));
+      } else {
+        total = Math.max(0, base + extras);
+      }
+      total = Math.round(total * 100) / 100;
+
+      const isIsento = total === 0;
+      const statusPagamento: FinancialPaymentStatus = isIsento
+        ? 'ISENTO'
+        : editingProfile.statusPagamento === 'ISENTO'
+        ? 'EM_DIA'
+        : editingProfile.statusPagamento || 'EM_DIA';
 
       const updated: StudentFinancialProfile = {
         ...editingProfile,
+        valorMensalidadeBase: base,
+        valorModalidadesExtras: extras,
+        descontoPercentual: pct,
+        descontoBolsa: bolsa,
         valorTotalMensal: total,
+        statusPagamento,
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser?.name || 'Coordenação',
       };
 
       await saveFinancialProfileToFirestore(updated);
+
+      // Sincronização Bidirecional com o cadastro de Alunos (Student)
+      const targetStudent = students.find((s) => s.id === updated.studentId);
+      if (targetStudent) {
+        const updatedStudent: Student = {
+          ...targetStudent,
+          planoContratual: updated.planoContratual as PlanoContratualType,
+          valorPlanoBase: base,
+          descontoBolsa: bolsa,
+          valorMensalidadeFinal: total,
+          valorModalidadesExtras: extras,
+          oficinasExtras: extras,
+          valorOficinas: extras,
+          valorExtras: extras,
+        };
+
+        try {
+          await saveStudentToFirestore(updatedStudent);
+        } catch (studentErr) {
+          console.warn('Erro ao atualizar aluno no Firestore:', studentErr);
+        }
+
+        const allCurrentStudents = loadStudents();
+        const updatedList = allCurrentStudents.map((s) =>
+          s.id === updatedStudent.id ? updatedStudent : s
+        );
+        saveStudents(updatedList);
+        if (onUpdateStudents) {
+          onUpdateStudents(updatedList);
+        }
+      }
 
       setFinancialProfiles((prev) => {
         const idx = prev.findIndex((p) => p.studentId === updated.studentId && p.anoLetivo === updated.anoLetivo);
@@ -558,24 +670,34 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
             <button
               type="button"
               onClick={() => setSelectedAnoLetivo(2026)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedAnoLetivo === 2026
                   ? 'bg-white text-indigo-600 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Ano Letivo 2026
+              <span>Ano Letivo 2026</span>
+              <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
+                selectedAnoLetivo === 2026 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {countStudents2026}
+              </span>
             </button>
             <button
               type="button"
               onClick={() => setSelectedAnoLetivo(2027)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedAnoLetivo === 2027
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Ano Letivo 2027
+              <span>Ano Letivo 2027</span>
+              <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
+                selectedAnoLetivo === 2027 ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {countStudents2027}
+              </span>
             </button>
           </div>
 
@@ -594,11 +716,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
       {/* Painel Atualizado de Indicadores (Dashboard de Fluxo de Caixa do Programa Integral) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Receita Prevista / Confirmada */}
+        {/* Card 1: Receita Contratual Prevista Líquida (Soma dos Planos Reais dos Alunos) */}
         <div className="bg-white rounded-3xl p-5 border border-emerald-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-emerald-50/20">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-              1. Receitas do Mês
+              1. Receita Contratual Líquida
             </span>
             <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
               <ArrowUpRight className="w-4 h-4" />
@@ -606,23 +728,23 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </div>
           <div className="mt-2">
             <span className="text-2xl font-black text-emerald-700 tracking-tight">
-              {formatCurrencyBR(metrics.receitaConfirmada)}
+              {formatCurrencyBR(metrics.receitaPrevistaMensal)}
             </span>
             <span className="text-[11px] text-emerald-600 font-bold block mt-0.5">
-              Confirmada / Em Dia
+              Prevista (Soma dos Planos Ativos)
             </span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-emerald-100/70 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Prevista: <strong className="text-slate-800">{formatCurrencyBR(metrics.receitaPrevistaMensal)}</strong></span>
-            <span className="text-emerald-700 font-semibold">{metrics.totalEmDia} quitadas</span>
+            <span>Bruto: <strong className="text-slate-800">{formatCurrencyBR(metrics.faturamentoBrutoReal)}</strong></span>
+            <span className="text-purple-700 font-semibold">Bolsas: -{formatCurrencyBR(metrics.totalDescontoBolsas)}</span>
           </div>
         </div>
 
-        {/* Card 2: Total de Despesas do Mês */}
+        {/* Card 2: Total de Despesas do Mês (100% Reais) */}
         <div className="bg-white rounded-3xl p-5 border border-rose-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-rose-50/20">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
-              2. Despesas do Mês
+              2. Despesas Operacionais Reais
             </span>
             <div className="p-2 bg-rose-100 text-rose-700 rounded-xl">
               <ArrowDownRight className="w-4 h-4" />
@@ -633,7 +755,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               {formatCurrencyBR(metrics.totalDespesasMes)}
             </span>
             <span className="text-[11px] text-rose-600 font-bold block mt-0.5">
-              Custos Operacionais ({currentExpenses.length})
+              Custos Cadastrados ({currentExpenses.length}) • Sem mocks
             </span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-rose-100/70 flex items-center justify-between text-[11px] text-slate-500">
@@ -642,7 +764,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Saldo Líquido Operacional (Receitas - Despesas) */}
+        {/* Card 3: Saldo Líquido Operacional (Receita Prevista - Despesas) */}
         <div
           className={`bg-white rounded-3xl p-5 border shadow-xs relative overflow-hidden ${
             metrics.saldoLiquidoOperacional >= 0
@@ -652,7 +774,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">
-              3. Saldo Líquido
+              3. Saldo Líquido Operacional
             </span>
             <div
               className={`p-2 rounded-xl ${
@@ -681,44 +803,82 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
             </span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Receita Confirmada (-) Despesas</span>
-            <span className="text-slate-400 font-mono text-[10px]">{selectedAnoLetivo}</span>
+            <span>Receita Contratada (-) Despesas</span>
+            <span className="text-slate-400 font-mono text-[10px]">Exercício {selectedAnoLetivo}</span>
           </div>
         </div>
 
-        {/* Card 4: Taxa de Adimplência */}
-        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs relative overflow-hidden">
+        {/* Card 4: Ticket Médio por Aluno & Base Pagante */}
+        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-slate-50/50">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              4. Taxa de Adimplência
+              4. Ticket Médio & Pagantes
             </span>
-            <div className="p-2 bg-slate-100 text-slate-700 rounded-xl">
+            <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
               <Percent className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline space-x-2">
             <span className="text-2xl font-black text-slate-900 tracking-tight">
-              {metrics.taxaAdimplencia}%
+              {formatCurrencyBR(metrics.ticketMedioPorAluno)}
             </span>
             <span className="text-xs text-slate-500 font-medium">
-              dos contratos ativos
+              / aluno pagante
             </span>
           </div>
-          <div className="mt-2.5 w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-            <div
-              className={`h-2 rounded-full transition-all duration-500 ${
-                metrics.taxaAdimplencia >= 85
-                  ? 'bg-emerald-500'
-                  : metrics.taxaAdimplencia >= 70
-                  ? 'bg-amber-500'
-                  : 'bg-rose-500'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, metrics.taxaAdimplencia))}%` }}
-            />
+          <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+            <span><strong>{metrics.totalAlunosPagantes}</strong> pagantes</span>
+            <span className="text-slate-600 font-medium">{metrics.totalIsentos} isentos (bolsa 100%)</span>
           </div>
-          <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
-            <span>{metrics.totalEmDia} adimplentes</span>
-            <span className="text-rose-600 font-semibold">{metrics.totalAtrasados} em atraso</span>
+        </div>
+      </div>
+
+      {/* Painel de Auditoria e Discriminação de Receitas Contratuais Reais */}
+      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 rounded-3xl p-5 sm:p-6 text-white shadow-lg border border-indigo-800/60 relative overflow-hidden">
+        <div className="absolute right-0 top-0 bottom-0 w-80 bg-radial from-indigo-500/10 to-transparent pointer-events-none" />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-1.5 max-w-xl">
+            <div className="flex items-center space-x-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                100% Base Real de Contratos • Sem Mocks
+              </span>
+              <span className="text-xs text-slate-400 font-mono">
+                Exercício {selectedAnoLetivo}
+              </span>
+            </div>
+            <h3 className="text-lg font-black tracking-tight text-white">
+              Discriminação da Receita Contratual Prevista
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Os valores apresentados são calculados varrendo os <strong>{resolvedProfiles.length} alunos cadastrados</strong> de {selectedAnoLetivo}, somando os planos contratuais e oficinas extras individuais e deduzindo as bolsas de estudo concedidas.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs">
+            <div className="p-2.5 bg-white/5 rounded-xl">
+              <span className="text-[10px] text-slate-400 font-medium block">Faturamento Bruto</span>
+              <span className="text-sm sm:text-base font-black text-white">
+                {formatCurrencyBR(metrics.faturamentoBrutoReal)}
+              </span>
+            </div>
+            <div className="p-2.5 bg-white/5 rounded-xl">
+              <span className="text-[10px] text-purple-300 font-medium block">Bolsas Concedidas</span>
+              <span className="text-sm sm:text-base font-black text-purple-400">
+                -{formatCurrencyBR(metrics.totalDescontoBolsas)}
+              </span>
+            </div>
+            <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl">
+              <span className="text-[10px] text-emerald-300 font-medium block">Receita Líquida</span>
+              <span className="text-sm sm:text-base font-black text-emerald-400">
+                {formatCurrencyBR(metrics.receitaPrevistaMensal)}
+              </span>
+            </div>
+            <div className="p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl">
+              <span className="text-[10px] text-indigo-300 font-medium block">Ticket Médio</span>
+              <span className="text-sm sm:text-base font-black text-indigo-300">
+                {formatCurrencyBR(metrics.ticketMedioPorAluno)}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -935,7 +1095,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                           </td>
 
                           <td className="py-3 px-3 text-center whitespace-nowrap">
-                            {profile.descontoPercentual > 0 ? (
+                            {(profile.descontoBolsa && profile.descontoBolsa > 0) ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200" title={`Bolsa / Desconto de ${formatCurrencyBR(profile.descontoBolsa)}`}>
+                                -{formatCurrencyBR(profile.descontoBolsa)}
+                              </span>
+                            ) : profile.descontoPercentual > 0 ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 {profile.descontoPercentual}% OFF
                               </span>
@@ -1577,178 +1741,284 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Plano de Horas Contratual:
-                </label>
-                <select
-                  value={editingProfile.planoHora}
-                  onChange={(e) => {
-                    const newPlano = e.target.value as FinancialPlanHour;
-                    const suggestedBase = BASE_PLAN_PRICES[newPlano] || editingProfile.valorMensalidadeBase;
-                    setEditingProfile({
-                      ...editingProfile,
-                      planoHora: newPlano,
-                      valorMensalidadeBase: suggestedBase,
-                    });
-                  }}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="PARCIAL_4H">Parcial (4 Horas) — Sugestão: R$ 1.150,00</option>
-                  <option value="INTEGRAL_8H">Integral (8 Horas) — Sugestão: R$ 1.850,00</option>
-                  <option value="EXTENDIDO_12H">Estendido (12 Horas) — Sugestão: R$ 2.450,00</option>
-                  <option value="CUSTOMIZADO">Personalizado / Customizado</option>
-                </select>
-              </div>
+            {(() => {
+              const modalAnoLetivo = editingProfile.anoLetivo || selectedAnoLetivo;
+              const tabelaPlanosModal = getTabelaPlanosPorAno(modalAnoLetivo);
+              const currentSelectedPlano = (editingProfile.planoContratual as PlanoContratualType) ||
+                (editingProfile.planoHora === 'PARCIAL_4H' ? 'Diária Integral' : 'Integral Semana (18:30h)');
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Mensalidade Base (R$):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={editingProfile.valorMensalidadeBase}
-                    onChange={(e) =>
-                      setEditingProfile({
-                        ...editingProfile,
-                        valorMensalidadeBase: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+              const base = Number(editingProfile.valorMensalidadeBase) || 0;
+              const extras = Number(editingProfile.valorModalidadesExtras) || 0;
+              const pct = Number(editingProfile.descontoPercentual) || 0;
+              const bolsa = Number(editingProfile.descontoBolsa) || 0;
+
+              let currentCalculatedTotal = 0;
+              if (bolsa > 0) {
+                currentCalculatedTotal = Math.max(0, (base + extras) - bolsa);
+              } else if (pct > 0) {
+                currentCalculatedTotal = Math.max(0, calculateValorTotalMensal(base, extras, pct));
+              } else {
+                currentCalculatedTotal = Math.max(0, base + extras);
+              }
+              currentCalculatedTotal = Math.round(currentCalculatedTotal * 100) / 100;
+
+              return (
+                <div className="p-5 overflow-y-auto space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Plano de Horas Contratual (Tabela Oficial {modalAnoLetivo}):
+                      </label>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Exercício {modalAnoLetivo}
+                      </span>
+                    </div>
+                    <select
+                      value={currentSelectedPlano}
+                      onChange={(e) => {
+                        const newPlano = e.target.value as PlanoContratualType;
+                        const planInfo = tabelaPlanosModal[newPlano];
+                        const newBase = newPlano === 'Personalizado'
+                          ? editingProfile.valorMensalidadeBase
+                          : (planInfo?.valorBase ?? editingProfile.valorMensalidadeBase);
+                        const newPlanoHora: FinancialPlanHour =
+                          newPlano === 'Diária Integral' ? 'PARCIAL_4H' :
+                          newPlano === 'Personalizado' ? 'CUSTOMIZADO' : 'INTEGRAL_8H';
+
+                        let newTot = 0;
+                        if (bolsa > 0) {
+                          newTot = Math.max(0, (newBase + extras) - bolsa);
+                        } else if (pct > 0) {
+                          newTot = Math.max(0, calculateValorTotalMensal(newBase, extras, pct));
+                        } else {
+                          newTot = Math.max(0, newBase + extras);
+                        }
+
+                        setEditingProfile({
+                          ...editingProfile,
+                          planoContratual: newPlano,
+                          planoHora: newPlanoHora,
+                          valorMensalidadeBase: newBase,
+                          valorTotalMensal: Math.round(newTot * 100) / 100,
+                        });
+                      }}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {Object.entries(tabelaPlanosModal).map(([nomePlano, info]) => (
+                        <option key={nomePlano} value={nomePlano}>
+                          {nomePlano === 'Personalizado'
+                            ? 'Personalizado / Valor Negociado'
+                            : `${nomePlano} — ${formatCurrencyBR(info.valorBase)}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Mensalidade Base (R$):
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editingProfile.valorMensalidadeBase}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          let newTot = 0;
+                          if (bolsa > 0) {
+                            newTot = Math.max(0, (val + extras) - bolsa);
+                          } else if (pct > 0) {
+                            newTot = Math.max(0, calculateValorTotalMensal(val, extras, pct));
+                          } else {
+                            newTot = Math.max(0, val + extras);
+                          }
+                          setEditingProfile({
+                            ...editingProfile,
+                            valorMensalidadeBase: val,
+                            valorTotalMensal: Math.round(newTot * 100) / 100,
+                          });
+                        }}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Oficinas Extras (R$):
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editingProfile.valorModalidadesExtras}
+                        onChange={(e) => {
+                          const valExtras = parseFloat(e.target.value) || 0;
+                          let newTot = 0;
+                          if (bolsa > 0) {
+                            newTot = Math.max(0, (base + valExtras) - bolsa);
+                          } else if (pct > 0) {
+                            newTot = Math.max(0, calculateValorTotalMensal(base, valExtras, pct));
+                          } else {
+                            newTot = Math.max(0, base + valExtras);
+                          }
+                          setEditingProfile({
+                            ...editingProfile,
+                            valorModalidadesExtras: valExtras,
+                            valorTotalMensal: Math.round(newTot * 100) / 100,
+                          });
+                        }}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Bolsa / Desconto em R$:
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editingProfile.descontoBolsa ?? 0}
+                        onChange={(e) => {
+                          const valBolsa = Math.max(0, parseFloat(e.target.value) || 0);
+                          const subtotal = base + extras;
+                          const calculatedPct = subtotal > 0 ? Math.min(100, Math.round((valBolsa / subtotal) * 100)) : 0;
+                          const newTot = Math.max(0, subtotal - valBolsa);
+                          setEditingProfile({
+                            ...editingProfile,
+                            descontoBolsa: valBolsa,
+                            descontoPercentual: calculatedPct,
+                            valorTotalMensal: Math.round(newTot * 100) / 100,
+                          });
+                        }}
+                        placeholder="R$ 0,00"
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Desconto Concedido (%):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={editingProfile.descontoPercentual}
+                        onChange={(e) => {
+                          const valPct = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                          const subtotal = base + extras;
+                          const calculatedBolsa = Math.round(((subtotal * valPct) / 100) * 100) / 100;
+                          const newTot = Math.max(0, subtotal - calculatedBolsa);
+                          setEditingProfile({
+                            ...editingProfile,
+                            descontoPercentual: valPct,
+                            descontoBolsa: calculatedBolsa,
+                            valorTotalMensal: Math.round(newTot * 100) / 100,
+                          });
+                        }}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Dia de Vencimento:
+                      </label>
+                      <select
+                        value={editingProfile.diaVencimento}
+                        onChange={(e) =>
+                          setEditingProfile({
+                            ...editingProfile,
+                            diaVencimento: parseInt(e.target.value) || 10,
+                          })
+                        }
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value={5}>Dia 05 de cada mês</option>
+                        <option value={10}>Dia 10 de cada mês (Padrão)</option>
+                        <option value={15}>Dia 15 de cada mês</option>
+                        <option value={20}>Dia 20 de cada mês</option>
+                        <option value={25}>Dia 25 de cada mês</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Forma de Cobrança / Pagamento:
+                      </label>
+                      <select
+                        value={editingProfile.formaPagamentoPadrao || 'Boleto'}
+                        onChange={(e) =>
+                          setEditingProfile({
+                            ...editingProfile,
+                            formaPagamentoPadrao: e.target.value,
+                          })
+                        }
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="Boleto">Boleto Bancário</option>
+                        <option value="PIX">Chave PIX / QR Code</option>
+                        <option value="Cartão">Cartão de Crédito Recorrente</option>
+                        <option value="Transferência">Transferência / Débito em Conta</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-900 text-white rounded-2xl flex items-center justify-between shadow-inner">
+                    <div>
+                      <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block">
+                        Valor Total Mensal Calculado ({modalAnoLetivo})
+                      </span>
+                      <span className="text-xl font-black text-emerald-400">
+                        {formatCurrencyBR(currentCalculatedTotal)}
+                      </span>
+                    </div>
+                    <div className="text-right text-[11px] text-slate-300 space-y-0.5">
+                      <p>
+                        Base: <span className="font-semibold text-white">{formatCurrencyBR(base)}</span>
+                      </p>
+                      <p>
+                        Extras: <span className="font-semibold text-white">+{formatCurrencyBR(extras)}</span>
+                      </p>
+                      {bolsa > 0 ? (
+                        <p className="text-emerald-300 font-bold">
+                          Bolsa/Desc: -{formatCurrencyBR(bolsa)} ({pct}%)
+                        </p>
+                      ) : pct > 0 ? (
+                        <p className="text-emerald-300 font-bold">Desc: -{pct}%</p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Observações Financeiras / Condições Especiais:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={editingProfile.observacoes || ''}
+                      onChange={(e) =>
+                        setEditingProfile({
+                          ...editingProfile,
+                          observacoes: e.target.value,
+                        })
+                      }
+                      placeholder="Ex: Irmãos matriculados no colégio, convênio corporativo, etc."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Oficinas Extras (R$):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={editingProfile.valorModalidadesExtras}
-                    onChange={(e) =>
-                      setEditingProfile({
-                        ...editingProfile,
-                        valorModalidadesExtras: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Desconto Concedido (%):
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={editingProfile.descontoPercentual}
-                    onChange={(e) =>
-                      setEditingProfile({
-                        ...editingProfile,
-                        descontoPercentual: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)),
-                      })
-                    }
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Dia de Vencimento:
-                  </label>
-                  <select
-                    value={editingProfile.diaVencimento}
-                    onChange={(e) =>
-                      setEditingProfile({
-                        ...editingProfile,
-                        diaVencimento: parseInt(e.target.value) || 10,
-                      })
-                    }
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value={5}>Dia 05 de cada mês</option>
-                    <option value={10}>Dia 10 de cada mês (Padrão)</option>
-                    <option value={15}>Dia 15 de cada mês</option>
-                    <option value={20}>Dia 20 de cada mês</option>
-                    <option value={25}>Dia 25 de cada mês</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Forma de Cobrança / Pagamento:
-                </label>
-                <select
-                  value={editingProfile.formaPagamentoPadrao || 'Boleto'}
-                  onChange={(e) =>
-                    setEditingProfile({
-                      ...editingProfile,
-                      formaPagamentoPadrao: e.target.value,
-                    })
-                  }
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="Boleto">Boleto Bancário</option>
-                  <option value="PIX">Chave PIX / QR Code</option>
-                  <option value="Cartão">Cartão de Crédito Recorrente</option>
-                  <option value="Transferência">Transferência / Débito em Conta</option>
-                </select>
-              </div>
-
-              <div className="p-4 bg-slate-900 text-white rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block">
-                    Valor Total Mensal Calculado
-                  </span>
-                  <span className="text-xl font-black text-emerald-400">
-                    {formatCurrencyBR(
-                      calculateValorTotalMensal(
-                        editingProfile.valorMensalidadeBase,
-                        editingProfile.valorModalidadesExtras,
-                        editingProfile.descontoPercentual
-                      )
-                    )}
-                  </span>
-                </div>
-                <div className="text-right text-[11px] text-slate-300">
-                  <p>Base: {formatCurrencyBR(editingProfile.valorMensalidadeBase)}</p>
-                  <p>Extras: +{formatCurrencyBR(editingProfile.valorModalidadesExtras)}</p>
-                  {editingProfile.descontoPercentual > 0 && (
-                    <p className="text-emerald-300">Desc: -{editingProfile.descontoPercentual}%</p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Observações Financeiras / Condições Especiais:
-                </label>
-                <textarea
-                  rows={2}
-                  value={editingProfile.observacoes || ''}
-                  onChange={(e) =>
-                    setEditingProfile({
-                      ...editingProfile,
-                      observacoes: e.target.value,
-                    })
-                  }
-                  placeholder="Ex: Irmãos matriculados no colégio, convênio corporativo, etc."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-            </div>
+              );
+            })()}
 
             <div className="border-t border-slate-100 p-4 bg-white flex justify-end space-x-2 shrink-0">
               <button

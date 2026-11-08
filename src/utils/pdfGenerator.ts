@@ -6280,23 +6280,23 @@ export function generateFinancialReportPDF({
   const cardWidth = (contentWidth - 9) / 4; // ~65mm cada
   const cardHeight = 17;
 
-  // Card 1: Receita Confirmada / Prevista
+  // Card 1: Receita Contratual Líquida / Faturamento Bruto
   doc.setFillColor(240, 253, 244);
   doc.setDrawColor(187, 247, 208);
   doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(21, 128, 61);
-  doc.text('RECEITA CONFIRMADA (EM DIA)', leftX + 4, startY + 4.8);
+  doc.text('RECEITA CONTRATUAL LÍQUIDA', leftX + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(21, 128, 61);
-  doc.text(formatCurrencyBR(metrics.receitaConfirmada), leftX + 4, startY + 10.5);
+  doc.text(formatCurrencyBR(metrics.receitaPrevistaMensal), leftX + 4, startY + 10.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.0);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Prevista: ${formatCurrencyBR(metrics.receitaPrevistaMensal)}`, leftX + 4, startY + 15);
+  doc.text(`Bruto: ${formatCurrencyBR(metrics.faturamentoBrutoReal)} | Bolsas: -${formatCurrencyBR(metrics.totalDescontoBolsas)}`, leftX + 4, startY + 15);
 
-  // Card 2: Total de Despesas do Mês
+  // Card 2: Total de Despesas do Mês (100% Reais)
   const card2X = leftX + cardWidth + 3;
   doc.setFillColor(254, 242, 242);
   doc.setDrawColor(254, 202, 202);
@@ -6304,7 +6304,7 @@ export function generateFinancialReportPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(185, 28, 28);
-  doc.text('TOTAL DE DESPESAS DO MÊS', card2X + 4, startY + 4.8);
+  doc.text('DESPESAS OPERACIONAIS REAIS', card2X + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(185, 28, 28);
   doc.text(formatCurrencyBR(metrics.totalDespesasMes), card2X + 4, startY + 10.5);
@@ -6336,7 +6336,7 @@ export function generateFinancialReportPDF({
   doc.setTextColor(isPositiveBalance ? 22 : 220, isPositiveBalance ? 101 : 38, isPositiveBalance ? 52 : 38);
   doc.text(isPositiveBalance ? 'Superávit Operacional do Período' : 'Atenção: Déficit no Período', card3X + 4, startY + 15);
 
-  // Card 4: Taxa de Adimplência
+  // Card 4: Ticket Médio & Pagantes
   const card4X = card3X + cardWidth + 3;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
@@ -6344,14 +6344,14 @@ export function generateFinancialReportPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(71, 85, 105);
-  doc.text('TAXA DE ADIMPLÊNCIA', card4X + 4, startY + 4.8);
+  doc.text('TICKET MÉDIO / PAGANTES', card4X + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(15, 23, 42);
-  doc.text(`${metrics.taxaAdimplencia}%`, card4X + 4, startY + 10.5);
+  doc.text(formatCurrencyBR(metrics.ticketMedioPorAluno), card4X + 4, startY + 10.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.0);
   doc.setTextColor(71, 85, 105);
-  doc.text(`${metrics.totalEmDia} adimplentes (${metrics.totalAtrasados} em atraso)`, card4X + 4, startY + 15);
+  doc.text(`${metrics.totalAlunosPagantes} pagantes (${metrics.totalIsentos} isentos/bolsa 100%)`, card4X + 4, startY + 15);
 
   startY += cardHeight + 4;
 
@@ -6367,7 +6367,7 @@ export function generateFinancialReportPDF({
 
   // Tabela Analítica de Contratos dos Alunos
   const tableData = profiles.map((p, idx) => {
-    const planoLabel =
+    const fallbackPlanoLabel =
       p.planoHora === 'INTEGRAL_8H'
         ? 'Integral (8h)'
         : p.planoHora === 'PARCIAL_4H'
@@ -6375,6 +6375,8 @@ export function generateFinancialReportPDF({
         : p.planoHora === 'EXTENDIDO_12H'
         ? 'Estendido (12h)'
         : 'Personalizado';
+
+    const planoLabel = p.planoContratual || fallbackPlanoLabel;
 
     const statusLabel =
       p.statusPagamento === 'EM_DIA'
@@ -6385,6 +6387,13 @@ export function generateFinancialReportPDF({
         ? 'ISENTO'
         : 'PENDENTE';
 
+    const descontoStr =
+      p.descontoBolsa && p.descontoBolsa > 0
+        ? `-${formatCurrencyBR(p.descontoBolsa)}`
+        : p.descontoPercentual > 0
+        ? `${p.descontoPercentual}%`
+        : '-';
+
     return [
       String(idx + 1).padStart(2, '0'),
       p.studentName || 'Aluno',
@@ -6392,7 +6401,7 @@ export function generateFinancialReportPDF({
       planoLabel,
       formatCurrencyBR(p.valorMensalidadeBase),
       formatCurrencyBR(p.valorModalidadesExtras),
-      p.descontoPercentual > 0 ? `${p.descontoPercentual}%` : '-',
+      descontoStr,
       formatCurrencyBR(p.valorTotalMensal),
       `Dia ${String(p.diaVencimento).padStart(2, '0')}`,
       statusLabel,

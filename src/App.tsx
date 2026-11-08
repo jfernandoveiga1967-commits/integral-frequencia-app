@@ -2302,6 +2302,7 @@ export default function App() {
             currentUser={currentUser}
             turmas={turmas}
             users={users}
+            onUpdateStudents={(updated) => setStudents(updated)}
           />
         )}
 

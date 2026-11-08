@@ -201,6 +201,10 @@ export interface Student {
   valorPlanoBase?: number; // Valor de tabela oficial do plano
   descontoBolsa?: number; // Valor em R$ de desconto concedido/bolsa
   valorMensalidadeFinal?: number; // Cálculo automático: Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0))
+  valorModalidadesExtras?: number; // Valor financeiro incremental de oficinas extras (ex: 0 quando zerado)
+  oficinasExtras?: number; // Alias de compatibilidade
+  valorOficinas?: number; // Alias de compatibilidade
+  valorExtras?: number; // Alias de compatibilidade
 }
 
 export interface AttendanceRecord {
@@ -308,6 +312,9 @@ export interface StudentFinancialProfile {
   planoHora: FinancialPlanHour;
   valorMensalidadeBase: number;
   valorModalidadesExtras: number; // soma dos valores das oficinas extras (Natação, Balé, Judô, etc.)
+  oficinasExtras?: number; // Alias de compatibilidade
+  valorOficinas?: number; // Alias de compatibilidade
+  valorExtras?: number; // Alias de compatibilidade
   descontoPercentual: number;
   valorTotalMensal: number; // (base + extras) * (1 - desconto/100)
   diaVencimento: number; // ex: 5 ou 10
@@ -338,6 +345,11 @@ export interface FinancialMetricSummary {
   totalDespesasPagas: number;
   totalDespesasPendentes: number;
   saldoLiquidoOperacional: number; // Receitas (Confirmadas) - Total Despesas
+  // Métricas Dinâmicas dos Planos Contratuais dos Alunos
+  faturamentoBrutoReal: number; // Soma dos planos base + extras sem desconto
+  totalDescontoBolsas: number; // Soma de bolsas e descontos concedidos
+  totalAlunosPagantes: number; // Alunos pagantes ativos (valor liquido > 0)
+  ticketMedioPorAluno: number; // Receita líquida / total de alunos pagantes
 }
 
 export type ExpenseCategory =

@@ -1280,6 +1280,10 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       valorPlanoBase: normalized.valorPlanoBase !== undefined ? normalized.valorPlanoBase : null,
       descontoBolsa: normalized.descontoBolsa !== undefined ? normalized.descontoBolsa : 0,
       valorMensalidadeFinal: normalized.valorMensalidadeFinal !== undefined ? normalized.valorMensalidadeFinal : null,
+      valorModalidadesExtras: normalized.valorModalidadesExtras !== undefined ? normalized.valorModalidadesExtras : null,
+      oficinasExtras: normalized.oficinasExtras !== undefined ? normalized.oficinasExtras : null,
+      valorOficinas: normalized.valorOficinas !== undefined ? normalized.valorOficinas : null,
+      valorExtras: normalized.valorExtras !== undefined ? normalized.valorExtras : null,
       notes: normalized.notes || '',
       updatedAt: new Date().toISOString(),
     };
