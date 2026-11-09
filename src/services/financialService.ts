@@ -23,7 +23,10 @@ import {
   PLANOS_CONTRATUAIS_TABELA,
   getTabelaPlanosPorAno,
 } from '../types';
-import { loadStudents, saveStudents } from '../utils/storageUtils';
+import { loadStudents, saveStudents, loadPontoClosings } from '../utils/storageUtils';
+import { loadMealConfig } from '../utils/mealFinanceUtils';
+import { isRoutineActivity } from '../utils/frequenciaUtils';
+import { formatCurrencyBR } from '../utils/pontoUtils';
 import { broadcastSyncEvent } from './syncService';
 
 const FINANCIAL_COLLECTION = 'studentFinancialProfiles';
@@ -66,8 +69,8 @@ export const EXPENSE_CATEGORIES_INFO: Record<
   { label: string; shortLabel: string; bgClass: string; textClass: string; borderClass: string }
 > = {
   FOLHA_PAGAMENTO: {
-    label: 'Folha de Pagamento & Encargos',
-    shortLabel: 'Folha / Salários',
+    label: 'Folha de Pagamento & Equipe (Livro Ponto)',
+    shortLabel: 'Folha / Ponto',
     bgClass: 'bg-indigo-50',
     textClass: 'text-indigo-700',
     borderClass: 'border-indigo-200',
@@ -87,8 +90,8 @@ export const EXPENSE_CATEGORIES_INFO: Record<
     borderClass: 'border-orange-200',
   },
   ALIMENTACAO_HORTIFRUTI: {
-    label: 'Alimentação, Cantina & Hortifruti',
-    shortLabel: 'Alimentação',
+    label: 'Alimentação Escolar & Insumos (Refeições)',
+    shortLabel: 'Alimentação / Refeições',
     bgClass: 'bg-emerald-50',
     textClass: 'text-emerald-700',
     borderClass: 'border-emerald-200',
@@ -495,10 +498,14 @@ export function loadLocalFinancialExpenses(): FinancialExpense[] {
     const raw = localStorage.getItem(LOCAL_EXPENSES_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Purga eventuais despesas mock antigas com IDs estáticos
+    // Purga completa de quaisquer despesas mock antigas com IDs estáticos ou dados de teste
     const cleaned = parsed.filter(
-      (e) => e && !['exp_2026_materiais_pedag', 'exp_2026_manutencao_higiene'].includes(e.id)
+      (e) =>
+        e &&
+        !['exp_2026_materiais_pedag', 'exp_2026_manutencao_higiene', 'exp_2026_oficinas_natacao', 'exp_2026_oficinas_artes', 'exp_2027_oficinas_natacao', 'exp_2027_oficinas_artes'].includes(e.id) &&
+        !e.id?.includes('mock') &&
+        !e.descricao?.toLowerCase().includes('mock') &&
+        !e.descricao?.toLowerCase().includes('exemplo')
     );
     return cleaned;
   } catch (e) {
@@ -700,20 +707,34 @@ export function calculateFinancialMetrics(
       ? 100
       : 0;
 
-  // Totalizadores de Despesas Reais
+  // Totalizadores de Despesas Reais e DRE
   let totalDespesasMes = 0;
   let totalDespesasPagas = 0;
   let totalDespesasPendentes = 0;
+  let custoFolhaReal = 0;
+  let custoAlimentacaoReal = 0;
 
   expenses.forEach((exp) => {
     const val = Number(exp.valor) || 0;
     totalDespesasMes += val;
+    if (exp.categoria === 'FOLHA_PAGAMENTO' || exp.origemModulo === 'FOLHA_PONTO') {
+      custoFolhaReal += val;
+    } else if (exp.categoria === 'ALIMENTACAO_HORTIFRUTI' || exp.origemModulo === 'CARDAPIO_REFEICOES') {
+      custoAlimentacaoReal += val;
+    }
     if (exp.status === 'PAGO') {
       totalDespesasPagas += val;
     } else {
       totalDespesasPendentes += val;
     }
   });
+
+  const totalCustosOperacionaisReais = Math.round((custoFolhaReal + custoAlimentacaoReal) * 100) / 100;
+  const resultadoOperacionalLiquidoReal = Math.round((receitaPrevistaMensal - totalCustosOperacionaisReais) * 100) / 100;
+  const margemOperacionalLiquida =
+    receitaPrevistaMensal > 0
+      ? Math.round((resultadoOperacionalLiquidoReal / receitaPrevistaMensal) * 1000) / 10
+      : 0;
 
   // Saldo Líquido Operacional: Receita Confirmada - Total de Despesas do Mês
   const saldoLiquidoOperacional = Math.round((receitaConfirmada - totalDespesasMes) * 100) / 100;
@@ -736,6 +757,11 @@ export function calculateFinancialMetrics(
     totalDescontoBolsas: Math.round(totalDescontoBolsas * 100) / 100,
     totalAlunosPagantes,
     ticketMedioPorAluno,
+    custoFolhaReal: Math.round(custoFolhaReal * 100) / 100,
+    custoAlimentacaoReal: Math.round(custoAlimentacaoReal * 100) / 100,
+    totalCustosOperacionaisReais,
+    resultadoOperacionalLiquidoReal,
+    margemOperacionalLiquida,
   };
 }
 
@@ -762,10 +788,9 @@ export function saveLastExpenseSyncTime(timestamp: string): void {
 }
 
 /**
- * Calcula as despesas operacionais automáticas a partir dos dados consolidados dos módulos:
- * 1. Folha de Pagamento (Livro Ponto / Equipe Ativa de Monitoria & Docência)
- * 2. Refeições e Lanches (Cardápio e Alimentação Auditada pela Nutricionista)
- * 3. Oficinas Especialistas Terceirizadas (Natação & Especialistas Credenciados)
+ * Calcula as despesas operacionais automáticas a partir das DUAS fontes reais:
+ * 1. Folha de Pagamento & Equipe (Módulo Livro Ponto)
+ * 2. Alimentação Escolar & Insumos (Módulo Cardápio & Refeições)
  */
 export function calculateModuleExpenses(
   anoLetivo: number,
@@ -776,74 +801,91 @@ export function calculateModuleExpenses(
   const activeStudents = students.filter(
     (s) => s.anoLetivo === anoLetivo && s.status !== 'inativo' && s.status !== 'cancelado'
   );
-  const totalAlunos = activeStudents.length;
 
-  // 1. Folha de Pagamento das Monitoras/ADIs e Docentes
+  // 1. Folha de Pagamento das Monitoras/ADIs e Docentes (Módulo Livro Ponto)
   const activeStaff = (users || []).filter(
     (u) =>
       u.status !== 'DESLIGADO' &&
-      !['admin', 'coordenador'].includes(String(u.role).toLowerCase())
+      u.status !== 'INATIVO' &&
+      !['admin'].includes(String(u.role).toLowerCase()) &&
+      !(String(u.role).toLowerCase() === 'coordenador' && (Number(u.baseSalary) || 0) === 0)
   );
-  const staffCount = activeStaff.length;
 
-  const totalFolha = activeStaff.reduce((sum, u) => {
-    const base = Number(u.baseSalary) || 0;
-    const ajuda = Number(u.ajudaDeCusto) || 0;
-    return sum + base + ajuda;
-  }, 0);
+  const pontoClosings = loadPontoClosings();
 
-  // 2. Refeições e Lanches (Alimentação e Hortifruti)
-  // Alunos matriculados × 22 dias letivos no mês × R$ 6.00 (lanches saudáveis e frutas frescas)
-  const diasLetivosMes = 22;
-  const custoUnitarioDiarioAlimentacao = 6.0;
-  const totalAlimentacao =
-    totalAlunos > 0
-      ? Math.round(totalAlunos * diasLetivosMes * custoUnitarioDiarioAlimentacao * 100) / 100
-      : 0;
+  let totalFolha = 0;
+  let staffCount = 0;
 
-  // 3. Oficinas Especialistas Terceirizadas
-  // 3a. Natação (Academia Aquática Fit + Transporte Escolar Autorizado)
-  const alunosNatacao = activeStudents.filter(
+  activeStaff.forEach((u) => {
+    // Verifica se há fechamento de ponto consolidado para o colaborador no ano
+    const userClosing = pontoClosings.find((c) => c.userId === u.id && c.year === anoLetivo);
+
+    if (userClosing && userClosing.netTotal > 0) {
+      totalFolha += Number(userClosing.netTotal) || 0;
+      staffCount++;
+    } else {
+      const base = Number(u.baseSalary) || Number((u as any).bancaContratual) || 1200;
+      const ajuda = Number(u.ajudaDeCusto) || Number((u as any).ajudaCusto) || 150;
+      const adicionais = Number((u as any).adicionais) || Number((u as any).horasExtras) || 0;
+
+      let totalColaborador = base + ajuda + adicionais;
+      if (u.regimeTrabalho === 'professor_horista') {
+        const aulas = u.tetoSemanalAulas ? u.tetoSemanalAulas * 4.5 : 8 * 4.5;
+        const salarioAulas = aulas * (u.valorHoraAula || 31.49);
+        const horaAtividade = salarioAulas * 0.05;
+        const dsr = (salarioAulas + horaAtividade) / 6;
+        totalColaborador = salarioAulas + horaAtividade + dsr + ajuda + adicionais;
+      }
+
+      if (totalColaborador > 0) {
+        totalFolha += Math.round(totalColaborador * 100) / 100;
+        staffCount++;
+      }
+    }
+  });
+
+  // 2. Refeições e Lanches (Módulo Cardápio & Refeições)
+  // Alunos que frequentam a Rotina no mês
+  const rotinaStudents = activeStudents.filter(
     (s) =>
-      (s.activities || []).some((m) => m.toLowerCase().includes('nata')) ||
-      (s.modalidadesEspeciais || []).some((m) => m.toLowerCase().includes('nata'))
-  ).length;
-  // Repasse de R$ 140,00 por aluno para a infraestrutura aquática + vans credenciadas
-  const totalNatacao = Math.round(alunosNatacao * 140.0 * 100) / 100;
+      !s.activities ||
+      s.activities.length === 0 ||
+      s.activities.some((a) => isRoutineActivity(a) || a.toLowerCase().includes('rotina')) ||
+      s.tipoContrato !== 'avulso'
+  );
+  const totalAlunosRotina = rotinaStudents.length;
 
-  // 3b. Especialistas (Judô, Balé, Flauta, Futebol)
-  const alunosEspecialistas = activeStudents.filter((s) => {
-    const list = [...(s.activities || []), ...(s.modalidadesEspeciais || [])];
-    return list.some((m) => {
-      const l = m.toLowerCase();
-      return (
-        l.includes('jud') ||
-        l.includes('bal') ||
-        l.includes('flaut') ||
-        l.includes('fute') ||
-        l.includes('músic')
-      );
-    });
-  }).length;
-  // Repasse de R$ 80,00 por aluno para os instrutores especialistas
-  const totalEspecialistas = Math.round(alunosEspecialistas * 80.0 * 100) / 100;
+  // Custo diário por refeição registrado no módulo Cardápio/Refeições
+  const mealConfig =
+    loadMealConfig(`${anoLetivo}-08`) ||
+    loadMealConfig(`${anoLetivo}-09`) ||
+    loadMealConfig(`${anoLetivo}-03`);
+  const custoDiarioPorRefeicao =
+    mealConfig?.defaultUnitPrice !== undefined && mealConfig.defaultUnitPrice > 0
+      ? mealConfig.defaultUnitPrice
+      : 9.0;
+  const diasLetivosMes = 22;
+  const totalAlimentacao =
+    totalAlunosRotina > 0
+      ? Math.round(totalAlunosRotina * diasLetivosMes * custoDiarioPorRefeicao * 100) / 100
+      : 0;
 
   const nowIso = new Date().toISOString();
   const expensesList: FinancialExpense[] = [];
 
   if (totalFolha > 0) {
     expensesList.push({
-      id: `exp_${anoLetivo}_folha_monit`,
+      id: `exp_${anoLetivo}_folha_livro_ponto`,
       anoLetivo,
       categoria: 'FOLHA_PAGAMENTO',
-      descricao: `Folha Salarial — Monitoras e Docentes (${anoLetivo})`,
+      descricao: `Folha de Pagamento & Equipe (Livro Ponto)`,
       valor: totalFolha,
       dataVencimento: `${anoLetivo}-08-05`,
       dataPagamento: `${anoLetivo}-08-05`,
       status: 'PAGO',
       formaPagamento: 'Transferência Bancária (Folha)',
-      fornecedorOuBeneficiario: 'Equipe de Monitoria e Docência do Programa Integral',
-      observacoes: `Auto-Sync: Calculado a partir de ${staffCount} colaboradores(as) cadastrados no Livro Ponto.`,
+      fornecedorOuBeneficiario: 'Equipe de Colaboradores e Monitoria do Livro Ponto',
+      observacoes: `Auto-Sync: Custo total consolidado de ${staffCount} colaboradores(as) cadastrados no Livro Ponto (Banca Contratual + Ajuda de Custo + Adicionais e Horas Extras).`,
       createdAt: nowIso,
       updatedAt: nowIso,
       isAutoGenerated: true,
@@ -854,17 +896,20 @@ export function calculateModuleExpenses(
 
   if (totalAlimentacao > 0) {
     expensesList.push({
-      id: `exp_${anoLetivo}_alimentacao_cantina`,
+      id: `exp_${anoLetivo}_alimentacao_refeicoes`,
       anoLetivo,
       categoria: 'ALIMENTACAO_HORTIFRUTI',
-      descricao: `Alimentação Escolar, Frutas Frescas e Lanches Nutricionais (${anoLetivo})`,
+      descricao: `Alimentação Escolar & Insumos (Refeições)`,
       valor: totalAlimentacao,
-      dataVencimento: `${anoLetivo}-08-12`,
-      dataPagamento: `${anoLetivo}-08-12`,
+      dataVencimento: `${anoLetivo}-08-10`,
+      dataPagamento: `${anoLetivo}-08-10`,
       status: 'PAGO',
       formaPagamento: 'Boleto Bancário',
-      fornecedorOuBeneficiario: 'NutriEscola Refeições Saudáveis & Hortifruti',
-      observacoes: `Auto-Sync: ${totalAlunos} alunos ativos × ${diasLetivosMes} dias letivos × R$ 6,00/dia.`,
+      fornecedorOuBeneficiario:
+        mealConfig?.contractCompany ||
+        mealConfig?.providerName ||
+        'NutriEscola & Cantina de Refeições Saudáveis',
+      observacoes: `Auto-Sync: ${totalAlunosRotina} alunos na Rotina × ${diasLetivosMes} dias letivos × ${formatCurrencyBR(custoDiarioPorRefeicao)}/refeição registrado no Módulo Cardápio/Refeições.`,
       createdAt: nowIso,
       updatedAt: nowIso,
       isAutoGenerated: true,
@@ -873,53 +918,12 @@ export function calculateModuleExpenses(
     });
   }
 
-  if (totalNatacao > 0) {
-    expensesList.push({
-      id: `exp_${anoLetivo}_oficinas_natacao`,
-      anoLetivo,
-      categoria: 'OFICINAS_TERCEIRIZADAS',
-      descricao: `Repasse Academia & Transporte Credenciado — Natação (${anoLetivo})`,
-      valor: totalNatacao,
-      dataVencimento: `${anoLetivo}-08-10`,
-      dataPagamento: `${anoLetivo}-08-10`,
-      status: 'PAGO',
-      formaPagamento: 'Boleto Bancário',
-      fornecedorOuBeneficiario: 'Centro Aquático Fit & Transporte Credenciado',
-      observacoes: `Auto-Sync: Repasse mensal de ${alunosNatacao} alunos matriculados na modalidade Natação × R$ 140,00/mês.`,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      isAutoGenerated: true,
-      origemModulo: 'OFICINAS_EXTRAS',
-      autoSyncKey: `sync_oficinas_natacao_${anoLetivo}`,
-    });
-  }
-
-  if (totalEspecialistas > 0) {
-    expensesList.push({
-      id: `exp_${anoLetivo}_oficinas_artes`,
-      anoLetivo,
-      categoria: 'OFICINAS_TERCEIRIZADAS',
-      descricao: `Honorários Especialistas Terceirizados (Judô, Balé, Flauta, Futebol) (${anoLetivo})`,
-      valor: totalEspecialistas,
-      dataVencimento: `${anoLetivo}-08-15`,
-      dataPagamento: `${anoLetivo}-08-15`,
-      status: 'PAGO',
-      formaPagamento: 'PIX Institucional',
-      fornecedorOuBeneficiario: 'Associação de Especialistas e Instrutores Credenciados',
-      observacoes: `Auto-Sync: Repasse de ${alunosEspecialistas} participações em oficinas vespertinas × R$ 80,00/mês.`,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      isAutoGenerated: true,
-      origemModulo: 'OFICINAS_EXTRAS',
-      autoSyncKey: `sync_oficinas_especialistas_${anoLetivo}`,
-    });
-  }
-
   return expensesList;
 }
 
 /**
  * Executa a sincronização com Firestore e Cache Local, preservando lançamentos manuais
+ * e expurgando antigas despesas automáticas de demonstração.
  */
 export async function syncExpensesFromModules(
   anoLetivo: number,
@@ -933,16 +937,34 @@ export async function syncExpensesFromModules(
   // Mapeia despesas atuais para mesclagem idempotente
   const mergedList = [...currentExpenses];
 
+  // Purga despesas automáticas legadas (oficinas ou mocks) que foram expurgadas
+  const validSyncKeys = new Set(generated.map((g) => g.autoSyncKey));
+  const obsoleteAutoExpenses = mergedList.filter(
+    (e) =>
+      e.anoLetivo === anoLetivo &&
+      e.isAutoGenerated &&
+      e.autoSyncKey &&
+      !validSyncKeys.has(e.autoSyncKey)
+  );
+
+  for (const obs of obsoleteAutoExpenses) {
+    await deleteExpenseFromFirestore(obs.id);
+  }
+
+  const cleanedMergedList = mergedList.filter(
+    (e) => !obsoleteAutoExpenses.some((obs) => obs.id === e.id)
+  );
+
   for (const gen of generated) {
-    const existingIndex = mergedList.findIndex(
+    const existingIndex = cleanedMergedList.findIndex(
       (e) =>
         e.anoLetivo === anoLetivo &&
         ((e.autoSyncKey && e.autoSyncKey === gen.autoSyncKey) || e.id === gen.id)
     );
 
     if (existingIndex >= 0) {
-      const prev = mergedList[existingIndex];
-      mergedList[existingIndex] = {
+      const prev = cleanedMergedList[existingIndex];
+      cleanedMergedList[existingIndex] = {
         ...prev,
         ...gen,
         id: prev.id,
@@ -951,9 +973,9 @@ export async function syncExpensesFromModules(
         formaPagamento: prev.formaPagamento || gen.formaPagamento,
         updatedAt: nowIso,
       };
-      await saveExpenseToFirestore(mergedList[existingIndex]);
+      await saveExpenseToFirestore(cleanedMergedList[existingIndex]);
     } else {
-      mergedList.push(gen);
+      cleanedMergedList.push(gen);
       await saveExpenseToFirestore(gen);
     }
   }
@@ -961,7 +983,7 @@ export async function syncExpensesFromModules(
   saveLastExpenseSyncTime(nowIso);
 
   return {
-    updatedExpenses: mergedList,
+    updatedExpenses: cleanedMergedList,
     count: generated.length,
     timestamp: nowIso,
   };

@@ -6304,18 +6304,19 @@ export function generateFinancialReportPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(185, 28, 28);
-  doc.text('DESPESAS OPERACIONAIS REAIS', card2X + 4, startY + 4.8);
+  doc.text('CUSTOS OPERACIONAIS REAIS', card2X + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(185, 28, 28);
-  doc.text(formatCurrencyBR(metrics.totalDespesasMes), card2X + 4, startY + 10.5);
+  doc.text(formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes), card2X + 4, startY + 10.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.0);
   doc.setTextColor(153, 27, 27);
-  doc.text(`Pagas: ${formatCurrencyBR(metrics.totalDespesasPagas)} • Pend: ${formatCurrencyBR(metrics.totalDespesasPendentes)}`, card2X + 4, startY + 15);
+  doc.text(`Folha: ${formatCurrencyBR(metrics.custoFolhaReal || 0)} | Alim: ${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}`, card2X + 4, startY + 15);
 
-  // Card 3: Saldo Líquido Operacional (Receitas - Despesas)
+  // Card 3: Resultado Operacional Líquido Real = Receitas Líquidas - Custos Reais
   const card3X = card2X + cardWidth + 3;
-  const isPositiveBalance = metrics.saldoLiquidoOperacional >= 0;
+  const netResult = metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional;
+  const isPositiveBalance = netResult >= 0;
   if (isPositiveBalance) {
     doc.setFillColor(238, 242, 255);
     doc.setDrawColor(199, 210, 254);
@@ -6327,14 +6328,14 @@ export function generateFinancialReportPDF({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.8);
   doc.setTextColor(isPositiveBalance ? 67 : 190, isPositiveBalance ? 56 : 18, isPositiveBalance ? 202 : 60);
-  doc.text('SALDO LÍQUIDO OPERACIONAL', card3X + 4, startY + 4.8);
+  doc.text('RESULTADO OPERACIONAL LÍQUIDO', card3X + 4, startY + 4.8);
   doc.setFontSize(10);
   doc.setTextColor(isPositiveBalance ? 49 : 190, isPositiveBalance ? 46 : 18, isPositiveBalance ? 129 : 60);
-  doc.text(formatCurrencyBR(metrics.saldoLiquidoOperacional), card3X + 4, startY + 10.5);
+  doc.text(formatCurrencyBR(netResult), card3X + 4, startY + 10.5);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
   doc.setTextColor(isPositiveBalance ? 22 : 220, isPositiveBalance ? 101 : 38, isPositiveBalance ? 52 : 38);
-  doc.text(isPositiveBalance ? 'Superávit Operacional do Período' : 'Atenção: Déficit no Período', card3X + 4, startY + 15);
+  doc.text(isPositiveBalance ? `Superávit Real (${metrics.margemOperacionalLiquida ?? 0}% Margem)` : 'Atenção: Déficit no Período', card3X + 4, startY + 15);
 
   // Card 4: Ticket Médio & Pagantes
   const card4X = card3X + cardWidth + 3;

@@ -350,6 +350,12 @@ export interface FinancialMetricSummary {
   totalDescontoBolsas: number; // Soma de bolsas e descontos concedidos
   totalAlunosPagantes: number; // Alunos pagantes ativos (valor liquido > 0)
   ticketMedioPorAluno: number; // Receita líquida / total de alunos pagantes
+  // Métricas de Custos Operacionais Reais (Folha + Alimentação) e DRE
+  custoFolhaReal?: number; // Custo com Folha de Pagamento & Equipe (Livro Ponto)
+  custoAlimentacaoReal?: number; // Custo com Alimentação Escolar & Insumos (Refeições)
+  totalCustosOperacionaisReais?: number; // Folha + Alimentação (Custos Operacionais Reais)
+  resultadoOperacionalLiquidoReal?: number; // Receita Líquida dos Alunos - (Folha + Alimentação)
+  margemOperacionalLiquida?: number; // % sobre a Receita Líquida
 }
 
 export type ExpenseCategory =

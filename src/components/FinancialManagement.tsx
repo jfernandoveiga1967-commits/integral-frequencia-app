@@ -94,8 +94,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   // Filtro de Exercício / Ano Letivo (2026 | 2027)
   const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
 
-  // Sub-abas internas: Receitas & Mensalidades vs Gestão de Despesas
-  const [activeSubTab, setActiveSubTab] = useState<'receitas' | 'despesas'>('receitas');
+  // Sub-abas internas: Receitas & Mensalidades vs Gestão de Despesas vs DRE Operacional
+  const [activeSubTab, setActiveSubTab] = useState<'receitas' | 'despesas' | 'dre'>('receitas');
 
   // Perfis financeiros carregados do Firestore / Cache
   const [financialProfiles, setFinancialProfiles] = useState<StudentFinancialProfile[]>([]);
@@ -740,11 +740,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </div>
         </div>
 
-        {/* Card 2: Total de Despesas do Mês (100% Reais) */}
+        {/* Card 2: Custos Operacionais Reais (Folha + Alimentação) */}
         <div className="bg-white rounded-3xl p-5 border border-rose-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-rose-50/20">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
-              2. Despesas Operacionais Reais
+              2. Custos Operacionais Reais
             </span>
             <div className="p-2 bg-rose-100 text-rose-700 rounded-xl">
               <ArrowDownRight className="w-4 h-4" />
@@ -752,33 +752,33 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </div>
           <div className="mt-2">
             <span className="text-2xl font-black text-rose-700 tracking-tight">
-              {formatCurrencyBR(metrics.totalDespesasMes)}
+              {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
             </span>
             <span className="text-[11px] text-rose-600 font-bold block mt-0.5">
-              Custos Cadastrados ({currentExpenses.length}) • Sem mocks
+              Folha: {formatCurrencyBR(metrics.custoFolhaReal || 0)} • Alim: {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
             </span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-rose-100/70 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Pagas: <strong className="text-slate-800">{formatCurrencyBR(metrics.totalDespesasPagas)}</strong></span>
-            <span className="text-amber-700 font-semibold">Pend: {formatCurrencyBR(metrics.totalDespesasPendentes)}</span>
+            <span>Ponto: <strong className="text-slate-800">{formatCurrencyBR(metrics.custoFolhaReal || 0)}</strong></span>
+            <span className="text-emerald-700 font-semibold">Refeições: {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}</span>
           </div>
         </div>
 
-        {/* Card 3: Saldo Líquido Operacional (Receita Prevista - Despesas) */}
+        {/* Card 3: Resultado Operacional Líquido Real = Receita Líquida - (Folha + Alimentação) */}
         <div
           className={`bg-white rounded-3xl p-5 border shadow-xs relative overflow-hidden ${
-            metrics.saldoLiquidoOperacional >= 0
+            (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
               ? 'border-indigo-200/80 bg-gradient-to-br from-white to-indigo-50/25'
               : 'border-rose-300 bg-gradient-to-br from-white to-rose-50/40'
           }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">
-              3. Saldo Líquido Operacional
+              3. Resultado Operacional Líquido Real
             </span>
             <div
               className={`p-2 rounded-xl ${
-                metrics.saldoLiquidoOperacional >= 0
+                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
                   ? 'bg-indigo-100 text-indigo-700'
                   : 'bg-rose-100 text-rose-700'
               }`}
@@ -789,21 +789,27 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           <div className="mt-2">
             <span
               className={`text-2xl font-black tracking-tight ${
-                metrics.saldoLiquidoOperacional >= 0 ? 'text-indigo-900' : 'text-rose-700'
+                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
+                  ? 'text-indigo-900'
+                  : 'text-rose-700'
               }`}
             >
-              {formatCurrencyBR(metrics.saldoLiquidoOperacional)}
+              {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional)}
             </span>
             <span
               className={`text-[11px] font-bold block mt-0.5 ${
-                metrics.saldoLiquidoOperacional >= 0 ? 'text-indigo-600' : 'text-rose-600'
+                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
+                  ? 'text-indigo-600'
+                  : 'text-rose-600'
               }`}
             >
-              {metrics.saldoLiquidoOperacional >= 0 ? 'Superávit Operacional' : 'Atenção: Déficit no Período'}
+              {(metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
+                ? `Superávit Real (${metrics.margemOperacionalLiquida ?? 0}% Margem)`
+                : 'Atenção: Déficit no Período'}
             </span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Receita Contratada (-) Despesas</span>
+            <span>Receita Líquida (-) Custos Reais</span>
             <span className="text-slate-400 font-mono text-[10px]">Exercício {selectedAnoLetivo}</span>
           </div>
         </div>
@@ -904,7 +910,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           <button
             type="button"
             onClick={() => setActiveSubTab('despesas')}
-            className={`flex items-center justify-center space-x-2 px-5 py-2.5 min-w-[220px] h-11 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
+            className={`flex items-center justify-center space-x-2 px-5 py-2.5 min-w-[200px] h-11 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
               activeSubTab === 'despesas'
                 ? 'bg-rose-600 text-white shadow-md'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
@@ -912,6 +918,20 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           >
             <TrendingDown className="w-4 h-4" />
             <span>📉 Gestão de Despesas ({currentExpenses.length})</span>
+          </button>
+
+          {/* Sub-aba 3: DRE Operacional Realista */}
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('dre')}
+            className={`flex items-center justify-center space-x-2 px-5 py-2.5 min-w-[200px] h-11 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
+              activeSubTab === 'dre'
+                ? 'bg-emerald-700 text-white shadow-md'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>📑 DRE Operacional Realista ({selectedAnoLetivo})</span>
           </button>
         </div>
 
@@ -1182,6 +1202,55 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       {/* ========================================================================= */}
       {activeSubTab === 'despesas' && (
         <div className="space-y-4 animate-in fade-in duration-150">
+          {/* Painel de Auditoria dos Custos Operacionais Reais (Livro Ponto & Cardápio) */}
+          <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-900 rounded-3xl p-5 sm:p-6 text-white shadow-lg border border-rose-800/60 relative overflow-hidden">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+              <div className="space-y-1.5 max-w-xl">
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    Custos 100% Reais • Sem Mocks
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    Exercício {selectedAnoLetivo}
+                  </span>
+                </div>
+                <h3 className="text-lg font-black tracking-tight text-white">
+                  Custos Operacionais Reais & DRE
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Os custos operacionais são conectados dinamicamente às fontes oficiais: a folha dos colaboradores ativos no <strong>Livro Ponto</strong> e o fornecimento de refeições aos alunos da Rotina pelo módulo <strong>Cardápio & Nutrição</strong>.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs">
+                <div className="p-2.5 bg-white/5 rounded-xl">
+                  <span className="text-[10px] text-indigo-300 font-medium block">Folha (Livro Ponto)</span>
+                  <span className="text-sm sm:text-base font-black text-indigo-300">
+                    {formatCurrencyBR(metrics.custoFolhaReal || 0)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-white/5 rounded-xl">
+                  <span className="text-[10px] text-emerald-300 font-medium block">Alimentação (Refeições)</span>
+                  <span className="text-sm sm:text-base font-black text-emerald-300">
+                    {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-rose-950/40 border border-rose-500/30 rounded-xl">
+                  <span className="text-[10px] text-rose-300 font-medium block">Total Custos Reais</span>
+                  <span className="text-sm sm:text-base font-black text-rose-400">
+                    {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl">
+                  <span className="text-[10px] text-emerald-300 font-medium block">Resultado Líquido</span>
+                  <span className="text-sm sm:text-base font-black text-emerald-400">
+                    {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Barra de Filtros de Despesas */}
           <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex flex-col md:flex-row items-center justify-between gap-3">
@@ -1400,6 +1469,216 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* CONTEÚDO DA SUB-ABA: DRE OPERACIONAL REALISTA                             */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'dre' && (
+        <div className="space-y-5 animate-in fade-in duration-150">
+          {/* Header Executivo do DRE */}
+          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 rounded-3xl p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="px-3 py-1 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    DRE Realista Auditado • Exercício {selectedAnoLetivo}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    Conexão Direta: Livro Ponto + Cardápio
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white tracking-tight">
+                  Demonstração do Resultado do Exercício (DRE)
+                </h3>
+                <p className="text-xs text-slate-300 max-w-2xl">
+                  Demonstração transparente integrando exclusivamente os contratos ativos dos alunos de {selectedAnoLetivo}, o custo consolidado da folha de pagamento do Livro Ponto e o faturamento de alimentação do Cardápio Escolar.
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleGeneratePDF}
+                  className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Imprimir Demonstrativo / DRE</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela Estruturada do DRE */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div>
+                <h4 className="text-sm font-black text-slate-900">
+                  Estrutura Contábil e Operacional de Resultados — {selectedAnoLetivo}
+                </h4>
+                <p className="text-xs text-slate-500 font-medium">
+                  Valores mensais médios calculados em tempo real a partir das bases ativas
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-slate-200 text-slate-700">
+                  Ano Letivo: {selectedAnoLetivo}
+                </span>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-100 font-sans text-xs">
+              {/* 1. RECEITA OPERACIONAL BRUTA */}
+              <div className="p-4 bg-slate-50/70 flex items-center justify-between font-black text-slate-900 text-sm">
+                <div className="flex items-center space-x-2">
+                  <span className="text-emerald-600 font-mono">1.</span>
+                  <span>RECEITA OPERACIONAL BRUTA (Contratos de {selectedAnoLetivo})</span>
+                </div>
+                <span className="text-emerald-700 font-mono text-base">
+                  {formatCurrencyBR(metrics.faturamentoBrutoReal)}
+                </span>
+              </div>
+
+              {/* Sub-item: Mensalidades Contratadas */}
+              <div className="py-2.5 px-6 flex items-center justify-between text-slate-600 pl-10 text-xs">
+                <span>(+) Faturamento Bruto dos Contratos ({resolvedProfiles.length} alunos cadastrados)</span>
+                <span className="font-semibold text-slate-800 font-mono">
+                  {formatCurrencyBR(metrics.faturamentoBrutoReal)}
+                </span>
+              </div>
+
+              {/* 2. DEDUÇÕES DA RECEITA */}
+              <div className="p-4 bg-slate-50/40 flex items-center justify-between font-bold text-slate-800">
+                <div className="flex items-center space-x-2">
+                  <span className="text-purple-600 font-mono">2.</span>
+                  <span>(-) DEDUÇÕES DA RECEITA BRUTA</span>
+                </div>
+                <span className="text-purple-700 font-mono">
+                  -{formatCurrencyBR(metrics.totalDescontoBolsas)}
+                </span>
+              </div>
+
+              {/* Sub-item: Bolsas e Descontos */}
+              <div className="py-2.5 px-6 flex items-center justify-between text-slate-600 pl-10 text-xs">
+                <span>(-) Bolsas de Estudo e Descontos Concedidos ({metrics.totalIsentos} alunos 100% isentos)</span>
+                <span className="font-semibold text-purple-700 font-mono">
+                  -{formatCurrencyBR(metrics.totalDescontoBolsas)}
+                </span>
+              </div>
+
+              {/* 3. RECEITA OPERACIONAL LÍQUIDA (ROL) */}
+              <div className="p-4 bg-emerald-50/50 flex items-center justify-between font-black text-emerald-950 text-sm border-y border-emerald-100">
+                <div className="flex items-center space-x-2">
+                  <span className="text-emerald-700 font-mono">3.</span>
+                  <span>(=) RECEITA OPERACIONAL LÍQUIDA (ROL)</span>
+                </div>
+                <span className="text-emerald-700 font-mono text-base">
+                  {formatCurrencyBR(metrics.receitaPrevistaMensal)}
+                </span>
+              </div>
+
+              {/* 4. CUSTOS OPERACIONAIS REAIS (DIRETOS) */}
+              <div className="p-4 bg-slate-50/70 flex items-center justify-between font-black text-slate-900 text-sm">
+                <div className="flex items-center space-x-2">
+                  <span className="text-rose-600 font-mono">4.</span>
+                  <span>(-) CUSTOS OPERACIONAIS REAIS (Livro Ponto + Cardápio)</span>
+                </div>
+                <span className="text-rose-700 font-mono text-base">
+                  -{formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
+                </span>
+              </div>
+
+              {/* Sub-item: Folha de Pagamento */}
+              <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-1.5 font-bold text-slate-900">
+                    <span>4.1 Folha de Pagamento & Equipe (Livro Ponto)</span>
+                    <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Livro Ponto Real
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 block">
+                    Banca contratual, ajuda de custo, horas extras e adicionais apurados dos colaboradores ativos
+                  </span>
+                </div>
+                <span className="font-bold text-rose-700 font-mono text-xs">
+                  -{formatCurrencyBR(metrics.custoFolhaReal || 0)}
+                </span>
+              </div>
+
+              {/* Sub-item: Alimentação Escolar */}
+              <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-1.5 font-bold text-slate-900">
+                    <span>4.2 Alimentação Escolar & Insumos (Refeições)</span>
+                    <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Cardápio & Refeições
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 block">
+                    Alunos na Rotina × 22 dias letivos no mês × custo por refeição registrado no Cardápio
+                  </span>
+                </div>
+                <span className="font-bold text-rose-700 font-mono text-xs">
+                  -{formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
+                </span>
+              </div>
+
+              {/* Sub-item: Outras despesas reais cadastradas manualmente */}
+              {metrics.totalDespesasMes > (metrics.totalCustosOperacionaisReais || 0) && (
+                <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center space-x-1.5 font-bold text-slate-900">
+                      <span>4.3 Outras Despesas Operacionais Reais</span>
+                      <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-slate-100 text-slate-600 border border-slate-200">
+                        Lançamentos Reais
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 block">
+                      Despesas administrativas, pedagógicas ou materiais cadastradas diretamente pela coordenação
+                    </span>
+                  </div>
+                  <span className="font-bold text-rose-700 font-mono text-xs">
+                    -{formatCurrencyBR(metrics.totalDespesasMes - (metrics.totalCustosOperacionaisReais || 0))}
+                  </span>
+                </div>
+              )}
+
+              {/* 5. RESULTADO OPERACIONAL LÍQUIDO REAL */}
+              <div
+                className={`p-5 flex items-center justify-between text-base font-black ${
+                  (metrics.resultadoOperacionalLiquidoReal ?? 0) >= 0
+                    ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/60 text-emerald-950 border-t-2 border-emerald-500'
+                    : 'bg-rose-50 text-rose-950 border-t-2 border-rose-500'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-mono text-lg">5.</span>
+                    <span className="text-base sm:text-lg">(=) RESULTADO OPERACIONAL LÍQUIDO REAL</span>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-600 block pl-6">
+                    Receita Líquida dos Alunos (-) Custos Operacionais Reais (Folha + Alimentação)
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`font-mono text-xl sm:text-2xl font-black block ${
+                      (metrics.resultadoOperacionalLiquidoReal ?? 0) >= 0
+                        ? 'text-emerald-700'
+                        : 'text-rose-700'
+                    }`}
+                  >
+                    {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    Margem Operacional Líquida: <strong className="text-slate-900">{metrics.margemOperacionalLiquida ?? 0}%</strong>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
