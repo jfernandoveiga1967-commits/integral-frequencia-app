@@ -16,6 +16,7 @@ import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
 import { saveStudents, loadStudents, normalizeStudent } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
+import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive } from '../services/studentService';
 import {
   E1ExtractedStudent,
   readE1FileAsText,
@@ -814,10 +815,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Painel de Métricas Estatísticas de Renovação/Captação (2026 -> 2027)
   const metrics2027 = React.useMemo(() => {
-    // 1. Base 2026: Total, Formandos do 6º Ano e Base Elegível Rematriculável
+    // 1. Base 2026 Ativa: Filtrar ESTRITAMENTE alunos com status de matrícula ATIVO em 2026
     const total2026 = students2026List.length;
-    const formandos6Ano2026 = students2026List.filter((s) => isTurma6Ano(s.turma));
-    const baseElegivel2026 = students2026List.filter((s) => !isTurma6Ano(s.turma));
+    const activeStudents2026 = students2026List.filter(isStudentActive);
+    const totalAtivos2026Count = activeStudents2026.length;
+
+    // Subtrair da base ativa exclusivamente os alunos do 6º Ano de 2026 que também estejam com status Ativo
+    const formandos6AnoAtivos2026 = activeStudents2026.filter((s) => isTurma6Ano(s.turma));
+    const baseElegivel2026 = activeStudents2026.filter((s) => !isTurma6Ano(s.turma));
     const baseElegivel2026Count = baseElegivel2026.length;
 
     // 2. Classificação de 2027: Rematriculados vs Novos
@@ -829,7 +834,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     const novosMiniMaternal = novos.filter((s) => isTurmaMiniMaternal(s.turma));
     const novosMaternalAo6Ano = novos.filter((s) => !isTurmaMiniMaternal(s.turma));
 
-    // 3. Taxa de Retenção/Rematrícula: % sobre a base elegível de 2026 (excluindo 6º ano)
+    // 3. Taxa de Retenção/Rematrícula: % sobre a base ESTRITAMENTE ATIVA elegível de 2026 (excluindo 6º ano ativo)
     const taxaRetencaoPct =
       baseElegivel2026Count > 0 ? (rematriculados.length / baseElegivel2026Count) * 100 : 0;
 
@@ -846,7 +851,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
     return {
       total2026,
-      formandos6AnoCount: formandos6Ano2026.length,
+      totalAtivos2026Count,
+      formandos6AnoCount: formandos6AnoAtivos2026.length,
       baseElegivel2026Count,
       total2027,
       rematriculadosCount: rematriculados.length,
@@ -894,6 +900,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return findDuplicateStudentGroups(students || [], 2027);
   }, [students]);
 
+  const auditReport2027 = React.useMemo(() => {
+    return audit2027Students(students || []);
+  }, [students]);
+
   const [showSanitizeModal, setShowSanitizeModal] = useState(false);
   const [isSanitizing, setIsSanitizing] = useState(false);
   const [sanitizeTargetYear, setSanitizeTargetYear] = useState<number>(2027);
@@ -905,18 +915,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   };
 
   const handleExecuteSanitize = async () => {
-    const info = findDuplicateStudentGroups(students || [], sanitizeTargetYear);
-    if (info.allIdsToDelete.length === 0) {
-      setToastMsg({
-        text: `Nenhum cadastro duplicado encontrado no Ano Letivo ${sanitizeTargetYear}.`,
-        type: 'success',
-      });
-      setShowSanitizeModal(false);
-      return;
-    }
-
     setIsSanitizing(true);
     try {
+      if (sanitizeTargetYear === 2027) {
+        await purgeSurplus2027Students();
+      }
+
+      const info = findDuplicateStudentGroups(students || [], sanitizeTargetYear);
+      if (info.allIdsToDelete.length === 0) {
+        setToastMsg({
+          text: `Base do Ano Letivo ${sanitizeTargetYear} auditada com sucesso: ${sanitizeTargetYear === 2027 ? `${OFFICIAL_2027_BATCH_COUNT} alunos oficiais` : 'sem duplicatas'}.`,
+          type: 'success',
+        });
+        setShowSanitizeModal(false);
+        return;
+      }
       // 1. Salva dados dos alunos canônicos vencedores no Firestore caso haja mesclagem
       const canonicalBatch = writeBatch(db);
       info.groups.forEach((group) => {
@@ -3787,8 +3800,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </button>
             </div>
           </div>
-          <div className="text-[11px] font-semibold text-slate-500">
-            {selectedAnoLetivo === 2026 ? 'Alunos cadastrados no ano letivo de 2026' : 'Alunos cadastrados no ano letivo de 2027'}
+          <div className="text-[11px] font-semibold text-slate-500 flex flex-wrap items-center gap-1.5">
+            <span>{selectedAnoLetivo === 2026 ? 'Alunos cadastrados no ano letivo de 2026' : `Alunos cadastrados no ano letivo de 2027 (${count2027} oficiais)`}</span>
+            {selectedAnoLetivo === 2027 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Base 100% Auditada ({OFFICIAL_2027_BATCH_COUNT} E1)
+              </span>
+            )}
           </div>
         </div>
 
@@ -3813,12 +3831,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </div>
               </div>
 
-              {/* Tag Pedagógica: 6º Ano Isento de Perda */}
-              <div className="flex items-center space-x-1.5 text-xs text-amber-200 bg-amber-950/60 border border-amber-500/30 px-3 py-1 rounded-xl">
-                <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  <strong>Formandos do 6º Ano (2026):</strong> {metrics2027.formandos6AnoCount} alunos excluídos da base de perda
-                </span>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Tag de Auditoria Oficial: Lote E1 133 Alunos */}
+                <div className="flex items-center space-x-1.5 text-xs text-emerald-200 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    <strong>Base 2027 Auditada:</strong> {count2027} / {OFFICIAL_2027_BATCH_COUNT} Alunos Oficiais (Lote E1)
+                  </span>
+                </div>
+
+                {/* Tag Pedagógica: 6º Ano Ativo Isento de Perda */}
+                <div className="flex items-center space-x-1.5 text-xs text-amber-200 bg-amber-950/60 border border-amber-500/30 px-3 py-1 rounded-xl">
+                  <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Formandos do 6º Ano Ativos (2026):</strong> {metrics2027.formandos6AnoCount} alunos excluídos da base de perda
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -3832,7 +3860,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     <span>Taxa de Retenção / Rematrícula</span>
                   </span>
                   <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded-full">
-                    Base Elegível 2026
+                    Base Ativa Elegível 2026
                   </span>
                 </div>
 
@@ -3842,14 +3870,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </span>
                   <div className="text-xs text-slate-300">
                     <span className="font-bold text-emerald-400">{metrics2027.rematriculadosCount}</span> alunos rematriculados de{' '}
-                    <span className="font-bold text-white">{metrics2027.baseElegivel2026Count}</span> elegíveis
+                    <span className="font-bold text-white">{metrics2027.baseElegivel2026Count}</span> ativos elegíveis
                   </div>
                 </div>
 
-                <div className="text-[11px] text-slate-400 bg-black/20 rounded-lg p-2 border border-white/5 flex items-center justify-between">
-                  <span>Total 2026: <strong>{metrics2027.total2026}</strong></span>
-                  <span>- {metrics2027.formandos6AnoCount} formandos 6º ano</span>
-                  <span>= <strong>{metrics2027.baseElegivel2026Count}</strong> base elegível</span>
+                <div className="text-[11px] text-slate-300 bg-black/25 rounded-lg p-2.5 border border-white/10 flex flex-wrap items-center justify-between gap-1.5">
+                  <span>Ativos 2026: <strong className="text-white">{metrics2027.totalAtivos2026Count}</strong></span>
+                  <span className="text-amber-300">- {metrics2027.formandos6AnoCount} formandos 6º ano ativos</span>
+                  <span className="text-emerald-300">= <strong className="text-emerald-400">{metrics2027.baseElegivel2026Count}</strong> base ativa elegível</span>
                 </div>
               </div>
 

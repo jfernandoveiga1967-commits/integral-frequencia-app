@@ -68,10 +68,16 @@ import {
   deleteExpenseFromFirestore,
   subscribeFinancialExpenses,
   syncExpensesFromModules,
+  isObsoleteOrDuplicateExpense,
+  loadLocalFinancialExpenses,
+  forceRewriteSanitizedExpensesToFirestore,
+  calculateDREMonthlyMatrix,
+  DREMonthlySummary,
+  MONTH_NAMES_DRE,
 } from '../services/financialService';
 import { saveStudentToFirestore } from '../firebase';
 import { loadStudents, saveStudents } from '../utils/storageUtils';
-import { generateFinancialReportPDF } from '../utils/pdfGenerator';
+import { generateFinancialReportPDF, generateDREMonthlyReportPDF } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { TURMAS_LIST } from '../data/initialData';
@@ -97,10 +103,15 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   // Sub-abas internas: Receitas & Mensalidades vs Gestão de Despesas vs DRE Operacional
   const [activeSubTab, setActiveSubTab] = useState<'receitas' | 'despesas' | 'dre'>('receitas');
 
+  // Filtro de Mês Individual no DRE ('ALL' | 1..12)
+  const [selectedMonth, setSelectedMonth] = useState<number | 'ALL'>('ALL');
+  // Modo de exibição da matriz: isolar a coluna do mês selecionado ou manter todas com destaque
+  const [isolateMonthColumn, setIsolateMonthColumn] = useState<boolean>(false);
+
   // Perfis financeiros carregados do Firestore / Cache
   const [financialProfiles, setFinancialProfiles] = useState<StudentFinancialProfile[]>([]);
-  // Despesas operacionais carregadas do Firestore / Cache
-  const [expenses, setExpenses] = useState<FinancialExpense[]>([]);
+  // Despesas operacionais carregadas do Firestore / Cache (inicialização imediata higienizada)
+  const [expenses, setExpenses] = useState<FinancialExpense[]>(() => loadLocalFinancialExpenses());
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -163,6 +174,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   useEffect(() => {
     const runSilentSync = async () => {
       try {
+        await forceRewriteSanitizedExpensesToFirestore(selectedAnoLetivo);
         await syncExpensesFromModules(selectedAnoLetivo, students, users);
       } catch (err) {
         console.warn('Auto-sync silencioso em background:', err);
@@ -294,9 +306,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     return list.sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '', 'pt-BR'));
   }, [students, financialProfiles, selectedAnoLetivo]);
 
-  // 3. Despesas ativas do ano letivo
+  // 3. Despesas ativas do ano letivo (filtrando estritamente despesas válidas, sem duplicatas ou repasses de oficinas)
   const currentExpenses = useMemo<FinancialExpense[]>(() => {
-    return expenses.filter((e) => e.anoLetivo === selectedAnoLetivo);
+    return expenses.filter(
+      (e) => e.anoLetivo === selectedAnoLetivo && !isObsoleteOrDuplicateExpense(e)
+    );
   }, [expenses, selectedAnoLetivo]);
 
   // 4. Métricas Gerais Consolidadas (Receitas, Despesas e Saldo Líquido Operacional)
@@ -628,6 +642,89 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     });
   };
 
+  // -------------------------------------------------------------------------
+  // MATRIZ MÊS A MÊS DO DRE (JANEIRO A DEZEMBRO + TOTAL ANUAL)
+  // -------------------------------------------------------------------------
+  const monthlyDRE = useMemo(() => {
+    return calculateDREMonthlyMatrix(metrics, selectedAnoLetivo);
+  }, [metrics, selectedAnoLetivo]);
+
+  // Apuração ativa do DRE conforme a competência selecionada ('ALL' ou 1..12)
+  const activeDREData = useMemo(() => {
+    if (selectedMonth === 'ALL') {
+      return {
+        isMonthly: false,
+        monthIndex: null as number | null,
+        label: 'Ano Completo (Consolidado)',
+        shortLabel: `Exercício ${selectedAnoLetivo}`,
+        receitaLiquida: metrics.receitaPrevistaMensal,
+        faturamentoBruto: metrics.faturamentoBrutoReal,
+        descontoBolsas: metrics.totalDescontoBolsas,
+        custosOperacionais: metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes,
+        custoFolha: metrics.custoFolhaReal || 0,
+        custoAlimentacao: metrics.custoAlimentacaoReal || 0,
+        resultadoLiquido: metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional,
+        margemPercentual: metrics.margemOperacionalLiquida ?? 0,
+      };
+    }
+    const m = monthlyDRE.months.find((item) => item.monthIndex === selectedMonth);
+    if (m) {
+      return {
+        isMonthly: true,
+        monthIndex: m.monthIndex,
+        label: `Mês de ${m.monthFullName}`,
+        shortLabel: m.monthFullName,
+        receitaLiquida: m.receitaLiquida,
+        faturamentoBruto: m.receitaBruta,
+        descontoBolsas: m.descontoBolsas,
+        custosOperacionais: m.custosOperacionais,
+        custoFolha: m.custoFolha,
+        custoAlimentacao: m.custoAlimentacao,
+        resultadoLiquido: m.resultadoLiquido,
+        margemPercentual: m.margemPercentual,
+      };
+    }
+    return {
+      isMonthly: false,
+      monthIndex: null as number | null,
+      label: 'Ano Completo (Consolidado)',
+      shortLabel: `Exercício ${selectedAnoLetivo}`,
+      receitaLiquida: metrics.receitaPrevistaMensal,
+      faturamentoBruto: metrics.faturamentoBrutoReal,
+      descontoBolsas: metrics.totalDescontoBolsas,
+      custosOperacionais: metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes,
+      custoFolha: metrics.custoFolhaReal || 0,
+      custoAlimentacao: metrics.custoAlimentacaoReal || 0,
+      resultadoLiquido: metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional,
+      margemPercentual: metrics.margemOperacionalLiquida ?? 0,
+    };
+  }, [selectedMonth, monthlyDRE, metrics, selectedAnoLetivo]);
+
+  const handleGenerateDREMonthlyPDF = () => {
+    const result = generateDREMonthlyReportPDF({
+      schoolYear: selectedAnoLetivo,
+      metrics,
+      monthlyDRE,
+      selectedMonth,
+      profilesCount: resolvedProfiles.length,
+    });
+
+    const monthTitle =
+      selectedMonth !== 'ALL'
+        ? ` — ${monthlyDRE.months.find((m) => m.monthIndex === selectedMonth)?.monthFullName || `Mês ${selectedMonth}`}`
+        : ' (Jan-Dez)';
+
+    setPdfPreviewState({
+      isOpen: true,
+      doc: result.doc,
+      dataUrl: result.dataUrl || result.dataUri,
+      blobUrl: result.blobUrl,
+      filename: result.filename,
+      title: `DRE Mensal Consolidado${monthTitle} — Exercício ${selectedAnoLetivo}`,
+      onDownload: result.download,
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Toast Alert */}
@@ -715,144 +812,177 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       </div>
 
       {/* Painel Atualizado de Indicadores (Dashboard de Fluxo de Caixa do Programa Integral) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Receita Contratual Prevista Líquida (Soma dos Planos Reais dos Alunos) */}
-        <div className="bg-white rounded-3xl p-5 border border-emerald-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-emerald-50/20">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-              1. Receita Contratual Líquida
-            </span>
-            <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
-              <ArrowUpRight className="w-4 h-4" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Card 1: Receita Contratual Líquida (Mês ou Ano) */}
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-emerald-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-emerald-50/20 min-w-0 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-1.5 min-w-0">
+                <span className="text-[11px] sm:text-xs font-bold text-emerald-800 uppercase tracking-wider truncate">
+                  1. Receita Contratual Líquida
+                </span>
+                {activeDREData.isMonthly && (
+                  <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                    {activeDREData.shortLabel}
+                  </span>
+                )}
+              </div>
+              <div className="p-1.5 sm:p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 min-w-0">
+              <span className="text-xl sm:text-2xl font-black text-emerald-700 tracking-tight truncate block">
+                {formatCurrencyBR(activeDREData.receitaLiquida)}
+              </span>
+              <span className="text-[10.5px] sm:text-[11px] text-emerald-600 font-bold block mt-0.5 truncate">
+                {activeDREData.isMonthly
+                  ? `Competência: ${activeDREData.label}`
+                  : 'Prevista (Soma dos Planos Ativos)'}
+              </span>
             </div>
           </div>
-          <div className="mt-2">
-            <span className="text-2xl font-black text-emerald-700 tracking-tight">
-              {formatCurrencyBR(metrics.receitaPrevistaMensal)}
-            </span>
-            <span className="text-[11px] text-emerald-600 font-bold block mt-0.5">
-              Prevista (Soma dos Planos Ativos)
-            </span>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-emerald-100/70 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Bruto: <strong className="text-slate-800">{formatCurrencyBR(metrics.faturamentoBrutoReal)}</strong></span>
-            <span className="text-purple-700 font-semibold">Bolsas: -{formatCurrencyBR(metrics.totalDescontoBolsas)}</span>
+          <div className="mt-2.5 pt-2 border-t border-emerald-100/70 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
+            <span className="truncate">Bruto: <strong className="text-slate-800">{formatCurrencyBR(activeDREData.faturamentoBruto)}</strong></span>
+            <span className="text-purple-700 font-semibold truncate">Bolsas: -{formatCurrencyBR(activeDREData.descontoBolsas)}</span>
           </div>
         </div>
 
-        {/* Card 2: Custos Operacionais Reais (Folha + Alimentação) */}
-        <div className="bg-white rounded-3xl p-5 border border-rose-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-rose-50/20">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
-              2. Custos Operacionais Reais
-            </span>
-            <div className="p-2 bg-rose-100 text-rose-700 rounded-xl">
-              <ArrowDownRight className="w-4 h-4" />
+        {/* Card 2: Custos Operacionais Reais (Mês ou Ano) */}
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-rose-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-rose-50/20 min-w-0 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-1.5 min-w-0">
+                <span className="text-[11px] sm:text-xs font-bold text-rose-800 uppercase tracking-wider truncate">
+                  2. Custos Operacionais Reais
+                </span>
+                {activeDREData.isMonthly && (
+                  <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-black bg-rose-100 text-rose-800 border border-rose-300 shrink-0">
+                    {activeDREData.shortLabel}
+                  </span>
+                )}
+              </div>
+              <div className="p-1.5 sm:p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0">
+                <ArrowDownRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 min-w-0">
+              <span className="text-xl sm:text-2xl font-black text-rose-700 tracking-tight truncate block">
+                {formatCurrencyBR(activeDREData.custosOperacionais)}
+              </span>
+              <span className="text-[10.5px] sm:text-[11px] text-rose-600 font-bold block mt-0.5 truncate">
+                Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Alim: {formatCurrencyBR(activeDREData.custoAlimentacao)}
+              </span>
             </div>
           </div>
-          <div className="mt-2">
-            <span className="text-2xl font-black text-rose-700 tracking-tight">
-              {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
-            </span>
-            <span className="text-[11px] text-rose-600 font-bold block mt-0.5">
-              Folha: {formatCurrencyBR(metrics.custoFolhaReal || 0)} • Alim: {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
-            </span>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-rose-100/70 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Ponto: <strong className="text-slate-800">{formatCurrencyBR(metrics.custoFolhaReal || 0)}</strong></span>
-            <span className="text-emerald-700 font-semibold">Refeições: {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}</span>
+          <div className="mt-2.5 pt-2 border-t border-rose-100/70 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
+            <span className="truncate">Ponto: <strong className="text-slate-800">{formatCurrencyBR(activeDREData.custoFolha)}</strong></span>
+            <span className="text-emerald-700 font-semibold truncate">Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)}</span>
           </div>
         </div>
 
-        {/* Card 3: Resultado Operacional Líquido Real = Receita Líquida - (Folha + Alimentação) */}
+        {/* Card 3: Resultado Operacional Líquido Real = Receita Líquida - Custos Reais */}
         <div
-          className={`bg-white rounded-3xl p-5 border shadow-xs relative overflow-hidden ${
-            (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
+          className={`bg-white rounded-3xl p-4 sm:p-5 border shadow-xs relative overflow-hidden min-w-0 flex flex-col justify-between ${
+            activeDREData.resultadoLiquido >= 0
               ? 'border-indigo-200/80 bg-gradient-to-br from-white to-indigo-50/25'
               : 'border-rose-300 bg-gradient-to-br from-white to-rose-50/40'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">
-              3. Resultado Operacional Líquido Real
-            </span>
-            <div
-              className={`p-2 rounded-xl ${
-                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
-                  ? 'bg-indigo-100 text-indigo-700'
-                  : 'bg-rose-100 text-rose-700'
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-1.5 min-w-0">
+                <span className="text-[11px] sm:text-xs font-bold text-indigo-900 uppercase tracking-wider truncate">
+                  3. Resultado Líquido Real
+                </span>
+                {activeDREData.isMonthly && (
+                  <span className="px-1.5 py-0.2 rounded-md text-[9.5px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 shrink-0">
+                    {activeDREData.shortLabel}
+                  </span>
+                )}
+              </div>
+              <div
+                className={`p-1.5 sm:p-2 rounded-xl shrink-0 ${
+                  activeDREData.resultadoLiquido >= 0
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'bg-rose-100 text-rose-700'
+                }`}
+              >
+                <Wallet className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 min-w-0">
+              <span
+                className={`text-xl sm:text-2xl font-black tracking-tight truncate block ${
+                  activeDREData.resultadoLiquido >= 0
+                    ? 'text-indigo-900'
+                    : 'text-rose-700'
+                }`}
+              >
+                {formatCurrencyBR(activeDREData.resultadoLiquido)}
+              </span>
+              <span
+                className={`text-[10.5px] sm:text-[11px] font-bold block mt-0.5 truncate ${
+                  activeDREData.resultadoLiquido >= 0
+                    ? 'text-indigo-600'
+                    : 'text-rose-600'
+                }`}
+              >
+                {activeDREData.resultadoLiquido >= 0
+                  ? `Superávit Real (${activeDREData.margemPercentual}% Margem)`
+                  : `Atenção: Déficit (${activeDREData.margemPercentual}% Margem)`}
+              </span>
             </div>
           </div>
-          <div className="mt-2">
-            <span
-              className={`text-2xl font-black tracking-tight ${
-                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
-                  ? 'text-indigo-900'
-                  : 'text-rose-700'
-              }`}
-            >
-              {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional)}
+          <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
+            <span className="truncate">Receita (-) Custos</span>
+            <span className="text-slate-400 font-mono text-[10px] shrink-0">
+              {activeDREData.isMonthly ? `${activeDREData.shortLabel} / ${selectedAnoLetivo}` : `Exercício ${selectedAnoLetivo}`}
             </span>
-            <span
-              className={`text-[11px] font-bold block mt-0.5 ${
-                (metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
-                  ? 'text-indigo-600'
-                  : 'text-rose-600'
-              }`}
-            >
-              {(metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional) >= 0
-                ? `Superávit Real (${metrics.margemOperacionalLiquida ?? 0}% Margem)`
-                : 'Atenção: Déficit no Período'}
-            </span>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Receita Líquida (-) Custos Reais</span>
-            <span className="text-slate-400 font-mono text-[10px]">Exercício {selectedAnoLetivo}</span>
           </div>
         </div>
 
         {/* Card 4: Ticket Médio por Aluno & Base Pagante */}
-        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-slate-50/50">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              4. Ticket Médio & Pagantes
-            </span>
-            <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
-              <Percent className="w-4 h-4" />
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs relative overflow-hidden bg-gradient-to-br from-white to-slate-50/50 min-w-0 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider truncate">
+                4. Ticket Médio & Pagantes
+              </span>
+              <div className="p-1.5 sm:p-2 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+                <Percent className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 min-w-0 flex items-baseline space-x-1.5">
+              <span className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight truncate">
+                {formatCurrencyBR(metrics.ticketMedioPorAluno)}
+              </span>
+              <span className="text-[11px] text-slate-500 font-medium shrink-0">
+                / pagante
+              </span>
             </div>
           </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-2xl font-black text-slate-900 tracking-tight">
-              {formatCurrencyBR(metrics.ticketMedioPorAluno)}
-            </span>
-            <span className="text-xs text-slate-500 font-medium">
-              / aluno pagante
-            </span>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span><strong>{metrics.totalAlunosPagantes}</strong> pagantes</span>
-            <span className="text-slate-600 font-medium">{metrics.totalIsentos} isentos (bolsa 100%)</span>
+          <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
+            <span className="truncate"><strong>{metrics.totalAlunosPagantes}</strong> pagantes</span>
+            <span className="text-slate-600 font-medium truncate">{metrics.totalIsentos} isentos</span>
           </div>
         </div>
       </div>
 
       {/* Painel de Auditoria e Discriminação de Receitas Contratuais Reais */}
-      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 rounded-3xl p-5 sm:p-6 text-white shadow-lg border border-indigo-800/60 relative overflow-hidden">
+      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 rounded-3xl p-4 sm:p-6 text-white shadow-lg border border-indigo-800/60 relative overflow-hidden">
         <div className="absolute right-0 top-0 bottom-0 w-80 bg-radial from-indigo-500/10 to-transparent pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div className="space-y-1.5 max-w-xl">
-            <div className="flex items-center space-x-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
+          <div className="space-y-1.5 max-w-xl min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 100% Base Real de Contratos • Sem Mocks
               </span>
               <span className="text-xs text-slate-400 font-mono">
                 Exercício {selectedAnoLetivo}
               </span>
             </div>
-            <h3 className="text-lg font-black tracking-tight text-white">
+            <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
               Discriminação da Receita Contratual Prevista
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
@@ -860,28 +990,28 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs">
-            <div className="p-2.5 bg-white/5 rounded-xl">
-              <span className="text-[10px] text-slate-400 font-medium block">Faturamento Bruto</span>
-              <span className="text-sm sm:text-base font-black text-white">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
+            <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+              <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block truncate">Faturamento Bruto</span>
+              <span className="text-xs sm:text-sm lg:text-base font-black text-white truncate block">
                 {formatCurrencyBR(metrics.faturamentoBrutoReal)}
               </span>
             </div>
-            <div className="p-2.5 bg-white/5 rounded-xl">
-              <span className="text-[10px] text-purple-300 font-medium block">Bolsas Concedidas</span>
-              <span className="text-sm sm:text-base font-black text-purple-400">
+            <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+              <span className="text-[10px] sm:text-[11px] text-purple-300 font-medium block truncate">Bolsas Concedidas</span>
+              <span className="text-xs sm:text-sm lg:text-base font-black text-purple-400 truncate block">
                 -{formatCurrencyBR(metrics.totalDescontoBolsas)}
               </span>
             </div>
-            <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl">
-              <span className="text-[10px] text-emerald-300 font-medium block">Receita Líquida</span>
-              <span className="text-sm sm:text-base font-black text-emerald-400">
+            <div className="p-2 sm:p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl min-w-0 overflow-hidden">
+              <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Receita Líquida</span>
+              <span className="text-xs sm:text-sm lg:text-base font-black text-emerald-400 truncate block">
                 {formatCurrencyBR(metrics.receitaPrevistaMensal)}
               </span>
             </div>
-            <div className="p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl">
-              <span className="text-[10px] text-indigo-300 font-medium block">Ticket Médio</span>
-              <span className="text-sm sm:text-base font-black text-indigo-300">
+            <div className="p-2 sm:p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl min-w-0 overflow-hidden">
+              <span className="text-[10px] sm:text-[11px] text-indigo-300 font-medium block truncate">Ticket Médio</span>
+              <span className="text-xs sm:text-sm lg:text-base font-black text-indigo-300 truncate block">
                 {formatCurrencyBR(metrics.ticketMedioPorAluno)}
               </span>
             </div>
@@ -1203,18 +1333,18 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       {activeSubTab === 'despesas' && (
         <div className="space-y-4 animate-in fade-in duration-150">
           {/* Painel de Auditoria dos Custos Operacionais Reais (Livro Ponto & Cardápio) */}
-          <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-900 rounded-3xl p-5 sm:p-6 text-white shadow-lg border border-rose-800/60 relative overflow-hidden">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-              <div className="space-y-1.5 max-w-xl">
-                <div className="flex items-center space-x-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
+          <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-900 rounded-3xl p-4 sm:p-6 text-white shadow-lg border border-rose-800/60 relative overflow-hidden">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
+              <div className="space-y-1.5 max-w-xl min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
                     Custos 100% Reais • Sem Mocks
                   </span>
                   <span className="text-xs text-slate-400 font-mono">
                     Exercício {selectedAnoLetivo}
                   </span>
                 </div>
-                <h3 className="text-lg font-black tracking-tight text-white">
+                <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
                   Custos Operacionais Reais & DRE
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
@@ -1222,28 +1352,28 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs">
-                <div className="p-2.5 bg-white/5 rounded-xl">
-                  <span className="text-[10px] text-indigo-300 font-medium block">Folha (Livro Ponto)</span>
-                  <span className="text-sm sm:text-base font-black text-indigo-300">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
+                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-indigo-300 font-medium block truncate">Folha (Livro Ponto)</span>
+                  <span className="text-xs sm:text-sm lg:text-base font-black text-indigo-300 truncate block">
                     {formatCurrencyBR(metrics.custoFolhaReal || 0)}
                   </span>
                 </div>
-                <div className="p-2.5 bg-white/5 rounded-xl">
-                  <span className="text-[10px] text-emerald-300 font-medium block">Alimentação (Refeições)</span>
-                  <span className="text-sm sm:text-base font-black text-emerald-300">
+                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Alimentação (Refeições)</span>
+                  <span className="text-xs sm:text-sm lg:text-base font-black text-emerald-300 truncate block">
                     {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
                   </span>
                 </div>
-                <div className="p-2.5 bg-rose-950/40 border border-rose-500/30 rounded-xl">
-                  <span className="text-[10px] text-rose-300 font-medium block">Total Custos Reais</span>
-                  <span className="text-sm sm:text-base font-black text-rose-400">
+                <div className="p-2 sm:p-2.5 bg-rose-950/40 border border-rose-500/30 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-rose-300 font-medium block truncate">Total Custos Reais</span>
+                  <span className="text-xs sm:text-sm lg:text-base font-black text-rose-400 truncate block">
                     {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
                   </span>
                 </div>
-                <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl">
-                  <span className="text-[10px] text-emerald-300 font-medium block">Resultado Líquido</span>
-                  <span className="text-sm sm:text-base font-black text-emerald-400">
+                <div className="p-2 sm:p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Resultado Líquido</span>
+                  <span className="text-xs sm:text-sm lg:text-base font-black text-emerald-400 truncate block">
                     {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
                   </span>
                 </div>
@@ -1480,10 +1610,10 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       {activeSubTab === 'dre' && (
         <div className="space-y-5 animate-in fade-in duration-150">
           {/* Header Executivo do DRE */}
-          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 rounded-3xl p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
+          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 rounded-3xl p-5 sm:p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1">
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="px-3 py-1 rounded-full text-[10.5px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                     DRE Realista Auditado • Exercício {selectedAnoLetivo}
                   </span>
@@ -1491,19 +1621,58 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     Conexão Direta: Livro Ponto + Cardápio
                   </span>
                 </div>
-                <h3 className="text-xl font-black text-white tracking-tight">
+                <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
                   Demonstração do Resultado do Exercício (DRE)
                 </h3>
-                <p className="text-xs text-slate-300 max-w-2xl">
+                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
                   Demonstração transparente integrando exclusivamente os contratos ativos dos alunos de {selectedAnoLetivo}, o custo consolidado da folha de pagamento do Livro Ponto e o faturamento de alimentação do Cardápio Escolar.
                 </p>
               </div>
 
-              <div className="flex items-center space-x-3 shrink-0">
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                {/* Seletor Suspenso de Mês Individual / Ano Completo */}
+                <div className="flex items-center space-x-1.5 bg-slate-900/90 border border-indigo-400/40 rounded-2xl px-3 py-2 shadow-inner">
+                  <Filter className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                  <label htmlFor="dre-month-selector" className="text-[11px] font-bold text-slate-300 shrink-0">
+                    Competência:
+                  </label>
+                  <select
+                    id="dre-month-selector"
+                    value={selectedMonth}
+                    onChange={(e) => {
+                      const val = e.target.value === 'ALL' ? 'ALL' : Number(e.target.value);
+                      setSelectedMonth(val);
+                      if (val === 'ALL') {
+                        setIsolateMonthColumn(false);
+                      }
+                    }}
+                    className="bg-transparent text-xs font-black text-white outline-none cursor-pointer pr-1"
+                  >
+                    <option value="ALL" className="bg-slate-900 text-white font-bold">
+                      📅 Ano Completo / Todos os Meses
+                    </option>
+                    {MONTH_NAMES_DRE.map((m, idx) => (
+                      <option key={idx + 1} value={idx + 1} className="bg-slate-900 text-white font-medium">
+                        Mês {String(idx + 1).padStart(2, '0')} — {m.full}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateDREMonthlyPDF}
+                  className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
+                  title="Exportar Demonstrativo do Resultado do Exercício mês a mês em PDF oficial timbrado"
+                >
+                  <FileText className="w-4 h-4 text-emerald-200" />
+                  <span>📄 Exportar DRE Mensal (PDF)</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleGeneratePDF}
                   className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
+                  title="Imprimir relatório financeiro detalhado de contratos e despesas"
                 >
                   <FileText className="w-4 h-4" />
                   <span>Imprimir Demonstrativo / DRE</span>
@@ -1512,20 +1681,499 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
             </div>
           </div>
 
-          {/* Tabela Estruturada do DRE */}
+          {/* Card de Apuração Isolada do Mês Selecionado */}
+          {selectedMonth !== 'ALL' && activeDREData.isMonthly && (
+            <div className="bg-gradient-to-r from-indigo-50 via-white to-purple-50 rounded-3xl p-5 border-2 border-indigo-300 shadow-sm space-y-3 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-100 pb-2.5">
+                <div className="flex items-center space-x-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-600 text-white">
+                    <Calendar className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-black text-indigo-950">
+                      Apuração Isolada da Competência — {activeDREData.label} de {selectedAnoLetivo}
+                    </h4>
+                    <p className="text-xs text-indigo-700 font-medium">
+                      Valores discriminados estritamente para o mês de {activeDREData.shortLabel}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsolateMonthColumn((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all flex items-center space-x-1 cursor-pointer shadow-xs"
+                    title={isolateMonthColumn ? 'Exibir todas as colunas de janeiro a dezembro' : 'Isolar apenas a coluna deste mês na matriz'}
+                  >
+                    <span>{isolateMonthColumn ? '👁️ Ver Matriz Completa' : '🎯 Isolar Coluna do Mês'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMonth('ALL');
+                      setIsolateMonthColumn(false);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 transition-all flex items-center space-x-1 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Ver Ano Completo</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-white rounded-2xl border border-indigo-100 shadow-2xs min-w-0">
+                  <span className="text-[10.5px] font-bold text-slate-500 block truncate">Receita Bruta</span>
+                  <span className="text-sm sm:text-base font-black text-slate-900 block mt-0.5 font-mono truncate">
+                    {formatCurrencyBR(activeDREData.faturamentoBruto)}
+                  </span>
+                  <span className="text-[10px] text-purple-700 font-medium block truncate">
+                    Bolsas: -{formatCurrencyBR(activeDREData.descontoBolsas)}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white rounded-2xl border border-emerald-200 shadow-2xs min-w-0">
+                  <span className="text-[10.5px] font-bold text-emerald-800 block truncate">Receita Líquida (ROL)</span>
+                  <span className="text-sm sm:text-base font-black text-emerald-700 block mt-0.5 font-mono truncate">
+                    {formatCurrencyBR(activeDREData.receitaLiquida)}
+                  </span>
+                  <span className="text-[10px] text-emerald-600 font-semibold block truncate">100% Contratos Ativos</span>
+                </div>
+
+                <div className="p-3 bg-white rounded-2xl border border-rose-200 shadow-2xs min-w-0">
+                  <span className="text-[10.5px] font-bold text-rose-800 block truncate">Custos Operacionais</span>
+                  <span className="text-sm sm:text-base font-black text-rose-700 block mt-0.5 font-mono truncate">
+                    -{formatCurrencyBR(activeDREData.custosOperacionais)}
+                  </span>
+                  <span className="text-[10px] text-rose-600 font-medium block truncate">
+                    Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Alim: {formatCurrencyBR(activeDREData.custoAlimentacao)}
+                  </span>
+                </div>
+
+                <div className={`p-3 bg-white rounded-2xl border shadow-2xs min-w-0 ${activeDREData.resultadoLiquido >= 0 ? 'border-indigo-300 bg-indigo-50/20' : 'border-rose-300 bg-rose-50/20'}`}>
+                  <span className="text-[10.5px] font-bold text-indigo-900 block truncate">Resultado Líquido</span>
+                  <span className={`text-sm sm:text-base font-black block mt-0.5 font-mono truncate ${activeDREData.resultadoLiquido >= 0 ? 'text-indigo-700' : 'text-rose-700'}`}>
+                    {formatCurrencyBR(activeDREData.resultadoLiquido)}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-600 block truncate">
+                    Margem: {activeDREData.margemPercentual}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Matriz Mensal Detalhada do DRE (Janeiro a Dezembro + Total Anual) */}
           <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/60">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-100 text-indigo-700">
+                    <Calendar className="w-4 h-4" />
+                  </span>
+                  <h4 className="text-sm font-black text-slate-900 tracking-tight">
+                    {selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? `Apuração Isolada da Competência (${activeDREData.shortLabel}) — Exercício ${selectedAnoLetivo}`
+                      : `Visão Discriminada Mês a Mês (Janeiro a Dezembro) — Exercício ${selectedAnoLetivo}`}
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {selectedMonth !== 'ALL' && isolateMonthColumn
+                    ? `Exibindo isoladamente a coluna do mês de ${activeDREData.shortLabel} e a representatividade sobre a ROL`
+                    : 'Projeção e competência mensal calculadas a partir dos contratos ativos e custos oficiais integrados'}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {selectedMonth !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsolateMonthColumn((prev) => !prev)}
+                    className="px-2.5 py-1 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-all cursor-pointer"
+                  >
+                    {isolateMonthColumn ? '👁️ Ver Todas as Colunas' : `🎯 Isolar Coluna (${activeDREData.shortLabel})`}
+                  </button>
+                )}
+                <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {selectedMonth !== 'ALL' && isolateMonthColumn ? `Competência ${activeDREData.shortLabel}` : '12 Meses + Fechamento'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleGenerateDREMonthlyPDF}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center space-x-1.5 cursor-pointer shadow-xs transition-all"
+                  title="Exportar esta matriz mês a mês em PDF timbrado"
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Exportar Matriz PDF</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider">
+                    <th className="py-3 px-4 sticky left-0 bg-slate-900 z-10 min-w-[250px] shadow-sm">
+                      Linha Contábil / Indicador
+                    </th>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <th
+                          key={m.monthIndex}
+                          className={`py-3 px-3 text-right min-w-[95px] font-mono transition-colors ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white font-black ring-2 ring-indigo-400'
+                              : 'text-slate-200'
+                          }`}
+                        >
+                          <div className="flex flex-col items-end">
+                            {isSelected && (
+                              <span className="text-[8.5px] uppercase tracking-wider text-indigo-200 font-extrabold">
+                                Competência
+                              </span>
+                            )}
+                            <span>{m.monthName}</span>
+                          </div>
+                        </th>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <th className="py-3 px-3 text-right min-w-[90px] font-mono bg-indigo-900 text-indigo-200 font-bold">
+                        % da ROL
+                      </th>
+                    )}
+                    <th className="py-3 px-4 text-right min-w-[125px] bg-slate-950 font-mono text-emerald-400">
+                      Total Anual
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-sans">
+                  {/* Linha 1: Receita Operacional Bruta */}
+                  <tr className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-4 sticky left-0 bg-white z-10 font-bold text-slate-900 border-r border-slate-100 shadow-2xs">
+                      1. Receita Operacional Bruta
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-3 px-3 text-right font-mono text-slate-700 ${
+                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
+                          }`}
+                        >
+                          {formatCurrencyBR(m.receitaBruta)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-3 px-3 text-right font-mono font-medium text-slate-500 bg-indigo-50/30">
+                        {activeDREData.receitaLiquida > 0
+                          ? `${Math.round((activeDREData.faturamentoBruto / activeDREData.receitaLiquida) * 1000) / 10}%`
+                          : '-'}
+                      </td>
+                    )}
+                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 bg-slate-50/60">
+                      {formatCurrencyBR(monthlyDRE.totalAnual.receitaBruta)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 2: (-) Bolsas e Descontos */}
+                  <tr className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-4 sticky left-0 bg-white z-10 font-medium text-purple-800 border-r border-slate-100 shadow-2xs pl-6">
+                      2. (-) Bolsas & Descontos
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-3 px-3 text-right font-mono text-purple-700 ${
+                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
+                          }`}
+                        >
+                          -{formatCurrencyBR(m.descontoBolsas)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-3 px-3 text-right font-mono font-medium text-purple-600 bg-indigo-50/30">
+                        -{activeDREData.receitaLiquida > 0
+                          ? `${Math.round((activeDREData.descontoBolsas / activeDREData.receitaLiquida) * 1000) / 10}%`
+                          : '-'}
+                      </td>
+                    )}
+                    <td className="py-3 px-4 text-right font-mono font-bold text-purple-800 bg-slate-50/60">
+                      -{formatCurrencyBR(monthlyDRE.totalAnual.descontoBolsas)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 3: (=) Receita Operacional Líquida (ROL) */}
+                  <tr className="bg-emerald-50/50 hover:bg-emerald-50 font-bold text-emerald-950 border-y border-emerald-200/80">
+                    <td className="py-3 px-4 sticky left-0 bg-emerald-50/95 z-10 text-emerald-900 border-r border-emerald-200 shadow-2xs font-black">
+                      3. (=) Receita Contratual Líquida (ROL)
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-3 px-3 text-right font-mono font-bold text-emerald-700 ${
+                            isSelected ? 'bg-emerald-100/80 font-black border-x-2 border-emerald-400' : ''
+                          }`}
+                        >
+                          {formatCurrencyBR(m.receitaLiquida)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-3 px-3 text-right font-mono font-black text-emerald-700 bg-emerald-50/80">
+                        100.0%
+                      </td>
+                    )}
+                    <td className="py-3 px-4 text-right font-mono font-black text-emerald-800 bg-emerald-100/60">
+                      {formatCurrencyBR(monthlyDRE.totalAnual.receitaLiquida)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 4.1: Folha de Pagamento */}
+                  <tr className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-2.5 px-4 sticky left-0 bg-white z-10 text-slate-700 border-r border-slate-100 shadow-2xs pl-6">
+                      <div className="flex items-center space-x-1.5">
+                        <span>4.1 Folha & Equipe</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          Ponto
+                        </span>
+                      </div>
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-2.5 px-3 text-right font-mono text-rose-700 ${
+                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
+                          }`}
+                        >
+                          -{formatCurrencyBR(m.custoFolha)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-2.5 px-3 text-right font-mono font-medium text-rose-600 bg-indigo-50/30">
+                        -{activeDREData.receitaLiquida > 0
+                          ? `${Math.round((activeDREData.custoFolha / activeDREData.receitaLiquida) * 1000) / 10}%`
+                          : '-'}
+                      </td>
+                    )}
+                    <td className="py-2.5 px-4 text-right font-mono font-semibold text-rose-700 bg-slate-50/60">
+                      -{formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 4.2: Alimentação Escolar */}
+                  <tr className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-2.5 px-4 sticky left-0 bg-white z-10 text-slate-700 border-r border-slate-100 shadow-2xs pl-6">
+                      <div className="flex items-center space-x-1.5">
+                        <span>4.2 Alimentação Escolar</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Cardápio
+                        </span>
+                      </div>
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-2.5 px-3 text-right font-mono text-rose-700 ${
+                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
+                          }`}
+                        >
+                          -{formatCurrencyBR(m.custoAlimentacao)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-2.5 px-3 text-right font-mono font-medium text-rose-600 bg-indigo-50/30">
+                        -{activeDREData.receitaLiquida > 0
+                          ? `${Math.round((activeDREData.custoAlimentacao / activeDREData.receitaLiquida) * 1000) / 10}%`
+                          : '-'}
+                      </td>
+                    )}
+                    <td className="py-2.5 px-4 text-right font-mono font-semibold text-rose-700 bg-slate-50/60">
+                      -{formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 4: Total Custos Operacionais */}
+                  <tr className="bg-rose-50/40 hover:bg-rose-50/70 font-bold text-rose-950 border-t border-rose-200/60">
+                    <td className="py-3 px-4 sticky left-0 bg-rose-50/95 z-10 text-rose-900 border-r border-rose-200 shadow-2xs font-black">
+                      4. (=) Total Custos Operacionais
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-3 px-3 text-right font-mono font-bold text-rose-700 ${
+                            isSelected ? 'bg-rose-100/80 font-black border-x-2 border-rose-400' : ''
+                          }`}
+                        >
+                          -{formatCurrencyBR(m.custosOperacionais)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td className="py-3 px-3 text-right font-mono font-black text-rose-700 bg-rose-50/80">
+                        -{activeDREData.receitaLiquida > 0
+                          ? `${Math.round((activeDREData.custosOperacionais / activeDREData.receitaLiquida) * 1000) / 10}%`
+                          : '-'}
+                      </td>
+                    )}
+                    <td className="py-3 px-4 text-right font-mono font-black text-rose-800 bg-rose-100/60">
+                      -{formatCurrencyBR(monthlyDRE.totalAnual.custosOperacionais)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 5: Resultado Operacional Líquido */}
+                  <tr
+                    className={`font-black text-sm border-t-2 ${
+                      activeDREData.resultadoLiquido >= 0
+                        ? 'bg-gradient-to-r from-emerald-50/80 via-teal-50/80 to-emerald-100/60 text-emerald-950 border-emerald-500'
+                        : 'bg-rose-50/90 text-rose-950 border-rose-500'
+                    }`}
+                  >
+                    <td
+                      className={`py-3.5 px-4 sticky left-0 z-10 border-r shadow-2xs ${
+                        activeDREData.resultadoLiquido >= 0
+                          ? 'bg-emerald-100/90 text-emerald-950 border-emerald-300'
+                          : 'bg-rose-100/90 text-rose-950 border-rose-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>5. (=) Resultado Líquido do Mês</span>
+                        <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-white/70">
+                          {activeDREData.resultadoLiquido >= 0 ? 'Superávit' : 'Déficit'}
+                        </span>
+                      </div>
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-3.5 px-3 text-right font-mono font-black ${
+                            m.resultadoLiquido >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                          } ${isSelected ? 'bg-indigo-100/90 ring-2 ring-indigo-500 font-black' : ''}`}
+                        >
+                          {formatCurrencyBR(m.resultadoLiquido)}
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td
+                        className={`py-3.5 px-3 text-right font-mono font-black ${
+                          activeDREData.resultadoLiquido >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                        } bg-indigo-50/80`}
+                      >
+                        {activeDREData.margemPercentual}%
+                      </td>
+                    )}
+                    <td
+                      className={`py-3.5 px-4 text-right font-mono font-black text-base ${
+                        monthlyDRE.totalAnual.resultadoLiquido >= 0
+                          ? 'text-emerald-800 bg-emerald-200/50'
+                          : 'text-rose-800 bg-rose-200/50'
+                      }`}
+                    >
+                      {formatCurrencyBR(monthlyDRE.totalAnual.resultadoLiquido)}
+                    </td>
+                  </tr>
+
+                  {/* Linha 6: Margem Operacional */}
+                  <tr className="bg-slate-50/60 font-semibold text-[11px] text-slate-600">
+                    <td className="py-2.5 px-4 sticky left-0 bg-slate-50 z-10 font-bold text-slate-700 border-r border-slate-200 shadow-2xs">
+                      6. Margem Operacional Líquida (%)
+                    </td>
+                    {(selectedMonth !== 'ALL' && isolateMonthColumn
+                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                      : monthlyDRE.months
+                    ).map((m) => {
+                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                      return (
+                        <td
+                          key={m.monthIndex}
+                          className={`py-2.5 px-3 text-right font-mono font-bold ${
+                            m.margemPercentual >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                          } ${isSelected ? 'bg-indigo-100/80 font-black border-x-2 border-indigo-400' : ''}`}
+                        >
+                          {m.margemPercentual}%
+                        </td>
+                      );
+                    })}
+                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                      <td
+                        className={`py-2.5 px-3 text-right font-mono font-bold ${
+                          activeDREData.margemPercentual >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                        } bg-indigo-50/50`}
+                      >
+                        {activeDREData.margemPercentual}%
+                      </td>
+                    )}
+                    <td
+                      className={`py-2.5 px-4 text-right font-mono font-extrabold bg-slate-100 text-slate-900 ${
+                        monthlyDRE.totalAnual.margemPercentual >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {monthlyDRE.totalAnual.margemPercentual}%
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Tabela Estruturada do DRE (Síntese Analítica) */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
               <div>
                 <h4 className="text-sm font-black text-slate-900">
                   Estrutura Contábil e Operacional de Resultados — {selectedAnoLetivo}
                 </h4>
                 <p className="text-xs text-slate-500 font-medium">
-                  Valores mensais médios calculados em tempo real a partir das bases ativas
+                  {activeDREData.isMonthly
+                    ? `Apuração estrita da ${activeDREData.label} calculada em tempo real a partir das bases ativas`
+                    : 'Valores mensais médios calculados em tempo real a partir das bases ativas'}
                 </p>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-slate-200 text-slate-700">
-                  Ano Letivo: {selectedAnoLetivo}
+                  {activeDREData.isMonthly ? activeDREData.label : `Ano Letivo: ${selectedAnoLetivo}`}
                 </span>
               </div>
             </div>
@@ -1535,10 +2183,12 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               <div className="p-4 bg-slate-50/70 flex items-center justify-between font-black text-slate-900 text-sm">
                 <div className="flex items-center space-x-2">
                   <span className="text-emerald-600 font-mono">1.</span>
-                  <span>RECEITA OPERACIONAL BRUTA (Contratos de {selectedAnoLetivo})</span>
+                  <span>
+                    RECEITA OPERACIONAL BRUTA ({activeDREData.isMonthly ? activeDREData.shortLabel : `Contratos de ${selectedAnoLetivo}`})
+                  </span>
                 </div>
                 <span className="text-emerald-700 font-mono text-base">
-                  {formatCurrencyBR(metrics.faturamentoBrutoReal)}
+                  {formatCurrencyBR(activeDREData.faturamentoBruto)}
                 </span>
               </div>
 
@@ -1546,7 +2196,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               <div className="py-2.5 px-6 flex items-center justify-between text-slate-600 pl-10 text-xs">
                 <span>(+) Faturamento Bruto dos Contratos ({resolvedProfiles.length} alunos cadastrados)</span>
                 <span className="font-semibold text-slate-800 font-mono">
-                  {formatCurrencyBR(metrics.faturamentoBrutoReal)}
+                  {formatCurrencyBR(activeDREData.faturamentoBruto)}
                 </span>
               </div>
 
@@ -1557,7 +2207,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   <span>(-) DEDUÇÕES DA RECEITA BRUTA</span>
                 </div>
                 <span className="text-purple-700 font-mono">
-                  -{formatCurrencyBR(metrics.totalDescontoBolsas)}
+                  -{formatCurrencyBR(activeDREData.descontoBolsas)}
                 </span>
               </div>
 
@@ -1565,7 +2215,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               <div className="py-2.5 px-6 flex items-center justify-between text-slate-600 pl-10 text-xs">
                 <span>(-) Bolsas de Estudo e Descontos Concedidos ({metrics.totalIsentos} alunos 100% isentos)</span>
                 <span className="font-semibold text-purple-700 font-mono">
-                  -{formatCurrencyBR(metrics.totalDescontoBolsas)}
+                  -{formatCurrencyBR(activeDREData.descontoBolsas)}
                 </span>
               </div>
 
@@ -1576,7 +2226,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   <span>(=) RECEITA OPERACIONAL LÍQUIDA (ROL)</span>
                 </div>
                 <span className="text-emerald-700 font-mono text-base">
-                  {formatCurrencyBR(metrics.receitaPrevistaMensal)}
+                  {formatCurrencyBR(activeDREData.receitaLiquida)}
                 </span>
               </div>
 
@@ -1587,7 +2237,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   <span>(-) CUSTOS OPERACIONAIS REAIS (Livro Ponto + Cardápio)</span>
                 </div>
                 <span className="text-rose-700 font-mono text-base">
-                  -{formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
+                  -{formatCurrencyBR(activeDREData.custosOperacionais)}
                 </span>
               </div>
 
@@ -1605,7 +2255,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   </span>
                 </div>
                 <span className="font-bold text-rose-700 font-mono text-xs">
-                  -{formatCurrencyBR(metrics.custoFolhaReal || 0)}
+                  -{formatCurrencyBR(activeDREData.custoFolha)}
                 </span>
               </div>
 
@@ -1623,34 +2273,14 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   </span>
                 </div>
                 <span className="font-bold text-rose-700 font-mono text-xs">
-                  -{formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
+                  -{formatCurrencyBR(activeDREData.custoAlimentacao)}
                 </span>
               </div>
-
-              {/* Sub-item: Outras despesas reais cadastradas manualmente */}
-              {metrics.totalDespesasMes > (metrics.totalCustosOperacionaisReais || 0) && (
-                <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center space-x-1.5 font-bold text-slate-900">
-                      <span>4.3 Outras Despesas Operacionais Reais</span>
-                      <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-slate-100 text-slate-600 border border-slate-200">
-                        Lançamentos Reais
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-slate-400 block">
-                      Despesas administrativas, pedagógicas ou materiais cadastradas diretamente pela coordenação
-                    </span>
-                  </div>
-                  <span className="font-bold text-rose-700 font-mono text-xs">
-                    -{formatCurrencyBR(metrics.totalDespesasMes - (metrics.totalCustosOperacionaisReais || 0))}
-                  </span>
-                </div>
-              )}
 
               {/* 5. RESULTADO OPERACIONAL LÍQUIDO REAL */}
               <div
                 className={`p-5 flex items-center justify-between text-base font-black ${
-                  (metrics.resultadoOperacionalLiquidoReal ?? 0) >= 0
+                  activeDREData.resultadoLiquido >= 0
                     ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/60 text-emerald-950 border-t-2 border-emerald-500'
                     : 'bg-rose-50 text-rose-950 border-t-2 border-rose-500'
                 }`}
@@ -1667,15 +2297,15 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                 <div className="text-right">
                   <span
                     className={`font-mono text-xl sm:text-2xl font-black block ${
-                      (metrics.resultadoOperacionalLiquidoReal ?? 0) >= 0
+                      activeDREData.resultadoLiquido >= 0
                         ? 'text-emerald-700'
                         : 'text-rose-700'
                     }`}
                   >
-                    {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
+                    {formatCurrencyBR(activeDREData.resultadoLiquido)}
                   </span>
                   <span className="text-[11px] font-bold text-slate-500">
-                    Margem Operacional Líquida: <strong className="text-slate-900">{metrics.margemOperacionalLiquida ?? 0}%</strong>
+                    Margem Operacional Líquida: <strong className="text-slate-900">{activeDREData.margemPercentual}%</strong>
                   </span>
                 </div>
               </div>

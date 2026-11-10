@@ -24,17 +24,43 @@ export const ALL_USERS_KEY = 'frequencia_integral_all_users';
 
 export { normalizeAndDeduplicateUsers };
 
+export const KNOWN_PURGED_2027_IDS = new Set<string>([
+  'st-1793979401393-21',
+  'st-1793977256640-21',
+]);
+
+/**
+ * Identifica alunos excedentes ou cadastros avulsos fora do lote oficial de 133 alunos do E1 em 2027.
+ */
+export function isSurplus2027Student(student: { id?: string; name?: string; anoLetivo?: number }): boolean {
+  if (!student) return false;
+  if (student.id && KNOWN_PURGED_2027_IDS.has(student.id)) return true;
+  if (
+    (student.anoLetivo === 2027 || !student.anoLetivo) &&
+    student.name &&
+    student.name.toLowerCase().trim() === 'izabel do prado moura'
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function getDeletedStudentIds(): Set<string> {
+  const set = new Set<string>(KNOWN_PURGED_2027_IDS);
   try {
-    const raw = localStorage.getItem(DELETED_STUDENTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return new Set(parsed);
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_STUDENTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => set.add(id));
+        }
+      }
     }
   } catch (e) {
     console.error('Erro ao ler IDs de alunos excluídos:', e);
   }
-  return new Set();
+  return set;
 }
 
 export function markStudentAsDeleted(id: string): void {
@@ -42,7 +68,9 @@ export function markStudentAsDeleted(id: string): void {
   try {
     const set = getDeletedStudentIds();
     set.add(id);
-    localStorage.setItem(DELETED_STUDENTS_KEY, JSON.stringify(Array.from(set)));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DELETED_STUDENTS_KEY, JSON.stringify(Array.from(set)));
+    }
   } catch (e) {
     console.error('Erro ao registrar aluno como excluído:', e);
   }
@@ -514,7 +542,7 @@ export function deduplicateStudentsList(
   const deletedIds = getDeletedStudentIds();
 
   (students || []).forEach((student) => {
-    if (!student || !student.id || isMockStudent(student) || deletedIds.has(student.id)) return;
+    if (!student || !student.id || isMockStudent(student) || isSurplus2027Student(student) || deletedIds.has(student.id)) return;
     const key = getStudentDeduplicationKey(student);
     if (!groups.has(key)) {
       groups.set(key, []);
@@ -613,7 +641,7 @@ export function mergeStudentsList(
 
   (incomingStudents || []).forEach((incoming) => {
     if (!incoming || !incoming.id) return;
-    if (isMockStudent(incoming)) return;
+    if (isMockStudent(incoming) || isSurplus2027Student(incoming)) return;
     if (deletedIds.has(incoming.id)) return;
 
     let existing = incoming.id ? currentMap.get(incoming.id) : undefined;
@@ -829,9 +857,11 @@ export function loadStudents(): Student[] {
         let migrated = false;
         const newTurmas: TurmaType[] = ['Mini Maternal Azul', 'Maternal Azul', 'Infantil 1 Azul'];
 
-        // Filter out any mock/fictional model students and deleted students
+        // Filter out any mock/fictional model students, surplus/stray 2027 entries, and deleted students
         const deletedIds = getDeletedStudentIds();
-        const nonMock = parsed.filter((s) => !isMockStudent(s) && !deletedIds.has(s.id));
+        const nonMock = parsed.filter(
+          (s) => !isMockStudent(s) && !isSurplus2027Student(s) && !deletedIds.has(s.id)
+        );
         if (nonMock.length !== parsed.length) migrated = true;
 
         const normalized = nonMock.map((s, idx) => {
@@ -860,7 +890,9 @@ export function loadStudents(): Student[] {
 export function saveStudents(students: Student[]): void {
   try {
     const deletedIds = getDeletedStudentIds();
-    const nonMock = (students || []).filter((s) => !isMockStudent(s) && !deletedIds.has(s.id));
+    const nonMock = (students || []).filter(
+      (s) => !isMockStudent(s) && !isSurplus2027Student(s) && !deletedIds.has(s.id)
+    );
     const deduped = deduplicateStudentsList(nonMock);
     const normalized = deduped.map((s) => normalizeStudent(s));
     localStorage.setItem(STUDENTS_KEY, JSON.stringify(normalized));

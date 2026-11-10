@@ -51,6 +51,7 @@ import {
 import { getDefaultHorarioTurnoForTurma } from './atribuicoesStorage';
 import { calculateCookingWorkshopDates } from './cardapioStorage';
 import { loadHolidays } from './storageUtils';
+import { DREMonthlySummary } from '../services/financialService';
 
 export interface PDFGenerationResult {
   doc: jsPDF;
@@ -6628,6 +6629,349 @@ export function generateFinancialReportPDF({
   applyPageNumbersAndFooters(doc, 'landscape');
 
   const filename = `Demonstrativo_Financeiro_Consolidado_${schoolYear}.pdf`;
+  const blob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(blob);
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  const download = () => doc.save(filename);
+
+  if (saveImmediately) {
+    doc.save(filename);
+  }
+
+  return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
+}
+
+// ---------------------------------------------------------------------------
+// 42.1. DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE MENSAL) EM PDF (LANDSCAPE)
+// ---------------------------------------------------------------------------
+
+export interface GenerateDREMonthlyReportOptions {
+  schoolYear: number;
+  metrics: FinancialMetricSummary;
+  monthlyDRE: DREMonthlySummary;
+  selectedMonth?: number | 'ALL';
+  profilesCount?: number;
+  saveImmediately?: boolean;
+}
+
+export function generateDREMonthlyReportPDF({
+  schoolYear,
+  metrics,
+  monthlyDRE,
+  selectedMonth = 'ALL',
+  profilesCount = 0,
+  saveImmediately = false,
+}: GenerateDREMonthlyReportOptions): PDFGenerationResult {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const leftX = 14;
+  const contentWidth = 269;
+
+  const targetMonth =
+    selectedMonth !== 'ALL' ? monthlyDRE.months.find((m) => m.monthIndex === selectedMonth) : null;
+
+  // Cabeçalho Oficial com timbre
+  drawOfficialHeader(
+    doc,
+    targetMonth
+      ? `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO — ${targetMonth.monthFullName.toUpperCase()} / ${schoolYear}`
+      : `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE MENSAL) — ${schoolYear}`,
+    targetMonth
+      ? `Colégio Crescer • Demonstrativo Analítico da Competência de ${targetMonth.monthFullName} de ${schoolYear}`
+      : 'Colégio Crescer • Demonstrativo Mês a Mês (Jan a Dez) e Fechamento Anual',
+    [
+      `Ano Letivo: ${schoolYear}`,
+      targetMonth ? `Competência: ${targetMonth.monthFullName}` : `Regime: Competência Mensal Contratual`,
+      `Base Ativa: ${profilesCount > 0 ? `${profilesCount} Contratos` : 'Base Integrada'}`,
+      `Integração: Livro Ponto + Cardápio & Refeições`,
+    ],
+    'landscape'
+  );
+
+  let startY = 36;
+
+  // 4 Cards de Indicadores do DRE
+  const cardWidth = (contentWidth - 9) / 4;
+  const cardHeight = 17;
+
+  // Card 1: Receita Contratual Líquida
+  const card1Value = targetMonth ? targetMonth.receitaLiquida : monthlyDRE.totalAnual.receitaLiquida;
+  const card1Title = targetMonth ? `RECEITA LÍQUIDA (${targetMonth.monthName.toUpperCase()})` : 'RECEITA LÍQUIDA ANUAL (ROL)';
+  const card1Sub = targetMonth
+    ? `Bruto: ${formatCurrencyBR(targetMonth.receitaBruta)} | Bolsas: -${formatCurrencyBR(targetMonth.descontoBolsas)}`
+    : `Mensal: ${formatCurrencyBR(metrics.receitaPrevistaMensal)} | 12 meses`;
+
+  doc.setFillColor(240, 253, 244);
+  doc.setDrawColor(187, 247, 208);
+  doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(21, 128, 61);
+  doc.text(card1Title, leftX + 4, startY + 4.8);
+  doc.setFontSize(10);
+  doc.setTextColor(21, 128, 61);
+  doc.text(formatCurrencyBR(card1Value), leftX + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.0);
+  doc.setTextColor(71, 85, 105);
+  doc.text(card1Sub, leftX + 4, startY + 15);
+
+  // Card 2: Custos Operacionais Reais
+  const card2X = leftX + cardWidth + 3;
+  const card2Value = targetMonth ? targetMonth.custosOperacionais : monthlyDRE.totalAnual.custosOperacionais;
+  const card2Title = targetMonth ? `CUSTOS (${targetMonth.monthName.toUpperCase()})` : 'CUSTOS OPERACIONAIS ANUAIS';
+  const card2Sub = targetMonth
+    ? `Folha: ${formatCurrencyBR(targetMonth.custoFolha)} | Alim: ${formatCurrencyBR(targetMonth.custoAlimentacao)}`
+    : `Folha Anual: ${formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)} | Alim: ${formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)}`;
+
+  doc.setFillColor(254, 242, 242);
+  doc.setDrawColor(254, 202, 202);
+  doc.roundedRect(card2X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(185, 28, 28);
+  doc.text(card2Title, card2X + 4, startY + 4.8);
+  doc.setFontSize(10);
+  doc.setTextColor(185, 28, 28);
+  doc.text(formatCurrencyBR(card2Value), card2X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.0);
+  doc.setTextColor(153, 27, 27);
+  doc.text(card2Sub, card2X + 4, startY + 15);
+
+  // Card 3: Resultado Operacional Líquido
+  const card3X = card2X + cardWidth + 3;
+  const card3Value = targetMonth ? targetMonth.resultadoLiquido : monthlyDRE.totalAnual.resultadoLiquido;
+  const card3Margem = targetMonth ? targetMonth.margemPercentual : monthlyDRE.totalAnual.margemPercentual;
+  const card3Title = targetMonth ? `RESULTADO (${targetMonth.monthName.toUpperCase()})` : 'RESULTADO LÍQUIDO ANUAL';
+  const isPos = card3Value >= 0;
+
+  doc.setFillColor(isPos ? 238 : 255, isPos ? 242 : 241, isPos ? 255 : 242);
+  doc.setDrawColor(isPos ? 199 : 254, isPos ? 210 : 205, isPos ? 254 : 211);
+  doc.roundedRect(card3X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(isPos ? 67 : 190, isPos ? 56 : 18, isPos ? 202 : 60);
+  doc.text(card3Title, card3X + 4, startY + 4.8);
+  doc.setFontSize(10);
+  doc.setTextColor(isPos ? 49 : 190, isPos ? 46 : 18, isPos ? 129 : 60);
+  doc.text(formatCurrencyBR(card3Value), card3X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.0);
+  doc.setTextColor(isPos ? 22 : 220, isPos ? 101 : 38, isPos ? 52 : 38);
+  doc.text(
+    isPos
+      ? `Superávit (${card3Margem}% Margem)`
+      : `Déficit (${card3Margem}% Margem)`,
+    card3X + 4,
+    startY + 15
+  );
+
+  // Card 4: Ticket Médio & Base
+  const card4X = card3X + cardWidth + 3;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(card4X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text('TICKET MÉDIO MENSAL', card4X + 4, startY + 4.8);
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrencyBR(metrics.ticketMedioPorAluno), card4X + 4, startY + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.0);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`${metrics.totalAlunosPagantes} pagantes (${metrics.totalIsentos} isentos)`, card4X + 4, startY + 15);
+
+  startY += cardHeight + 4;
+
+  // Banner da Seção da Tabela
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(leftX, startY, contentWidth, 5.5, 1, 1, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('MATRIZ MÊS A MÊS DO DRE (JANEIRO A DEZEMBRO) — EXERCÍCIO ' + schoolYear, leftX + 4, startY + 3.8);
+
+  startY += 7;
+
+  // Montagem da tabela mensal (14 colunas: Linha Contábil, Jan, Fev, Mar, Abr, Mai, Jun, Jul, Ago, Set, Out, Nov, Dez, Total Anual)
+  const headRow = [
+    'Linha Contábil / Indicador',
+    'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+    'Total Anual'
+  ];
+
+  const row1 = [
+    '1. Receita Operacional Bruta',
+    ...monthlyDRE.months.map(m => formatCurrencyBR(m.receitaBruta)),
+    formatCurrencyBR(monthlyDRE.totalAnual.receitaBruta)
+  ];
+
+  const row2 = [
+    '2. (-) Deduções e Bolsas de Estudo',
+    ...monthlyDRE.months.map(m => `-${formatCurrencyBR(m.descontoBolsas)}`),
+    `-${formatCurrencyBR(monthlyDRE.totalAnual.descontoBolsas)}`
+  ];
+
+  const row3 = [
+    '3. (=) Receita Operacional Líquida (ROL)',
+    ...monthlyDRE.months.map(m => formatCurrencyBR(m.receitaLiquida)),
+    formatCurrencyBR(monthlyDRE.totalAnual.receitaLiquida)
+  ];
+
+  const row4 = [
+    '4.1 (-) Folha de Pagamento & Equipe (Ponto)',
+    ...monthlyDRE.months.map(m => `-${formatCurrencyBR(m.custoFolha)}`),
+    `-${formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)}`
+  ];
+
+  const row5 = [
+    '4.2 (-) Alimentação Escolar & Insumos (Cardápio)',
+    ...monthlyDRE.months.map(m => `-${formatCurrencyBR(m.custoAlimentacao)}`),
+    `-${formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)}`
+  ];
+
+  const row6 = [
+    '4. (=) Total Custos Operacionais Reais',
+    ...monthlyDRE.months.map(m => `-${formatCurrencyBR(m.custosOperacionais)}`),
+    `-${formatCurrencyBR(monthlyDRE.totalAnual.custosOperacionais)}`
+  ];
+
+  const row7 = [
+    '5. (=) Resultado Operacional Líquido',
+    ...monthlyDRE.months.map(m => formatCurrencyBR(m.resultadoLiquido)),
+    formatCurrencyBR(monthlyDRE.totalAnual.resultadoLiquido)
+  ];
+
+  const row8 = [
+    '6. Margem Operacional Líquida (%)',
+    ...monthlyDRE.months.map(m => `${m.margemPercentual}%`),
+    `${monthlyDRE.totalAnual.margemPercentual}%`
+  ];
+
+  const tableBody = [row1, row2, row3, row4, row5, row6, row7, row8];
+
+  autoTable(doc, {
+    startY,
+    head: [headRow],
+    body: tableBody,
+    theme: 'grid',
+    styles: {
+      fontSize: 6.2,
+      cellPadding: 1.8,
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: [30, 41, 59],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 6.5,
+      halign: 'center',
+    },
+    columnStyles: {
+      0: { cellWidth: 55, fontStyle: 'bold' },
+      1: { cellWidth: 16.4, halign: 'right' },
+      2: { cellWidth: 16.4, halign: 'right' },
+      3: { cellWidth: 16.4, halign: 'right' },
+      4: { cellWidth: 16.4, halign: 'right' },
+      5: { cellWidth: 16.4, halign: 'right' },
+      6: { cellWidth: 16.4, halign: 'right' },
+      7: { cellWidth: 16.4, halign: 'right' },
+      8: { cellWidth: 16.4, halign: 'right' },
+      9: { cellWidth: 16.4, halign: 'right' },
+      10: { cellWidth: 16.4, halign: 'right' },
+      11: { cellWidth: 16.4, halign: 'right' },
+      12: { cellWidth: 16.4, halign: 'right' },
+      13: { cellWidth: 18.2, halign: 'right', fontStyle: 'bold' },
+    },
+    didParseCell: (data) => {
+      if (selectedMonth !== 'ALL' && data.column.index === Number(selectedMonth)) {
+        if (data.section === 'head') {
+          data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
+          data.cell.styles.textColor = [255, 255, 255];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+      if (data.section === 'body') {
+        const rowIndex = data.row.index;
+        if (rowIndex === 2) {
+          data.cell.styles.fillColor = [240, 253, 244];
+          data.cell.styles.textColor = [21, 128, 61];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (rowIndex === 5) {
+          data.cell.styles.fillColor = [254, 242, 242];
+          data.cell.styles.textColor = [185, 28, 28];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (rowIndex === 6) {
+          const isRowPos = monthlyDRE.totalAnual.resultadoLiquido >= 0;
+          data.cell.styles.fillColor = isRowPos ? [238, 242, 255] : [255, 241, 242];
+          data.cell.styles.textColor = isRowPos ? [49, 46, 129] : [190, 18, 60];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 6.6;
+        } else if (rowIndex === 7) {
+          data.cell.styles.fillColor = [248, 250, 252];
+          data.cell.styles.fontStyle = 'bold';
+        }
+
+        if (selectedMonth !== 'ALL' && data.column.index === Number(selectedMonth)) {
+          data.cell.styles.fontStyle = 'bold';
+          if (rowIndex !== 2 && rowIndex !== 5 && rowIndex !== 6) {
+            data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
+          }
+        }
+      }
+    },
+  });
+
+  const afterTableY = (doc as any).lastAutoTable?.finalY || 140;
+
+  // Bloco de Notas Explicativas
+  const notesY = afterTableY + 6;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(leftX, notesY, contentWidth, 14, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.0);
+  doc.setTextColor(30, 41, 59);
+  doc.text('NOTAS EXPLICATIVAS DO DRE OPERACIONAL:', leftX + 4, notesY + 4.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `1. Receita apurada a partir dos contratos vigentes no exercício (${formatCurrencyBR(metrics.receitaPrevistaMensal)}/mês e ${formatCurrencyBR(monthlyDRE.totalAnual.receitaLiquida)}/ano).`,
+    leftX + 4,
+    notesY + 8
+  );
+  doc.text(
+    `2. Custos operacionais 100% integrados às fontes reais: Folha de Pagamento do Livro Ponto (${formatCurrencyBR(metrics.custoFolhaReal || 0)}/mês) e Alimentação Escolar do Cardápio (${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}/mês). Total operacional mensal: ${formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}.`,
+    leftX + 4,
+    notesY + 11.5
+  );
+
+  // Assinaturas
+  const sigY = notesY + 24;
+  if (sigY < 195) {
+    doc.setDrawColor(203, 213, 225);
+    doc.line(leftX + 25, sigY, leftX + 115, sigY);
+    doc.line(leftX + 154, sigY, leftX + 244, sigY);
+
+    doc.setFontSize(7.0);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Coordenação Geral do Programa Integral', leftX + 70, sigY + 4, { align: 'center' });
+    doc.text('Diretoria Financeira & Controladoria Escolar', leftX + 199, sigY + 4, { align: 'center' });
+  }
+
+  applyPageNumbersAndFooters(doc, 'landscape');
+
+  const filename = `DRE_Mensal_Consolidado_${schoolYear}.pdf`;
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
   const dataUri = doc.output('datauristring');
