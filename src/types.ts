@@ -380,6 +380,7 @@ export interface FinancialExpense {
   status: ExpenseStatus;
   formaPagamento: string;
   fornecedorOuBeneficiario?: string;
+  fornecedor?: string;
   observacoes?: string;
   comprovanteRef?: string;
   createdAt?: string;

@@ -6522,7 +6522,7 @@ export function generateFinancialReportPDF({
         String(idx + 1).padStart(2, '0'),
         catLabel,
         `${exp.descricao}${autoTag}`,
-        exp.fornecedorOuBeneficiario || '-',
+        exp.fornecedor || exp.fornecedorOuBeneficiario || '-',
         formatDateBR(exp.dataVencimento),
         formatCurrencyBR(exp.valor),
         exp.formaPagamento || 'Boleto',

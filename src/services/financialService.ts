@@ -136,6 +136,7 @@ export function getStrictOfficialExpenses(anoLetivo: number = 2026): FinancialEx
       status: 'PAGO',
       formaPagamento: 'Transferência Bancária (Folha)',
       fornecedorOuBeneficiario: 'Equipe de Colaboradores e Monitoria do Livro Ponto',
+      fornecedor: 'Equipe de Colaboradores e Monitoria do Livro Ponto',
       observacoes: 'Auto-Sync: Custo total consolidado dos colaboradores ativos cadastrados no Livro Ponto (Banca Contratual + Ajuda de Custo + Adicionais e Horas Extras).',
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: nowIso,
@@ -154,6 +155,7 @@ export function getStrictOfficialExpenses(anoLetivo: number = 2026): FinancialEx
       status: 'PAGO',
       formaPagamento: 'Boleto Bancário',
       fornecedorOuBeneficiario: 'NutriEscola & Cantina de Refeições Saudáveis',
+      fornecedor: 'NutriEscola & Cantina de Refeições Saudáveis',
       observacoes: 'Auto-Sync: 228 alunos na Rotina × 22 dias letivos no mês × R$ 9,00/refeição registrado no Módulo Cardápio/Refeições.',
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: nowIso,
@@ -646,12 +648,75 @@ export async function zeroAllExtraWorkshopsValues(
 // ---------------------------------------------------------------------------
 
 /**
+ * Mescla a definição oficial de uma despesa com as alterações manuais homologadas pelo usuário,
+ * garantindo que fornecedor, descrição, vencimento, forma de pagamento e observações NUNCA sejam sobrescritos.
+ */
+export function mergePreservingUserEdits(
+  official: FinancialExpense,
+  userExpense?: Partial<FinancialExpense> | null
+): FinancialExpense {
+  if (!userExpense) return { ...official };
+
+  const fornecedorVal =
+    (userExpense.fornecedorOuBeneficiario && userExpense.fornecedorOuBeneficiario.trim()) ||
+    (userExpense.fornecedor && userExpense.fornecedor.trim()) ||
+    official.fornecedorOuBeneficiario ||
+    official.fornecedor ||
+    '';
+
+  const descVal =
+    userExpense.descricao && userExpense.descricao.trim()
+      ? userExpense.descricao.trim()
+      : official.descricao;
+
+  const vencimentoVal =
+    userExpense.dataVencimento && userExpense.dataVencimento.trim()
+      ? userExpense.dataVencimento.trim()
+      : official.dataVencimento;
+
+  const formaPgtoVal =
+    userExpense.formaPagamento && userExpense.formaPagamento.trim()
+      ? userExpense.formaPagamento.trim()
+      : official.formaPagamento;
+
+  const obsVal =
+    userExpense.observacoes !== undefined && userExpense.observacoes !== null
+      ? userExpense.observacoes
+      : official.observacoes;
+
+  const statusVal = (userExpense.status as ExpenseStatus) || official.status;
+  const dataPgtoVal =
+    statusVal === 'PAGO'
+      ? userExpense.dataPagamento || official.dataPagamento || new Date().toISOString().split('T')[0]
+      : userExpense.dataPagamento ?? official.dataPagamento;
+
+  const valorVal =
+    userExpense.valor !== undefined && Number(userExpense.valor) > 0
+      ? Number(userExpense.valor)
+      : official.valor;
+
+  return {
+    ...official,
+    descricao: descVal,
+    fornecedorOuBeneficiario: fornecedorVal,
+    fornecedor: fornecedorVal,
+    dataVencimento: vencimentoVal,
+    status: statusVal,
+    dataPagamento: dataPgtoVal,
+    formaPagamento: formaPgtoVal,
+    observacoes: obsVal,
+    valor: valorVal,
+    updatedAt: userExpense.updatedAt || official.updatedAt,
+    updatedBy: userExpense.updatedBy || official.updatedBy,
+  };
+}
+
+/**
  * Limpa a chave do localStorage 'colegio_crescer_financial_expenses_v1' de qualquer despesa
  * com ID de demonstração ou categoria de oficinas extras ('oficinas_terceirizadas',
  * 'oficinas_culinaria', 'auto_expense_oficinas', 'auto_expense_natacao').
- * Filtra o array em memória para manter ESTRITAMENTE:
- * 1. Folha de Pagamento & Equipe (Livro Ponto) — R$ 32.660,03
- * 2. Alimentação Escolar & Insumos (Refeições) — R$ 45.144,00
+ * Filtra o array em memória para manter ESTRITAMENTE as despesas oficiais, PRESERVANDO
+ * com total fidelidade as edições manuais de Fornecedor, Descrição, Vencimento e Observações.
  */
 export function sanitizeLocalExpensesStorage(anoLetivo: number = 2026): FinancialExpense[] {
   const strictOfficial = getStrictOfficialExpenses(anoLetivo);
@@ -695,18 +760,10 @@ export function sanitizeLocalExpensesStorage(anoLetivo: number = 2026): Financia
       return true;
     });
 
-    // Mantém ESTRITAMENTE os 2 registros oficiais
+    // Mantém ESTRITAMENTE os registros oficiais PRESERVANDO todas as edições do usuário
     const sanitizedList: FinancialExpense[] = strictOfficial.map((official) => {
       const match = cleaned.find((c) => c.id === official.id || c.autoSyncKey === official.autoSyncKey);
-      if (match) {
-        return {
-          ...official,
-          status: match.status || official.status,
-          dataPagamento: match.dataPagamento || official.dataPagamento,
-          formaPagamento: match.formaPagamento || official.formaPagamento,
-        };
-      }
-      return official;
+      return mergePreservingUserEdits(official, match);
     });
 
     localStorage.setItem(LOCAL_EXPENSES_STORAGE_KEY, JSON.stringify(sanitizedList));
@@ -721,14 +778,15 @@ export function sanitizeLocalExpensesStorage(anoLetivo: number = 2026): Financia
 }
 
 /**
- * Força o expurgo físico imediato no Firestore de todos os lançamentos que não sejam os 2 oficiais,
- * e sobrescreve o documento com o estado rigorosamente higienizado.
+ * Força o expurgo físico no Firestore de lançamentos não-oficiais ou duplicados,
+ * preservando com exatidão as alterações de metadados homologadas pelo usuário.
  */
 export async function forceRewriteSanitizedExpensesToFirestore(
   anoLetivo: number = 2026
 ): Promise<FinancialExpense[]> {
-  const strictOfficial = sanitizeLocalExpensesStorage(anoLetivo);
+  const strictOfficial = getStrictOfficialExpenses(anoLetivo);
   const validIds = new Set(strictOfficial.map((s) => s.id));
+  const localList = sanitizeLocalExpensesStorage(anoLetivo);
 
   try {
     const colRef = collection(db, EXPENSES_COLLECTION);
@@ -763,19 +821,29 @@ export async function forceRewriteSanitizedExpensesToFirestore(
       } catch {}
     }
 
-    // Sobrescreve com setDoc os 2 documentos higienizados
-    for (const official of strictOfficial) {
-      await setDoc(doc(db, EXPENSES_COLLECTION, official.id), official, { merge: true });
+    // Mesclar preservando edições do usuário (prioridade: dados do Firestore > localList > default oficial)
+    const mergedList: FinancialExpense[] = strictOfficial.map((official) => {
+      const remoteDoc = snap.docs.find((d) => d.id === official.id);
+      const remoteData = remoteDoc ? (remoteDoc.data() as FinancialExpense) : null;
+      const localData = localList.find((l) => l.id === official.id);
+      const candidate = remoteData || localData;
+      return mergePreservingUserEdits(official, candidate);
+    });
+
+    // Grava com setDoc os documentos higienizados preservando os dados editados
+    for (const item of mergedList) {
+      await setDoc(doc(db, EXPENSES_COLLECTION, item.id), item, { merge: true });
     }
+
+    saveLocalFinancialExpenses(mergedList);
+    return mergedList;
   } catch (err) {
     console.warn('Aviso ao expurgar e reescrever despesas no Firestore:', err);
+    return localList;
   }
-
-  return strictOfficial;
 }
 
 export function loadLocalFinancialExpenses(): FinancialExpense[] {
-  // Limpeza explícita forçada da chave colegio_crescer_financial_expenses_v1 na inicialização
   return sanitizeLocalExpensesStorage(2026);
 }
 
@@ -792,38 +860,71 @@ export async function loadFinancialExpensesFromFirestore(
   anoLetivo?: number
 ): Promise<FinancialExpense[]> {
   const targetYear = anoLetivo || 2026;
-  // Força purga física e reescrita do estado no Firestore
   return forceRewriteSanitizedExpensesToFirestore(targetYear);
 }
 
-export async function saveExpenseToFirestore(expense: FinancialExpense): Promise<void> {
-  if (isObsoleteOrDuplicateExpense(expense)) {
-    return;
+/**
+ * Atualiza os campos editáveis de uma despesa operacional persistindo tanto no Firestore
+ * quanto no armazenamento local (localStorage), preservando com exatidão:
+ * - fornecedor / fornecedorOuBeneficiario
+ * - descricao
+ * - dataVencimento
+ * - formaPagamento
+ * - observacoes
+ * - status / dataPagamento
+ * - valor
+ */
+export async function updateFinancialExpense(
+  expenseId: string,
+  patch: Partial<FinancialExpense>
+): Promise<FinancialExpense | null> {
+  if (!expenseId) return null;
+
+  const currentList = loadLocalFinancialExpenses();
+  const existing = currentList.find((e) => e.id === expenseId);
+  const targetYear = patch.anoLetivo || existing?.anoLetivo || 2026;
+  const official = getStrictOfficialExpenses(targetYear).find((o) => o.id === expenseId) || (existing || ({} as FinancialExpense));
+
+  const merged = mergePreservingUserEdits(official, {
+    ...(existing || {}),
+    ...patch,
+    id: expenseId,
+    updatedAt: new Date().toISOString(),
+    updatedBy: patch.updatedBy || 'Coordenação',
+  });
+
+  // 1. Gravação no Firestore com merge: true
+  try {
+    const docRef = doc(db, EXPENSES_COLLECTION, expenseId);
+    await setDoc(docRef, merged, { merge: true });
+  } catch (err) {
+    console.warn('Aviso: Falha na gravação remota da despesa no Firestore (modo offline/resiliente):', err);
   }
 
-  const docId = expense.id || `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  // 2. Gravação no Cache Local (localStorage)
+  const updatedList = currentList.map((item) => (item.id === expenseId ? merged : item));
+  if (!updatedList.some((item) => item.id === expenseId)) {
+    updatedList.push(merged);
+  }
+  saveLocalFinancialExpenses(updatedList);
+
+  return merged;
+}
+
+/**
+ * Salva ou atualiza uma despesa operacional no Firestore e no cache local.
+ */
+export async function saveExpense(expense: FinancialExpense): Promise<FinancialExpense> {
+  const expenseId = expense.id || `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const cleanExpense: FinancialExpense = {
     ...expense,
-    id: docId,
-    updatedAt: new Date().toISOString(),
+    id: expenseId,
   };
-
-  try {
-    const docRef = doc(db, EXPENSES_COLLECTION, docId);
-    await setDoc(docRef, cleanExpense, { merge: true });
-  } catch (err) {
-    console.warn('Falha ao salvar despesa no Firestore:', err);
-  }
-
-  const current = loadLocalFinancialExpenses().filter((e) => !isObsoleteOrDuplicateExpense(e));
-  const index = current.findIndex((e) => e.id === docId);
-  if (index >= 0) {
-    current[index] = cleanExpense;
-  } else {
-    current.push(cleanExpense);
-  }
-  saveLocalFinancialExpenses(current);
+  const result = await updateFinancialExpense(expenseId, cleanExpense);
+  return result || cleanExpense;
 }
+
+export const saveExpenseToFirestore = saveExpense;
 
 export async function deleteExpenseFromFirestore(expenseId: string): Promise<void> {
   try {
@@ -841,11 +942,11 @@ export function subscribeFinancialExpenses(
   anoLetivo: number,
   onUpdate: (expenses: FinancialExpense[]) => void
 ): () => void {
-  // 1. Limpeza forçada na chave do localStorage colegio_crescer_financial_expenses_v1
+  // 1. Limpeza e carregamento inicial preservando edições do usuário
   const initialSanitized = sanitizeLocalExpensesStorage(anoLetivo);
   onUpdate(initialSanitized);
 
-  // 2. Dispara a reescrita forçada no Firestore em background
+  // 2. Sincroniza em background sem sobrescrever edições
   forceRewriteSanitizedExpensesToFirestore(anoLetivo).catch(() => {});
 
   try {
@@ -855,9 +956,6 @@ export function subscribeFinancialExpenses(
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        // Limpa a chave do localStorage em tempo real
-        sanitizeLocalExpensesStorage(anoLetivo);
-
         const list: FinancialExpense[] = [];
         let needsFirestoreClean = false;
 
@@ -883,28 +981,17 @@ export function subscribeFinancialExpenses(
 
           if (isDemoOrWorkshop) {
             needsFirestoreClean = true;
-            // Purga física no Firestore
             deleteDoc(d.ref).catch(() => {});
           } else {
             list.push(data);
           }
         });
 
-        // Filtrar o array em memória para manter ESTRITAMENTE:
-        // 1. Folha de Pagamento & Equipe (Livro Ponto) — R$ 32.660,03
-        // 2. Alimentação Escolar & Insumos (Refeições) — R$ 45.144,00
+        // Filtrar e mesclar preservando estritamente todas as edições do usuário
         const strictOfficial = getStrictOfficialExpenses(anoLetivo);
         const finalList: FinancialExpense[] = strictOfficial.map((official) => {
           const existing = list.find((e) => e.id === official.id || e.autoSyncKey === official.autoSyncKey);
-          if (existing) {
-            return {
-              ...official,
-              status: existing.status || official.status,
-              dataPagamento: existing.dataPagamento || official.dataPagamento,
-              formaPagamento: existing.formaPagamento || official.formaPagamento,
-            };
-          }
-          return official;
+          return mergePreservingUserEdits(official, existing);
         });
 
         if (needsFirestoreClean || list.length !== 2) {
@@ -1199,6 +1286,7 @@ export function calculateModuleExpenses(
       status: 'PAGO',
       formaPagamento: 'Transferência Bancária (Folha)',
       fornecedorOuBeneficiario: 'Equipe de Colaboradores e Monitoria do Livro Ponto',
+      fornecedor: 'Equipe de Colaboradores e Monitoria do Livro Ponto',
       observacoes: `Auto-Sync: Custo total consolidado de ${finalStaffCount} colaboradores(as) cadastrados no Livro Ponto (Banca Contratual + Ajuda de Custo + Adicionais e Horas Extras).`,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -1217,6 +1305,10 @@ export function calculateModuleExpenses(
       status: 'PAGO',
       formaPagamento: 'Boleto Bancário',
       fornecedorOuBeneficiario:
+        mealConfig?.contractCompany ||
+        mealConfig?.providerName ||
+        'NutriEscola & Cantina de Refeições Saudáveis',
+      fornecedor:
         mealConfig?.contractCompany ||
         mealConfig?.providerName ||
         'NutriEscola & Cantina de Refeições Saudáveis',
