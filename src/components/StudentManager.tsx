@@ -16,7 +16,7 @@ import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
 import { saveStudents, loadStudents, normalizeStudent } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
-import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive } from '../services/studentService';
+import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
 import {
   E1ExtractedStudent,
   readE1FileAsText,
@@ -46,7 +46,7 @@ interface StudentManagerProps {
   onUpdateStudent: (student: Student) => void | Promise<void>;
   onDeleteStudent: (id: string, studentName?: string, studentTurma?: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;
-  onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string) => void;
+  onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string, anoLetivo?: number) => void;
 }
 
 export const StudentManager: React.FC<StudentManagerProps> = ({
@@ -770,7 +770,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Listas de alunos de 2026 e 2027 com igualdade estrita
   const students2026List = React.useMemo(
-    () => (students || []).filter((s) => s.anoLetivo === 2026),
+    () => (students || []).filter((s) => (s.anoLetivo || 2026) === 2026),
     [students]
   );
   const students2027List = React.useMemo(
@@ -879,7 +879,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Alunos pertencentes ao exercício selecionado (2026 ou 2027) com igualdade estrita
   const studentsForSelectedYear = React.useMemo(() => {
-    return (students || []).filter((s) => s.anoLetivo === selectedAnoLetivo);
+    return (students || []).filter((s) => (s.anoLetivo || 2026) === selectedAnoLetivo);
   }, [students, selectedAnoLetivo]);
 
   const totalAtivosCount = React.useMemo(
@@ -1709,8 +1709,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     : 'bg-white text-slate-800'
                 }`}
               >
-                {turmasList.map((t) => (
-                  <option key={t} value={t}>
+                {turmasList.map((t, tIdx) => (
+                  <option key={`${t}-${tIdx}`} value={t}>
                     {t}
                   </option>
                 ))}
@@ -2432,8 +2432,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     !isCoordenador && allowedTurmas.length === 1 ? 'opacity-75 cursor-not-allowed' : ''
                   }`}
                 >
-                  {turmasList.map((t) => (
-                    <option key={t} value={t}>
+                  {turmasList.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       {t}
                     </option>
                   ))}
@@ -2803,8 +2803,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       : 'text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500'
                   }`}
                 >
-                  {editTurmasList.map((t) => (
-                    <option key={t} value={t}>
+                  {editTurmasList.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       {t}
                     </option>
                   ))}
@@ -4204,14 +4204,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </button>
             )}
 
-            {turmasList.map((t) => {
+            {turmasList.map((t, tIdx) => {
               const isSelected = selectedTurma === t;
               const count = studentsForSelectedYear.filter(
                 (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
               ).length;
               return (
                 <button
-                  key={t}
+                  key={`${t}-${tIdx}`}
                   type="button"
                   onClick={() => setSelectedTurma(t)}
                   className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center space-x-2 border ${
@@ -4251,12 +4251,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     : `Todas Minhas Turmas (${studentsForSelectedYear.filter((s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && allowedTurmas.includes(s.turma)).length} Alunos Ativos)`}
                 </option>
               )}
-              {turmasList.map((t) => {
+              {turmasList.map((t, tIdx) => {
                 const count = studentsForSelectedYear.filter(
                   (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
                 ).length;
                 return (
-                  <option key={t} value={t}>
+                  <option key={`${t}-${tIdx}`} value={t}>
                     {t} ({count} {count === 1 ? 'aluno' : 'alunos'})
                   </option>
                 );
@@ -4688,8 +4688,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   onChange={(e) => setTargetTransferTurma(e.target.value)}
                   className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl font-medium text-slate-800 bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                 >
-                  {turmasList.map((t) => (
-                    <option key={t} value={t} disabled={t === transferringStudent.turma}>
+                  {turmasList.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t} disabled={t === transferringStudent.turma}>
                       {t} {t === transferringStudent.turma ? '(Turma Atual)' : ''}
                     </option>
                   ))}
@@ -4901,7 +4901,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     const shouldDeleteStudents = count === 0 || deleteStudentsWithTurma || !hasOtherTurmas;
                     const targetReassign = !shouldDeleteStudents ? (reassignTargetTurma || turmasList.filter((t) => t !== turmaToDelete)[0]) : undefined;
                     
-                    onDeleteTurma(turmaToDelete, shouldDeleteStudents, targetReassign);
+                    onDeleteTurma(turmaToDelete, shouldDeleteStudents, targetReassign, selectedAnoLetivo);
                     if (selectedTurma === turmaToDelete) {
                       setSelectedTurma('TODAS');
                     }

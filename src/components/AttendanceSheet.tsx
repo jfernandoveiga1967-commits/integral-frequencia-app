@@ -213,7 +213,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
     (actId: string, turmaName: string) => {
       if (!students || students.length === 0) return 0;
       const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
-      const yearStudents = students.filter((s) => s.anoLetivo === targetAcademicYear);
+      const yearStudents = students.filter((s) => (s.anoLetivo !== undefined ? Number(s.anoLetivo) : 2026) === targetAcademicYear);
       const turmaList = turmaName === 'TODAS'
         ? yearStudents
         : yearStudents.filter((s) => s.turma === turmaName);
@@ -491,7 +491,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         if (!student) return false;
 
         // Isolamento Rígido por Ano Letivo: garante que matrículas de 2027 não apareçam em 2026 e vice-versa
-        if (student.anoLetivo !== targetAcademicYear) {
+        const studentYear = student.anoLetivo !== undefined ? Number(student.anoLetivo) : 2026;
+        if (studentYear !== targetAcademicYear) {
           return false;
         }
 
@@ -1239,8 +1240,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                   {isCoordenador ? `Todas as Turmas (${turmasList.length})` : `Todas Minhas Turmas (${turmasList.length})`}
                 </option>
               )}
-              {turmasList.map((turma) => (
-                <option key={turma} value={turma}>
+              {turmasList.map((turma, idx) => (
+                <option key={`${turma}-${idx}`} value={turma}>
                   {turma}
                 </option>
               ))}

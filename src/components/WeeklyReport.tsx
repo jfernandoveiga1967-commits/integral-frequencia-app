@@ -1546,8 +1546,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
               >
                 <option value="all">Todas as Turmas (Geral)</option>
-                {turmasList.map((t) => (
-                  <option key={t} value={t}>
+                {turmasList.map((t, tIdx) => (
+                  <option key={`${t}-${tIdx}`} value={t}>
                     Turma {t}
                   </option>
                 ))}
@@ -2048,8 +2048,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   onChange={(e) => setSelectedPdfTurma(e.target.value as TurmaType)}
                   className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500"
                 >
-                  {turmasList.map((t) => (
-                    <option key={t} value={t}>
+                  {turmasList.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       {t}
                     </option>
                   ))}
@@ -2466,8 +2466,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                   className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
                   <option value="all">Todas as Turmas (Geral do Integral)</option>
-                  {turmasList.map((t) => (
-                    <option key={t} value={t}>
+                  {turmasList.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       Turma {t}
                     </option>
                   ))}

@@ -676,8 +676,8 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
                 onChange={(e) => handleTurmaChange(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
               >
-                {turmas.map((t) => (
-                  <option key={t} value={t}>
+                {turmas.map((t, tIdx) => (
+                  <option key={`${t}-${tIdx}`} value={t}>
                     {t}
                   </option>
                 ))}
@@ -1018,13 +1018,13 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
                     Selecione as turmas de destino para replicar este planejamento:
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                    {turmas.map((t) => {
+                    {turmas.map((t, tIdx) => {
                       const isCurrentOrigin = t === turma;
                       const isSelected = selectedCopyTurmas.includes(t);
 
                       return (
                         <div
-                          key={t}
+                          key={`${t}-${tIdx}`}
                           onClick={() => {
                             if (!isCurrentOrigin) handleToggleCopyTurma(t);
                           }}

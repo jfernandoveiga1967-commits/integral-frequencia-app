@@ -1141,10 +1141,10 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
                   >
                     <option value="TODAS">Todas as Turmas ({resolvedProfiles.length})</option>
-                    {availableTurmas.map((t) => {
+                    {availableTurmas.map((t, tIdx) => {
                       const count = resolvedProfiles.filter((p) => p.turma === t).length;
                       return (
-                        <option key={t} value={t}>
+                        <option key={`${t}-${tIdx}`} value={t}>
                           {t} ({count})
                         </option>
                       );

@@ -8,6 +8,7 @@ import { syncMealSnapshotsFromRecords } from './mealFinanceUtils';
 import { getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, PRESET_USERS } from './authUtils';
 import { repairOverlappedPontoRecords } from './pontoUtils';
 import { deduplicateSemanarioPlans, deduplicateScheduleBlocks } from './scheduleDeduplication';
+import { sortTurmasPedagogical } from './turmaUtils';
 
 export const STUDENTS_KEY = 'integral_frequencia_students_v1';
 export const DELETED_STUDENTS_KEY = 'integral_frequencia_deleted_students_v1';
@@ -516,9 +517,10 @@ export function extractStudentTimestamp(student: any): number {
  * Agrupa pelo e-mail do responsável ou por nomeCompleto + turma.
  */
 export function getStudentDeduplicationKey(student: any): string {
+  const ano = student?.anoLetivo ? Number(student.anoLetivo) : 2026;
   const emailResp = student?.emailResponsavel || student?.parentEmail || student?.email;
   if (emailResp && typeof emailResp === 'string' && emailResp.trim().includes('@')) {
-    return `email:${emailResp.trim().toLowerCase()}`;
+    return `email:${ano}__${emailResp.trim().toLowerCase()}`;
   }
   const normName = (student?.name || student?.nomeCompleto || student?.nome || '')
     .toString()
@@ -526,7 +528,7 @@ export function getStudentDeduplicationKey(student: any): string {
     .toLowerCase()
     .replace(/\s+/g, ' ');
   const normTurma = (student?.turma || '').toString().trim().toLowerCase();
-  return `name_turma:${normName}__${normTurma}`;
+  return `name_turma_ano:${ano}__${normName}__${normTurma}`;
 }
 
 /**
@@ -824,19 +826,28 @@ export function loadTurmas(): string[] {
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Garantir que a turma Mini Maternal Azul sempre esteja presente para o ano letivo de 2026
+        const set = new Set<string>(parsed.map((t) => String(t || '').trim()).filter(Boolean));
+        if (!set.has('Mini Maternal Azul') && !set.has('Mini Maternal')) {
+          set.add('Mini Maternal Azul');
+        }
+        const cleanList = sortTurmasPedagogical(Array.from(set));
+        saveTurmas(cleanList);
+        return cleanList;
       }
     }
   } catch (e) {
     console.error('Erro ao carregar turmas do LocalStorage:', e);
   }
-  saveTurmas(TURMAS_LIST);
-  return TURMAS_LIST;
+  const defaultList = sortTurmasPedagogical(TURMAS_LIST);
+  saveTurmas(defaultList);
+  return defaultList;
 }
 
 export function saveTurmas(turmas: string[]): void {
   try {
-    localStorage.setItem(TURMAS_KEY, JSON.stringify(turmas));
+    const cleanList = sortTurmasPedagogical(turmas || []);
+    localStorage.setItem(TURMAS_KEY, JSON.stringify(cleanList));
   } catch (e) {
     console.error('Erro ao salvar turmas:', e);
   }

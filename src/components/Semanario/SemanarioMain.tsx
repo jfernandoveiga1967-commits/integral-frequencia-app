@@ -926,8 +926,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
             title="Escolher turma para o PDF"
           >
             <option value="all">Todas as Turmas</option>
-            {sortedTurmas.map((t) => (
-              <option key={t} value={t}>
+            {sortedTurmas.map((t, tIdx) => (
+              <option key={`${t}-${tIdx}`} value={t}>
                 {t}
               </option>
             ))}
@@ -1232,7 +1232,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
           {/* Grid of Class Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 print:hidden no-print">
-            {displayedTurmas.map((t) => {
+            {displayedTurmas.map((t, tIdx) => {
               const turmaPlans = weekPlans.filter((p) => p.turma === t);
               // Atividades que possuem texto/conteúdo pedagógico salvo (descricao, conteudo ou proposta preenchidos)
               const filledTurmaPlans = turmaPlans.filter(isPlanContentFilled);
@@ -1258,7 +1258,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
               return (
                 <div
-                  key={t}
+                  key={`${t}-${tIdx}`}
                   onClick={() => {
                     setActiveTurma(t);
                     setSelectedDay(getInitialDayOfWeek());
@@ -1419,7 +1419,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
               const turmaPlans = weekPlans.filter((p) => p.turma === turma);
               return (
                 <div
-                  key={turma}
+                  key={`${turma}-${turmaIndex}`}
                   className={`turma-print-section p-4 ${
                     turmaIndex > 0 ? 'print:break-before-page page-break-before-always' : ''
                   }`}
@@ -1575,8 +1575,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   onChange={(e) => setActiveTurma(e.target.value)}
                   className="bg-transparent text-xs font-extrabold text-slate-800 focus:outline-none cursor-pointer"
                 >
-                  {sortedTurmas.map((t) => (
-                    <option key={t} value={t}>
+                  {sortedTurmas.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       {t}
                     </option>
                   ))}

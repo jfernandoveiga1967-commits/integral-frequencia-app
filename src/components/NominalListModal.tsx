@@ -704,12 +704,12 @@ export const NominalListModal: React.FC<NominalListModalProps> = ({
                   className="w-full px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
                 >
                   <option value="TODAS">Todas as Turmas ({students.length})</option>
-                  {turmasList.map((t) => {
+                  {turmasList.map((t, tIdx) => {
                     const count = students.filter(
                       (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
                     ).length;
                     return (
-                      <option key={t} value={t}>
+                      <option key={`${t}-${tIdx}`} value={t}>
                         {t} ({count})
                       </option>
                     );

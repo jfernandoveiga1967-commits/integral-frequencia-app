@@ -205,6 +205,7 @@ export interface Student {
   oficinasExtras?: number; // Alias de compatibilidade
   valorOficinas?: number; // Alias de compatibilidade
   valorExtras?: number; // Alias de compatibilidade
+  updatedAt?: string; // Data/hora da última atualização
 }
 
 export interface AttendanceRecord {

@@ -2341,11 +2341,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                             </div>
 
                             <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto py-1">
-                              {availableTurmas.map((t) => {
+                              {availableTurmas.map((t, tIdx) => {
                                 const isAssigned = isMasterCoord || userTurmas.includes(t);
                                 return (
                                   <button
-                                    key={t}
+                                    key={`${t}-${tIdx}`}
                                     type="button"
                                     disabled={isMasterCoord}
                                     onClick={() => handleToggleUserTurma(user, t)}
@@ -3682,11 +3682,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </p>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50/50">
-                  {availableTurmas.map((t) => {
+                  {availableTurmas.map((t, tIdx) => {
                     const isChecked = formRole === 'coordenador' || formTurmas.includes(t);
                     return (
                       <button
-                        key={t}
+                        key={`${t}-${tIdx}`}
                         type="button"
                         onClick={() => toggleTurmaInForm(t)}
                         className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${

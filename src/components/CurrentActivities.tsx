@@ -1527,7 +1527,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-3.5">
-          {filteredTurmas.map((item) => {
+          {filteredTurmas.map((item, itemIdx) => {
             const { turmaName, activeBlock, nextBlock, rollCallInfo } = item;
             const actDetails = activeBlock ? activityMap.get(activeBlock.activityId) : null;
             const nextActDetails = nextBlock ? activityMap.get(nextBlock.activityId) : null;
@@ -1551,7 +1551,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
             return (
               <div
-                key={turmaName}
+                key={`${turmaName}-${itemIdx}`}
                 className={`rounded-2xl border transition-all duration-200 flex flex-col justify-between overflow-hidden shadow-xs hover:shadow-md ${
                   isClassActive
                     ? 'bg-white border-indigo-200 ring-1 ring-indigo-500/20'

@@ -148,6 +148,7 @@ import {
   deduplicateScheduleBlocks,
   upsertScheduleBlocks,
 } from './utils/scheduleDeduplication';
+import { restoreMiniMaternal2026 } from './services/studentService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser());
@@ -337,11 +338,18 @@ export default function App() {
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
 
+    // Reconstitui e assegura imediatamente a integridade do Mini Maternal 2026
+    restoreMiniMaternal2026().then((res) => {
+      setTurmas(sortTurmasPedagogical(loadTurmas()));
+      setStudents(loadStudents().filter((s) => !isMockStudent(s)));
+    }).catch(() => {});
+
     // Test Firestore connectivity & flush any pending outbox queue
     testFirestoreConnection().then((connected) => {
       setFirebaseConnected(connected);
       if (connected) {
         processAttendanceOutbox().catch(() => {});
+        restoreMiniMaternal2026().catch(() => {});
       }
     });
 
@@ -1359,31 +1367,56 @@ export default function App() {
     return true;
   };
 
-  const handleDeleteTurma = (turmaName: string, deleteStudents: boolean = true, targetTurmaToReassign?: string) => {
-    const updatedTurmas = turmas.filter((t) => t !== turmaName);
+  const handleDeleteTurma = (
+    turmaName: string,
+    deleteStudents: boolean = true,
+    targetTurmaToReassign?: string,
+    targetAnoLetivo?: number
+  ) => {
+    const isMiniMaternal = (turmaName || '').toLowerCase().includes('mini') && (turmaName || '').toLowerCase().includes('maternal');
+    // A turma oficial do Mini Maternal 2026 é canônica e protegida contra exclusão
+    if (isMiniMaternal && (!targetAnoLetivo || targetAnoLetivo === 2026)) {
+      console.warn('[App] A turma do Mini Maternal 2026 é oficial e protegida contra exclusão.');
+      return;
+    }
+
+    const updatedTurmas = isMiniMaternal ? turmas : turmas.filter((t) => t !== turmaName);
     setTurmas(updatedTurmas);
     saveTurmas(updatedTurmas);
     broadcastSyncEvent('SYNC_TURMAS', updatedTurmas);
-    deleteTurmaFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
+    if (!isMiniMaternal) {
+      deleteTurmaFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
+    }
 
     // Integração com o Quadro de Atribuições: remove imediatamente a atribuição correspondente
-    setQuadroAtribuicoes((prev) => {
-      const nextList = prev.filter((a) => a.turma !== turmaName);
-      saveLocalQuadroAtribuicoes(nextList);
-      broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
-      return nextList;
-    });
-    deleteTurmaAtribuicaoFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
+    if (!isMiniMaternal) {
+      setQuadroAtribuicoes((prev) => {
+        const nextList = prev.filter((a) => a.turma !== turmaName);
+        saveLocalQuadroAtribuicoes(nextList);
+        broadcastSyncEvent('SYNC_QUADRO_ATRIBUICOES', nextList);
+        return nextList;
+      });
+      deleteTurmaAtribuicaoFromFirestore(turmaName).catch((err) => console.warn('Falha na gravação remota:', err));
+    }
 
     if (deleteStudents) {
-      // Remove all students belonging to this turma
-      const studentIdsToRemove = new Set<string>(students.filter((s) => s.turma === turmaName).map((s) => s.id));
-      const updatedStudents = students.filter((s) => s.turma !== turmaName);
+      // Regra de isolamento estrito por ano letivo: se targetAnoLetivo for especificado, só afeta alunos desse ano!
+      const shouldKeepStudent = (s: Student) => {
+        if (s.turma !== turmaName) return true;
+        const studentYear = s.anoLetivo !== undefined ? Number(s.anoLetivo) : 2026;
+        if (targetAnoLetivo && studentYear !== targetAnoLetivo) {
+          return true; // Preserva alunos do outro ano letivo (ex: 2026 protegido ao operar em 2027)
+        }
+        return false;
+      };
+
+      const studentsToRemove = students.filter((s) => !shouldKeepStudent(s));
+      const studentIdsToRemove = new Set<string>(studentsToRemove.map((s) => s.id));
+      const updatedStudents = students.filter(shouldKeepStudent);
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
-      const studentsToRemove = students.filter((s) => s.turma === turmaName);
       studentsToRemove.forEach((s) => deleteStudentFromFirestore(s.id, s.name, s.turma).catch((err) => console.warn('Falha na gravação remota:', err)));
 
       // Clean attendance records for removed students
@@ -1396,15 +1429,25 @@ export default function App() {
         deleteDoc(doc(db, 'attendanceRecords', r.id)).catch(() => {});
       });
     } else if (targetTurmaToReassign) {
-      // Reassign students to targetTurmaToReassign
-      const updatedStudents = students.map((s) => s.turma === turmaName ? { ...s, turma: targetTurmaToReassign } : s);
+      // Reassign students to targetTurmaToReassign respeitando o ano letivo
+      const updatedStudents = students.map((s) => {
+        if (s.turma !== turmaName) return s;
+        const studentYear = s.anoLetivo !== undefined ? Number(s.anoLetivo) : 2026;
+        if (targetAnoLetivo && studentYear !== targetAnoLetivo) {
+          return s; // Preserva alunos do outro ano
+        }
+        return { ...s, turma: targetTurmaToReassign };
+      });
       setStudents(updatedStudents);
       saveStudents(updatedStudents);
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
       updatedStudents.filter((s) => s.turma === targetTurmaToReassign).forEach((s) => saveStudentToFirestore(s).catch((err) => console.warn('Falha na gravação remota:', err)));
 
-      const updatedRecords = records.map((r) => r.turma === turmaName ? { ...r, turma: targetTurmaToReassign } : r);
+      const updatedRecords = records.map((r) => {
+        if (r.turma !== turmaName) return r;
+        return { ...r, turma: targetTurmaToReassign };
+      });
       setRecords(updatedRecords);
       saveAttendanceRecords(updatedRecords);
       broadcastSyncEvent('SYNC_ATTENDANCE_RECORDS', updatedRecords);
@@ -2458,10 +2501,10 @@ export default function App() {
                   className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 w-full sm:w-auto cursor-pointer"
                 >
                   <option value="all">Todas as Turmas ({todayConsolidated.pendingStudents.length})</option>
-                  {turmas.map((t) => {
+                  {turmas.map((t, tIdx) => {
                     const countInTurma = todayConsolidated.pendingStudents.filter((s) => s.turma === t).length;
                     return (
-                      <option key={t} value={t}>
+                      <option key={`${t}-${tIdx}`} value={t}>
                         Turma {t} ({countInTurma})
                       </option>
                     );

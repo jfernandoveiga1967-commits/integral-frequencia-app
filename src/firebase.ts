@@ -62,6 +62,7 @@ import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './uti
 import { normalizeAttendanceStatus, getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
 import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays } from './utils/dateUtils';
 import { saveMealConfig } from './utils/mealFinanceUtils';
+import { sortTurmasPedagogical } from './utils/turmaUtils';
 
 export { doc, getDoc, updateDoc, deleteDoc };
 
@@ -412,13 +413,21 @@ export function subscribeTurmas(
     colRef,
     (snapshot) => {
       clearFirestoreQuotaExceeded();
-      const list: string[] = [];
+      const uniqueNames = new Set<string>();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         if (data && data.name) {
-          list.push(data.name);
+          const trimmed = String(data.name).trim();
+          if (trimmed) {
+            uniqueNames.add(trimmed);
+          }
         }
       });
+      // Preservar a turma do Mini Maternal para o exercício de 2026
+      if (!uniqueNames.has('Mini Maternal Azul') && !uniqueNames.has('Mini Maternal')) {
+        uniqueNames.add('Mini Maternal Azul');
+      }
+      const list = sortTurmasPedagogical(Array.from(uniqueNames));
       onData(list);
     },
     (error) => {
@@ -1829,6 +1838,11 @@ export async function saveTurmaToFirestore(turmaName: string) {
 
 export async function deleteTurmaFromFirestore(turmaName: string) {
   try {
+    const norm = (turmaName || '').toLowerCase();
+    if (norm.includes('mini') && norm.includes('maternal')) {
+      console.warn('[firebase] Turma do Mini Maternal 2026 é oficial e protegida contra exclusão.');
+      return;
+    }
     const safeId = turmaName.replace(/\s+/g, '_').toLowerCase();
     const docRef = doc(db, 'turmas', safeId);
     await deleteDoc(docRef);

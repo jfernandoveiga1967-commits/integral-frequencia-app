@@ -107,7 +107,8 @@ export function getTurmaPedagogicalWeight(turmaName: string): number {
  */
 export function sortTurmasPedagogical(turmas: string[]): string[] {
   if (!Array.isArray(turmas)) return [];
-  return [...turmas].sort((a, b) => {
+  const unique = Array.from(new Set(turmas.map((t) => String(t || '').trim()).filter(Boolean)));
+  return unique.sort((a, b) => {
     const weightA = getTurmaPedagogicalWeight(a);
     const weightB = getTurmaPedagogicalWeight(b);
     if (weightA !== weightB) {

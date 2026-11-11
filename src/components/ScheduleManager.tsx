@@ -1111,12 +1111,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
             ref={turmasScrollRef}
             className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1.5 pt-0.5 no-scrollbar overscroll-x-contain scroll-smooth w-full"
           >
-            {sortedTurmas.map((t) => {
+            {sortedTurmas.map((t, tIdx) => {
               const isSelected = selectedTurma === t;
               const blockCount = totalBlocksForTurma(t);
               return (
                 <button
-                  key={t}
+                  key={`${t}-${tIdx}`}
                   id={`schedule-select-turma-${t.replace(/\s+/g, '-').toLowerCase()}`}
                   type="button"
                   onClick={() => setSelectedTurma(t)}
@@ -1586,12 +1586,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto p-1">
                   {sortedTurmas
                     .filter((t) => t !== selectedTurma)
-                    .map((t) => {
+                    .map((t, tIdx) => {
                       const isChecked = fullRoutineTargetTurmas.includes(t);
                       const existingCount = totalBlocksForTurma(t);
                       return (
                         <div
-                          key={t}
+                          key={`${t}-${tIdx}`}
                           onClick={() => handleToggleFullRoutineTurma(t)}
                           className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
                             isChecked
@@ -1878,12 +1878,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1">
-                  {sortedTurmas.map((t) => {
+                  {sortedTurmas.map((t, tIdx) => {
                     const isChecked = dayReplicateTargetTurmas.includes(t);
                     const isSourceTurma = t === dayReplicateModal.sourceTurma;
                     return (
                       <div
-                        key={t}
+                        key={`${t}-${tIdx}`}
                         onClick={() => handleToggleDayTargetTurma(t)}
                         className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                           isChecked
@@ -2061,8 +2061,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   onChange={(e) => setFormTurma(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {sortedTurmas.map((t) => (
-                    <option key={t} value={t}>
+                  {sortedTurmas.map((t, tIdx) => (
+                    <option key={`${t}-${tIdx}`} value={t}>
                       {t}
                     </option>
                   ))}
@@ -2312,11 +2312,11 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-white rounded-xl border border-slate-200">
-                        {sortedTurmas.map((t) => {
+                        {sortedTurmas.map((t, tIdx) => {
                           const isChecked = formReplicateTurmas.includes(t);
                           return (
                             <div
-                              key={t}
+                              key={`${t}-${tIdx}`}
                               onClick={() => handleToggleFormReplicateTurma(t)}
                               className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all flex items-center justify-between ${
                                 isChecked
@@ -2534,8 +2534,8 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                     {pdfReportType === 'weekly' && (
                       <option value="ALL">Todas as Turmas (Documento Unificado com todas as grades)</option>
                     )}
-                    {sortedTurmas.map((t) => (
-                      <option key={t} value={t}>
+                    {sortedTurmas.map((t, tIdx) => (
+                      <option key={`${t}-${tIdx}`} value={t}>
                         {t} ({totalBlocksForTurma(t)} horários cadastrados)
                       </option>
                     ))}
