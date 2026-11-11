@@ -330,14 +330,70 @@ export async function reclassifyKlausTo4thYear(): Promise<{
 }
 
 /**
- * Lista canônica dos 14 alunos oficiais do Mini Maternal de 2026 vinculados
- * aos 528 registros históricos de chamada na coleção attendanceRecords.
+ * Lista canônica dos 9 alunos oficiais do Mini Maternal de 2026 vinculados
+ * à Educação Infantil do Colégio Crescer com histórico e matrícula regular.
  */
 export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
   {
-    id: 'st-1786023256048-0-xgds',
-    matricula: 'st-1786023256048-0-xgds',
-    name: 'Maria Eloá Bueno Nunes',
+    id: 'st-2026-minimaternal-gael-sturrari',
+    matricula: 'st-2026-minimaternal-gael-sturrari',
+    name: 'Gael Sturrari',
+    turma: 'Mini Maternal Azul',
+    anoLetivo: 2026,
+    status: 'ativo',
+    statusMatricula: 'ativo',
+    tipoContrato: 'regular',
+    activities: ['Rotina'],
+    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+    horariosSaida: {},
+    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
+  },
+  {
+    id: 'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
+    matricula: 'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
+    name: 'José Ricardo Bijora Maneghin',
+    turma: 'Mini Maternal Azul',
+    anoLetivo: 2026,
+    status: 'ativo',
+    statusMatricula: 'ativo',
+    tipoContrato: 'regular',
+    activities: ['Rotina'],
+    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+    horariosSaida: {},
+    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
+  },
+  {
+    id: 'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
+    matricula: 'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
+    name: 'Lyan Adolpho Vieira Gardin',
+    turma: 'Mini Maternal Azul',
+    anoLetivo: 2026,
+    status: 'ativo',
+    statusMatricula: 'ativo',
+    tipoContrato: 'regular',
+    activities: ['Rotina'],
+    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+    horariosSaida: {},
+    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
+  },
+  {
+    id: 'st-2026-minimaternal-samuel-armani-boa-nova',
+    matricula: 'st-2026-minimaternal-samuel-armani-boa-nova',
+    name: 'Samuel Armani Boa Nova',
+    turma: 'Mini Maternal Azul',
+    anoLetivo: 2026,
+    status: 'ativo',
+    statusMatricula: 'ativo',
+    tipoContrato: 'regular',
+    activities: ['Rotina'],
+    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+    horariosSaida: {},
+    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
+  },
+  {
+    id: 'st-2026-minimaternal-anthony-rabelo-goncalves',
+    matricula: 'st-2026-minimaternal-anthony-rabelo-goncalves',
+    name: 'Anthony Rabelo Gonçalves',
     turma: 'Mini Maternal Azul',
     anoLetivo: 2026,
     status: 'ativo',
@@ -404,132 +460,6 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     horariosSaida: {},
     notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
   },
-  {
-    id: 'st-1786023256048-5-5vrf',
-    matricula: 'st-1786023256048-5-5vrf',
-    name: 'Helena Vasconcelos Ramos',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1787171728919-w8dx',
-    matricula: 'st-1787171728919-w8dx',
-    name: 'Joaquim Ferreira Prado',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1788527089570-ctsi',
-    matricula: 'st-1788527089570-ctsi',
-    name: 'Cecília Rocha Almeida',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1788878234936-yklw',
-    matricula: 'st-1788878234936-yklw',
-    name: 'Davi Lucca Moreira',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1791559436540-ru3a',
-    matricula: 'st-1791559436540-ru3a',
-    name: 'Lara Beatriz Mendes',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1793456297352-0-nqty',
-    matricula: 'st-1793456297352-0-nqty',
-    name: 'Noah Rodrigues Lima',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1793721721927-43-sev8r',
-    matricula: 'st-1793721721927-43-sev8r',
-    name: 'Bernardo Silva Ramos',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1793721721927-44-b6yeo',
-    matricula: 'st-1793721721927-44-b6yeo',
-    name: 'Theo Henrique Barbosa',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
-    id: 'st-1793721721927-45-k9o55',
-    matricula: 'st-1793721721927-45-k9o55',
-    name: 'Valentina Souza Castro',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
 ];
 
 /**
@@ -575,6 +505,21 @@ export async function restoreMiniMaternal2026(): Promise<{
   const studentMap = new Map<string, Student>();
   currentStudents.forEach((s) => studentMap.set(s.id, s));
 
+  // Conjunto dos 9 IDs e nomes normalizados oficiais do Mini Maternal 2026
+  const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => st.id));
+  const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
+
+  // Identificar e expurgar alunos indevidamente vinculados ao Mini Maternal 2026 fora dos 9 oficiais
+  const extraneousMiniMaternal2026Ids: string[] = [];
+  studentMap.forEach((s, sId) => {
+    const isMiniMaternal = (s.turma || '').toLowerCase().includes('mini') && (s.turma || '').toLowerCase().includes('maternal');
+    const is2026 = (s.anoLetivo || 2026) === 2026;
+    if (isMiniMaternal && is2026 && !officialIds.has(sId) && !officialNames.has(normalizeStudentNameForMatching(s.name))) {
+      extraneousMiniMaternal2026Ids.push(sId);
+      studentMap.delete(sId);
+    }
+  });
+
   const nowIso = new Date().toISOString();
   const restoredStudents: Student[] = OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => {
     const existing = studentMap.get(st.id);
@@ -585,7 +530,7 @@ export async function restoreMiniMaternal2026(): Promise<{
     };
   });
 
-  // Atualizar mapa
+  // Atualizar mapa com os 9 oficiais
   restoredStudents.forEach((st) => {
     studentMap.set(st.id, st);
   });
@@ -593,10 +538,13 @@ export async function restoreMiniMaternal2026(): Promise<{
   const updatedStudents = Array.from(studentMap.values());
   saveStudents(updatedStudents);
 
-  // 4. Salvar alunos no Firestore em lote
+  // 4. Salvar alunos no Firestore em lote e purgar excedentes
   try {
     for (const st of restoredStudents) {
       await saveStudentToFirestore(st);
+    }
+    if (extraneousMiniMaternal2026Ids.length > 0) {
+      await batchDeleteStudentsFromFirestore(extraneousMiniMaternal2026Ids);
     }
   } catch (e) {
     console.warn('[studentService] Aviso ao salvar alunos do Mini Maternal no Firestore:', e);
@@ -610,5 +558,20 @@ export async function restoreMiniMaternal2026(): Promise<{
     restoredStudentsCount: restoredStudents.length,
     studentsList: restoredStudents,
   };
+}
+
+/**
+ * Valida se um aluno pertence aos 9 alunos canônicos protegidos do Mini Maternal 2026,
+ * impedindo sua exclusão por rotinas de sanitização e mesclagem.
+ */
+export function isProtectedMiniMaternal2026Student(student: { id?: string; name?: string; anoLetivo?: number }): boolean {
+  if (!student) return false;
+  const ano = student.anoLetivo !== undefined ? Number(student.anoLetivo) : 2026;
+  if (ano !== 2026) return false;
+  const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((s) => s.id));
+  if (student.id && officialIds.has(student.id)) return true;
+  const norm = normalizeStudentNameForMatching(student.name || '');
+  const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((s) => normalizeStudentNameForMatching(s.name)));
+  return officialNames.has(norm);
 }
 

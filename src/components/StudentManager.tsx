@@ -14,7 +14,7 @@ import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, D
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
-import { saveStudents, loadStudents, normalizeStudent } from '../utils/storageUtils';
+import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
 import {
@@ -959,12 +959,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       });
       await canonicalBatch.commit();
 
-      // 2. Exclui em lote todos os IDs duplicados no Firestore e sincroniza marcas de exclusão
-      const totalDeleted = await batchDeleteStudentsFromFirestore(info.allIdsToDelete);
+      // 2. Exclui em lote todos os IDs duplicados no Firestore e sincroniza marcas de exclusão (protegendo os 9 oficiais do Mini Maternal 2026)
+      const safeIdsToDelete = info.allIdsToDelete.filter(
+        (id) => !PROTECTED_MINI_MATERNAL_2026_IDS.has(id) && !id.startsWith('st-2026-minimaternal')
+      );
+      const totalDeleted = await batchDeleteStudentsFromFirestore(safeIdsToDelete);
 
       // 3. Atualiza cache local e estado
       const currentList = loadStudents();
-      const idsToDeleteSet = new Set(info.allIdsToDelete);
+      const idsToDeleteSet = new Set(safeIdsToDelete);
       const cleaned = currentList.filter((s) => !idsToDeleteSet.has(s.id));
       saveStudents(cleaned);
       setStudents(cleaned);

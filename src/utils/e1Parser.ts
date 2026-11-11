@@ -977,7 +977,9 @@ export function findDuplicateStudentGroups(
 
     const canonical = sorted[0];
     const duplicates = sorted.slice(1);
-    const idsToDelete = duplicates.map((d) => d.id).filter((id) => id !== canonical.id);
+    const idsToDelete = duplicates
+      .map((d) => d.id)
+      .filter((id) => id !== canonical.id && !id.startsWith('st-2026-minimaternal'));
 
     idsToDelete.forEach((id) => allIdsToDeleteSet.add(id));
 

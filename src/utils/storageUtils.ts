@@ -30,6 +30,18 @@ export const KNOWN_PURGED_2027_IDS = new Set<string>([
   'st-1793977256640-21',
 ]);
 
+export const PROTECTED_MINI_MATERNAL_2026_IDS = new Set<string>([
+  'st-2026-minimaternal-gael-sturrari',
+  'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
+  'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
+  'st-2026-minimaternal-samuel-armani-boa-nova',
+  'st-2026-minimaternal-anthony-rabelo-goncalves',
+  'st-1786023256048-1-h1if',
+  'st-1786023256048-2-0bbc',
+  'st-1786023256048-3-xx25',
+  'st-1786023256048-4-l16u',
+]);
+
 /**
  * Identifica alunos excedentes ou cadastros avulsos fora do lote oficial de 133 alunos do E1 em 2027.
  */
@@ -61,11 +73,17 @@ export function getDeletedStudentIds(): Set<string> {
   } catch (e) {
     console.error('Erro ao ler IDs de alunos excluídos:', e);
   }
+  // Os 9 alunos oficiais do Mini Maternal 2026 nunca devem ser considerados excluídos
+  PROTECTED_MINI_MATERNAL_2026_IDS.forEach((id) => set.delete(id));
   return set;
 }
 
 export function markStudentAsDeleted(id: string): void {
   if (!id) return;
+  if (PROTECTED_MINI_MATERNAL_2026_IDS.has(id)) {
+    console.warn('[storageUtils] Bloqueada exclusão de aluno protegido do Mini Maternal 2026:', id);
+    return;
+  }
   try {
     const set = getDeletedStudentIds();
     set.add(id);
