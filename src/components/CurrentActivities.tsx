@@ -162,11 +162,15 @@ function getEnrolledStudentsForActivity(
 ): Student[] {
   const safeStudents = Array.isArray(students) ? students : [];
   const normTurma = (turmaName || '').trim();
+  const targetAcademicYear = selectedDate ? parseInt(selectedDate.split('-')[0], 10) || 2026 : 2026;
+
   const turmaActiveStudents = safeStudents.filter((s) => {
     if (!s || typeof s !== 'object') return false;
+    const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+    if (sYear !== targetAcademicYear) return false;
     if ((s.turma || '').trim() !== normTurma) return false;
-    const st = s.status || s.statusMatricula || 'ativo';
-    if (st !== 'ativo') return false;
+    const st = (s.status || (s as any).statusMatricula || 'ativo').toLowerCase().trim();
+    if (st !== 'ativo' && st !== 'regular') return false;
     if (selectedDate) {
       if (!isStudentActiveOnDate(s, selectedDate)) return false;
       if (!isStudentScheduledForDate(s, selectedDate)) return false;
@@ -254,6 +258,24 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'TODAS' | 'EM_ANDAMENTO' | 'EXIGE_CHAMADA' | 'CHAMADA_PENDENTE' | 'SEM_ATIVIDADE'>('TODAS');
   const [selectedActivityFilter, setSelectedActivityFilter] = useState<string>('TODAS');
+
+  // Isolamento estrito do ano letivo selecionado (ex: 2026)
+  const targetAcademicYear = useMemo(() => {
+    if (selectedDate) {
+      const parsedYear = parseInt(selectedDate.split('-')[0], 10);
+      if (!isNaN(parsedYear) && parsedYear > 2000) return parsedYear;
+    }
+    return 2026;
+  }, [selectedDate]);
+
+  // Alunos filtrados estritamente para o ano letivo selecionado (eliminando cumulação com 2027)
+  const yearStudents = useMemo(() => {
+    const safe = Array.isArray(students) ? students : [];
+    return safe.filter((s) => {
+      const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+      return sYear === targetAcademicYear;
+    });
+  }, [students, targetAcademicYear]);
 
   // Auditoria de confirmação de chamada no bloco
   const [confirmationTick, setConfirmationTick] = useState<number>(0);
@@ -441,7 +463,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       cleanOldDepartureAlertStorageKeys(selectedDate);
 
       const newAlerts = evaluateDepartureAlerts({
-        students,
+        students: yearStudents,
         records,
         quadroAtribuicoes: atribuicoesList,
         selectedDate,
@@ -482,7 +504,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     isSimulatingTime,
     simulatedTime,
     simulatedDay,
-    students,
+    yearStudents,
     records,
     atribuicoesList,
     selectedDate,
@@ -730,7 +752,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
         // Enrolled students in this turma for this activity who are scheduled to attend on this day
         const enrolledStudents = getEnrolledStudentsForActivity(
-          students,
+          yearStudents,
           turmaName,
           activeBlock.activityId,
           effectiveDayOfWeek,
@@ -796,7 +818,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     effectiveDayOfWeek,
     effectiveCurrentTime,
     activityMap,
-    students,
+    yearStudents,
     records,
     selectedDate,
     isSimulatingTime,
@@ -824,6 +846,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         pendingRollCalls: 0,
         completedRollCalls: 0,
         totalStudentsInActivePeriods: 0,
+        totalActiveStudents: 0,
       };
     }
 
@@ -929,14 +952,33 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
 
     const totalStudentsInActivePeriods = activePresentStudentIds.size;
 
+    // Card "Alunos Ativos":
+    // Computa exclusivamente os alunos onde status === 'ativo' (ou regular) E anoLetivo === targetAcademicYear (2026),
+    // agendados para a data de referência, alinhando rigorosamente com os 206 esperados do topo.
+    const safeStudents = Array.isArray(yearStudents) ? yearStudents : [];
+    const activeScheduledForDate = safeStudents.filter((s) => {
+      if (!s || typeof s !== 'object') return false;
+      const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+      if (sYear !== targetAcademicYear) return false;
+      const st = (s.status || (s as any).statusMatricula || 'ativo').toLowerCase().trim();
+      if (st !== 'ativo' && st !== 'regular') return false;
+      if (selectedDate) {
+        return isStudentActiveOnDate(s, selectedDate) && isStudentScheduledForDate(s, selectedDate);
+      }
+      return isStudentScheduledForDay(s, effectiveDayOfWeek);
+    });
+
+    const totalActiveStudents = activeScheduledForDate.length;
+
     return {
       totalTurmas,
       inActivity,
       pendingRollCalls,
       completedRollCalls,
       totalStudentsInActivePeriods,
+      totalActiveStudents,
     };
-  }, [turmaStatuses, records, selectedDate, isSimulatingTime]);
+  }, [turmaStatuses, records, selectedDate, isSimulatingTime, yearStudents, targetAcademicYear, effectiveDayOfWeek]);
 
   // Filtered list of turmas
   const filteredTurmas = useMemo(() => {
@@ -991,7 +1033,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     turmas.forEach((turmaName) => {
       map[turmaName] = getPendingEarlyDeparturesForTurma({
         turmaName,
-        students,
+        students: yearStudents,
         records,
         selectedDate,
         quadroAtribuicoes,
@@ -999,7 +1041,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     });
 
     return map;
-  }, [turmas, students, records, selectedDate, quadroAtribuicoes]);
+  }, [turmas, yearStudents, records, selectedDate, quadroAtribuicoes]);
 
   const [confirmingCheckoutStudentId, setConfirmingCheckoutStudentId] = useState<string | null>(null);
 
@@ -1041,7 +1083,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
   const quickModalStudents = useMemo(() => {
     if (!quickRollCallModal) return [];
     const baseList = getEnrolledStudentsForActivity(
-      students,
+      yearStudents,
       quickRollCallModal.turma,
       quickRollCallModal.activityId,
       effectiveDayOfWeek,
@@ -1058,7 +1100,7 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       }
       return (a.name || '').localeCompare(b.name || '', 'pt-BR');
     });
-  }, [quickRollCallModal, students, effectiveDayOfWeek, selectedDate, activityMap]);
+  }, [quickRollCallModal, yearStudents, effectiveDayOfWeek, selectedDate, activityMap]);
 
   const quickModalRecordsMap = useMemo(() => {
     if (!quickRollCallModal) return new Map<string, AttendanceRecord>();
@@ -1248,9 +1290,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
             <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Alunos Ativos</div>
             <div className="text-lg sm:text-xl font-black text-emerald-300 mt-0.5">
-              {stats.totalStudentsInActivePeriods}
+              {stats.totalActiveStudents}
             </div>
-            <div className="text-[9px] text-emerald-400/80 mt-0.5">Presentes em atividades agora</div>
+            <div className="text-[9px] text-emerald-400/80 mt-0.5">
+              {stats.totalStudentsInActivePeriods > 0
+                ? `${stats.totalStudentsInActivePeriods} em atividade (${stats.totalActiveStudents} esperados)`
+                : 'Alunos ativos esperados hoje'}
+            </div>
           </div>
         </div>
       </div>
@@ -1711,12 +1757,13 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                         // NÃO calcula nem renderiza alunos de Reforço neste card.
                         if (!isCurrentReforco) return null;
 
-                        const safeStudents = Array.isArray(students) ? students : [];
+                        const safeStudents = Array.isArray(yearStudents) ? yearStudents : [];
                         const reforcoStudentsInTurma = safeStudents.filter(
                           (s) =>
                             s &&
                             s.turma === turmaName &&
-                            (s.status || s.statusMatricula || 'ativo') === 'ativo' &&
+                            ((s.status || (s as any).statusMatricula || 'ativo').toLowerCase().trim() === 'ativo' ||
+                             (s.status || (s as any).statusMatricula || 'ativo').toLowerCase().trim() === 'regular') &&
                             isStudentInReforcoVigency(s, selectedDate) &&
                             isStudentScheduledForDate(s, selectedDate)
                         );

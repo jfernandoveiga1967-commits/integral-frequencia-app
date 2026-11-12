@@ -80,8 +80,8 @@ export function isStudentActiveOnDate(
     if (!student.inactivationDate) {
       return false;
     }
-    // Se a data de consulta for anterior ou igual à data de inativação, aluno ainda constava ativo
-    return dateStr <= student.inactivationDate;
+    // Se a data de consulta for estritamente anterior à data de inativação, aluno ainda constava ativo
+    return dateStr < student.inactivationDate;
   }
 
   return true;

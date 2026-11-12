@@ -221,15 +221,24 @@ export function isStudentActiveInDatabase(
   // Isolamento Rígido por Ano Letivo: se há data de referência, valida o ano da matrícula
   if (referenceDate) {
     const targetAcademicYear = parseInt(referenceDate.split('-')[0], 10) || 2026;
-    if (student.anoLetivo !== targetAcademicYear) {
+    const studentYear = student.anoLetivo !== undefined && student.anoLetivo !== null ? Number(student.anoLetivo) : 2026;
+    if (studentYear !== targetAcademicYear) {
       return false;
     }
   }
 
   const status = (student.status || (student as any).statusMatricula || 'ativo').toLowerCase().trim();
 
-  // Aluno com status 'ativo': SEMPRE computado como matrícula ativa, inclusive os recém-adicionados
-  if (status === 'ativo') {
+  // Alunos inativos ou cancelados: só considerados se a data de consulta for estritamente anterior à inativação
+  if (status === 'inativo' || status === 'cancelado') {
+    if (referenceDate) {
+      return isStudentActiveOnDate(student, referenceDate);
+    }
+    return false;
+  }
+
+  // Aluno com status 'ativo' ou 'regular': computado como matrícula ativa
+  if (status === 'ativo' || status === 'regular') {
     // Alunos de contrato avulso só deixam de ser ativos se a data de referência for posterior ao término do contrato
     if (student.tipoContrato === 'avulso' && student.dataTerminoContrato && referenceDate) {
       if (referenceDate > student.dataTerminoContrato) {
@@ -239,15 +248,7 @@ export function isStudentActiveInDatabase(
     return true;
   }
 
-  // Alunos inativos ou cancelados: só considerados se a data de consulta for anterior ou igual à inativação
-  if (status === 'inativo' || status === 'cancelado') {
-    if (referenceDate) {
-      return isStudentActiveOnDate(student, referenceDate);
-    }
-    return false;
-  }
-
-  return true;
+  return false;
 }
 
 /**
@@ -263,7 +264,10 @@ export function getDailyConsolidatedMetrics(
 ): DailyConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
   const targetAcademicYear = parseInt(dateStr.split('-')[0], 10) || 2026;
-  const yearFilteredStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
+  const yearFilteredStudents = (students || []).filter((s) => {
+    const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+    return sYear === targetAcademicYear;
+  });
   const targetStudents = isAllTurmas
     ? yearFilteredStudents
     : yearFilteredStudents.filter((s) => s.turma === turmaFilter);
@@ -510,7 +514,10 @@ export function getPeriodConsolidatedMetrics(
 ): PeriodConsolidatedMetrics {
   const isAllTurmas = !turmaFilter || turmaFilter === 'all' || turmaFilter === 'Todas as Turmas';
   const targetAcademicYear = parseInt(startDate.split('-')[0], 10) || 2026;
-  const yearFilteredStudents = (students || []).filter((s) => s.anoLetivo === targetAcademicYear);
+  const yearFilteredStudents = (students || []).filter((s) => {
+    const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+    return sYear === targetAcademicYear;
+  });
   const targetStudents = isAllTurmas
     ? yearFilteredStudents
     : yearFilteredStudents.filter((s) => s.turma === turmaFilter);
