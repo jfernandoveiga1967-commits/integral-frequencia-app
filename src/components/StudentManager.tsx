@@ -546,7 +546,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           : '18:30h') ||
         '18:30h',
       valorPlanoBase:
-        student.valorPlanoBase !== undefined
+        student.valorPlanoBase != null
           ? student.valorPlanoBase
           : (student.planoContratual
               ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
@@ -554,11 +554,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             (student.anoLetivo === 2027 ? 1250 : 1120),
       descontoBolsa: student.descontoBolsa || 0,
       valorMensalidadeFinal:
-        student.valorMensalidadeFinal !== undefined
+        student.valorMensalidadeFinal != null
           ? student.valorMensalidadeFinal
           : Math.max(
               0,
-              (student.valorPlanoBase !== undefined
+              (student.valorPlanoBase != null
                 ? student.valorPlanoBase
                 : (student.planoContratual
                     ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
@@ -2796,7 +2796,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={editingStudent.name}
+                  value={editingStudent.name ?? ''}
                   disabled={isSavingEdit}
                   onChange={(e) =>
                     setEditingStudent({ ...editingStudent, name: e.target.value })
@@ -2811,7 +2811,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   Turma:
                 </label>
                 <select
-                  value={editingStudent.turma}
+                  value={editingStudent.turma || ''}
                   onChange={(e) =>
                     setEditingStudent((prev) => prev ? { ...prev, turma: e.target.value as TurmaType } : null)
                   }
@@ -3380,7 +3380,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   const defaultEditBase =
                     editTabela[editingStudent.planoContratual || 'Integral Semana (18:30h)']?.valorBase ??
                     (editingStudent.anoLetivo === 2027 ? 1250 : 1120);
-                  const currentBase = editingStudent.valorPlanoBase !== undefined ? editingStudent.valorPlanoBase : defaultEditBase;
+                  const currentBase = editingStudent.valorPlanoBase ?? defaultEditBase;
                   const currentDesconto = editingStudent.descontoBolsa ?? 0;
                   const currentFinal = Math.max(0, currentBase - currentDesconto);
 
@@ -3394,7 +3394,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           type="number"
                           step="0.01"
                           min="0"
-                          value={currentBase}
+                          value={currentBase ?? 0}
                           onChange={(e) => handleChangeEditBase(parseFloat(e.target.value) || 0)}
                           disabled={isSavingEdit || (editingStudent.planoContratual || 'Integral Semana (18:30h)') !== 'Personalizado'}
                           className={`w-full px-2.5 py-1.5 text-xs font-bold border rounded-lg ${
@@ -3413,7 +3413,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           type="number"
                           step="0.01"
                           min="0"
-                          value={currentDesconto}
+                          value={currentDesconto ?? 0}
                           onChange={(e) => handleChangeEditDesconto(parseFloat(e.target.value) || 0)}
                           disabled={isSavingEdit}
                           placeholder="0,00"

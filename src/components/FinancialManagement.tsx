@@ -239,38 +239,38 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       const planoInfo = activeTabela[planoContratual as keyof typeof activeTabela];
 
       const baseVal =
-        student.valorPlanoBase !== undefined && student.valorPlanoBase > 0
+        student.valorPlanoBase != null && student.valorPlanoBase > 0
           ? student.valorPlanoBase
-          : existing?.valorMensalidadeBase !== undefined && existing.valorMensalidadeBase > 0
+          : existing?.valorMensalidadeBase != null && existing.valorMensalidadeBase > 0
           ? existing.valorMensalidadeBase
           : planoInfo?.valorBase ?? fallbackBase;
 
       const extras =
-        student.valorModalidadesExtras !== undefined
-          ? student.valorModalidadesExtras
-          : existing?.valorModalidadesExtras !== undefined
-          ? existing.valorModalidadesExtras
-          : student.valorOficinas !== undefined
-          ? student.valorOficinas
-          : student.oficinasExtras !== undefined
-          ? student.oficinasExtras
-          : student.valorExtras !== undefined
-          ? student.valorExtras
+        student.valorModalidadesExtras != null
+          ? Number(student.valorModalidadesExtras) || 0
+          : existing?.valorModalidadesExtras != null
+          ? Number(existing.valorModalidadesExtras) || 0
+          : student.valorOficinas != null
+          ? Number(student.valorOficinas) || 0
+          : student.oficinasExtras != null
+          ? Number(student.oficinasExtras) || 0
+          : student.valorExtras != null
+          ? Number(student.valorExtras) || 0
           : calculateModalidadesExtrasTotal(student.activities || []);
 
       const descontoBolsa =
-        student.descontoBolsa !== undefined
+        student.descontoBolsa != null
           ? Number(student.descontoBolsa) || 0
-          : existing?.descontoBolsa !== undefined
+          : existing?.descontoBolsa != null
           ? Number(existing.descontoBolsa) || 0
           : 0;
 
       const finalVal =
         extras === 0
           ? Math.max(0, baseVal - descontoBolsa)
-          : student.valorMensalidadeFinal !== undefined && student.valorMensalidadeFinal > 0
+          : student.valorMensalidadeFinal != null && student.valorMensalidadeFinal > 0
           ? student.valorMensalidadeFinal
-          : existing?.valorTotalMensal !== undefined && existing.valorTotalMensal > 0
+          : existing?.valorTotalMensal != null && existing.valorTotalMensal > 0
           ? existing.valorTotalMensal
           : Math.max(0, baseVal + extras - descontoBolsa);
 
@@ -2758,7 +2758,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         type="number"
                         step="0.01"
                         min="0"
-                        value={editingProfile.valorMensalidadeBase}
+                        value={editingProfile.valorMensalidadeBase ?? 0}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
                           let newTot = 0;
@@ -2787,7 +2787,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         type="number"
                         step="0.01"
                         min="0"
-                        value={editingProfile.valorModalidadesExtras}
+                        value={editingProfile.valorModalidadesExtras ?? 0}
                         onChange={(e) => {
                           const valExtras = parseFloat(e.target.value) || 0;
                           let newTot = 0;
@@ -2845,7 +2845,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         min="0"
                         max="100"
                         step="1"
-                        value={editingProfile.descontoPercentual}
+                        value={editingProfile.descontoPercentual ?? 0}
                         onChange={(e) => {
                           const valPct = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
                           const subtotal = base + extras;
@@ -2869,7 +2869,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         Dia de Vencimento:
                       </label>
                       <select
-                        value={editingProfile.diaVencimento}
+                        value={editingProfile.diaVencimento ?? 10}
                         onChange={(e) =>
                           setEditingProfile({
                             ...editingProfile,

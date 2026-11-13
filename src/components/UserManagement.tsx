@@ -721,10 +721,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setEditingUser(user);
     const cleanInitialName = (user.name || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || user.name || '';
     setFormName(cleanInitialName);
-    setFormEmail(user.email);
+    setFormEmail(user.email || '');
     setFormPhone(user.phone || '');
     setFormBirthDate(user.birthDate || '1990-01-01');
-    setFormRole(user.role);
+    setFormRole(user.role || 'professor');
     const cat = detectCargoCategory(user);
     setFormCargoCategory(cat);
     setFormCargoLabel(user.cargoLabel || '');
@@ -767,12 +767,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     if (user.contractDailyHoursFormatted) {
       setFormContractDailyHoursFormatted(user.contractDailyHoursFormatted);
       setFormContractDailyMinutes(user.contractDailyMinutes || parseHoursAndMinutesStringToMinutes(user.contractDailyHoursFormatted));
-      setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : calc.dailyHours);
-    } else if (user.contractDailyMinutes !== undefined && user.contractDailyMinutes > 0) {
+      setFormContractDailyHours(user.contractDailyHours != null ? user.contractDailyHours : calc.dailyHours);
+    } else if (user.contractDailyMinutes != null && user.contractDailyMinutes > 0) {
       setFormContractDailyMinutes(user.contractDailyMinutes);
       setFormContractDailyHoursFormatted(formatMinutesToHoursAndMinutes(user.contractDailyMinutes));
-      setFormContractDailyHours(user.contractDailyHours !== undefined ? user.contractDailyHours : Number((user.contractDailyMinutes / 60).toFixed(2)));
-    } else if (user.contractDailyHours !== undefined) {
+      setFormContractDailyHours(user.contractDailyHours != null ? user.contractDailyHours : Number((user.contractDailyMinutes / 60).toFixed(2)));
+    } else if (user.contractDailyHours != null) {
       const minutes = Math.round(Number(user.contractDailyHours) * 60);
       setFormContractDailyHours(user.contractDailyHours);
       setFormContractDailyMinutes(minutes);
@@ -787,7 +787,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       setFormContractDailyMinutes(360);
     }
 
-    setFormBaseSalary(user.baseSalary !== undefined && user.baseSalary !== null ? user.baseSalary : 1200);
+    setFormBaseSalary(user.baseSalary != null ? user.baseSalary : 1200);
     // Fonte de verdade única e soberana: regimeTrabalho técnico (não o texto legado de regimeContratual)
     const initialRegime: RegimeTrabalho =
       user.regimeTrabalho === 'prestador_aula_efetiva' ||
@@ -798,17 +798,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         : 'mensalista';
     setFormRegimeTrabalho(initialRegime);
     setFormValorHoraAula(
-      user.valorHoraAula !== undefined && user.valorHoraAula !== null && Number(user.valorHoraAula) > 0
+      user.valorHoraAula != null && Number(user.valorHoraAula) > 0
         ? user.valorHoraAula
         : (initialRegime === 'prestador_aula_efetiva' ? 33.06 : '')
     );
     setFormDuracaoAulaMinutos(
-      user.duracaoAulaMinutos !== undefined && Number(user.duracaoAulaMinutos) > 0
+      user.duracaoAulaMinutos != null && Number(user.duracaoAulaMinutos) > 0
         ? user.duracaoAulaMinutos
         : 50
     );
-    setFormContractDivisorHours(user.contractDivisorHours !== undefined ? user.contractDivisorHours : 220);
-    setFormAjudaDeCusto(user.ajudaDeCusto !== undefined && user.ajudaDeCusto !== null ? user.ajudaDeCusto : 0);
+    setFormContractDivisorHours(user.contractDivisorHours != null ? user.contractDivisorHours : 220);
+    setFormAjudaDeCusto(user.ajudaDeCusto != null ? user.ajudaDeCusto : 0);
     setFormCompany(user.empresa || user.company || 'GADAL - Gestão e Apoio');
   };
 
@@ -2888,7 +2888,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={formName}
+                    value={formName ?? ''}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="Ex: Prof. Roberto Santos"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -2902,7 +2902,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   </label>
                   <input
                     type="email"
-                    value={formEmail}
+                    value={formEmail ?? ''}
                     onChange={(e) => setFormEmail(e.target.value)}
                     placeholder="Ex: roberto@crescer.edu.br"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"

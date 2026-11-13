@@ -461,7 +461,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-entry1`}
                   type="time"
-                  value={entry1}
+                  value={entry1 ?? ''}
                   onChange={(e) => {
                     const newEntry = e.target.value;
                     setEntry1(newEntry);
@@ -477,7 +477,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-exit1`}
                   type="time"
-                  value={exit1}
+                  value={exit1 ?? ''}
                   onChange={(e) => {
                     const newExit = e.target.value;
                     setExit1(newExit);
@@ -496,7 +496,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-entry1`}
                   type="time"
-                  value={entry1}
+                  value={entry1 ?? ''}
                   onChange={(e) => setEntry1(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                 />
@@ -506,7 +506,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-exit1`}
                   type="time"
-                  value={exit1}
+                  value={exit1 ?? ''}
                   onChange={(e) => setExit1(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                 />
@@ -516,7 +516,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-entry2`}
                   type="time"
-                  value={entry2}
+                  value={entry2 ?? ''}
                   onChange={(e) => setEntry2(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                 />
@@ -526,7 +526,7 @@ export const EditDayModal = React.memo<EditDayModalProps>(({
                 <input
                   key={`input-${colaboradorId}-${dia}-exit2`}
                   type="time"
-                  value={exit2}
+                  value={exit2 ?? ''}
                   onChange={(e) => setExit2(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:border-indigo-500 focus:outline-none"
                 />
@@ -1034,12 +1034,12 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
         targetUser.contractDailyHoursFormatted ||
         formatMinutesToHoursAndMinutes(targetUser.contractDailyMinutes || (shift === 'continua_6h' ? 360 : 528))
       );
-      setUserEditBaseSalary(targetUser.baseSalary !== undefined && targetUser.baseSalary !== null ? targetUser.baseSalary : 1200);
+      setUserEditBaseSalary(targetUser.baseSalary != null ? targetUser.baseSalary : 1200);
       setUserEditRegimeTrabalho(targetUser.regimeTrabalho || 'mensalista');
-      setUserEditValorHoraAula(targetUser.valorHoraAula !== undefined && targetUser.valorHoraAula !== null ? targetUser.valorHoraAula : '');
-      setUserEditDuracaoAulaMinutos(targetUser.duracaoAulaMinutos !== undefined ? targetUser.duracaoAulaMinutos : DURACAO_AULA_PADRAO_MINUTOS);
+      setUserEditValorHoraAula(targetUser.valorHoraAula != null ? targetUser.valorHoraAula : '');
+      setUserEditDuracaoAulaMinutos(targetUser.duracaoAulaMinutos != null ? targetUser.duracaoAulaMinutos : DURACAO_AULA_PADRAO_MINUTOS);
       setUserEditDivisorHours(targetUser.contractDivisorHours || DIVISOR_MENSAL_PADRAO);
-      setUserEditAjudaDeCusto(targetUser.ajudaDeCusto !== undefined && targetUser.ajudaDeCusto !== null ? targetUser.ajudaDeCusto : 0);
+      setUserEditAjudaDeCusto(targetUser.ajudaDeCusto != null ? targetUser.ajudaDeCusto : 0);
       setUserEditCompany(targetUser.company || 'GADAL - Gestão e Apoio');
       setUserEditAllowedLocations(
         Array.isArray(targetUser.allowedLocations) && targetUser.allowedLocations.length > 0

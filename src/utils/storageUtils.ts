@@ -281,8 +281,8 @@ export function normalizeStudent(
 
   // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
   const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
-  const dataInicioContrato = s.dataInicioContrato !== undefined ? s.dataInicioContrato : (existingStudent?.dataInicioContrato || undefined);
-  const dataTerminoContrato = s.dataTerminoContrato !== undefined ? s.dataTerminoContrato : (existingStudent?.dataTerminoContrato || undefined);
+  const dataInicioContrato = s.dataInicioContrato != null ? s.dataInicioContrato : (existingStudent?.dataInicioContrato || undefined);
+  const dataTerminoContrato = s.dataTerminoContrato != null ? s.dataTerminoContrato : (existingStudent?.dataTerminoContrato || undefined);
   
   let diasContratados: DayOfWeek[] | undefined = undefined;
   if (Array.isArray(s.diasContratados) && s.diasContratados.length > 0) {
@@ -315,23 +315,23 @@ export function normalizeStudent(
   // para garantir que a gravação no Firestore com ignoreUndefinedProperties e merge: true realmente sobrescreva os valores antigos.
   const inactivationDate = status === 'ativo' ? '' : (s.inactivationDate || existingStudent?.inactivationDate || '');
   const inactivationReason = status === 'ativo' ? '' : (s.inactivationReason || existingStudent?.inactivationReason || '');
-  const notes = s.notes !== undefined ? s.notes : (existingStudent?.notes !== undefined ? existingStudent.notes : undefined);
-  const reforcoStartDate = s.reforcoStartDate !== undefined ? s.reforcoStartDate : (existingStudent?.reforcoStartDate || undefined);
-  const reforcoEndDate = s.reforcoEndDate !== undefined ? s.reforcoEndDate : (existingStudent?.reforcoEndDate || undefined);
+  const notes = s.notes != null ? s.notes : (existingStudent?.notes != null ? existingStudent.notes : undefined);
+  const reforcoStartDate = s.reforcoStartDate != null ? s.reforcoStartDate : (existingStudent?.reforcoStartDate || undefined);
+  const reforcoEndDate = s.reforcoEndDate != null ? s.reforcoEndDate : (existingStudent?.reforcoEndDate || undefined);
 
-  const anoLetivo = s.anoLetivo !== undefined ? Number(s.anoLetivo) : (existingStudent?.anoLetivo !== undefined ? Number(existingStudent.anoLetivo) : 2026);
+  const anoLetivo = s.anoLetivo != null ? Number(s.anoLetivo) : (existingStudent?.anoLetivo != null ? Number(existingStudent.anoLetivo) : 2026);
   const tipoSaida = s.tipoSaida || existingStudent?.tipoSaida || 'PAIS';
-  const nomeCondutor = s.nomeCondutor !== undefined ? s.nomeCondutor : existingStudent?.nomeCondutor;
+  const nomeCondutor = s.nomeCondutor != null ? s.nomeCondutor : existingStudent?.nomeCondutor;
 
   const planoContratual = s.planoContratual || existingStudent?.planoContratual;
   const horarioPermanenciaLimite = s.horarioPermanenciaLimite || existingStudent?.horarioPermanenciaLimite;
-  const valorPlanoBase = s.valorPlanoBase !== undefined ? s.valorPlanoBase : existingStudent?.valorPlanoBase;
-  const descontoBolsa = s.descontoBolsa !== undefined ? s.descontoBolsa : existingStudent?.descontoBolsa;
-  const valorMensalidadeFinal = s.valorMensalidadeFinal !== undefined
+  const valorPlanoBase = s.valorPlanoBase != null ? s.valorPlanoBase : existingStudent?.valorPlanoBase;
+  const descontoBolsa = s.descontoBolsa != null ? s.descontoBolsa : existingStudent?.descontoBolsa;
+  const valorMensalidadeFinal = s.valorMensalidadeFinal != null
     ? s.valorMensalidadeFinal
-    : (existingStudent?.valorMensalidadeFinal !== undefined
+    : (existingStudent?.valorMensalidadeFinal != null
         ? existingStudent.valorMensalidadeFinal
-        : (valorPlanoBase !== undefined ? Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0)) : undefined));
+        : (valorPlanoBase != null ? Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0)) : undefined));
 
   return {
     id,
@@ -361,10 +361,10 @@ export function normalizeStudent(
     valorPlanoBase,
     descontoBolsa,
     valorMensalidadeFinal,
-    valorModalidadesExtras: s.valorModalidadesExtras !== undefined ? s.valorModalidadesExtras : existingStudent?.valorModalidadesExtras,
-    oficinasExtras: s.oficinasExtras !== undefined ? s.oficinasExtras : existingStudent?.oficinasExtras,
-    valorOficinas: s.valorOficinas !== undefined ? s.valorOficinas : existingStudent?.valorOficinas,
-    valorExtras: s.valorExtras !== undefined ? s.valorExtras : existingStudent?.valorExtras,
+    valorModalidadesExtras: s.valorModalidadesExtras != null ? s.valorModalidadesExtras : existingStudent?.valorModalidadesExtras,
+    oficinasExtras: s.oficinasExtras != null ? s.oficinasExtras : existingStudent?.oficinasExtras,
+    valorOficinas: s.valorOficinas != null ? s.valorOficinas : existingStudent?.valorOficinas,
+    valorExtras: s.valorExtras != null ? s.valorExtras : existingStudent?.valorExtras,
     notes,
   };
 }
@@ -430,8 +430,8 @@ export function mergeStudentData(
     : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : (existingStudent.inactivationReason || ''));
 
   const tipoContrato: ContractType = incomingStudent.tipoContrato || existingStudent.tipoContrato || 'regular';
-  const dataInicioContrato = incomingStudent.dataInicioContrato !== undefined ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;
-  const dataTerminoContrato = incomingStudent.dataTerminoContrato !== undefined ? incomingStudent.dataTerminoContrato : existingStudent.dataTerminoContrato;
+  const dataInicioContrato = incomingStudent.dataInicioContrato != null ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;
+  const dataTerminoContrato = incomingStudent.dataTerminoContrato != null ? incomingStudent.dataTerminoContrato : existingStudent.dataTerminoContrato;
   const diasContratados = Array.isArray(incomingStudent.diasContratados) && incomingStudent.diasContratados.length > 0
     ? incomingStudent.diasContratados
     : (existingStudent.diasContratados || (tipoContrato === 'avulso' ? incomingDays : undefined));
@@ -440,13 +440,13 @@ export function mergeStudentData(
     ...existingStudent,
     ...incomingStudent,
     id: incomingStudent.id || existingStudent.id,
-    name: incomingStudent.name !== undefined ? incomingStudent.name : existingStudent.name,
-    turma: incomingStudent.turma !== undefined ? incomingStudent.turma : existingStudent.turma,
+    name: incomingStudent.name ?? existingStudent.name,
+    turma: incomingStudent.turma ?? existingStudent.turma,
     activities: mergedActivities,
-    modalidadesEspeciais: incomingStudent.modalidadesEspeciais !== undefined ? incomingStudent.modalidadesEspeciais : existingStudent.modalidadesEspeciais,
-    specialties: incomingStudent.specialties !== undefined ? incomingStudent.specialties : existingStudent.specialties,
-    reforcoStartDate: incomingStudent.reforcoStartDate !== undefined ? incomingStudent.reforcoStartDate : existingStudent.reforcoStartDate,
-    reforcoEndDate: incomingStudent.reforcoEndDate !== undefined ? incomingStudent.reforcoEndDate : existingStudent.reforcoEndDate,
+    modalidadesEspeciais: incomingStudent.modalidadesEspeciais ?? existingStudent.modalidadesEspeciais,
+    specialties: incomingStudent.specialties ?? existingStudent.specialties,
+    reforcoStartDate: incomingStudent.reforcoStartDate != null ? incomingStudent.reforcoStartDate : existingStudent.reforcoStartDate,
+    reforcoEndDate: incomingStudent.reforcoEndDate != null ? incomingStudent.reforcoEndDate : existingStudent.reforcoEndDate,
     tipoContrato,
     dataInicioContrato,
     dataTerminoContrato,
@@ -466,29 +466,29 @@ export function mergeStudentData(
         : status,
     inactivationDate,
     inactivationReason,
-    anoLetivo: incomingStudent.anoLetivo !== undefined ? incomingStudent.anoLetivo : existingStudent.anoLetivo,
-    tipoSaida: incomingStudent.tipoSaida !== undefined ? incomingStudent.tipoSaida : existingStudent.tipoSaida,
-    nomeCondutor: incomingStudent.nomeCondutor !== undefined ? incomingStudent.nomeCondutor : existingStudent.nomeCondutor,
-    planoContratual: incomingStudent.planoContratual !== undefined ? incomingStudent.planoContratual : existingStudent.planoContratual,
-    horarioPermanenciaLimite: incomingStudent.horarioPermanenciaLimite !== undefined ? incomingStudent.horarioPermanenciaLimite : existingStudent.horarioPermanenciaLimite,
-    valorPlanoBase: incomingStudent.valorPlanoBase !== undefined ? incomingStudent.valorPlanoBase : existingStudent.valorPlanoBase,
-    descontoBolsa: incomingStudent.descontoBolsa !== undefined ? incomingStudent.descontoBolsa : existingStudent.descontoBolsa,
-    valorMensalidadeFinal: incomingStudent.valorMensalidadeFinal !== undefined
+    anoLetivo: incomingStudent.anoLetivo != null ? incomingStudent.anoLetivo : existingStudent.anoLetivo,
+    tipoSaida: incomingStudent.tipoSaida ?? existingStudent.tipoSaida,
+    nomeCondutor: incomingStudent.nomeCondutor != null ? incomingStudent.nomeCondutor : existingStudent.nomeCondutor,
+    planoContratual: incomingStudent.planoContratual ?? existingStudent.planoContratual,
+    horarioPermanenciaLimite: incomingStudent.horarioPermanenciaLimite ?? existingStudent.horarioPermanenciaLimite,
+    valorPlanoBase: incomingStudent.valorPlanoBase != null ? incomingStudent.valorPlanoBase : existingStudent.valorPlanoBase,
+    descontoBolsa: incomingStudent.descontoBolsa != null ? incomingStudent.descontoBolsa : existingStudent.descontoBolsa,
+    valorMensalidadeFinal: incomingStudent.valorMensalidadeFinal != null
       ? incomingStudent.valorMensalidadeFinal
       : existingStudent.valorMensalidadeFinal,
-    valorModalidadesExtras: incomingStudent.valorModalidadesExtras !== undefined
+    valorModalidadesExtras: incomingStudent.valorModalidadesExtras != null
       ? incomingStudent.valorModalidadesExtras
       : existingStudent.valorModalidadesExtras,
-    oficinasExtras: incomingStudent.oficinasExtras !== undefined
+    oficinasExtras: incomingStudent.oficinasExtras != null
       ? incomingStudent.oficinasExtras
       : existingStudent.oficinasExtras,
-    valorOficinas: incomingStudent.valorOficinas !== undefined
+    valorOficinas: incomingStudent.valorOficinas != null
       ? incomingStudent.valorOficinas
       : existingStudent.valorOficinas,
-    valorExtras: incomingStudent.valorExtras !== undefined
+    valorExtras: incomingStudent.valorExtras != null
       ? incomingStudent.valorExtras
       : existingStudent.valorExtras,
-    notes: incomingStudent.notes !== undefined ? incomingStudent.notes : existingStudent.notes,
+    notes: incomingStudent.notes != null ? incomingStudent.notes : existingStudent.notes,
   };
 }
 
