@@ -283,8 +283,8 @@ export function isSimplifiedTwoPunchUser(
   const id = (target.id || employeeIdentifier || '').trim().toLowerCase();
 
   const isDanyel =
-    id === 'usr_danyelpereira' ||
-    email === 'danyel.pereira@crescercampinas.com.br' ||
+    id === 'usr_1786984807334' ||
+    email === 'pereiradanyel4@gmail.com' ||
     name.includes('danyel');
 
   const isThais =

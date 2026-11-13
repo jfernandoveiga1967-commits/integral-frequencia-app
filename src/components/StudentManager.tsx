@@ -47,6 +47,8 @@ interface StudentManagerProps {
   onDeleteStudent: (id: string, studentName?: string, studentTurma?: string) => void | Promise<void>;
   onAddTurma?: (turmaName: string) => boolean;
   onDeleteTurma?: (turmaName: string, deleteStudents: boolean, targetTurmaToReassign?: string, anoLetivo?: number) => void;
+  selectedAnoLetivo?: number;
+  onSelectAnoLetivo?: (ano: number) => void;
 }
 
 export const StudentManager: React.FC<StudentManagerProps> = ({
@@ -62,6 +64,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   onDeleteStudent,
   onAddTurma,
   onDeleteTurma,
+  selectedAnoLetivo: propSelectedAnoLetivo,
+  onSelectAnoLetivo,
 }) => {
   const [students, setStudents] = useState<Student[]>(initialStudents || []);
 
@@ -148,7 +152,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   // Single Add form state
   // Filtro de Exercício Exibido na Gestão de Matrículas (2026 | 2027)
-  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
+  const [internalSelectedAnoLetivo, setInternalSelectedAnoLetivo] = useState<number>(propSelectedAnoLetivo ?? 2026);
+  const selectedAnoLetivo = propSelectedAnoLetivo ?? internalSelectedAnoLetivo;
+  const setSelectedAnoLetivo = React.useCallback(
+    (ano: number) => {
+      setInternalSelectedAnoLetivo(ano);
+      if (onSelectAnoLetivo) {
+        onSelectAnoLetivo(ano);
+      }
+    },
+    [onSelectAnoLetivo]
+  );
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');

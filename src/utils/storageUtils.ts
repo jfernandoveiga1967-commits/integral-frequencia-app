@@ -264,6 +264,15 @@ export function normalizeStudent(
     status = 'ativo';
   }
 
+  const statusMatricula: StudentStatus =
+    status === 'ativo'
+      ? 'ativo'
+      : s.statusMatricula === 'inativo' || s.statusMatricula === 'cancelado'
+      ? s.statusMatricula
+      : existingStudent?.statusMatricula === 'inativo' || existingStudent?.statusMatricula === 'cancelado'
+      ? existingStudent.statusMatricula
+      : status;
+
   // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
   const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
   const dataInicioContrato = s.dataInicioContrato !== undefined ? s.dataInicioContrato : (existingStudent?.dataInicioContrato || undefined);
@@ -335,7 +344,7 @@ export function normalizeStudent(
     diasFrequencia,
     horariosSaida,
     status,
-    statusMatricula: status,
+    statusMatricula,
     inactivationDate,
     inactivationReason,
     anoLetivo,
@@ -441,7 +450,14 @@ export function mergeStudentData(
       : (incomingDays && incomingDays.length > 0 ? incomingDays : (existingStudent.diasFrequencia || [...DEFAULT_DIAS_FREQUENCIA])),
     horariosSaida: mergedHorarios,
     status,
-    statusMatricula: status,
+    statusMatricula:
+      status === 'ativo'
+        ? 'ativo'
+        : incomingStudent.statusMatricula === 'inativo' || incomingStudent.statusMatricula === 'cancelado'
+        ? incomingStudent.statusMatricula
+        : existingStudent.statusMatricula === 'inativo' || existingStudent.statusMatricula === 'cancelado'
+        ? existingStudent.statusMatricula
+        : status,
     inactivationDate,
     inactivationReason,
     anoLetivo: incomingStudent.anoLetivo !== undefined ? incomingStudent.anoLetivo : existingStudent.anoLetivo,

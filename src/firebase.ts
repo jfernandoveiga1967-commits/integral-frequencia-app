@@ -470,6 +470,7 @@ export function subscribeUsers(
           const docId = docSnap.id;
           const userEmail = (data.email || '').trim().toLowerCase();
           const userName = (data.name || '').trim().toLowerCase();
+          if (isPurgedUser({ id: data.id || docId, email: userEmail, name: data.name })) return;
 
           const isMasterAdmin =
             userEmail === ADMIN_EMAIL.toLowerCase() ||
@@ -604,7 +605,7 @@ export async function resolveUserFirestoreDocId(user: UserProfile): Promise<stri
     return 'usr_coord_1';
   }
 
-  // 2. Se rawId já é informado e válido (ex: usr_danyelpereira), use diretamente SEM leituras prévias para poupar cota
+  // 2. Se rawId já é informado e válido (ex: usr_coord_1), use diretamente SEM leituras prévias para poupar cota
   if (rawId) {
     return rawId;
   }
@@ -970,6 +971,7 @@ export async function scanAndConsolidateUsers(): Promise<UserProfile[]> {
     const processDoc = (docSnap: any, _colName: string) => {
       const data = docSnap.data();
       if (!data) return;
+      if (isPurgedUser({ id: data.id || docSnap.id, email: data.email, name: data.name })) return;
       const profile = parseUserProfileFromFirestoreData(data, docSnap.id);
       collectedProfiles.push(profile);
     };
@@ -1953,9 +1955,7 @@ export async function seedDefaultSchoolData(force = false): Promise<{
     saveTurmas(TURMAS_LIST);
 
     // 3. Usuários Administradores e Equipe
-    const adminUsersList: UserProfile[] = [
-      ...PRESET_USERS,
-    ];
+    const adminUsersList: UserProfile[] = PRESET_USERS.filter((u) => !isPurgedUser(u));
 
     const usersBatch = writeBatch(db);
     adminUsersList.forEach((u) => {

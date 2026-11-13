@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole } from '../types';
 import { LOGO_CRESCER_BASE64 } from '../utils/appLogoData';
-import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay, getLocalUsersList, saveLocalUsersList } from '../utils/authUtils';
+import { PRESET_USERS, verifyUserCredentials, formatBirthDateToDisplay, getLocalUsersList, saveLocalUsersList, isPurgedUser } from '../utils/authUtils';
 import {
   LogIn,
   UserPlus,
@@ -28,10 +28,11 @@ interface LoginScreenProps {
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, usersList = [] }) => {
   const [activeTab, setActiveTab] = useState<'login' | 'custom'>('login');
 
-  // Combine provided usersList with PRESET_USERS, deduplicating by ID or email
+  // Combine provided usersList with PRESET_USERS, deduplicating by ID or email e bloqueando blacklist
   const allRegisteredUsers = React.useMemo(() => {
-    const list = [...usersList];
+    const list = usersList.filter((u) => !isPurgedUser(u));
     PRESET_USERS.forEach((p) => {
+      if (isPurgedUser(p)) return;
       if (!list.some((u) => u.id === p.id || (u.email && p.email && u.email.toLowerCase() === p.email.toLowerCase()))) {
         list.push(p);
       }

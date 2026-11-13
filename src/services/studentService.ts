@@ -354,8 +354,10 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     name: 'José Ricardo Bijora Maneghin',
     turma: 'Mini Maternal Azul',
     anoLetivo: 2026,
-    status: 'ativo',
-    statusMatricula: 'ativo',
+    status: 'inativo',
+    statusMatricula: 'cancelado',
+    inactivationDate: '2026-11-13',
+    inactivationReason: 'Matrícula cancelada pela gestão',
     tipoContrato: 'regular',
     activities: ['Rotina'],
     diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
@@ -385,7 +387,7 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     status: 'ativo',
     statusMatricula: 'ativo',
     tipoContrato: 'regular',
-    activities: ['Rotina'],
+    activities: ['Rotina', 'Natação', 'Judô'],
     diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
     horariosSaida: {},
     notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
@@ -413,7 +415,7 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     status: 'ativo',
     statusMatricula: 'ativo',
     tipoContrato: 'regular',
-    activities: ['Rotina'],
+    activities: ['Rotina', 'Natação', 'Judô'],
     diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
     horariosSaida: {},
     notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
@@ -427,7 +429,7 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     status: 'ativo',
     statusMatricula: 'ativo',
     tipoContrato: 'regular',
-    activities: ['Rotina'],
+    activities: ['Rotina', 'Natação', 'Judô'],
     diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
     horariosSaida: {},
     notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
@@ -463,10 +465,11 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
 ];
 
 /**
- * Restaura imediatamente a Turma do Mini Maternal para o exercício de 2026 no
- * banco de dados Firestore e localStorage, reconstituindo o cadastro da turma,
- * a atribuição de sala/equipe e os 14 alunos vinculados a ela em 2026 com
- * histórico preservado e sem afetar o exercício de 2027.
+ * Garante a integridade da Turma do Mini Maternal para o exercício de 2026 no
+ * Firestore e localStorage de forma NÃO DESTRUTIVA:
+ * - Nunca sobrescreve 'activities', 'modalidadesEspeciais', 'status', 'statusMatricula',
+ *   ou quaisquer edições posteriores já salvas no Firestore para alunos existentes.
+ * - Apenas cria o documento caso esteja ausente em ambas as fontes (Firestore e localStorage).
  */
 export async function restoreMiniMaternal2026(): Promise<{
   turmaRestaurada: string;
@@ -480,30 +483,46 @@ export async function restoreMiniMaternal2026(): Promise<{
     saveTurmas(currentTurmas);
   }
 
-  // 2. Persistir turma e quadro no Firestore
+  // 2. Persistir turma no Firestore (sem sobrescrever edições de alunos existentes)
   try {
-    const { saveTurmaToFirestore, saveTurmaAtribuicaoToFirestore } = await import('../firebase');
+    const { saveTurmaToFirestore } = await import('../firebase');
     await saveTurmaToFirestore('Mini Maternal Azul');
-
-    await saveTurmaAtribuicaoToFirestore({
-      id: 'atrib_minimaternal_azul',
-      turma: 'Mini Maternal Azul',
-      espacoBase: 'Sala 4 (Maternal)',
-      horarioTurno: '11:20 às 17:20',
-      monitoraName: 'Stefani Caroline Germano',
-      monitoraPhone: '(19) 98976-6174',
-      adiName: 'Patrícia Nascimento',
-      adiPhone: '(19) 99525-1590',
-      observacao: 'Cuidados, rotina e estimulação psicomotora com bebês (Mini Maternal).',
-    });
   } catch (e) {
-    console.warn('[studentService] Aviso ao persistir Mini Maternal no Firestore:', e);
+    console.warn('[studentService] Aviso ao assegurar Mini Maternal no Firestore:', e);
   }
 
-  // 3. Reconstituir e relincar alunos do Mini Maternal 2026
+  // 3. Carregar alunos locais e consultar Firestore para verificar existência real antes de qualquer inserção
   const currentStudents = getStudents();
   const studentMap = new Map<string, Student>();
   currentStudents.forEach((s) => studentMap.set(s.id, s));
+
+  const remoteExistingMap = new Map<string, Student>();
+  try {
+    const { db } = await import('../firebase');
+    const { doc, getDoc } = await import('firebase/firestore');
+    await Promise.all(
+      OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map(async (st) => {
+        try {
+          const [alunoSnap, studentSnap] = await Promise.all([
+            getDoc(doc(db, 'alunos', st.id)),
+            getDoc(doc(db, 'students', st.id)),
+          ]);
+          const remoteData = alunoSnap.exists()
+            ? (alunoSnap.data() as Student)
+            : studentSnap.exists()
+            ? (studentSnap.data() as Student)
+            : null;
+          if (remoteData) {
+            remoteExistingMap.set(st.id, { ...remoteData, id: st.id });
+          }
+        } catch {
+          // Modo offline ou erro pontual de leitura: respeita estado local
+        }
+      })
+    );
+  } catch {
+    // Fallback offline silencioso
+  }
 
   // Conjunto dos 9 IDs e nomes normalizados oficiais do Mini Maternal 2026
   const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => st.id));
@@ -521,16 +540,42 @@ export async function restoreMiniMaternal2026(): Promise<{
   });
 
   const nowIso = new Date().toISOString();
+  const missingStudentsToCreate: Student[] = [];
   const restoredStudents: Student[] = OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => {
-    const existing = studentMap.get(st.id);
-    return {
-      ...(existing || {}),
+    // Prioridade absoluta ao dado remoto do Firestore, depois ao dado local; nunca sobrescreve edits da gestão
+    const remoteExisting = remoteExistingMap.get(st.id);
+    const localExisting =
+      studentMap.get(st.id) ||
+      Array.from(studentMap.values()).find(
+        (cand) =>
+          (cand.anoLetivo || 2026) === 2026 &&
+          normalizeStudentNameForMatching(cand.name) === normalizeStudentNameForMatching(st.name)
+      );
+    const existing = remoteExisting || localExisting;
+
+    if (existing) {
+      // Preserva integralmente status, statusMatricula, activities, modalidadesEspeciais e demais customizações
+      return {
+        ...st,
+        ...existing,
+        id: existing.id || st.id,
+        anoLetivo: existing.anoLetivo !== undefined ? Number(existing.anoLetivo) : 2026,
+        turma: existing.turma || st.turma,
+        activities: Array.isArray(existing.activities) && existing.activities.length > 0 ? existing.activities : st.activities,
+        status: existing.status || st.status || 'ativo',
+        statusMatricula: existing.statusMatricula || existing.status || st.statusMatricula || 'ativo',
+      };
+    }
+
+    const created: Student = {
       ...st,
       updatedAt: nowIso,
     };
+    missingStudentsToCreate.push(created);
+    return created;
   });
 
-  // Atualizar mapa com os 9 oficiais
+  // Atualizar mapa local preservando as edições existentes
   restoredStudents.forEach((st) => {
     studentMap.set(st.id, st);
   });
@@ -538,16 +583,16 @@ export async function restoreMiniMaternal2026(): Promise<{
   const updatedStudents = Array.from(studentMap.values());
   saveStudents(updatedStudents);
 
-  // 4. Salvar alunos no Firestore em lote e purgar excedentes
+  // 4. Persistir no Firestore APENAS os documentos que estavam ausentes e purgar eventuais excedentes
   try {
-    for (const st of restoredStudents) {
+    for (const st of missingStudentsToCreate) {
       await saveStudentToFirestore(st);
     }
     if (extraneousMiniMaternal2026Ids.length > 0) {
       await batchDeleteStudentsFromFirestore(extraneousMiniMaternal2026Ids);
     }
   } catch (e) {
-    console.warn('[studentService] Aviso ao salvar alunos do Mini Maternal no Firestore:', e);
+    console.warn('[studentService] Aviso ao criar alunos ausentes do Mini Maternal no Firestore:', e);
   }
 
   broadcastSyncEvent('SYNC_TURMAS', currentTurmas);

@@ -48,28 +48,6 @@ export const INITIAL_USERS: UserProfile[] = [
     contractDailyHours: 6,
     contractDailyMinutes: 360,
   } as UserProfile,
-  {
-    id: 'usr_danyelpereira',
-    name: 'Danyel Pereira',
-    email: 'danyel.pereira@crescercampinas.com.br',
-    role: 'professor' as UserRole,
-    cargoLabel: 'Professor de Flauta',
-    avatarColor: 'bg-sky-600',
-    birthDate: '1985-05-15',
-    pin: '15/05/1985',
-    status: 'ATIVO' as UserStatus,
-    workShiftType: 'continua_6h',
-    assignedActivities: ['Flauta'],
-    assignedTurmas: [],
-    allowedClassIds: [],
-    allowedTabs: ['ponto', 'semanario', 'momento'],
-    canManageStudents: false,
-    canMarkAttendance: true,
-    company: 'Colégio Crescer',
-    contractSchedule: '13:00 - 17:30',
-    contractDailyHours: 4.5,
-    contractDailyMinutes: 270,
-  } as UserProfile,
 ];
 
 export const PRESET_USERS = INITIAL_USERS;

@@ -905,6 +905,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       return;
     }
 
+    if (isPurgedUser({ email: normalizedEmail, id: editingUser?.id })) {
+      showToast('Este e-mail/usuário está na lista de bloqueio permanente (EXCLUDED_USERS_BLACKLIST) e não pode ser cadastrado.', 'error');
+      return;
+    }
+
     const roleLabels: Record<UserRole, string> = {
       coordenador: 'Coordenador (Administrador)',
       professor: 'Monitor / Professor',

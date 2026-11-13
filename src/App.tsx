@@ -36,7 +36,7 @@ import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribu
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 import { getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
-import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador, isAdmin, isTabAllowed, getUserAllowedTabs } from './utils/authUtils';
+import { getStoredUser, saveStoredUser, getLocalUsersList, saveLocalUsersList, normalizeAndDeduplicateUsers, ADMIN_EMAIL, PRESET_USERS, isCoordenador, isAdmin, isTabAllowed, getUserAllowedTabs, isPurgedUser } from './utils/authUtils';
 import { Header, TabType } from './components/Header';
 import { Footer } from './components/Footer';
 import { AttendanceSheet } from './components/AttendanceSheet';
@@ -174,6 +174,7 @@ export default function App() {
   const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
   const [quadroAtribuicoes, setQuadroAtribuicoes] = useState<TurmaAtribuicao[]>(() => loadLocalQuadroAtribuicoes());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState<number>(2026);
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     status: 'synced',
@@ -338,19 +339,17 @@ export default function App() {
     setRecords(loadedRecords);
     setTurmas(loadedTurmas);
 
-    // Reconstitui e assegura imediatamente a integridade do Mini Maternal 2026
-    restoreMiniMaternal2026().then((res) => {
-      setTurmas(sortTurmasPedagogical(loadTurmas()));
-      setStudents(loadStudents().filter((s) => !isMockStudent(s)));
-    }).catch(() => {});
-
-    // Test Firestore connectivity & flush any pending outbox queue
-    testFirestoreConnection().then((connected) => {
+    // Test Firestore connectivity, flush outbox & ensure Mini Maternal 2026 non-destructively after checking Firestore
+    testFirestoreConnection().then(async (connected) => {
       setFirebaseConnected(connected);
       if (connected) {
         processAttendanceOutbox().catch(() => {});
-        restoreMiniMaternal2026().catch(() => {});
       }
+      try {
+        await restoreMiniMaternal2026();
+        setTurmas(sortTurmasPedagogical(loadTurmas()));
+        setStudents(loadStudents().filter((s) => !isMockStudent(s)));
+      } catch {}
     });
 
     // Initialize cross-tab sync & background connectivity engine
@@ -1081,18 +1080,26 @@ export default function App() {
   };
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
-    let updatedList: Student[] = [];
+    const existingStudent = students.find((s) => s.id === updatedStudent.id);
+    const mergedStudent = mergeStudentData(existingStudent, updatedStudent);
+    const nextStudentsList = students.some((s) => s.id === mergedStudent.id)
+      ? students.map((s) => (s.id === mergedStudent.id ? mergedStudent : s))
+      : [mergedStudent, ...students];
+
     setStudents((prev) => {
-      const existing = prev.find((s) => s.id === updatedStudent.id);
-      const merged = mergeStudentData(existing, updatedStudent);
-      const updated = prev.map((s) => (s.id === merged.id ? merged : s));
-      updatedList = updated;
+      const prevExisting = prev.find((s) => s.id === updatedStudent.id);
+      const prevMerged = mergeStudentData(prevExisting, updatedStudent);
+      const updated = prev.some((s) => s.id === prevMerged.id)
+        ? prev.map((s) => (s.id === prevMerged.id ? prevMerged : s))
+        : [prevMerged, ...prev];
       saveStudents(updated);
       return updated;
     });
-    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
+
+    saveStudents(nextStudentsList);
+    broadcastSyncEvent('SYNC_STUDENTS', nextStudentsList);
     try {
-      await saveStudentToFirestore(updatedStudent);
+      await saveStudentToFirestore(mergedStudent);
     } catch (err) {
       console.error('Error updating student in Firestore:', err);
     }
@@ -1507,6 +1514,10 @@ export default function App() {
   };
 
   const handleSaveUser = async (userToSave: UserProfile) => {
+    if (isPurgedUser(userToSave)) {
+      console.warn('[App] Bloqueada tentativa de salvar usuário listado em EXCLUDED_USERS_BLACKLIST:', userToSave?.email || userToSave?.id);
+      return;
+    }
     try {
       // 1. Gravação resiliente no Firestore e no cache local
       const confirmedUser = await saveUserToFirestore(userToSave);
@@ -2080,6 +2091,25 @@ export default function App() {
     return getDailyConsolidatedMetrics(todayStr, students, records, activeHeaderTurma);
   }, [todayStr, students, records, activeHeaderTurma]);
 
+  // Ano letivo ativo para o cabeçalho (segue a aba Alunos e Turmas quando aberta; padrão 2026)
+  const activeHeaderYear = activeTab === 'alunos' ? selectedAcademicYear : 2026;
+
+  // Total Matriculados reativo conectado ao estado compartilhado `students`,
+  // filtrando estritamente alunos ATIVOS (status === 'ativo'/'regular') do ano letivo ativo (e turma selecionada, se houver)
+  const headerTotalMatriculados = useMemo(() => {
+    return (students || []).filter((s) => {
+      if (!s) return false;
+      const sYear = s.anoLetivo !== undefined && s.anoLetivo !== null ? Number(s.anoLetivo) : 2026;
+      if (sYear !== activeHeaderYear) return false;
+      if (activeHeaderTurma && (s.turma || '').trim() !== activeHeaderTurma.trim()) return false;
+      const st = (s.status || '').toLowerCase().trim();
+      const stMat = (s.statusMatricula || '').toLowerCase().trim();
+      if (st === 'inativo' || st === 'cancelado' || st === 'trancado') return false;
+      if (stMat === 'inativo' || stMat === 'cancelado' || stMat === 'trancado') return false;
+      return st === 'ativo' || st === 'regular' || (!st && (stMat === 'ativo' || stMat === 'regular'));
+    }).length;
+  }, [students, activeHeaderYear, activeHeaderTurma]);
+
   // Web Push Notifications & Background Audio Alerts Engine
   useWebPushNotifications({
     currentUser,
@@ -2141,8 +2171,8 @@ export default function App() {
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        totalStudents={todayConsolidated.totalMatriculados}
-        totalMatriculados={todayConsolidated.totalMatriculados}
+        totalStudents={headerTotalMatriculados}
+        totalMatriculados={headerTotalMatriculados}
         totalAtivosHoje={todayConsolidated.totalAtivos}
         presentesHoje={todayConsolidated.presentes}
         faltasHoje={todayConsolidated.faltas}
@@ -2335,6 +2365,8 @@ export default function App() {
             onDeleteStudent={handleDeleteStudent}
             onAddTurma={handleAddTurma}
             onDeleteTurma={handleDeleteTurma}
+            selectedAnoLetivo={selectedAcademicYear}
+            onSelectAnoLetivo={setSelectedAcademicYear}
           />
         )}
 

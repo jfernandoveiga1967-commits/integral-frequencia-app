@@ -9,9 +9,10 @@ import {
   isPurgedUser,
   PURGED_EMAILS,
   PURGED_USER_IDS,
+  EXCLUDED_USERS_BLACKLIST,
 } from '../utils/authUtils';
 
-export { PURGED_EMAILS, PURGED_USER_IDS, isPurgedUser };
+export { PURGED_EMAILS, PURGED_USER_IDS, EXCLUDED_USERS_BLACKLIST, isPurgedUser };
 
 /**
  * Serviço centralizado de gerenciamento de usuários no Firestore.
@@ -24,6 +25,13 @@ export function registerPurgedUsersTombstones(): void {
   try {
     PURGED_EMAILS.forEach((email, idx) => {
       markUserAsDeleted(PURGED_USER_IDS[idx], email);
+    });
+    EXCLUDED_USERS_BLACKLIST.forEach((entry) => {
+      if (entry.includes('@')) {
+        markUserAsDeleted('', entry);
+      } else {
+        markUserAsDeleted(entry, '');
+      }
     });
   } catch (err) {
     console.error('Erro ao registrar tombstones de usuários expurgados:', err);

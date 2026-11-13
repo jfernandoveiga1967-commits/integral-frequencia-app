@@ -48,49 +48,42 @@ export const PRESET_USERS: UserProfile[] = [
     canMarkAttendance: false,
     company: 'Colégio Crescer',
   } as UserProfile,
-  {
-    id: 'usr_danyelpereira',
-    name: 'Danyel Pereira',
-    email: 'danyel.pereira@crescercampinas.com.br',
-    role: 'professor' as UserRole,
-    cargoLabel: 'Professor de Flauta',
-    avatarColor: 'bg-sky-600',
-    birthDate: '1985-05-15',
-    pin: '15/05/1985',
-    status: 'ATIVO' as UserStatus,
-    workShiftType: 'continua_6h',
-    assignedActivities: ['Flauta'],
-    assignedTurmas: [],
-    allowedClassIds: [],
-    allowedTabs: ['ponto', 'semanario', 'momento'],
-    canManageStudents: false,
-    canMarkAttendance: true,
-    company: 'Colégio Crescer',
-    contractSchedule: '13:00 - 17:30',
-    contractDailyHours: 4.5,
-    contractDailyMinutes: 270,
-  } as UserProfile,
 ];
 
 // ===========================================================================
-// EXPURGO DEFINITIVO DE PERFIS DE TESTE / FICTÍCIOS
+// EXPURGO DEFINITIVO DE PERFIS DE TESTE / FICTÍCIOS (BLACKLIST PERMANENTE)
 // ===========================================================================
+export const EXCLUDED_USERS_BLACKLIST = [
+  'amanda.oliveira@crescercampinas.com.br',
+  'leticia.danca@crescercampinas.com.br',
+  'danyel.pereira@crescercampinas.com.br',
+  'usr_amanda',
+  'usr_leticia',
+  'usr_danyelpereira',
+] as const;
+
 export const PURGED_EMAILS = [
   'amanda.oliveira@crescercampinas.com.br',
   'leticia.danca@crescercampinas.com.br',
+  'danyel.pereira@crescercampinas.com.br',
 ] as const;
 
 export const PURGED_USER_IDS = [
   'usr_amanda',
   'usr_leticia',
+  'usr_danyelpereira',
 ] as const;
 
 export function isPurgedUser(user: { email?: string; id?: string; name?: string } | null | undefined): boolean {
   if (!user) return false;
   const email = (user.email || '').trim().toLowerCase();
   const id = (user.id || '').trim().toLowerCase();
-  if (email && PURGED_EMAILS.some((p) => p.toLowerCase() === email)) return true;
-  if (id && PURGED_USER_IDS.some((p) => p.toLowerCase() === id)) return true;
+  if (email && (PURGED_EMAILS.some((p) => p.toLowerCase() === email) || EXCLUDED_USERS_BLACKLIST.some((b) => b.toLowerCase() === email))) {
+    return true;
+  }
+  if (id && (PURGED_USER_IDS.some((p) => p.toLowerCase() === id) || EXCLUDED_USERS_BLACKLIST.some((b) => b.toLowerCase() === id))) {
+    return true;
+  }
   return false;
 }
 
@@ -699,7 +692,7 @@ export function getLocalUsersList(): UserProfile[] {
   } catch (e) {
     console.error('Erro ao ler usuários do localStorage:', e);
   }
-  return [...PRESET_USERS];
+  return normalizeAndDeduplicateUsers(PRESET_USERS.filter((u) => !isPurgedUser(u)));
 }
 
 export function saveLocalUsersList(users: UserProfile[]): void {
