@@ -973,9 +973,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       });
       await canonicalBatch.commit();
 
-      // 2. Exclui em lote todos os IDs duplicados no Firestore e sincroniza marcas de exclusão (protegendo os 9 oficiais do Mini Maternal 2026)
+      // 2. Exclui em lote todos os IDs duplicados no Firestore e sincroniza marcas de exclusão (protegendo os 8 oficiais ativos do Mini Maternal 2026)
       const safeIdsToDelete = info.allIdsToDelete.filter(
-        (id) => !PROTECTED_MINI_MATERNAL_2026_IDS.has(id) && !id.startsWith('st-2026-minimaternal')
+        (id) =>
+          id === 'st-2026-minimaternal-jose-ricardo-bijora-maneghin' ||
+          (!PROTECTED_MINI_MATERNAL_2026_IDS.has(id) && !id.startsWith('st-2026-minimaternal'))
       );
       const totalDeleted = await batchDeleteStudentsFromFirestore(safeIdsToDelete);
 

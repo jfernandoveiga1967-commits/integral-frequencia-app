@@ -264,9 +264,18 @@ export function subscribeAlunos(
 
   const emit = () => {
     const combinedMap = new Map<string, any>();
-    // Preenche 'students' e mescla com 'alunos' para integridade total
+    // Preenche 'students' e mescla com 'alunos' priorizando o documento com updatedAt mais recente
     studentsDocs.forEach((val, id) => combinedMap.set(id, val));
-    alunosDocs.forEach((val, id) => combinedMap.set(id, val));
+    alunosDocs.forEach((val, id) => {
+      const prev = combinedMap.get(id);
+      if (!prev) {
+        combinedMap.set(id, val);
+      } else {
+        const tPrev = prev.updatedAt ? new Date(prev.updatedAt).getTime() : 0;
+        const tVal = val.updatedAt ? new Date(val.updatedAt).getTime() : 0;
+        combinedMap.set(id, tVal >= tPrev ? val : prev);
+      }
+    });
 
     const deletedIds = getDeletedStudentIds();
     const list: Student[] = [];
@@ -1305,6 +1314,9 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
     ]);
     if (results[0].status === 'rejected') {
       throw results[0].reason;
+    }
+    if (results[1].status === 'rejected') {
+      throw results[1].reason;
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `alunos/${student.id}`);

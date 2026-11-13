@@ -30,9 +30,12 @@ export const KNOWN_PURGED_2027_IDS = new Set<string>([
   'st-1793977256640-21',
 ]);
 
+export const KNOWN_PURGED_DUPLICATE_IDS = new Set<string>([
+  'st-1790358651800-dl4g', // Maria Cecilia Trindade Latterza (3º Ano Azul - cancelado duplicado)
+]);
+
 export const PROTECTED_MINI_MATERNAL_2026_IDS = new Set<string>([
   'st-2026-minimaternal-gael-sturrari',
-  'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
   'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
   'st-2026-minimaternal-samuel-armani-boa-nova',
   'st-2026-minimaternal-anthony-rabelo-goncalves',
@@ -59,7 +62,10 @@ export function isSurplus2027Student(student: { id?: string; name?: string; anoL
 }
 
 export function getDeletedStudentIds(): Set<string> {
-  const set = new Set<string>(KNOWN_PURGED_2027_IDS);
+  const set = new Set<string>([
+    ...KNOWN_PURGED_2027_IDS,
+    ...KNOWN_PURGED_DUPLICATE_IDS,
+  ]);
   try {
     if (typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(DELETED_STUDENTS_KEY);

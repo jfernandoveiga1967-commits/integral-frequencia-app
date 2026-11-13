@@ -1130,25 +1130,26 @@ export default function App() {
     });
 
     // 4. Atualiza estado da tela removendo tanto pelo ID quanto pelo par nome+turma (para garantir que réplicas sumam da tela)
-    let updatedList: Student[] = [];
+    const shouldKeep = (s: Student) => {
+      if (allIdsToPurge.has(s.id)) return false;
+      if (
+        resolvedName &&
+        resolvedTurma &&
+        (s.name || '').trim().toLowerCase() === resolvedName.toLowerCase() &&
+        (s.turma || '').trim().toLowerCase() === resolvedTurma.toLowerCase()
+      ) {
+        return false;
+      }
+      return true;
+    };
+    const nextList = students.filter(shouldKeep);
     setStudents((prev) => {
-      const updated = prev.filter((s) => {
-        if (allIdsToPurge.has(s.id)) return false;
-        if (
-          resolvedName &&
-          resolvedTurma &&
-          (s.name || '').trim().toLowerCase() === resolvedName.toLowerCase() &&
-          (s.turma || '').trim().toLowerCase() === resolvedTurma.toLowerCase()
-        ) {
-          return false;
-        }
-        return true;
-      });
-      updatedList = updated;
+      const updated = prev.filter(shouldKeep);
       saveStudents(updated);
       return updated;
     });
-    broadcastSyncEvent('SYNC_STUDENTS', updatedList);
+    saveStudents(nextList);
+    broadcastSyncEvent('SYNC_STUDENTS', nextList);
   };
 
   // Save attendance record modifications

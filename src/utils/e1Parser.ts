@@ -289,6 +289,11 @@ export function isNumericMatricula(val: string): boolean {
   const clean = val.trim();
   const lower = clean.toLowerCase();
 
+  // Rejeição estrita de IDs determinísticos (ex: aluno_2027_nome, aluno_2026_nome) que não são RAs numéricos
+  if (/^aluno_\d{4}_/i.test(clean) || /^aluno_[a-z_]+/i.test(clean)) {
+    return false;
+  }
+
   // Rejeição estrita de palavras pedagógicas, turmas e cabeçalhos
   if (
     lower.includes('ano') ||
@@ -328,11 +333,16 @@ export function isNumericMatricula(val: string): boolean {
 /**
  * Higieniza o valor da matrícula para garantir que contenha exclusivamente
  * código/RA numérico do aluno (ex: '2026123' ou 'st-178...').
- * Rejeita turmas, cabeçalhos ou nomes acidentais.
+ * Rejeita turmas, cabeçalhos, IDs determinísticos (aluno_2027_...) ou nomes acidentais.
  */
 export function cleanMatriculaValue(val: string, fallbackId?: string): string {
   if (!val) return fallbackId || '';
   const clean = val.trim();
+
+  // IDs determinísticos do sistema (aluno_2027_...) não contêm RA numérico: evita extrair apenas o ano "2027"
+  if (/^aluno_\d{4}_/i.test(clean) || /^aluno_[a-z_]+/i.test(clean)) {
+    return fallbackId && !/^aluno_\d{4}_/i.test(fallbackId) ? fallbackId : '';
+  }
 
   // Se for turma, cabeçalho ou não contiver dígitos, rejeita categoricamente
   if (isTurmaString(clean) || isHeaderOrSystemText(clean) || !/[0-9]/.test(clean)) {

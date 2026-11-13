@@ -349,22 +349,6 @@ export const OFFICIAL_MINI_MATERNAL_2026_STUDENTS: Student[] = [
     notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
   },
   {
-    id: 'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
-    matricula: 'st-2026-minimaternal-jose-ricardo-bijora-maneghin',
-    name: 'José Ricardo Bijora Maneghin',
-    turma: 'Mini Maternal Azul',
-    anoLetivo: 2026,
-    status: 'inativo',
-    statusMatricula: 'cancelado',
-    inactivationDate: '2026-11-13',
-    inactivationReason: 'Matrícula cancelada pela gestão',
-    tipoContrato: 'regular',
-    activities: ['Rotina'],
-    diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-    horariosSaida: {},
-    notes: 'Matrícula Oficial 2026 - Mini Maternal Azul',
-  },
-  {
     id: 'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
     matricula: 'st-2026-minimaternal-lyan-adolpho-vieira-gardin',
     name: 'Lyan Adolpho Vieira Gardin',
@@ -524,16 +508,21 @@ export async function restoreMiniMaternal2026(): Promise<{
     // Fallback offline silencioso
   }
 
-  // Conjunto dos 9 IDs e nomes normalizados oficiais do Mini Maternal 2026
+  // Conjunto dos 8 IDs e nomes normalizados oficiais ativos do Mini Maternal 2026
   const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => st.id));
   const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
 
-  // Identificar e expurgar alunos indevidamente vinculados ao Mini Maternal 2026 fora dos 9 oficiais
+  // Identificar e expurgar alunos indevidamente vinculados ao Mini Maternal 2026 fora dos oficiais
+  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin caso exista
   const extraneousMiniMaternal2026Ids: string[] = [];
   studentMap.forEach((s, sId) => {
     const isMiniMaternal = (s.turma || '').toLowerCase().includes('mini') && (s.turma || '').toLowerCase().includes('maternal');
     const is2026 = (s.anoLetivo || 2026) === 2026;
-    if (isMiniMaternal && is2026 && !officialIds.has(sId) && !officialNames.has(normalizeStudentNameForMatching(s.name))) {
+    const normName = normalizeStudentNameForMatching(s.name);
+    const isJoseRicardo =
+      sId === 'st-2026-minimaternal-jose-ricardo-bijora-maneghin' ||
+      normName === 'jose ricardo bijora maneghin';
+    if (isMiniMaternal && is2026 && !isJoseRicardo && !officialIds.has(sId) && !officialNames.has(normName)) {
       extraneousMiniMaternal2026Ids.push(sId);
       studentMap.delete(sId);
     }
