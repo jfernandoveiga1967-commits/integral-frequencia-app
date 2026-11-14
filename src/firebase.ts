@@ -23,7 +23,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord, CustomExpenseCategory } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { ManualNorma, NormaAceite } from './types/manualNormas';
 import { NORMAS_DATA } from './data/normasData';
@@ -3375,6 +3375,184 @@ export async function getCookingRecipesFromFirestore(monthKey: string): Promise<
     console.warn(`Erro ao ler cookingRecipes/${monthKey} do Firestore:`, error);
   }
   return null;
+}
+
+/**
+ * Escuta em tempo real todas as receitas da Oficina de Culinária do ano letivo (cookingRecipes)
+ */
+export function subscribeCookingRecipes(
+  anoLetivo: number,
+  onData: (recipes: CookingRecipe[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'cookingRecipes');
+  const yearPrefix = `${anoLetivo}-`;
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      const allRecipes: CookingRecipe[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const mKey = String(data?.monthKey || docSnap.id || '');
+        if (!mKey.startsWith(yearPrefix)) return;
+        if (Array.isArray(data?.recipes)) {
+          data.recipes.forEach((r: CookingRecipe) => {
+            if (r && r.id) {
+              allRecipes.push({ ...r, monthKey: r.monthKey || mKey });
+            }
+          });
+        }
+      });
+      onData(allRecipes);
+    },
+    (error) => {
+      console.warn('Erro ao escutar cookingRecipes em tempo real:', error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+/**
+ * Escuta em tempo real os relatórios de refeições do ano letivo (mealReports)
+ */
+export function subscribeMealReports(
+  anoLetivo: number,
+  onData: (reports: MealReportConfig[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, 'mealReports');
+  const q = query(colRef, where('year', '==', Number(anoLetivo)));
+  return onSnapshot(
+    q,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      const reports: MealReportConfig[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const mKey = String(data.monthKey || docSnap.id || '');
+        reports.push({
+          id: data.id || mKey,
+          monthKey: mKey,
+          year: Number(data.year) || anoLetivo,
+          month: Number(data.month) || Number(mKey.split('-')[1]) || 8,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          defaultUnitPrice:
+            data.defaultUnitPrice !== undefined
+              ? Number(data.defaultUnitPrice)
+              : data.unitPrice !== undefined
+              ? Number(data.unitPrice)
+              : 9.0,
+          entries: data.entries || {},
+          contractCompany: data.contractCompany || data.providerName || 'Cantina & Nutrição Escolar',
+          providerName: data.providerName || data.contractCompany || 'Cantina & Nutrição Escolar',
+          responsibleCoordinator: data.responsibleCoordinator,
+          coordinatorRole: data.coordinatorRole,
+          responsibleFinancial: data.responsibleFinancial,
+          financialRole: data.financialRole,
+          generalNotes: data.generalNotes || '',
+          updatedAt: data.updatedAt,
+          updatedBy: data.updatedBy,
+        });
+      });
+      onData(reports);
+    },
+    (error) => {
+      console.warn('Erro ao escutar mealReports em tempo real:', error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+/**
+ * Escuta em tempo real as configurações globais do Relatório de Refeições (settings/mealReport)
+ */
+export function subscribeMealReportGlobalSettings(
+  onData: (settings: MealReportGlobalSettings | null) => void,
+  onError?: (err: any) => void
+): () => void {
+  const docRef = doc(db, 'settings', 'mealReport');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      if (snap.exists()) {
+        const data = snap.data();
+        const result: MealReportGlobalSettings = {
+          id: 'mealReport',
+          unitPrice: data.unitPrice !== undefined ? Number(data.unitPrice) : 9.0,
+          providerName: data.providerName || (data as Record<string, unknown>).contractCompany as string || 'Cantina & Nutrição Escolar',
+          responsibleCoordinator: data.responsibleCoordinator,
+          coordinatorRole: data.coordinatorRole,
+          responsibleFinancial: data.responsibleFinancial,
+          financialRole: data.financialRole,
+          updatedAt: data.updatedAt,
+          updatedBy: data.updatedBy,
+        };
+        try {
+          localStorage.setItem('crescer_meal_global_settings', JSON.stringify(result));
+        } catch {}
+        onData(result);
+      } else {
+        onData(null);
+      }
+    },
+    (error) => {
+      console.warn('Erro ao escutar settings/mealReport em tempo real:', error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+/**
+ * Salva categorias personalizadas de despesas do Financeiro no Firestore (settings/financial_custom_categories)
+ */
+export async function saveCustomExpenseCategoriesToFirestore(
+  categories: CustomExpenseCategory[],
+  updatedBy?: string
+): Promise<void> {
+  const docRef = doc(db, 'settings', 'financial_custom_categories');
+  const payload = {
+    id: 'financial_custom_categories',
+    categories: Array.isArray(categories) ? categories : [],
+    updatedAt: new Date().toISOString(),
+    updatedBy: updatedBy || '',
+  };
+  try {
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn('Erro ao salvar settings/financial_custom_categories no Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'settings/financial_custom_categories');
+    throw error;
+  }
+}
+
+/**
+ * Escuta em tempo real as categorias personalizadas de despesas do Financeiro (settings/financial_custom_categories)
+ */
+export function subscribeCustomExpenseCategories(
+  onData: (categories: CustomExpenseCategory[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const docRef = doc(db, 'settings', 'financial_custom_categories');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      clearFirestoreQuotaExceeded();
+      if (snap.exists()) {
+        const data = snap.data();
+        const cats = Array.isArray(data?.categories) ? (data.categories as CustomExpenseCategory[]) : [];
+        onData(cats);
+      } else {
+        onData([]);
+      }
+    },
+    (error) => {
+      console.warn('Erro ao escutar settings/financial_custom_categories:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 /**

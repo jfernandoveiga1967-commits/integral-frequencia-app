@@ -498,16 +498,16 @@ export default function App() {
   // Sincronização sob demanda (Zero Overhead para dispositivos móveis com conexão restrita)
   // Regra: se a aba correspondente não estiver liberada para o usuário, o listener correspondente NÃO é inicializado.
   // O coordenador possui sempre acesso irrestrito total.
-  const shouldSyncStudents = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
-  const shouldSyncTurmas = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncStudents = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
+  const shouldSyncTurmas = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncUsers = isLogged; // Otimização ativa: a lista de 24 usuários só é sincronizada após o login; antes do login, a autenticação faz busca pontual por e-mail no Firestore
   const shouldSyncActivities = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
-  const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('usuarios', currentUser));
-  const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
-  const shouldSyncPonto = isLogged && (isCoord || isTabAllowed('ponto', currentUser));
-  const shouldSyncSemanario = isLogged && (isCoord || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('usuarios', currentUser) || isTabAllowed('financeiro', currentUser));
+  const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser) || isTabAllowed('financeiro', currentUser));
+  const shouldSyncPonto = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('financeiro', currentUser));
+  const shouldSyncSemanario = isLogged && (isCoord || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncQuadro = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('usuarios', currentUser));
-  const shouldSyncRecords = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser));
+  const shouldSyncRecords = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
 
   const hasHealedActivitiesRef = useRef(false);
 
@@ -2403,6 +2403,12 @@ export default function App() {
             currentUser={currentUser}
             turmas={turmas}
             users={users}
+            pontoRecords={pontoRecords}
+            pontoClosings={pontoClosings}
+            holidays={holidays}
+            attendanceRecords={records}
+            schedules={schedules}
+            semanarioPlans={semanarioPlans}
             onUpdateStudents={(updated) => setStudents(updated)}
           />
         )}

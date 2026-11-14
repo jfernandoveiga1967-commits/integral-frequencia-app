@@ -12,6 +12,7 @@ import {
 } from '../firebase';
 import { loadHolidays } from './storageUtils';
 import { isHolidayOrRecess } from './dateUtils';
+import { broadcastSyncEvent } from '../services/syncService';
 
 const MENU_STORAGE_KEY_PREFIX = 'crescer_cardapio_monthly_';
 const RECIPES_STORAGE_KEY_PREFIX = 'crescer_culinaria_recipes_';
@@ -180,6 +181,7 @@ export function saveMonthlyMenuLocally(menu: MonthlyMenu): void {
  */
 export async function saveMonthlyMenu(menu: MonthlyMenu): Promise<void> {
   saveMonthlyMenuLocally(menu);
+  broadcastSyncEvent('SYNC_CARDAPIO', { monthKey: menu.monthKey, source: 'monthlyMenu' });
   try {
     await saveMonthlyMenuToFirestore(menu);
   } catch (err) {
@@ -240,10 +242,55 @@ export function saveCookingRecipesLocally(monthKey: string, recipes: CookingReci
 }
 
 /**
+ * Carrega todas as receitas de culinária armazenadas localmente para um dado ano letivo
+ */
+export function loadAllLocalCookingRecipesForYear(year: number): CookingRecipe[] {
+  const results: CookingRecipe[] = [];
+  const seenIds = new Set<string>();
+  const prefix = `${RECIPES_STORAGE_KEY_PREFIX}${year}-`;
+
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        const monthKey = key.replace(RECIPES_STORAGE_KEY_PREFIX, '');
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((r: CookingRecipe) => {
+              if (r && r.id && !seenIds.has(r.id)) {
+                seenIds.add(r.id);
+                results.push({ ...r, monthKey: r.monthKey || monthKey });
+              }
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consolidar receitas locais:', err);
+  }
+
+  // Garante que as receitas oficiais de Setembro/2026 estejam presentes se nada foi customizado para 2026-09
+  if (year === 2026 && results.length === 0) {
+    DEFAULT_CULINARY_RECIPES_SEPTEMBER_2026.forEach((r) => {
+      if (!seenIds.has(r.id)) {
+        seenIds.add(r.id);
+        results.push(r);
+      }
+    });
+  }
+
+  return results;
+}
+
+/**
  * Salva receitas no LocalStorage e no Firestore
  */
 export async function saveCookingRecipes(monthKey: string, recipes: CookingRecipe[]): Promise<void> {
   saveCookingRecipesLocally(monthKey, recipes);
+  broadcastSyncEvent('SYNC_CARDAPIO', { monthKey, source: 'cookingRecipes' });
   try {
     await saveCookingRecipesToFirestore(monthKey, recipes);
   } catch (err) {

@@ -32,6 +32,7 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
   const [category, setCategory] = useState<'doce' | 'salgado' | 'bebida' | 'lanche'>('salgado');
   const [prepTime, setPrepTime] = useState<string>('40 minutos');
   const [servings, setServings] = useState<string>('15 porções');
+  const [custoInsumos, setCustoInsumos] = useState<string>('');
   const [ingredientsText, setIngredientsText] = useState<string>('');
   const [instructionsText, setInstructionsText] = useState<string>('');
   const [nutritionalNotes, setNutritionalNotes] = useState<string>('');
@@ -54,6 +55,11 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
       setCategory(recipe.category || 'salgado');
       setPrepTime(recipe.prepTime || '40 minutos');
       setServings(recipe.servings || '15 porções');
+      setCustoInsumos(
+        recipe.custoInsumos !== undefined && recipe.custoInsumos !== null && !isNaN(Number(recipe.custoInsumos))
+          ? String(recipe.custoInsumos)
+          : ''
+      );
       setIngredientsText(recipe.ingredients ? recipe.ingredients.join('\n') : '');
       setInstructionsText(recipe.instructions ? recipe.instructions.join('\n') : '');
       setNutritionalNotes(recipe.nutritionalNotes || '');
@@ -67,6 +73,7 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
       setCategory('salgado');
       setPrepTime('40 minutos');
       setServings('15 porções');
+      setCustoInsumos('');
       setIngredientsText('');
       setInstructionsText('');
       setNutritionalNotes('');
@@ -108,6 +115,7 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
 
     const id = recipe?.id || `recipe_${Date.now()}`;
 
+    const parsedCost = parseFloat(custoInsumos.replace(',', '.'));
     const newRecipe: CookingRecipe = {
       id,
       monthKey: recipe?.monthKey || monthKey,
@@ -118,6 +126,7 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
       category,
       prepTime: prepTime.trim() || undefined,
       servings: servings.trim() || undefined,
+      custoInsumos: !isNaN(parsedCost) && parsedCost >= 0 ? Math.round(parsedCost * 100) / 100 : undefined,
       ingredients,
       instructions,
       nutritionalNotes: nutritionalNotes.trim() || undefined,
@@ -286,8 +295,8 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
             )}
           </div>
 
-          {/* Tempo de Preparo e Rendimento */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Tempo de Preparo, Rendimento e Custo de Insumos */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-1">
                 Tempo Estimado
@@ -310,6 +319,20 @@ export const EditRecipeModal: React.FC<EditRecipeModalProps> = ({
                 onChange={(e) => setServings(e.target.value)}
                 placeholder="Ex: 1 forma média (15 fatias), 4 copos..."
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-amber-300 block mb-1">
+                Custo Insumos (R$ - Financeiro)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={custoInsumos}
+                onChange={(e) => setCustoInsumos(e.target.value)}
+                placeholder="Auto se vazio"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-amber-500/40 text-white text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>

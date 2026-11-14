@@ -25,6 +25,7 @@ import {
   saveMealReportToFirestore,
   getMealReportFromFirestore,
 } from '../firebase';
+import { broadcastSyncEvent } from '../services/syncService';
 import {
   Utensils,
   X,
@@ -778,6 +779,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         ]);
         // Salva cópia local após a confirmação do servidor
         saveMealConfig(configToSave);
+        broadcastSyncEvent('SYNC_CARDAPIO', { monthKey, source: 'mealReport' });
         setAutoSaveStatus('saved');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
       },

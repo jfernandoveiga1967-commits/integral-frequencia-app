@@ -805,6 +805,11 @@ export const CardapioCulinaria: React.FC<CardapioCulinariaProps> = ({ currentUse
                         <span className="capitalize px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-[10px] font-bold">
                           {recipe.category}
                         </span>
+                        {recipe.custoInsumos !== undefined && recipe.custoInsumos > 0 && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-300/60">
+                            Insumos: R$ {Number(recipe.custoInsumos).toFixed(2).replace('.', ',')}
+                          </span>
+                        )}
                       </div>
                     </div>
 

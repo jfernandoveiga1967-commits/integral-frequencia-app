@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Student,
   UserProfile,
@@ -11,8 +11,19 @@ import {
   ExpenseCategory,
   ExpenseStatus,
   PlanoContratualType,
+  CustomExpenseCategory,
+  CustomCategoryColor,
+  PontoRecord,
+  PontoMonthClosing,
+  HolidayItem,
+  AttendanceRecord,
+  ScheduleBlock,
+  SemanarioPlan,
+  MealReportConfig,
+  MealReportGlobalSettings,
   getTabelaPlanosPorAno,
 } from '../types';
+import { CookingRecipe } from '../types/cardapio';
 import {
   CreditCard,
   DollarSign,
@@ -51,11 +62,19 @@ import {
   Wrench,
   BookOpen,
   Zap,
+  Tag,
 } from 'lucide-react';
 import { formatCurrencyBR } from '../utils/pontoUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import {
   EXPENSE_CATEGORIES_INFO,
+  AVAILABLE_CUSTOM_CATEGORY_COLORS,
+  getCategoryDisplayInfo,
+  loadLocalCustomCategories,
+  saveLocalCustomCategories,
+  createCustomExpenseCategory,
+  renameCustomExpenseCategory,
+  deleteCustomExpenseCategory,
   buildDefaultFinancialProfile,
   calculateFinancialMetrics,
   calculateModalidadesExtrasTotal,
@@ -70,6 +89,8 @@ import {
   deleteExpenseFromFirestore,
   subscribeFinancialExpenses,
   syncExpensesFromModules,
+  calculateModuleExpenses,
+  mergeAutoSyncedExpense,
   isObsoleteOrDuplicateExpense,
   loadLocalFinancialExpenses,
   forceRewriteSanitizedExpensesToFirestore,
@@ -77,7 +98,14 @@ import {
   DREMonthlySummary,
   MONTH_NAMES_DRE,
 } from '../services/financialService';
-import { saveStudentToFirestore } from '../firebase';
+import {
+  saveStudentToFirestore,
+  subscribeCustomExpenseCategories,
+  subscribeMealReports,
+  subscribeMealReportGlobalSettings,
+  subscribeCookingRecipes,
+} from '../firebase';
+import { subscribeToSyncEvents } from '../services/syncService';
 import { loadStudents, saveStudents } from '../utils/storageUtils';
 import { generateFinancialReportPDF, generateDREMonthlyReportPDF } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -89,6 +117,12 @@ interface FinancialManagementProps {
   currentUser?: UserProfile | null;
   turmas?: string[];
   users?: UserProfile[];
+  pontoRecords?: PontoRecord[];
+  pontoClosings?: PontoMonthClosing[];
+  holidays?: HolidayItem[];
+  attendanceRecords?: AttendanceRecord[];
+  schedules?: ScheduleBlock[];
+  semanarioPlans?: SemanarioPlan[];
   onUpdateStudents?: (students: Student[]) => void;
 }
 
@@ -97,6 +131,12 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   currentUser = null,
   turmas = TURMAS_LIST,
   users = [],
+  pontoRecords = [],
+  pontoClosings = [],
+  holidays = [],
+  attendanceRecords = [],
+  schedules = [],
+  semanarioPlans = [],
   onUpdateStudents,
 }) => {
   // Filtro de Exercício / Ano Letivo (2026 | 2027)
@@ -112,8 +152,26 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
   // Perfis financeiros carregados do Firestore / Cache
   const [financialProfiles, setFinancialProfiles] = useState<StudentFinancialProfile[]>([]);
-  // Despesas operacionais carregadas do Firestore / Cache (inicialização imediata higienizada)
+  // Despesas operacionais carregadas do Firestore / Cache
   const [expenses, setExpenses] = useState<FinancialExpense[]>(() => loadLocalFinancialExpenses());
+
+  // Categorias personalizadas criadas manualmente pelo gestor (Firestore + localStorage)
+  const [customCategories, setCustomCategories] = useState<CustomExpenseCategory[]>(() =>
+    loadLocalCustomCategories()
+  );
+  const [showCreateCategoryInline, setShowCreateCategoryInline] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+  const [newCategoryColor, setNewCategoryColor] = useState<CustomCategoryColor>('sky');
+  const [isSavingCategory, setIsSavingCategory] = useState<boolean>(false);
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renamingCategoryLabel, setRenamingCategoryLabel] = useState<string>('');
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState<boolean>(false);
+
+  // Dados em tempo real dos módulos Cardápio / Refeições / Culinária
+  const [mealReports, setMealReports] = useState<MealReportConfig[]>([]);
+  const [mealGlobalSettings, setMealGlobalSettings] = useState<MealReportGlobalSettings | null>(null);
+  const [cookingRecipes, setCookingRecipes] = useState<CookingRecipe[]>([]);
+  const [externalSyncTick, setExternalSyncTick] = useState<number>(0);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -172,20 +230,49 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // 1. Sincronização Silenciosa e Automática em segundo plano (background) ao carregar a aba ou alterar o ano letivo
+  // 1. Escutas em tempo real de Categorias Personalizadas, Cardápio/Refeições, Culinária e SyncBus
   useEffect(() => {
-    const runSilentSync = async () => {
-      try {
-        await forceRewriteSanitizedExpensesToFirestore(selectedAnoLetivo);
-        await syncExpensesFromModules(selectedAnoLetivo, students, users);
-      } catch (err) {
-        console.warn('Auto-sync silencioso em background:', err);
+    const unsubCategories = subscribeCustomExpenseCategories((remoteCats) => {
+      if (remoteCats.length > 0) {
+        setCustomCategories(remoteCats);
+        saveLocalCustomCategories(remoteCats);
       }
-    };
-    runSilentSync();
-  }, [selectedAnoLetivo, students.length, users.length]);
+    });
 
-  // 2. Escuta em tempo real do Firestore: Perfis Financeiros e Despesas por Ano Letivo
+    const unsubGlobalMeal = subscribeMealReportGlobalSettings((settings) => {
+      setMealGlobalSettings(settings);
+    });
+
+    const unsubSyncBus = subscribeToSyncEvents((msg) => {
+      if (
+        msg.type === 'SYNC_CARDAPIO' ||
+        msg.type === 'SYNC_PONTO_RECORDS' ||
+        msg.type === 'SYNC_PONTO_CLOSINGS' ||
+        msg.type === 'SYNC_SEMANARIO' ||
+        msg.type === 'SYNC_STUDENTS' ||
+        msg.type === 'SYNC_USERS' ||
+        msg.type === 'SYNC_FINANCIAL_CATEGORIES' ||
+        msg.type === 'SYNC_FINANCIAL_EXPENSES'
+      ) {
+        if (msg.type === 'SYNC_FINANCIAL_CATEGORIES' && (msg.payload as any)?.categories) {
+          setCustomCategories((msg.payload as any).categories);
+        }
+        setExternalSyncTick((t) => t + 1);
+      }
+    });
+
+    const handleMealUpdated = () => setExternalSyncTick((t) => t + 1);
+    window.addEventListener('app_meal_report_updated', handleMealUpdated);
+
+    return () => {
+      unsubCategories();
+      unsubGlobalMeal();
+      unsubSyncBus();
+      window.removeEventListener('app_meal_report_updated', handleMealUpdated);
+    };
+  }, []);
+
+  // 2. Escuta em tempo real por Ano Letivo: Perfis Financeiros, Despesas, Relatórios de Refeição e Receitas de Culinária
   useEffect(() => {
     setIsLoading(true);
     const unsubProfiles = subscribeFinancialProfiles(selectedAnoLetivo, (remoteProfiles) => {
@@ -197,11 +284,77 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       setExpenses(remoteExpenses);
     });
 
+    const unsubMealReports = subscribeMealReports(selectedAnoLetivo, (reports) => {
+      setMealReports(reports);
+    });
+
+    const unsubRecipes = subscribeCookingRecipes(selectedAnoLetivo, (recipes) => {
+      setCookingRecipes(recipes);
+    });
+
     return () => {
       unsubProfiles();
       unsubExpenses();
+      unsubMealReports();
+      unsubRecipes();
     };
   }, [selectedAnoLetivo]);
+
+  // 3. Sincronização Reativa Automática com as Abas Reais (Livro Ponto, Alunos Ativos, Cardápio/Refeições, Culinária/Semanário)
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+
+    syncTimerRef.current = setTimeout(async () => {
+      try {
+        const { updatedExpenses } = await syncExpensesFromModules(
+          selectedAnoLetivo,
+          students,
+          users,
+          expenses,
+          {
+            selectedMonth,
+            pontoRecords,
+            pontoClosings,
+            holidays,
+            attendanceRecords,
+            schedules,
+            semanarioPlans,
+            mealReports,
+            mealGlobalSettings,
+            cookingRecipes,
+          }
+        );
+        if (updatedExpenses && updatedExpenses.length > 0) {
+          setExpenses((prev) => {
+            const otherYears = prev.filter((e) => Number(e.anoLetivo) !== Number(selectedAnoLetivo));
+            return [...otherYears, ...updatedExpenses];
+          });
+        }
+      } catch (err) {
+        console.warn('Auto-sync reativo em background:', err);
+      }
+    }, 220);
+
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  }, [
+    selectedAnoLetivo,
+    selectedMonth,
+    students,
+    users,
+    pontoRecords,
+    pontoClosings,
+    holidays,
+    attendanceRecords,
+    schedules,
+    semanarioPlans,
+    mealReports,
+    mealGlobalSettings,
+    cookingRecipes,
+    externalSyncTick,
+  ]);
 
   // Contagens por Ano Letivo para os seletores
   const countStudents2026 = useMemo(
@@ -308,17 +461,98 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     return list.sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '', 'pt-BR'));
   }, [students, financialProfiles, selectedAnoLetivo]);
 
-  // 3. Despesas ativas do ano letivo (filtrando estritamente despesas válidas, sem duplicatas ou repasses de oficinas)
-  const currentExpenses = useMemo<FinancialExpense[]>(() => {
-    return expenses.filter(
-      (e) => e.anoLetivo === selectedAnoLetivo && !isObsoleteOrDuplicateExpense(e)
-    );
-  }, [expenses, selectedAnoLetivo]);
+  // 3. Despesas ao vivo calculadas em tempo real + despesas manuais persistidas
+  const liveAutoExpenses = useMemo<FinancialExpense[]>(() => {
+    return calculateModuleExpenses(selectedAnoLetivo, students, users, {
+      selectedMonth,
+      pontoRecords,
+      pontoClosings,
+      holidays,
+      attendanceRecords,
+      schedules,
+      semanarioPlans,
+      mealReports,
+      mealGlobalSettings,
+      cookingRecipes,
+    });
+  }, [
+    selectedAnoLetivo,
+    selectedMonth,
+    students,
+    users,
+    pontoRecords,
+    pontoClosings,
+    holidays,
+    attendanceRecords,
+    schedules,
+    semanarioPlans,
+    mealReports,
+    mealGlobalSettings,
+    cookingRecipes,
+  ]);
 
-  // 4. Métricas Gerais Consolidadas (Receitas, Despesas e Saldo Líquido Operacional)
+  const currentExpenses = useMemo<FinancialExpense[]>(() => {
+    const yearSaved = expenses.filter(
+      (e) => Number(e.anoLetivo) === Number(selectedAnoLetivo) && !isObsoleteOrDuplicateExpense(e)
+    );
+    const savedMap = new Map<string, FinancialExpense>();
+    yearSaved.forEach((e) => savedMap.set(e.id, e));
+
+    // Mescla despesas automáticas em tempo real preservando status/pagamento/fornecedor salvos
+    const mergedMap = new Map<string, FinancialExpense>();
+    liveAutoExpenses.forEach((autoExp) => {
+      const existing = savedMap.get(autoExp.id);
+      mergedMap.set(autoExp.id, mergeAutoSyncedExpense(autoExp, existing));
+    });
+
+    // Preserva 100% todas as despesas manuais e personalizadas
+    yearSaved.forEach((savedExp) => {
+      if (!savedExp.isAutoGenerated || savedExp.origemModulo === 'MANUAL') {
+        mergedMap.set(savedExp.id, savedExp);
+      }
+    });
+
+    return Array.from(mergedMap.values()).sort((a, b) => {
+      const autoDiff = Number(Boolean(b.isAutoGenerated)) - Number(Boolean(a.isAutoGenerated));
+      if (autoDiff !== 0) return autoDiff;
+      return (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR');
+    });
+  }, [expenses, liveAutoExpenses, selectedAnoLetivo]);
+
+  // Categorias dinâmicas disponíveis para filtro (sincronizadas presentes + personalizadas)
+  const filterCategoryOptions = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; count: number; isAuto: boolean }>();
+
+    customCategories.forEach((c) => {
+      map.set(c.id, { id: c.id, label: c.label, count: 0, isAuto: false });
+    });
+
+    currentExpenses.forEach((exp) => {
+      const catId = exp.categoria || 'OUTROS';
+      const info = getCategoryDisplayInfo(catId, customCategories, exp.categoriaLabel);
+      const prev = map.get(catId);
+      if (prev) {
+        prev.count += 1;
+      } else {
+        map.set(catId, {
+          id: catId,
+          label: info.shortLabel || info.label,
+          count: 1,
+          isAuto: Boolean(exp.isAutoGenerated || exp.autoSyncKey),
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isAuto !== b.isAuto) return a.isAuto ? -1 : 1;
+      return a.label.localeCompare(b.label, 'pt-BR');
+    });
+  }, [currentExpenses, customCategories]);
+
+  // 4. Métricas Gerais Consolidadas (Receitas, Despesas por Categoria e Saldo Líquido Operacional)
   const metrics = useMemo<FinancialMetricSummary>(() => {
-    return calculateFinancialMetrics(resolvedProfiles, currentExpenses);
-  }, [resolvedProfiles, currentExpenses]);
+    return calculateFinancialMetrics(resolvedProfiles, currentExpenses, customCategories);
+  }, [resolvedProfiles, currentExpenses, customCategories]);
 
   // 5. Lista Filtrada de Receitas (Alunos)
   const filteredProfiles = useMemo<StudentFinancialProfile[]>(() => {
@@ -512,12 +746,103 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   };
 
   // -------------------------------------------------------------------------
-  // HANDLERS: GESTÃO DE DESPESAS OPERACIONAIS
+  // HANDLERS: CATEGORIAS PERSONALIZADAS E GESTÃO DE DESPESAS OPERACIONAIS
   // -------------------------------------------------------------------------
+  const handleCreateCustomCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) {
+      showToast('Digite um nome para a nova categoria.', 'error');
+      return;
+    }
+    setIsSavingCategory(true);
+    try {
+      const { categories: nextList, created } = await createCustomExpenseCategory(
+        trimmed,
+        newCategoryColor,
+        customCategories,
+        currentUser?.name || 'Gestão'
+      );
+      setCustomCategories(nextList);
+      setNewCategoryName('');
+      setShowCreateCategoryInline(false);
+      if (editingExpense) {
+        setEditingExpense({
+          ...editingExpense,
+          categoria: created.id,
+          categoriaLabel: created.label,
+        });
+      }
+      showToast(`Categoria "${created.label}" criada e salva!`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao criar categoria personalizada.', 'error');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleConfirmRenameCategory = async (categoryId: string) => {
+    const trimmed = renamingCategoryLabel.trim();
+    if (!trimmed) {
+      showToast('O nome da categoria não pode ficar vazio.', 'error');
+      return;
+    }
+    setIsSavingCategory(true);
+    try {
+      const nextList = await renameCustomExpenseCategory(
+        categoryId,
+        trimmed,
+        customCategories,
+        currentUser?.name || 'Gestão'
+      );
+      setCustomCategories(nextList);
+      setExpenses((prev) =>
+        prev.map((e) => (e.categoria === categoryId ? { ...e, categoriaLabel: trimmed } : e))
+      );
+      setRenamingCategoryId(null);
+      setRenamingCategoryLabel('');
+      showToast(`Categoria renomeada para "${trimmed}".`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao renomear categoria.', 'error');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCustomCategory = async (category: CustomExpenseCategory) => {
+    setIsSavingCategory(true);
+    try {
+      const res = await deleteCustomExpenseCategory(
+        category.id,
+        expenses,
+        customCategories,
+        currentUser?.name || 'Gestão'
+      );
+      if (!res.deleted) {
+        showToast(res.reason || 'Não é possível excluir uma categoria em uso.', 'error');
+        return;
+      }
+      setCustomCategories(res.categories);
+      if (editingExpense?.categoria === category.id) {
+        setEditingExpense({
+          ...editingExpense,
+          categoria: res.categories[0]?.id || '',
+          categoriaLabel: res.categories[0]?.label || '',
+        });
+      }
+      showToast(`Categoria "${category.label}" excluída.`, 'success');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
   const handleOpenNewExpense = () => {
+    const defaultCat = customCategories[0];
+    setShowCreateCategoryInline(customCategories.length === 0);
+    setNewCategoryName('');
     setEditingExpense({
       anoLetivo: selectedAnoLetivo,
-      categoria: 'FOLHA_PAGAMENTO',
+      categoria: defaultCat?.id || '',
+      categoriaLabel: defaultCat?.label || '',
       descricao: '',
       valor: 0,
       dataVencimento: new Date().toISOString().split('T')[0],
@@ -526,12 +851,16 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       fornecedorOuBeneficiario: '',
       fornecedor: '',
       observacoes: '',
+      isAutoGenerated: false,
+      origemModulo: 'MANUAL',
     });
     setExpenseModalOpen(true);
   };
 
   const handleOpenEditExpense = (expense: FinancialExpense) => {
     const forn = expense.fornecedor || expense.fornecedorOuBeneficiario || '';
+    setShowCreateCategoryInline(false);
+    setNewCategoryName('');
     setEditingExpense({
       ...expense,
       fornecedor: forn,
@@ -542,7 +871,13 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
   const handleSaveExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingExpense || !editingExpense.descricao || !editingExpense.valor) {
+    if (!editingExpense) return;
+    if (!editingExpense.categoria || editingExpense.categoria.trim() === '') {
+      showToast('Selecione ou crie uma categoria personalizada antes de salvar a despesa.', 'error');
+      setShowCreateCategoryInline(true);
+      return;
+    }
+    if (!editingExpense.descricao || !editingExpense.valor) {
       showToast('Preencha os campos obrigatórios da despesa (Descrição e Valor).', 'error');
       return;
     }
@@ -555,10 +890,17 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         ''
       ).trim();
 
+      const catInfo = getCategoryDisplayInfo(
+        editingExpense.categoria,
+        customCategories,
+        editingExpense.categoriaLabel
+      );
+
       const expenseToSave: FinancialExpense = {
         id: editingExpense.id || `exp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         anoLetivo: editingExpense.anoLetivo || selectedAnoLetivo,
-        categoria: (editingExpense.categoria as ExpenseCategory) || 'OUTROS',
+        categoria: editingExpense.categoria as ExpenseCategory,
+        categoriaLabel: catInfo.label,
         descricao: editingExpense.descricao.trim(),
         valor: Math.max(0, Number(editingExpense.valor)),
         dataVencimento: editingExpense.dataVencimento || new Date().toISOString().split('T')[0],
@@ -575,6 +917,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         updatedBy: currentUser?.name || 'Coordenação',
         isAutoGenerated: editingExpense.isAutoGenerated ?? false,
         origemModulo: editingExpense.origemModulo || 'MANUAL',
+        origemAbaLabel: editingExpense.origemAbaLabel,
         autoSyncKey: editingExpense.autoSyncKey,
       };
 
@@ -649,6 +992,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     const result = generateFinancialReportPDF({
       profiles: filteredProfiles,
       expenses: filteredExpenses,
+      customCategories,
       metrics,
       schoolYear: selectedAnoLetivo,
       monthRef: `Exercício ${selectedAnoLetivo}`,
@@ -688,6 +1032,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         custosOperacionais: metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes,
         custoFolha: metrics.custoFolhaReal || 0,
         custoAlimentacao: metrics.custoAlimentacaoReal || 0,
+        custoCulinaria: metrics.custoCulinariaReal || 0,
+        custoOutrasCategorias: metrics.custoOutrasCategoriasReal || 0,
         resultadoLiquido: metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional,
         margemPercentual: metrics.margemOperacionalLiquida ?? 0,
       };
@@ -705,6 +1051,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         custosOperacionais: m.custosOperacionais,
         custoFolha: m.custoFolha,
         custoAlimentacao: m.custoAlimentacao,
+        custoCulinaria: m.custoCulinaria,
+        custoOutrasCategorias: m.custoOutrasCategorias,
         resultadoLiquido: m.resultadoLiquido,
         margemPercentual: m.margemPercentual,
       };
@@ -720,6 +1068,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       custosOperacionais: metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes,
       custoFolha: metrics.custoFolhaReal || 0,
       custoAlimentacao: metrics.custoAlimentacaoReal || 0,
+      custoCulinaria: metrics.custoCulinariaReal || 0,
+      custoOutrasCategorias: metrics.custoOutrasCategoriasReal || 0,
       resultadoLiquido: metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional,
       margemPercentual: metrics.margemOperacionalLiquida ?? 0,
     };
@@ -896,13 +1246,13 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                 {formatCurrencyBR(activeDREData.custosOperacionais)}
               </span>
               <span className="text-[10.5px] sm:text-[11px] text-rose-600 font-bold block mt-0.5 truncate">
-                Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Alim: {formatCurrencyBR(activeDREData.custoAlimentacao)}
+                Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)}
               </span>
             </div>
           </div>
           <div className="mt-2.5 pt-2 border-t border-rose-100/70 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
-            <span className="truncate">Ponto: <strong className="text-slate-800">{formatCurrencyBR(activeDREData.custoFolha)}</strong></span>
-            <span className="text-emerald-700 font-semibold truncate">Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)}</span>
+            <span className="truncate">Culinária: <strong className="text-amber-700">{formatCurrencyBR(activeDREData.custoCulinaria)}</strong></span>
+            <span className="text-slate-700 font-semibold truncate">Personaliz.: {formatCurrencyBR(activeDREData.custoOutrasCategorias)}</span>
           </div>
         </div>
 
@@ -1090,17 +1440,32 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </button>
         </div>
 
-        {/* Botão Padronizado de Ação: [ ➕ Nova Despesa ] */}
+        {/* Botões Padronizados de Ação: [ 🏷️ Categorias ] e [ ➕ Nova Despesa ] */}
         {activeSubTab === 'despesas' && (
-          <button
-            type="button"
-            onClick={handleOpenNewExpense}
-            className="flex items-center justify-center space-x-2 px-5 py-2.5 min-w-[220px] h-11 rounded-2xl text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all cursor-pointer border border-emerald-500/30"
-            title="Cadastrar nova despesa ou custo operacional"
-          >
-            <Plus className="w-4 h-4" />
-            <span>➕ Nova Despesa</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreateCategoryInline(true);
+                setRenamingCategoryId(null);
+                setCategoryManagerOpen(true);
+              }}
+              className="flex items-center justify-center space-x-1.5 px-4 py-2.5 h-11 rounded-2xl text-xs font-extrabold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-xs transition-all cursor-pointer"
+              title="Criar, renomear ou excluir categorias personalizadas de despesas"
+            >
+              <Tag className="w-4 h-4 text-indigo-600" />
+              <span>Categorias ({customCategories.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenNewExpense}
+              className="flex items-center justify-center space-x-2 px-5 py-2.5 min-w-[200px] h-11 rounded-2xl text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all cursor-pointer border border-emerald-500/30"
+              title="Cadastrar nova despesa ou custo operacional"
+            >
+              <Plus className="w-4 h-4" />
+              <span>➕ Nova Despesa</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -1373,32 +1738,44 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   Custos Operacionais Reais & DRE
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Os custos operacionais são conectados dinamicamente às fontes oficiais: a folha dos colaboradores ativos no <strong>Livro Ponto</strong> e o fornecimento de refeições aos alunos da Rotina pelo módulo <strong>Cardápio & Nutrição</strong>.
+                  Custos sincronizados em tempo real a partir das abas oficiais: <strong>Livro Ponto</strong> (fracionado por cargo/categoria), <strong>Cardápio & Nutrição</strong> (refeições pela Rotina ativa), <strong>Oficinas de Culinária</strong> (Cardápio e Semanário) e suas <strong>Categorias Personalizadas</strong>.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
                 <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
                   <span className="text-[10px] sm:text-[11px] text-indigo-300 font-medium block truncate">Folha (Livro Ponto)</span>
-                  <span className="text-xs sm:text-sm lg:text-base font-black text-indigo-300 truncate block">
+                  <span className="text-xs sm:text-sm font-black text-indigo-300 truncate block">
                     {formatCurrencyBR(metrics.custoFolhaReal || 0)}
                   </span>
                 </div>
                 <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Alimentação (Refeições)</span>
-                  <span className="text-xs sm:text-sm lg:text-base font-black text-emerald-300 truncate block">
+                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Refeições (Cardápio)</span>
+                  <span className="text-xs sm:text-sm font-black text-emerald-300 truncate block">
                     {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
+                  </span>
+                </div>
+                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-amber-300 font-medium block truncate">Culinária (Oficinas)</span>
+                  <span className="text-xs sm:text-sm font-black text-amber-300 truncate block">
+                    {formatCurrencyBR(metrics.custoCulinariaReal || 0)}
+                  </span>
+                </div>
+                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
+                  <span className="text-[10px] sm:text-[11px] text-sky-300 font-medium block truncate">Personalizadas</span>
+                  <span className="text-xs sm:text-sm font-black text-sky-300 truncate block">
+                    {formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}
                   </span>
                 </div>
                 <div className="p-2 sm:p-2.5 bg-rose-950/40 border border-rose-500/30 rounded-xl min-w-0 overflow-hidden">
                   <span className="text-[10px] sm:text-[11px] text-rose-300 font-medium block truncate">Total Custos Reais</span>
-                  <span className="text-xs sm:text-sm lg:text-base font-black text-rose-400 truncate block">
+                  <span className="text-xs sm:text-sm font-black text-rose-400 truncate block">
                     {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
                   </span>
                 </div>
                 <div className="p-2 sm:p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl min-w-0 overflow-hidden">
                   <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Resultado Líquido</span>
-                  <span className="text-xs sm:text-sm lg:text-base font-black text-emerald-400 truncate block">
+                  <span className="text-xs sm:text-sm font-black text-emerald-400 truncate block">
                     {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
                   </span>
                 </div>
@@ -1430,22 +1807,20 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-                {/* Filtro por Categoria */}
+                {/* Filtro Dinâmico por Categoria (Sincronizadas + Personalizadas) */}
                 <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-2xl">
                   <span className="text-slate-500 text-xs font-semibold">Categoria:</span>
                   <select
                     value={selectedExpenseCategory}
                     onChange={(e) => setSelectedExpenseCategory(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
+                    className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1 max-w-[230px]"
                   >
                     <option value="TODAS">Todas as Categorias ({currentExpenses.length})</option>
-                    <option value="FOLHA_PAGAMENTO">Folha / Salários</option>
-                    <option value="OFICINAS_TERCEIRIZADAS">Oficinas Terceirizadas</option>
-                    <option value="OFICINAS_CULINARIA">Oficinas de Culinária</option>
-                    <option value="ALIMENTACAO_HORTIFRUTI">Alimentação & Cantina</option>
-                    <option value="MATERIAIS_DIDATICOS">Materiais Didáticos</option>
-                    <option value="MANUTENCAO_INFRA">Manutenção & Infra</option>
-                    <option value="OUTROS">Outros Custos</option>
+                    {filterCategoryOptions.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.label} ({cat.count}){cat.isAuto ? ' ⚡' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1496,7 +1871,24 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     </tr>
                   ) : (
                     filteredExpenses.map((exp, idx) => {
-                      const catInfo = EXPENSE_CATEGORIES_INFO[exp.categoria] || EXPENSE_CATEGORIES_INFO.OUTROS;
+                      const catInfo = getCategoryDisplayInfo(
+                        exp.categoria,
+                        customCategories,
+                        exp.categoriaLabel
+                      );
+                      const originLabel =
+                        exp.origemAbaLabel ||
+                        (exp.origemModulo === 'FOLHA_PONTO'
+                          ? 'Livro Ponto'
+                          : exp.origemModulo === 'CARDAPIO_REFEICOES'
+                          ? 'Cardápio / Refeições'
+                          : exp.origemModulo === 'CULINARIA_OFICINAS'
+                          ? 'Culinária / Oficinas'
+                          : exp.origemModulo === 'SEMANARIO_CULINARIA'
+                          ? 'Semanário / Oficinas'
+                          : exp.origemModulo === 'OFICINAS_EXTRAS'
+                          ? 'Oficinas Extras'
+                          : 'Auto-Sync');
 
                       return (
                         <tr
@@ -1523,17 +1915,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                                   <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
                                     <Zap className="w-2.5 h-2.5 text-amber-500 fill-amber-500" />
                                     <span>⚡ Automático</span>
-                                    {exp.origemModulo && (
+                                    {(exp.origemModulo || exp.origemAbaLabel) && (
                                       <>
                                         <span className="text-amber-400 font-bold">•</span>
                                         <span className="text-[9.5px] font-semibold text-amber-800">
-                                          {exp.origemModulo === 'FOLHA_PONTO'
-                                            ? 'Livro Ponto'
-                                            : exp.origemModulo === 'CARDAPIO_REFEICOES'
-                                            ? 'Cardápio / Refeições'
-                                            : exp.origemModulo === 'OFICINAS_EXTRAS'
-                                            ? 'Oficinas Extras'
-                                            : 'Auto-Sync'}
+                                          {originLabel}
                                         </span>
                                       </>
                                     )}
@@ -1643,14 +2029,14 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     DRE Realista Auditado • Exercício {selectedAnoLetivo}
                   </span>
                   <span className="text-xs text-slate-400 font-mono">
-                    Conexão Direta: Livro Ponto + Cardápio
+                    Conexão Direta: Livro Ponto + Cardápio + Culinária + Personalizadas
                   </span>
                 </div>
                 <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
                   Demonstração do Resultado do Exercício (DRE)
                 </h3>
                 <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                  Demonstração transparente integrando exclusivamente os contratos ativos dos alunos de {selectedAnoLetivo}, o custo consolidado da folha de pagamento do Livro Ponto e o faturamento de alimentação do Cardápio Escolar.
+                  Demonstração transparente integrando os contratos ativos dos alunos de {selectedAnoLetivo}, a folha do Livro Ponto fracionada por cargo, as refeições do Cardápio Escolar, as oficinas de Culinária e todas as categorias personalizadas criadas pela gestão.
                 </p>
               </div>
 
@@ -1771,7 +2157,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     -{formatCurrencyBR(activeDREData.custosOperacionais)}
                   </span>
                   <span className="text-[10px] text-rose-600 font-medium block truncate">
-                    Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Alim: {formatCurrencyBR(activeDREData.custoAlimentacao)}
+                    Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)} • Culin./Outras: {formatCurrencyBR(activeDREData.custoCulinaria + activeDREData.custoOutrasCategorias)}
                   </span>
                 </div>
 
@@ -1973,81 +2359,79 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     </td>
                   </tr>
 
-                  {/* Linha 4.1: Folha de Pagamento */}
-                  <tr className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-4 sticky left-0 bg-white z-10 text-slate-700 border-r border-slate-100 shadow-2xs pl-6">
-                      <div className="flex items-center space-x-1.5">
-                        <span>4.1 Folha & Equipe</span>
-                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          Ponto
-                        </span>
-                      </div>
-                    </td>
-                    {(selectedMonth !== 'ALL' && isolateMonthColumn
-                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
-                      : monthlyDRE.months
-                    ).map((m) => {
-                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
-                      return (
-                        <td
-                          key={m.monthIndex}
-                          className={`py-2.5 px-3 text-right font-mono text-rose-700 ${
-                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
-                          }`}
-                        >
-                          -{formatCurrencyBR(m.custoFolha)}
-                        </td>
-                      );
-                    })}
-                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
-                      <td className="py-2.5 px-3 text-right font-mono font-medium text-rose-600 bg-indigo-50/30">
-                        -{activeDREData.receitaLiquida > 0
-                          ? `${Math.round((activeDREData.custoFolha / activeDREData.receitaLiquida) * 1000) / 10}%`
-                          : '-'}
-                      </td>
-                    )}
-                    <td className="py-2.5 px-4 text-right font-mono font-semibold text-rose-700 bg-slate-50/60">
-                      -{formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)}
-                    </td>
-                  </tr>
+                  {/* Linhas 4.x: Categorias Dinâmicas (Abas Sincronizadas + Categorias Personalizadas) */}
+                  {monthlyDRE.categoryRows.length > 0 ? (
+                    monthlyDRE.categoryRows.map((catRow, catIdx) => {
+                      const sourceBadgeText =
+                        catRow.origemAbaLabel ||
+                        (catRow.isAutoGenerated ? 'Auto-Sync' : 'Personalizada');
+                      const badgeStyleClass =
+                        catRow.origemModulo === 'FOLHA_PONTO'
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                          : catRow.origemModulo === 'CARDAPIO_REFEICOES'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
+                            catRow.origemModulo === 'SEMANARIO_CULINARIA'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-sky-50 text-sky-700 border-sky-200';
+                      const visibleMonths =
+                        selectedMonth !== 'ALL' && isolateMonthColumn
+                          ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
+                          : monthlyDRE.months;
+                      const activeMonthVal =
+                        selectedMonth !== 'ALL'
+                          ? catRow.monthlyValues[selectedMonth - 1] || 0
+                          : catRow.monthlyValues[0] || 0;
 
-                  {/* Linha 4.2: Alimentação Escolar */}
-                  <tr className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-4 sticky left-0 bg-white z-10 text-slate-700 border-r border-slate-100 shadow-2xs pl-6">
-                      <div className="flex items-center space-x-1.5">
-                        <span>4.2 Alimentação Escolar</span>
-                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          Cardápio
-                        </span>
-                      </div>
-                    </td>
-                    {(selectedMonth !== 'ALL' && isolateMonthColumn
-                      ? monthlyDRE.months.filter((m) => m.monthIndex === selectedMonth)
-                      : monthlyDRE.months
-                    ).map((m) => {
-                      const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
                       return (
-                        <td
-                          key={m.monthIndex}
-                          className={`py-2.5 px-3 text-right font-mono text-rose-700 ${
-                            isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
-                          }`}
-                        >
-                          -{formatCurrencyBR(m.custoAlimentacao)}
-                        </td>
+                        <tr key={catRow.categoria} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4 sticky left-0 bg-white z-10 text-slate-700 border-r border-slate-100 shadow-2xs pl-6">
+                            <div className="flex items-center space-x-1.5">
+                              <span>
+                                4.{catIdx + 1} {catRow.label}
+                              </span>
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] border font-semibold ${badgeStyleClass}`}>
+                                {sourceBadgeText}
+                              </span>
+                            </div>
+                          </td>
+                          {visibleMonths.map((m) => {
+                            const isSelected = selectedMonth !== 'ALL' && m.monthIndex === selectedMonth;
+                            const val = catRow.monthlyValues[m.monthIndex - 1] ?? 0;
+                            return (
+                              <td
+                                key={m.monthIndex}
+                                className={`py-2.5 px-3 text-right font-mono text-rose-700 ${
+                                  isSelected ? 'bg-indigo-50/80 font-black border-x-2 border-indigo-300' : ''
+                                }`}
+                              >
+                                -{formatCurrencyBR(val)}
+                              </td>
+                            );
+                          })}
+                          {selectedMonth !== 'ALL' && isolateMonthColumn && (
+                            <td className="py-2.5 px-3 text-right font-mono font-medium text-rose-600 bg-indigo-50/30">
+                              -{activeDREData.receitaLiquida > 0
+                                ? `${Math.round((activeMonthVal / activeDREData.receitaLiquida) * 1000) / 10}%`
+                                : '-'}
+                            </td>
+                          )}
+                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-rose-700 bg-slate-50/60">
+                            -{formatCurrencyBR(catRow.totalAnual)}
+                          </td>
+                        </tr>
                       );
-                    })}
-                    {selectedMonth !== 'ALL' && isolateMonthColumn && (
-                      <td className="py-2.5 px-3 text-right font-mono font-medium text-rose-600 bg-indigo-50/30">
-                        -{activeDREData.receitaLiquida > 0
-                          ? `${Math.round((activeDREData.custoAlimentacao / activeDREData.receitaLiquida) * 1000) / 10}%`
-                          : '-'}
+                    })
+                  ) : (
+                    <tr className="hover:bg-slate-50/80 transition-colors">
+                      <td
+                        colSpan={selectedMonth !== 'ALL' && isolateMonthColumn ? 4 : 14}
+                        className="py-3 px-6 text-slate-400 text-xs italic"
+                      >
+                        Nenhuma categoria de custo registrada para este exercício.
                       </td>
-                    )}
-                    <td className="py-2.5 px-4 text-right font-mono font-semibold text-rose-700 bg-slate-50/60">
-                      -{formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)}
-                    </td>
-                  </tr>
+                    </tr>
+                  )}
 
                   {/* Linha 4: Total Custos Operacionais */}
                   <tr className="bg-rose-50/40 hover:bg-rose-50/70 font-bold text-rose-950 border-t border-rose-200/60">
@@ -2259,48 +2643,63 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               <div className="p-4 bg-slate-50/70 flex items-center justify-between font-black text-slate-900 text-sm">
                 <div className="flex items-center space-x-2">
                   <span className="text-rose-600 font-mono">4.</span>
-                  <span>(-) CUSTOS OPERACIONAIS REAIS (Livro Ponto + Cardápio)</span>
+                  <span>(-) CUSTOS OPERACIONAIS REAIS (Abas Integradas + Categorias Personalizadas)</span>
                 </div>
                 <span className="text-rose-700 font-mono text-base">
                   -{formatCurrencyBR(activeDREData.custosOperacionais)}
                 </span>
               </div>
 
-              {/* Sub-item: Folha de Pagamento */}
-              <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
-                <div className="space-y-0.5">
-                  <div className="flex items-center space-x-1.5 font-bold text-slate-900">
-                    <span>4.1 Folha de Pagamento & Equipe (Livro Ponto)</span>
-                    <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      Livro Ponto Real
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 block">
-                    Banca contratual, ajuda de custo, horas extras e adicionais apurados dos colaboradores ativos
-                  </span>
-                </div>
-                <span className="font-bold text-rose-700 font-mono text-xs">
-                  -{formatCurrencyBR(activeDREData.custoFolha)}
-                </span>
-              </div>
+              {/* Sub-itens dinâmicos por categoria */}
+              {monthlyDRE.categoryRows.map((catRow, catIdx) => {
+                const displayVal =
+                  selectedMonth !== 'ALL'
+                    ? catRow.monthlyValues[selectedMonth - 1] || 0
+                    : catRow.monthlyValues[0] || 0;
+                const badgeStyleClass =
+                  catRow.origemModulo === 'FOLHA_PONTO'
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : catRow.origemModulo === 'CARDAPIO_REFEICOES'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
+                      catRow.origemModulo === 'SEMANARIO_CULINARIA'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-sky-50 text-sky-700 border-sky-200';
+                const sourceText =
+                  catRow.origemAbaLabel ||
+                  (catRow.isAutoGenerated ? 'Sincronização Automática' : 'Categoria Personalizada');
 
-              {/* Sub-item: Alimentação Escolar */}
-              <div className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50">
-                <div className="space-y-0.5">
-                  <div className="flex items-center space-x-1.5 font-bold text-slate-900">
-                    <span>4.2 Alimentação Escolar & Insumos (Refeições)</span>
-                    <span className="px-2 py-0.5 rounded-full text-[9.5px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      Cardápio & Refeições
+                return (
+                  <div
+                    key={catRow.categoria}
+                    className="py-3 px-6 flex items-center justify-between text-slate-700 pl-10 hover:bg-slate-50"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5 font-bold text-slate-900">
+                        <span>
+                          4.{catIdx + 1} {catRow.label}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[9.5px] border ${badgeStyleClass}`}>
+                          {catRow.isAutoGenerated ? `⚡ ${sourceText}` : sourceText}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 block">
+                        {catRow.origemModulo === 'FOLHA_PONTO'
+                          ? 'Folha de colaboradores ativos do Livro Ponto agrupada por cargo/função'
+                          : catRow.origemModulo === 'CARDAPIO_REFEICOES'
+                          ? 'Refeições sincronizadas com o Cardápio & Nutrição e censo ativo da Rotina'
+                          : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
+                            catRow.origemModulo === 'SEMANARIO_CULINARIA'
+                          ? 'Insumos e práticas culinárias sincronizados do Cardápio e Semanário'
+                          : 'Despesas lançadas manualmente na categoria personalizada pela gestão'}
+                      </span>
+                    </div>
+                    <span className="font-bold text-rose-700 font-mono text-xs shrink-0">
+                      -{formatCurrencyBR(displayVal)}
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-400 block">
-                    Alunos na Rotina × 22 dias letivos no mês × custo por refeição registrado no Cardápio
-                  </span>
-                </div>
-                <span className="font-bold text-rose-700 font-mono text-xs">
-                  -{formatCurrencyBR(activeDREData.custoAlimentacao)}
-                </span>
-              </div>
+                );
+              })}
 
               {/* 5. RESULTADO OPERACIONAL LÍQUIDO REAL */}
               <div
@@ -2316,7 +2715,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     <span className="text-base sm:text-lg">(=) RESULTADO OPERACIONAL LÍQUIDO REAL</span>
                   </div>
                   <span className="text-xs font-semibold text-slate-600 block pl-6">
-                    Receita Líquida dos Alunos (-) Custos Operacionais Reais (Folha + Alimentação)
+                    Receita Líquida dos Alunos (-) Total de Custos Operacionais (Abas + Personalizadas)
                   </span>
                 </div>
                 <div className="text-right">
@@ -2377,29 +2776,202 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
 
             {/* Body */}
             <div className="p-5 overflow-y-auto space-y-4">
-              {/* Categoria */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Categoria da Despesa: <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={editingExpense.categoria || 'FOLHA_PAGAMENTO'}
-                  onChange={(e) =>
-                    setEditingExpense({
-                      ...editingExpense,
-                      categoria: e.target.value as ExpenseCategory,
-                    })
-                  }
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
-                >
-                  <option value="FOLHA_PAGAMENTO">Folha de Pagamento & Encargos (Monitoras/Docentes)</option>
-                  <option value="OFICINAS_TERCEIRIZADAS">Oficinas Terceirizadas (Natação, Balé, Judô, etc.)</option>
-                  <option value="OFICINAS_CULINARIA">Oficinas de Culinária</option>
-                  <option value="ALIMENTACAO_HORTIFRUTI">Alimentação, Cantina & Hortifruti</option>
-                  <option value="MATERIAIS_DIDATICOS">Materiais Pedagógicos & Brinquedos</option>
-                  <option value="MANUTENCAO_INFRA">Manutenção, Infra & Limpeza</option>
-                  <option value="OUTROS">Outras Despesas Operacionais</option>
-                </select>
+              {/* Categoria Dinâmica / Personalizada */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Categoria da Despesa: <span className="text-rose-500">*</span>
+                  </label>
+                  {!(editingExpense.isAutoGenerated || editingExpense.autoSyncKey) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateCategoryInline((prev) => !prev)}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{showCreateCategoryInline ? 'Fechar Novo' : '+ Criar Nova Categoria'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {editingExpense.isAutoGenerated || editingExpense.autoSyncKey ? (
+                  <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-black text-slate-900 block">
+                        {getCategoryDisplayInfo(editingExpense.categoria || '', customCategories, editingExpense.categoriaLabel).label}
+                      </span>
+                      <span className="text-[11px] text-amber-700 font-semibold">
+                        ⚡ Categoria sincronizada automaticamente ({editingExpense.origemAbaLabel || 'Módulo Integrado'})
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={editingExpense.categoria || ''}
+                      onChange={(e) => {
+                        const chosen = customCategories.find((c) => c.id === e.target.value);
+                        setEditingExpense({
+                          ...editingExpense,
+                          categoria: e.target.value as ExpenseCategory,
+                          categoriaLabel: chosen?.label || editingExpense.categoriaLabel,
+                        });
+                      }}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+                    >
+                      <option value="">
+                        {customCategories.length === 0
+                          ? 'Nenhuma categoria criada — clique em "+ Criar Nova Categoria"'
+                          : 'Selecione uma categoria personalizada...'}
+                      </option>
+                      {customCategories.map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.label}
+                        </option>
+                      ))}
+                      {editingExpense.categoria &&
+                        !customCategories.some((c) => c.id === editingExpense.categoria) && (
+                          <option value={editingExpense.categoria}>
+                            {getCategoryDisplayInfo(editingExpense.categoria, customCategories, editingExpense.categoriaLabel).label}
+                          </option>
+                        )}
+                    </select>
+
+                    {/* Painel Inline "+ Criar Nova Categoria" */}
+                    {showCreateCategoryInline && (
+                      <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-2xl space-y-2.5 animate-in fade-in">
+                        <span className="text-[11px] font-black text-indigo-900 uppercase tracking-wide block">
+                          Nova Categoria Personalizada
+                        </span>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            placeholder="Ex: Manutenção, Eventos, Materiais Pedagógicos..."
+                            className="flex-1 p-2 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={isSavingCategory}
+                            onClick={handleCreateCustomCategory}
+                            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center space-x-1 shrink-0"
+                          >
+                            {isSavingCategory ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            <span>Salvar Categoria</span>
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10.5px] font-bold text-slate-600 mr-1">Cor:</span>
+                          {AVAILABLE_CUSTOM_CATEGORY_COLORS.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => setNewCategoryColor(c.id)}
+                              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${c.bgClass} ${c.textClass} ${
+                                newCategoryColor === c.id ? 'ring-2 ring-indigo-600 border-indigo-600' : c.borderClass
+                              }`}
+                            >
+                              {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Gerenciamento rápido (Renomear / Excluir categorias personalizadas) */}
+                    {customCategories.length > 0 && (
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 space-y-2">
+                        <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">
+                          Categorias Personalizadas Salvas ({customCategories.length})
+                        </span>
+                        <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+                          {customCategories.map((cat) => {
+                            const isInUse = expenses.some((ex) => ex.categoria === cat.id);
+                            const style = getCategoryDisplayInfo(cat.id, customCategories, cat.label);
+                            const isRenaming = renamingCategoryId === cat.id;
+
+                            return (
+                              <div
+                                key={cat.id}
+                                className="flex items-center justify-between gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200"
+                              >
+                                {isRenaming ? (
+                                  <div className="flex items-center gap-1.5 flex-1">
+                                    <input
+                                      type="text"
+                                      value={renamingCategoryLabel}
+                                      onChange={(e) => setRenamingCategoryLabel(e.target.value)}
+                                      className="flex-1 px-2 py-1 text-xs font-semibold border border-indigo-300 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={isSavingCategory}
+                                      onClick={() => handleConfirmRenameCategory(cat.id)}
+                                      className="p-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 cursor-pointer"
+                                      title="Salvar novo nome"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRenamingCategoryId(null);
+                                        setRenamingCategoryLabel('');
+                                      }}
+                                      className="p-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer"
+                                      title="Cancelar"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <span
+                                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold border ${style.bgClass} ${style.textClass} ${style.borderClass}`}
+                                    >
+                                      {cat.label}
+                                    </span>
+                                    <div className="flex items-center space-x-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRenamingCategoryId(cat.id);
+                                          setRenamingCategoryLabel(cat.label);
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Renomear categoria"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isInUse || isSavingCategory}
+                                        onClick={() => handleDeleteCustomCategory(cat)}
+                                        className={`p-1 rounded-lg transition-colors ${
+                                          isInUse
+                                            ? 'text-slate-300 cursor-not-allowed'
+                                            : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer'
+                                        }`}
+                                        title={
+                                          isInUse
+                                            ? 'Categoria em uso por despesas lançadas'
+                                            : 'Excluir categoria não utilizada'
+                                        }
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Descrição */}
@@ -2604,6 +3176,193 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Modal: Gerenciar Categorias Personalizadas */}
+      {categoryManagerOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 sm:p-5 bg-white shrink-0">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <Tag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base leading-tight">
+                    Categorias Personalizadas
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Crie, renomeie ou exclua categorias sem vínculo ativo
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryManagerOpen(false);
+                  setRenamingCategoryId(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-2.5">
+                <span className="text-[11px] font-black text-indigo-900 uppercase tracking-wide block">
+                  + Criar Nova Categoria
+                </span>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="Ex: Manutenção, Eventos, Utilidades..."
+                    className="flex-1 p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSavingCategory}
+                    onClick={handleCreateCustomCategory}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1 shrink-0"
+                  >
+                    {isSavingCategory ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    <span>Criar</span>
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10.5px] font-bold text-slate-600 mr-1">Cor:</span>
+                  {AVAILABLE_CUSTOM_CATEGORY_COLORS.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setNewCategoryColor(c.id)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${c.bgClass} ${c.textClass} ${
+                        newCategoryColor === c.id ? 'ring-2 ring-indigo-600 border-indigo-600' : c.borderClass
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-slate-700 block">
+                  Categorias Criadas pela Gestão ({customCategories.length})
+                </span>
+                {customCategories.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-xs text-slate-500">
+                    Nenhuma categoria personalizada cadastrada ainda. Crie sua primeira categoria acima.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {customCategories.map((cat) => {
+                      const usageCount = expenses.filter((ex) => ex.categoria === cat.id).length;
+                      const style = getCategoryDisplayInfo(cat.id, customCategories, cat.label);
+                      const isRenaming = renamingCategoryId === cat.id;
+
+                      return (
+                        <div
+                          key={cat.id}
+                          className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl"
+                        >
+                          {isRenaming ? (
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <input
+                                type="text"
+                                value={renamingCategoryLabel}
+                                onChange={(e) => setRenamingCategoryLabel(e.target.value)}
+                                className="flex-1 px-2.5 py-1.5 bg-white text-xs font-semibold border border-indigo-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                              <button
+                                type="button"
+                                disabled={isSavingCategory}
+                                onClick={() => handleConfirmRenameCategory(cat.id)}
+                                className="p-1.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 cursor-pointer"
+                                title="Salvar"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRenamingCategoryId(null);
+                                  setRenamingCategoryLabel('');
+                                }}
+                                className="p-1.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
+                                title="Cancelar"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center space-x-2 min-w-0">
+                                <span
+                                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border truncate ${style.bgClass} ${style.textClass} ${style.borderClass}`}
+                                >
+                                  {cat.label}
+                                </span>
+                                <span className="text-[10.5px] font-semibold text-slate-400 shrink-0">
+                                  {usageCount} despesa(s)
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRenamingCategoryId(cat.id);
+                                    setRenamingCategoryLabel(cat.label);
+                                  }}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
+                                  title="Renomear categoria"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={usageCount > 0 || isSavingCategory}
+                                  onClick={() => handleDeleteCustomCategory(cat)}
+                                  className={`p-1.5 rounded-xl border border-transparent transition-colors ${
+                                    usageCount > 0
+                                      ? 'text-slate-300 cursor-not-allowed'
+                                      : 'text-slate-500 hover:text-rose-600 hover:bg-white hover:border-slate-200 cursor-pointer'
+                                  }`}
+                                  title={
+                                    usageCount > 0
+                                      ? 'Não é possível excluir categoria com despesas vinculadas'
+                                      : 'Excluir categoria'
+                                  }
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 p-4 bg-white flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryManagerOpen(false);
+                  setRenamingCategoryId(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

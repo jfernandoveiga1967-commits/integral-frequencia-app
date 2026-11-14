@@ -54,7 +54,9 @@ export interface CookingRecipe {
   nutritionalNotes?: string; // e.g. "*RICO EM VITAMINAS A e C"
   allergens?: string[]; // e.g. ["Glúten", "Ovos", "Lactose"]
   pedagogicalSkills?: string; // e.g. "Coordenação motora fina, medidas e pesos, hábitos saudáveis"
-  
+  custoInsumos?: number; // Custo estimado de ingredientes e insumos da oficina (R$)
+  custoPorAluno?: number; // Custo opcional por aluno participante (R$)
+
   authorName?: string;
   createdAt?: string;
   updatedAt?: string;
