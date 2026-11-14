@@ -44,6 +44,7 @@ import {
   loadTurmas,
   saveAttendanceRecords,
   loadAttendanceRecords,
+  pickMostRecentStudentRecord,
 } from './utils/storageUtils';
 import {
   normalizeAndDeduplicateUsers,
@@ -264,16 +265,13 @@ export function subscribeAlunos(
 
   const emit = () => {
     const combinedMap = new Map<string, any>();
-    // Preenche 'students' e mescla com 'alunos' priorizando o documento com updatedAt mais recente
+    // Mescla 'students' e 'alunos' priorizando estritamente o documento com updatedAt mais recente
     studentsDocs.forEach((val, id) => combinedMap.set(id, val));
     alunosDocs.forEach((val, id) => {
       const prev = combinedMap.get(id);
-      if (!prev) {
-        combinedMap.set(id, val);
-      } else {
-        const tPrev = prev.updatedAt ? new Date(prev.updatedAt).getTime() : 0;
-        const tVal = val.updatedAt ? new Date(val.updatedAt).getTime() : 0;
-        combinedMap.set(id, tVal >= tPrev ? val : prev);
+      const winner = pickMostRecentStudentRecord(val, prev);
+      if (winner) {
+        combinedMap.set(id, winner);
       }
     });
 
@@ -1272,8 +1270,31 @@ export async function deleteActivityFromFirestore(activityId: string) {
   }
 }
 
+const FIRESTORE_WRITE_TIMEOUT_MS = 15000;
+
+async function withWriteTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Tempo limite excedido ao ${label} no Firestore. Verifique sua conexão.`));
+    }, FIRESTORE_WRITE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export async function saveStudentToFirestore(student: Student): Promise<void> {
   try {
+    if (isFirestoreQuotaExceeded) {
+      throw new Error('Cota diária do Firestore excedida. Não foi possível salvar o aluno no servidor.');
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('Sem conexão com a internet. Não foi possível confirmar a gravação no Firestore.');
+    }
+
     const normalized = normalizeStudent(student);
     const isAtivo = (normalized.status || 'ativo') === 'ativo';
     const payload = {
@@ -1308,10 +1329,13 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       updatedAt: new Date().toISOString(),
     };
 
-    const results = await Promise.allSettled([
-      setDoc(doc(db, 'alunos', normalized.id), payload, { merge: true }),
-      setDoc(doc(db, 'students', normalized.id), payload, { merge: true }),
-    ]);
+    const results = await withWriteTimeout(
+      Promise.allSettled([
+        setDoc(doc(db, 'alunos', normalized.id), payload, { merge: true }),
+        setDoc(doc(db, 'students', normalized.id), payload, { merge: true }),
+      ]),
+      'salvar aluno'
+    );
     if (results[0].status === 'rejected') {
       throw results[0].reason;
     }
@@ -1334,6 +1358,12 @@ export async function deleteStudentFromFirestore(
   let resolvedTurma = (studentTurma || '').trim();
 
   try {
+    if (isFirestoreQuotaExceeded) {
+      throw new Error('Cota diária do Firestore excedida. Não foi possível excluir o aluno no servidor.');
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('Sem conexão com a internet. Não foi possível confirmar a exclusão no Firestore.');
+    }
     // 1. Se o nome não foi passado, tenta obter os dados a partir do próprio documento se existir
     if (!resolvedName && cleanId) {
       try {
@@ -1416,7 +1446,7 @@ export async function deleteStudentFromFirestore(
       const chunk = refsList.slice(i, i + BATCH_SIZE);
       const batch = writeBatch(db);
       chunk.forEach((r) => batch.delete(r));
-      await batch.commit();
+      await withWriteTimeout(batch.commit(), 'excluir aluno');
     }
 
     // 6. Atualiza registro de alunos excluídos no storage local para evitar ressincronização
@@ -4041,30 +4071,52 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
     return loadStudents();
   }
 
-  const colRef = collection(db, 'alunos');
   try {
-    const snap = await getDocsFromServer(colRef);
+    const [alunosRes, studentsRes] = await Promise.allSettled([
+      getDocsFromServer(collection(db, 'alunos')),
+      getDocsFromServer(collection(db, 'students')),
+    ]);
+
+    if (alunosRes.status === 'rejected' && studentsRes.status === 'rejected') {
+      throw alunosRes.reason;
+    }
+
     clearFirestoreQuotaExceeded();
-    const list: Student[] = [];
     const deletedIds = getDeletedStudentIds();
-    snap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
-        list.push(normalizeStudent({ ...data, id: docSnap.id }));
+    const alunosMap = new Map<string, any>();
+    const studentsMap = new Map<string, any>();
+
+    if (alunosRes.status === 'fulfilled') {
+      alunosRes.value.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+          alunosMap.set(docSnap.id, { ...data, id: docSnap.id });
+        }
+      });
+    }
+
+    if (studentsRes.status === 'fulfilled') {
+      studentsRes.value.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+          studentsMap.set(docSnap.id, { ...data, id: docSnap.id });
+        }
+      });
+    }
+
+    const mergedDocsMap = new Map<string, any>();
+    studentsMap.forEach((val, id) => mergedDocsMap.set(id, val));
+    alunosMap.forEach((val, id) => {
+      const prev = mergedDocsMap.get(id);
+      const winner = pickMostRecentStudentRecord(val, prev);
+      if (winner) {
+        mergedDocsMap.set(id, winner);
       }
     });
-    if (list.length > 0) {
-      return deduplicateStudentsList(list);
-    }
-    // Fallback para 'students' se 'alunos' estiver vazia
-    const altCol = collection(db, 'students');
-    const altSnap = await getDocsFromServer(altCol);
-    clearFirestoreQuotaExceeded();
-    altSnap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
-        list.push(normalizeStudent({ ...data, id: docSnap.id }));
-      }
+
+    const list: Student[] = [];
+    mergedDocsMap.forEach((data, id) => {
+      list.push(normalizeStudent({ ...data, id }));
     });
     return deduplicateStudentsList(list);
   } catch (err) {

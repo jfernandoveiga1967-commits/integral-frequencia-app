@@ -38,46 +38,34 @@ export const AlunosTurmas: React.FC<AlunosTurmasProps> = (props) => {
   }, [props.students]);
 
   const handleAddStudent = async (studentData: Omit<Student, 'id'>) => {
-    try {
-      if (props.onAddStudent) {
-        await props.onAddStudent(studentData);
-      } else {
-        const newStudent: Student = {
-          ...studentData,
-          id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          status: 'ativo',
-          statusMatricula: 'ativo',
-        };
-        await saveStudentToFirestore(newStudent);
-      }
-    } catch (err) {
-      console.warn('Falha na gravação remota:', err);
+    if (props.onAddStudent) {
+      await props.onAddStudent(studentData);
+    } else {
+      const newStudent: Student = {
+        ...studentData,
+        id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        status: 'ativo',
+        statusMatricula: 'ativo',
+      };
+      await saveStudentToFirestore(newStudent);
     }
   };
 
   const handleUpdateStudent = async (student: Student) => {
-    try {
-      if (props.onUpdateStudent) {
-        await props.onUpdateStudent(student);
-      } else {
-        await saveStudentToFirestore(student);
-      }
-    } catch (err) {
-      console.warn('Falha na gravação remota:', err);
+    if (props.onUpdateStudent) {
+      await props.onUpdateStudent(student);
+    } else {
+      await saveStudentToFirestore(student);
     }
   };
 
   const handleDeleteStudent = async (id: string) => {
-    try {
-      if (props.onDeleteStudent) {
-        await props.onDeleteStudent(id);
-      } else {
-        await deleteStudentFromFirestore(id);
-        removeStudentFromLocalStorage(id);
-        markStudentAsDeleted(id);
-      }
-    } catch (err) {
-      console.warn('Falha na gravação remota:', err);
+    if (props.onDeleteStudent) {
+      await props.onDeleteStudent(id);
+    } else {
+      await deleteStudentFromFirestore(id);
+      removeStudentFromLocalStorage(id);
+      markStudentAsDeleted(id);
     }
   };
 

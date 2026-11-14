@@ -502,12 +502,16 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
     if (expiredStudents.length > 0 && userCanManageStudents) {
       expiredStudents.forEach((student) => {
-        onUpdateStudent({
-          ...student,
-          status: 'inativo',
-          statusMatricula: 'inativo',
-          inactivationDate: student.dataTerminoContrato?.trim() || today,
-          inactivationReason: 'Contrato Concluído',
+        Promise.resolve(
+          onUpdateStudent({
+            ...student,
+            status: 'inativo',
+            statusMatricula: 'inativo',
+            inactivationDate: student.dataTerminoContrato?.trim() || today,
+            inactivationReason: 'Contrato Concluído',
+          })
+        ).catch((err) => {
+          console.warn(`Falha ao sincronizar inativação automática do aluno "${student.name}" no Firestore:`, err);
         });
       });
     }
@@ -744,8 +748,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         })
       );
       setTransferringStudent(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error transferring student:', err);
+      setToastMsg({
+        text: `Erro ao transferir "${transferringStudent.name}" no Firestore: ${err?.message || 'Falha de comunicação'}.`,
+        type: 'error',
+      });
     } finally {
       setIsSavingTransfer(false);
     }

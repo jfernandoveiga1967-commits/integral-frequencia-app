@@ -12,6 +12,7 @@ import {
   isSurplus2027Student,
   markStudentAsDeleted,
   removeStudentFromLocalStorage,
+  pickMostRecentStudentRecord,
 } from '../utils/storageUtils';
 import { saveStudentToFirestore, batchDeleteStudentsFromFirestore } from '../firebase';
 import { broadcastSyncEvent } from './syncService';
@@ -491,13 +492,11 @@ export async function restoreMiniMaternal2026(): Promise<{
             getDoc(doc(db, 'alunos', st.id)),
             getDoc(doc(db, 'students', st.id)),
           ]);
-          const remoteData = alunoSnap.exists()
-            ? (alunoSnap.data() as Student)
-            : studentSnap.exists()
-            ? (studentSnap.data() as Student)
-            : null;
+          const alunoData = alunoSnap.exists() ? ({ ...alunoSnap.data(), id: st.id } as Student) : null;
+          const studentData = studentSnap.exists() ? ({ ...studentSnap.data(), id: st.id } as Student) : null;
+          const remoteData = pickMostRecentStudentRecord(alunoData, studentData);
           if (remoteData) {
-            remoteExistingMap.set(st.id, { ...remoteData, id: st.id });
+            remoteExistingMap.set(st.id, remoteData);
           }
         } catch {
           // Modo offline ou erro pontual de leitura: respeita estado local
@@ -531,7 +530,7 @@ export async function restoreMiniMaternal2026(): Promise<{
   const nowIso = new Date().toISOString();
   const missingStudentsToCreate: Student[] = [];
   const restoredStudents: Student[] = OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => {
-    // Prioridade absoluta ao dado remoto do Firestore, depois ao dado local; nunca sobrescreve edits da gestão
+    // Prioridade ao registro mais recente pelo updatedAt entre Firestore ('alunos'/'students') e cache local
     const remoteExisting = remoteExistingMap.get(st.id);
     const localExisting =
       studentMap.get(st.id) ||
@@ -540,7 +539,7 @@ export async function restoreMiniMaternal2026(): Promise<{
           (cand.anoLetivo || 2026) === 2026 &&
           normalizeStudentNameForMatching(cand.name) === normalizeStudentNameForMatching(st.name)
       );
-    const existing = remoteExisting || localExisting;
+    const existing = pickMostRecentStudentRecord(remoteExisting, localExisting);
 
     if (existing) {
       // Preserva integralmente status, statusMatricula, activities, modalidadesEspeciais e demais customizações

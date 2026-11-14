@@ -31,6 +31,7 @@ import {
   resetAllData,
   isMockStudent,
   checkAndInactivateExpiredTemporaryStudents,
+  pickMostRecentStudentRecord,
 } from './utils/storageUtils';
 import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas, generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
@@ -348,7 +349,16 @@ export default function App() {
       try {
         await restoreMiniMaternal2026();
         setTurmas(sortTurmasPedagogical(loadTurmas()));
-        setStudents(loadStudents().filter((s) => !isMockStudent(s)));
+        const restoredList = loadStudents().filter((s) => !isMockStudent(s));
+        setStudents((prev) => {
+          if (!prev || prev.length === 0) return restoredList;
+          const prevMap = new Map(prev.map((s) => [s.id, s]));
+          const merged = restoredList.map((st) => {
+            const current = prevMap.get(st.id);
+            return pickMostRecentStudentRecord(current, st) || st;
+          });
+          return merged;
+        });
       } catch {}
     });
 
@@ -1081,28 +1091,39 @@ export default function App() {
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
     const existingStudent = students.find((s) => s.id === updatedStudent.id);
-    const mergedStudent = mergeStudentData(existingStudent, updatedStudent);
-    const nextStudentsList = students.some((s) => s.id === mergedStudent.id)
-      ? students.map((s) => (s.id === mergedStudent.id ? mergedStudent : s))
-      : [mergedStudent, ...students];
+    const stampedIncoming: Student = {
+      ...updatedStudent,
+      updatedAt: updatedStudent.updatedAt || new Date().toISOString(),
+    };
+    const mergedStudent = mergeStudentData(existingStudent, stampedIncoming);
 
-    setStudents((prev) => {
-      const prevExisting = prev.find((s) => s.id === updatedStudent.id);
-      const prevMerged = mergeStudentData(prevExisting, updatedStudent);
-      const updated = prev.some((s) => s.id === prevMerged.id)
-        ? prev.map((s) => (s.id === prevMerged.id ? prevMerged : s))
-        : [prevMerged, ...prev];
-      saveStudents(updated);
-      return updated;
-    });
-
-    saveStudents(nextStudentsList);
-    broadcastSyncEvent('SYNC_STUDENTS', nextStudentsList);
+    // Persiste primeiro no Firestore e propaga qualquer falha para a UI em vez de silenciar
     try {
       await saveStudentToFirestore(mergedStudent);
     } catch (err) {
       console.error('Error updating student in Firestore:', err);
+      throw err;
     }
+
+    let nextStudentsList: Student[] = [];
+    setStudents((prev) => {
+      const prevExisting = prev.find((s) => s.id === stampedIncoming.id);
+      const prevMerged = mergeStudentData(prevExisting, stampedIncoming);
+      const updated = prev.some((s) => s.id === prevMerged.id)
+        ? prev.map((s) => (s.id === prevMerged.id ? prevMerged : s))
+        : [prevMerged, ...prev];
+      nextStudentsList = updated;
+      saveStudents(updated);
+      return updated;
+    });
+
+    if (nextStudentsList.length === 0) {
+      nextStudentsList = students.some((s) => s.id === mergedStudent.id)
+        ? students.map((s) => (s.id === mergedStudent.id ? mergedStudent : s))
+        : [mergedStudent, ...students];
+      saveStudents(nextStudentsList);
+    }
+    broadcastSyncEvent('SYNC_STUDENTS', nextStudentsList);
   };
 
   const handleDeleteStudent = async (id: string, studentName?: string, studentTurma?: string): Promise<void> => {
@@ -1111,18 +1132,18 @@ export default function App() {
     const resolvedName = (studentName || targetStudent?.name || '').trim();
     const resolvedTurma = (studentTurma || targetStudent?.turma || '').trim();
 
-    // 2. Exclusão assíncrona no Firestore (coleções 'alunos' e 'students')
-    // Localiza e remove todos os documentos que correspondem ao aluno (incluindo duplicatas)
+    // 2. Exclusão obrigatória no Firestore (coleções 'alunos' e 'students')
+    // Propaga qualquer erro de permissão, cota ou rede para impedir falsa exclusão na interface
     let deletedIds: string[] = [];
     try {
       const res = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma);
       deletedIds = res.deletedIds || [];
     } catch (err) {
-      console.warn('Falha na gravação remota:', err);
+      console.error('Falha na exclusão remota no Firestore:', err);
+      throw err;
     }
 
-    // 3. Limpeza de Cache ao Deletar:
-    // Remove imediatamente do storage local e marca todos os IDs encontrados para não ressincronizar
+    // 3. Limpeza de Cache ao Deletar (somente após confirmação no Firestore):
     const allIdsToPurge = new Set<string>([id, ...deletedIds]);
     allIdsToPurge.forEach((sid) => {
       removeStudentFromLocalStorage(sid);
@@ -1142,13 +1163,17 @@ export default function App() {
       }
       return true;
     };
-    const nextList = students.filter(shouldKeep);
+    let nextList: Student[] = [];
     setStudents((prev) => {
       const updated = prev.filter(shouldKeep);
+      nextList = updated;
       saveStudents(updated);
       return updated;
     });
-    saveStudents(nextList);
+    if (nextList.length === 0) {
+      nextList = students.filter(shouldKeep);
+      saveStudents(nextList);
+    }
     broadcastSyncEvent('SYNC_STUDENTS', nextList);
   };
 

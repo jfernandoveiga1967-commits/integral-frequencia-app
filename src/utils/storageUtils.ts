@@ -333,6 +333,10 @@ export function normalizeStudent(
         ? existingStudent.valorMensalidadeFinal
         : (valorPlanoBase != null ? Math.max(0, (valorPlanoBase || 0) - (descontoBolsa || 0)) : undefined));
 
+  const updatedAt =
+    normalizeUpdatedAtIso(s.updatedAt) ||
+    normalizeUpdatedAtIso(existingStudent?.updatedAt);
+
   return {
     id,
     matricula,
@@ -366,7 +370,71 @@ export function normalizeStudent(
     valorOficinas: s.valorOficinas != null ? s.valorOficinas : existingStudent?.valorOficinas,
     valorExtras: s.valorExtras != null ? s.valorExtras : existingStudent?.valorExtras,
     notes,
+    ...(updatedAt ? { updatedAt } : {}),
   };
+}
+
+/**
+ * Converte um campo de data/hora (ISO string, número epoch ou Firestore Timestamp)
+ * para milissegundos Unix. Retorna 0 se ausente ou inválido (nunca NaN).
+ */
+export function parseUpdatedAtMs(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const ms = new Date(trimmed).getTime();
+    return Number.isFinite(ms) && ms > 0 ? ms : 0;
+  }
+  if (typeof value === 'object') {
+    const obj = value as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
+    if (typeof obj.toMillis === 'function') {
+      const ms = obj.toMillis();
+      return Number.isFinite(ms) && ms > 0 ? ms : 0;
+    }
+    if (typeof obj.seconds === 'number' && Number.isFinite(obj.seconds)) {
+      const ns = typeof obj.nanoseconds === 'number' && Number.isFinite(obj.nanoseconds) ? obj.nanoseconds : 0;
+      const ms = obj.seconds * 1000 + Math.floor(ns / 1_000_000);
+      return Number.isFinite(ms) && ms > 0 ? ms : 0;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Normaliza qualquer formato de updatedAt (string, número ou Timestamp) para ISO string.
+ */
+export function normalizeUpdatedAtIso(value: unknown): string | undefined {
+  const ms = parseUpdatedAtMs(value);
+  if (ms > 0) {
+    return new Date(ms).toISOString();
+  }
+  return undefined;
+}
+
+/**
+ * Compara dois registros do mesmo aluno (ex: coleção 'alunos' vs 'students')
+ * pelo campo updatedAt e retorna o mais recente. Em caso de empate ou ausência,
+ * prioriza o registro primário ('alunos').
+ */
+export function pickMostRecentStudentRecord<T extends Record<string, any>>(
+  primary?: T | null,
+  secondary?: T | null
+): T | null {
+  if (!primary && !secondary) return null;
+  if (!primary) return secondary || null;
+  if (!secondary) return primary;
+
+  const tPrimary = parseUpdatedAtMs(primary.updatedAt);
+  const tSecondary = parseUpdatedAtMs(secondary.updatedAt);
+
+  if (tSecondary > tPrimary) {
+    return secondary;
+  }
+  return primary;
 }
 
 /**
@@ -489,6 +557,10 @@ export function mergeStudentData(
       ? incomingStudent.valorExtras
       : existingStudent.valorExtras,
     notes: incomingStudent.notes != null ? incomingStudent.notes : existingStudent.notes,
+    updatedAt:
+      parseUpdatedAtMs(incomingStudent.updatedAt) >= parseUpdatedAtMs(existingStudent.updatedAt)
+        ? (normalizeUpdatedAtIso(incomingStudent.updatedAt) || normalizeUpdatedAtIso(existingStudent.updatedAt))
+        : normalizeUpdatedAtIso(existingStudent.updatedAt),
   };
 }
 
@@ -534,14 +606,10 @@ export function checkAndInactivateExpiredTemporaryStudents(
  */
 export function extractStudentTimestamp(student: any): number {
   if (!student) return 0;
-  if (student.updatedAt) {
-    const t = new Date(student.updatedAt).getTime();
-    if (!isNaN(t) && t > 0) return t;
-  }
-  if (student.createdAt) {
-    const t = new Date(student.createdAt).getTime();
-    if (!isNaN(t) && t > 0) return t;
-  }
+  const updatedMs = parseUpdatedAtMs(student.updatedAt);
+  if (updatedMs > 0) return updatedMs;
+  const createdMs = parseUpdatedAtMs(student.createdAt);
+  if (createdMs > 0) return createdMs;
   if (student.id && typeof student.id === 'string') {
     const match = student.id.match(/st-(\d{10,14})/);
     if (match && match[1]) {
