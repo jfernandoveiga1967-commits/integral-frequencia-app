@@ -1288,14 +1288,12 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           </div>
 
           <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
-            <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Alunos Ativos</div>
+            <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Alunos no Integral Agora</div>
             <div className="text-lg sm:text-xl font-black text-emerald-300 mt-0.5">
-              {stats.totalActiveStudents}
+              {stats.totalStudentsInActivePeriods}
             </div>
             <div className="text-[9px] text-emerald-400/80 mt-0.5">
-              {stats.totalStudentsInActivePeriods > 0
-                ? `${stats.totalStudentsInActivePeriods} em atividade (${stats.totalActiveStudents} esperados)`
-                : 'Alunos ativos esperados hoje'}
+              Presentes em atividade neste horário
             </div>
           </div>
         </div>
