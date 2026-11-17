@@ -1,7 +1,5 @@
-const CACHE_NAME = 'integral-frequencia-v4.2-v1.3';
+const CACHE_NAME = 'integral-frequencia-v5.0-network-first';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/favicon.ico',
   '/icon.svg',
@@ -11,11 +9,10 @@ const STATIC_ASSETS = [
   '/logo-web.png'
 ];
 
-// Install Event - Pre-cache core shell for instant startup
+// Install Event - Pre-cache static icons/manifest & activate immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[PWA ServiceWorker] Pre-caching app shell for instant startup');
       return cache.addAll(STATIC_ASSETS).catch((err) => {
         console.warn('[PWA ServiceWorker] Pre-cache warning:', err);
       });
@@ -23,7 +20,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate Event - Clean old caches & take control immediately
+// Activate Event - Clean ALL old caches & take control immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -39,12 +36,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Instant Local Cache Load + Async Background Sync
+// Fetch Event - Network-First for HTML & JS/CSS bundles so refreshes always fetch latest app version
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Skip non-GET requests, non-HTTP protocols, or Firebase/Firestore requests
+  // Skip non-GET requests, non-HTTP protocols, or Firebase/Firestore/Dev/Cloud Run preview requests
   if (
     req.method !== 'GET' ||
     !url.protocol.startsWith('http') ||
@@ -66,45 +63,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 1. Navigation / HTML Requests (App Opening from Mobile Home Screen)
-  // Strategy: Cache-First / Stale-While-Revalidate -> Returns cached /index.html in 0ms, revalidates in background
+  // 1. Navigation / HTML Requests -> Always Network-First (fallback to cache only when offline)
   if (req.mode === 'navigate' || req.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
-      caches.match('/index.html').then((cachedHtml) => {
-        const networkFetch = fetch(req)
-          .then((networkResponse) => {
-            if (networkResponse && networkResponse.status === 200) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone));
-            }
-            return networkResponse;
-          })
-          .catch(() => {
-            console.log('[PWA ServiceWorker] Offline / Render sleeping - app loaded instantly from local cache');
-          });
-
-        return cachedHtml || networkFetch;
-      })
+      fetch(req, { cache: 'no-store' })
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
 
-  // 2. Static Assets & Bundles (JS, CSS, Images, Icons)
-  // Strategy: Stale-While-Revalidate -> Serve immediately from local cache, revalidate in background
+  // 2. Static Assets & Bundles -> Network-First so updated JS/CSS chunks take effect immediately
   event.respondWith(
-    caches.match(req).then((cachedResponse) => {
-      const networkFetch = fetch(req)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, responseClone));
-          }
-          return networkResponse;
-        })
-        .catch(() => cachedResponse);
-
-      return cachedResponse || networkFetch;
-    })
+    fetch(req)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, responseClone));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(req))
   );
 });
 

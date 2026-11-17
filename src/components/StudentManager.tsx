@@ -904,13 +904,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     return (students || []).filter((s) => (s.anoLetivo || 2026) === selectedAnoLetivo);
   }, [students, selectedAnoLetivo]);
 
+  const getEffectiveStudentStatus = React.useCallback((s: Student): 'ativo' | 'inativo' | 'cancelado' => {
+    const st = String(s.status || '').trim().toLowerCase();
+    const sm = String(s.statusMatricula || '').trim().toLowerCase();
+    if (st === 'cancelado' || sm === 'cancelado') return 'cancelado';
+    if (st === 'inativo' || st === 'trancado' || sm === 'inativo' || sm === 'trancado') return 'inativo';
+    return 'ativo';
+  }, []);
+
   const totalAtivosCount = React.useMemo(
-    () => studentsForSelectedYear.filter((s) => (s.status || 'ativo') === 'ativo').length,
-    [studentsForSelectedYear]
+    () => studentsForSelectedYear.filter((s) => getEffectiveStudentStatus(s) === 'ativo').length,
+    [studentsForSelectedYear, getEffectiveStudentStatus]
   );
   const totalInativosCount = React.useMemo(
-    () => studentsForSelectedYear.filter((s) => s.status === 'inativo' || s.status === 'cancelado').length,
-    [studentsForSelectedYear]
+    () => studentsForSelectedYear.filter((s) => getEffectiveStudentStatus(s) !== 'ativo').length,
+    [studentsForSelectedYear, getEffectiveStudentStatus]
   );
 
   // Detecção e Sanitização de Cadastros Duplicados por Ano Letivo
@@ -1021,7 +1029,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           return false;
         }
 
-        const studentStatus = student.status || 'ativo';
+        const studentStatus = getEffectiveStudentStatus(student);
         if (statusFilter === 'ativos' && studentStatus !== 'ativo') {
           return false;
         }
@@ -4247,7 +4255,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             {turmasList.map((t, tIdx) => {
               const isSelected = selectedTurma === t;
               const count = studentsForSelectedYear.filter(
-                (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo' && s.turma === t
+                (s) => getEffectiveStudentStatus(s) === 'ativo' && s.turma === t
               ).length;
               return (
                 <button

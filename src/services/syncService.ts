@@ -322,9 +322,21 @@ export function initConnectivityMonitor(): () => void {
     disconnectFirestore().catch(() => {});
   };
 
+  let lastBackgroundAt = 0;
   const handleVisibilityOrFocus = async () => {
-    // If the tab just became active or focused and was marked offline, verify and sync
-    if ((document.visibilityState === 'visible' || document.hasFocus()) && (!currentConnectionState.isOnline || currentConnectionState.status === 'offline')) {
+    if (document.visibilityState === 'hidden') {
+      lastBackgroundAt = Date.now();
+      return;
+    }
+    const returnedAfterPause = lastBackgroundAt > 0 && Date.now() - lastBackgroundAt > 60000;
+    if (returnedAfterPause) {
+      lastBackgroundAt = 0;
+    }
+    // If the tab just became active/focused and was offline OR returned after background suspension on mobile
+    if (
+      (document.visibilityState === 'visible' || document.hasFocus()) &&
+      (!currentConnectionState.isOnline || currentConnectionState.status === 'offline' || (navigator.onLine && returnedAfterPause))
+    ) {
       await runAutoReconnect();
     }
   };
@@ -370,7 +382,7 @@ export function initConnectivityMonitor(): () => void {
 export async function forceManualSync(): Promise<{ success: boolean; message: string }> {
   updateConnectionState({ status: 'syncing' });
   try {
-    const success = await runAutoReconnect();
+    const success = await runAutoReconnect(true);
     if (success) {
       return { success: true, message: 'Dados e conexões 100% sincronizados com sucesso!' };
     }

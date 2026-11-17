@@ -218,9 +218,11 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         ? yearStudents
         : yearStudents.filter((s) => s.turma === turmaName);
       
-      const activeList = turmaList.filter(
-        (s) => s.status !== 'inativo' && s.status !== 'cancelado'
-      );
+      const activeList = turmaList.filter((s) => {
+        const st = String(s.status || '').trim().toLowerCase();
+        const sm = String(s.statusMatricula || '').trim().toLowerCase();
+        return st !== 'inativo' && st !== 'cancelado' && st !== 'trancado' && sm !== 'inativo' && sm !== 'cancelado' && sm !== 'trancado';
+      });
 
       if (actId === 'Rotina') {
         return activeList.length;

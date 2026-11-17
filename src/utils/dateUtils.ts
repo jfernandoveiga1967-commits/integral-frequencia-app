@@ -68,10 +68,18 @@ export function isStudentActiveOnDate(
     }
   }
 
-  const status = student.status || 'ativo';
-  if (status === 'ativo') return true;
+  const rawStatus = (student.status || (student as any).statusMatricula || 'ativo').toString().trim().toLowerCase();
+  const rawStatusMat = ((student as any).statusMatricula || '').toString().trim().toLowerCase();
+  const effectiveStatus =
+    rawStatus === 'inativo' || rawStatus === 'cancelado' || rawStatus === 'trancado'
+      ? rawStatus
+      : rawStatusMat === 'inativo' || rawStatusMat === 'cancelado' || rawStatusMat === 'trancado'
+      ? rawStatusMat
+      : rawStatus || 'ativo';
 
-  if (status === 'inativo' || status === 'cancelado') {
+  if (effectiveStatus === 'ativo' || effectiveStatus === 'regular') return true;
+
+  if (effectiveStatus === 'inativo' || effectiveStatus === 'cancelado' || effectiveStatus === 'trancado') {
     // Alunos avulsos que foram inativados por conclusão de contrato
     // continuam ativos nas datas históricas do intervalo em que estiveram contratados
     if (student.tipoContrato === 'avulso' && student.dataInicioContrato && student.dataTerminoContrato) {

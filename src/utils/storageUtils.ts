@@ -275,28 +275,33 @@ export function normalizeStudent(
     };
   }
 
-  // Preservação de Status / Status de Matrícula
+  // Preservação de Status / Status de Matrícula (case-insensitive)
+  const normRawStatus = typeof s.status === 'string' ? s.status.trim().toLowerCase() : '';
+  const normRawStatusMat = typeof s.statusMatricula === 'string' ? s.statusMatricula.trim().toLowerCase() : '';
+  const normExistStatus = typeof existingStudent?.status === 'string' ? existingStudent.status.trim().toLowerCase() : '';
+  const normExistStatusMat = typeof existingStudent?.statusMatricula === 'string' ? existingStudent.statusMatricula.trim().toLowerCase() : '';
+
   let status: StudentStatus = 'ativo';
-  if (s.status === 'inativo' || s.status === 'cancelado') {
-    status = s.status;
-  } else if (s.status === 'ativo') {
+  if (normRawStatus === 'inativo' || normRawStatus === 'cancelado' || normRawStatus === 'trancado') {
+    status = (normRawStatus === 'trancado' ? 'inativo' : normRawStatus) as StudentStatus;
+  } else if (normRawStatusMat === 'inativo' || normRawStatusMat === 'cancelado' || normRawStatusMat === 'trancado') {
+    status = (normRawStatusMat === 'trancado' ? 'inativo' : normRawStatusMat) as StudentStatus;
+  } else if (normRawStatus === 'ativo' || normRawStatus === 'regular') {
     status = 'ativo';
-  } else if (s.statusMatricula === 'inativo' || s.statusMatricula === 'cancelado') {
-    status = s.statusMatricula;
-  } else if (existingStudent?.status === 'inativo' || existingStudent?.status === 'cancelado') {
-    status = existingStudent.status;
+  } else if (normExistStatus === 'inativo' || normExistStatus === 'cancelado') {
+    status = normExistStatus as StudentStatus;
+  } else if (normExistStatusMat === 'inativo' || normExistStatusMat === 'cancelado') {
+    status = normExistStatusMat as StudentStatus;
   } else {
     status = 'ativo';
   }
 
   const statusMatricula: StudentStatus =
-    status === 'ativo'
-      ? 'ativo'
-      : s.statusMatricula === 'inativo' || s.statusMatricula === 'cancelado'
-      ? s.statusMatricula
-      : existingStudent?.statusMatricula === 'inativo' || existingStudent?.statusMatricula === 'cancelado'
-      ? existingStudent.statusMatricula
-      : status;
+    status !== 'ativo'
+      ? (normRawStatusMat === 'inativo' || normRawStatusMat === 'cancelado'
+          ? (normRawStatusMat as StudentStatus)
+          : status)
+      : 'ativo';
 
   // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
   const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
@@ -717,8 +722,13 @@ export function deduplicateStudentsList(
       const tB = extractStudentTimestamp(b);
       if (tB !== tA) return tB - tA;
 
-      const aNonActive = a.status === 'cancelado' || a.status === 'inativo' ? 1 : 0;
-      const bNonActive = b.status === 'cancelado' || b.status === 'inativo' ? 1 : 0;
+      const isNonActiveRecord = (rec: Student) => {
+        const st = String(rec.status || '').trim().toLowerCase();
+        const sm = String(rec.statusMatricula || '').trim().toLowerCase();
+        return st === 'cancelado' || st === 'inativo' || st === 'trancado' || sm === 'cancelado' || sm === 'inativo' || sm === 'trancado';
+      };
+      const aNonActive = isNonActiveRecord(a) ? 1 : 0;
+      const bNonActive = isNonActiveRecord(b) ? 1 : 0;
       if (bNonActive !== aNonActive) return bNonActive - aNonActive;
 
       const aActs = Array.isArray(a.activities) ? a.activities.length : 0;

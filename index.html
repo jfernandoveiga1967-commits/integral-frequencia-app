@@ -47,15 +47,16 @@
       });
 
       if ('serviceWorker' in navigator) {
-        const isIframeOrDev =
+        const isIframeOrPreview =
           window.self !== window.top ||
           window.location.hostname === 'localhost' ||
           window.location.hostname === '127.0.0.1' ||
           window.location.hostname.includes('ais-dev') ||
-          window.location.port === '3000';
+          window.location.hostname.includes('run.app') ||
+          window.port === '3000';
 
-        if (isIframeOrDev) {
-          // Unregister any active service worker in preview/iframe/dev environment to prevent stale cache
+        if (isIframeOrPreview) {
+          // Unregister any active service worker in preview/shared/iframe/dev environment to prevent stale cache across devices
           navigator.serviceWorker.getRegistrations().then((registrations) => {
             for (const registration of registrations) {
               registration.unregister();
@@ -69,10 +70,18 @@
             });
           }
         } else {
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
+          });
+
           const registerSW = () => {
-            navigator.serviceWorker.register('/sw.js')
+            navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
               .then((reg) => {
-                console.log('PWA ServiceWorker registrado com sucesso:', reg.scope);
+                reg.update().catch(() => {});
               })
               .catch((err) => {
                 console.warn('Falha ao registrar ServiceWorker:', err);

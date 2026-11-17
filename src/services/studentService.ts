@@ -477,11 +477,7 @@ export async function restoreMiniMaternal2026(): Promise<{
     console.warn('[studentService] Aviso ao assegurar Mini Maternal no Firestore:', e);
   }
 
-  // 3. Carregar alunos locais e consultar Firestore para verificar existência real antes de qualquer inserção
-  const currentStudents = getStudents();
-  const studentMap = new Map<string, Student>();
-  currentStudents.forEach((s) => studentMap.set(s.id, s));
-
+  // 3. Consultar Firestore para verificar existência real antes de qualquer inserção
   const remoteExistingMap = new Map<string, Student>();
   const checkedRemoteIds = new Set<string>();
   const canQueryFirestore =
@@ -541,6 +537,16 @@ export async function restoreMiniMaternal2026(): Promise<{
     }
   }
 
+  // Reler o cache local DEPOIS das chamadas assíncronas ao Firestore para não sobrescrever dados
+  // recém-chegados via onSnapshot (evita race condition entre dispositivos)
+  const freshLocalStudents = getStudents();
+  const studentMap = new Map<string, Student>();
+  freshLocalStudents.forEach((s) => {
+    if (!s || !s.id) return;
+    const prev = studentMap.get(s.id);
+    studentMap.set(s.id, pickMostRecentStudentRecord(s, prev) || s);
+  });
+
   // Conjunto dos 8 IDs e nomes normalizados oficiais ativos do Mini Maternal 2026
   const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => st.id));
   const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
@@ -562,7 +568,7 @@ export async function restoreMiniMaternal2026(): Promise<{
   const nowIso = new Date().toISOString();
   const missingStudentsToCreate: Student[] = [];
   const restoredStudents: Student[] = OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => {
-    // Prioridade ao registro mais recente pelo updatedAt entre Firestore ('alunos'/'students') e cache local
+    // Prioridade ao registro mais recente pelo updatedAt entre Firestore ('alunos'/'students') e cache local atualizado
     const remoteExisting = remoteExistingMap.get(st.id);
     const localExisting =
       studentMap.get(st.id) ||
@@ -575,6 +581,9 @@ export async function restoreMiniMaternal2026(): Promise<{
 
     if (existing) {
       // Preserva integralmente status, statusMatricula, activities, modalidadesEspeciais e demais customizações
+      const rawStatus = String(existing.status || existing.statusMatricula || st.status || 'ativo').trim().toLowerCase();
+      const resolvedStatus: Student['status'] =
+        rawStatus === 'cancelado' ? 'cancelado' : rawStatus === 'inativo' || rawStatus === 'trancado' ? 'inativo' : 'ativo';
       return {
         ...st,
         ...existing,
@@ -582,8 +591,8 @@ export async function restoreMiniMaternal2026(): Promise<{
         anoLetivo: existing.anoLetivo !== undefined ? Number(existing.anoLetivo) : 2026,
         turma: existing.turma || st.turma,
         activities: Array.isArray(existing.activities) && existing.activities.length > 0 ? existing.activities : st.activities,
-        status: existing.status || st.status || 'ativo',
-        statusMatricula: existing.statusMatricula || existing.status || st.statusMatricula || 'ativo',
+        status: resolvedStatus,
+        statusMatricula: resolvedStatus,
       };
     }
 
@@ -605,7 +614,8 @@ export async function restoreMiniMaternal2026(): Promise<{
     }
   });
 
-  const updatedStudents = Array.from(studentMap.values());
+  const { deduplicateStudentsList: dedupeList } = await import('../utils/storageUtils');
+  const updatedStudents = dedupeList(Array.from(studentMap.values()));
   saveStudents(updatedStudents);
 
   // 4. Persistir no Firestore APENAS os documentos comprovadamente ausentes e purgar eventuais excedentes

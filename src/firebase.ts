@@ -258,14 +258,109 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
  *   o ouvinte remove/atualiza automaticamente o registro na tela de todos os outros aparelhos conectados sem exigir ação manual.
  * - Gestão do Evento (Unsubscribe): Retorna uma função unsubscribe() para limpar o escutador na desmontagem (useEffect).
  */
+const reconciledStudentDriftKeys = new Set<string>();
+
+function studentSyncStateDiffers(docA: any, docB: any): boolean {
+  if (!docA || !docB) return false;
+  const stA = String(docA.status || docA.statusMatricula || 'ativo').trim().toLowerCase();
+  const stB = String(docB.status || docB.statusMatricula || 'ativo').trim().toLowerCase();
+  if (stA !== stB) return true;
+  const smA = String(docA.statusMatricula || docA.status || 'ativo').trim().toLowerCase();
+  const smB = String(docB.statusMatricula || docB.status || 'ativo').trim().toLowerCase();
+  if (smA !== smB) return true;
+  const actsA = (Array.isArray(docA.activities) ? docA.activities : []).slice().sort().join('|');
+  const actsB = (Array.isArray(docB.activities) ? docB.activities : []).slice().sort().join('|');
+  if (actsA !== actsB) return true;
+  if (String(docA.turma || '').trim() !== String(docB.turma || '').trim()) return true;
+  if (String(docA.inactivationDate || '') !== String(docB.inactivationDate || '')) return true;
+  return false;
+}
+
+function scheduleDuplicateReconciliationInFirestore(
+  alunosDocs: Map<string, any>,
+  studentsDocs: Map<string, any>,
+  winner: Student,
+  targetIds: string[]
+) {
+  if (isFirestoreQuotaExceeded) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (!winner || targetIds.length === 0) return;
+
+  const winnerActs = Array.isArray(winner.activities) && winner.activities.length > 0 ? winner.activities : ['Rotina'];
+  const winnerStatus = winner.status || 'ativo';
+  const winnerMat = winner.statusMatricula || winnerStatus;
+  const winnerUpdatedAt = winner.updatedAt || new Date().toISOString();
+  const sigBase = `${winnerStatus}:${winnerMat}:${winnerActs.slice().sort().join(',')}:${winner.turma || ''}:${winner.inactivationDate || ''}`;
+
+  const writes: Array<{ col: 'alunos' | 'students'; id: string }> = [];
+  for (const tid of targetIds) {
+    const aDoc = alunosDocs.get(tid);
+    const sDoc = studentsDocs.get(tid);
+    if (aDoc && studentSyncStateDiffers(aDoc, winner)) {
+      const key = `alunos/${tid}:${sigBase}`;
+      if (!reconciledStudentDriftKeys.has(key)) {
+        reconciledStudentDriftKeys.add(key);
+        writes.push({ col: 'alunos', id: tid });
+      }
+    }
+    if (sDoc && studentSyncStateDiffers(sDoc, winner)) {
+      const key = `students/${tid}:${sigBase}`;
+      if (!reconciledStudentDriftKeys.has(key)) {
+        reconciledStudentDriftKeys.add(key);
+        writes.push({ col: 'students', id: tid });
+      }
+    }
+  }
+
+  if (writes.length === 0) return;
+
+  const syncPatch: Record<string, any> = {
+    turma: winner.turma,
+    activities: winnerActs,
+    modalidadesEspeciais: winner.modalidadesEspeciais || [],
+    specialties: winner.specialties || winner.modalidadesEspeciais || [],
+    status: winnerStatus,
+    statusMatricula: winnerMat,
+    inactivationDate: winnerStatus === 'ativo' ? '' : (winner.inactivationDate || ''),
+    inactivationReason: winnerStatus === 'ativo' ? '' : (winner.inactivationReason || ''),
+    updatedAt: winnerUpdatedAt,
+  };
+
+  try {
+    const batch = writeBatch(db);
+    writes.slice(0, 100).forEach(({ col, id }) => {
+      batch.set(doc(db, col, id), syncPatch, { merge: true });
+    });
+    batch.commit().catch((err) => {
+      handleFirestoreError(err, OperationType.WRITE, 'alunos/reconcile');
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'alunos/reconcile');
+  }
+}
+
 export function subscribeAlunos(
   onData: (students: Student[]) => void,
   onError?: (err: Error) => void
 ): () => void {
   const alunosDocs = new Map<string, any>();
   const studentsDocs = new Map<string, any>();
+  let hasAlunosSnapshot = false;
+  let hasStudentsSnapshot = false;
+  let alunosErrored = false;
+  let studentsErrored = false;
+  let barrierReleased = false;
 
-  const emit = () => {
+  const emit = (forceBarrier = false) => {
+    if (!forceBarrier && !barrierReleased) {
+      const readyAlunos = hasAlunosSnapshot || alunosErrored;
+      const readyStudents = hasStudentsSnapshot || studentsErrored;
+      if (!readyAlunos || !readyStudents) {
+        return;
+      }
+      barrierReleased = true;
+    }
+
     const combinedMap = new Map<string, any>();
     // Mescla 'students' e 'alunos' priorizando estritamente o documento com updatedAt mais recente
     studentsDocs.forEach((val, id) => combinedMap.set(id, val));
@@ -282,11 +377,24 @@ export function subscribeAlunos(
 
     combinedMap.forEach((data, id) => {
       if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
-        list.push(normalizeStudent({ ...data, id }));
+        const normalized = normalizeStudent({ ...data, id });
+        list.push(normalized);
+        // Se 'alunos/{id}' e 'students/{id}' divergirem em status/modalidades, concilia a cópia obsoleta no Firestore
+        const aDoc = alunosDocs.get(id);
+        const sDoc = studentsDocs.get(id);
+        if (aDoc && sDoc && studentSyncStateDiffers(aDoc, sDoc)) {
+          scheduleDuplicateReconciliationInFirestore(alunosDocs, studentsDocs, normalized, [id]);
+        }
       }
     });
 
-    const deduped = deduplicateStudentsList(list);
+    const deduped = deduplicateStudentsList(list, (winner, olderDuplicates) => {
+      const duplicateIds = olderDuplicates.map((d) => d.id).filter(Boolean);
+      if (duplicateIds.length > 0) {
+        scheduleDuplicateReconciliationInFirestore(alunosDocs, studentsDocs, winner, [winner.id, ...duplicateIds]);
+      }
+    });
+
     if (deduped.length === 0) {
       const localSt = loadStudents().filter((s) => !isMockStudent(s));
       if (localSt.length > 0) {
@@ -297,10 +405,18 @@ export function subscribeAlunos(
     onData(deduped);
   };
 
+  const fallbackTimer = setTimeout(() => {
+    if (!barrierReleased && (hasAlunosSnapshot || hasStudentsSnapshot)) {
+      barrierReleased = true;
+      emit(true);
+    }
+  }, 1500);
+
   const unsubAlunos = onSnapshot(
     collection(db, 'alunos'),
     (snapshot) => {
       clearFirestoreQuotaExceeded();
+      hasAlunosSnapshot = true;
       alunosDocs.clear();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -311,8 +427,10 @@ export function subscribeAlunos(
       emit();
     },
     (error) => {
+      alunosErrored = true;
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.GET, 'alunos');
+      emit();
     }
   );
 
@@ -320,6 +438,7 @@ export function subscribeAlunos(
     collection(db, 'students'),
     (snapshot) => {
       clearFirestoreQuotaExceeded();
+      hasStudentsSnapshot = true;
       studentsDocs.clear();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -330,12 +449,15 @@ export function subscribeAlunos(
       emit();
     },
     (error) => {
+      studentsErrored = true;
       if (onError) onError(error);
       handleFirestoreError(error, OperationType.GET, 'students');
+      emit();
     }
   );
 
   return () => {
+    clearTimeout(fallbackTimer);
     unsubAlunos();
     unsubStudents();
   };

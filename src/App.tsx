@@ -483,6 +483,10 @@ export default function App() {
           if (freshRecords && freshRecords.length > 0) {
             setRecords(freshRecords);
           }
+          const freshStudents = deduplicateStudentsList(loadStudents().filter((s) => !isMockStudent(s)));
+          if (freshStudents.length > 0) {
+            setStudents(freshStudents);
+          }
           break;
         }
       }
@@ -2234,7 +2238,8 @@ export default function App() {
     try {
       await reconnectFirestore(true);
     } catch {}
-    const res = await forceManualSync();
+    await forceManualSync();
+    let syncedFromServer = false;
     try {
       const directSync = await forceDirectServerSync(todayStr);
       if (directSync.records && directSync.records.length > 0) {
@@ -2242,16 +2247,21 @@ export default function App() {
         setRecords(directSync.records);
       }
       if (directSync.students && directSync.students.length > 0) {
-        saveStudents(directSync.students);
-        setStudents(directSync.students);
+        const cleanDirectStudents = deduplicateStudentsList(directSync.students.filter((s) => !isMockStudent(s)));
+        saveStudents(cleanDirectStudents);
+        setStudents(cleanDirectStudents);
+        broadcastSyncEvent('SYNC_STUDENTS', cleanDirectStudents);
+        syncedFromServer = true;
       }
     } catch (e) {
       console.warn('Sync direto do servidor no handleForceSync:', e);
     }
-    const freshRecords = loadAttendanceRecords();
-    if (freshRecords.length > 0) setRecords(freshRecords);
-    const freshStudents = loadStudents();
-    if (freshStudents.length > 0) setStudents(freshStudents);
+    if (!syncedFromServer) {
+      const freshRecords = loadAttendanceRecords();
+      if (freshRecords.length > 0) setRecords(freshRecords);
+      const freshStudents = deduplicateStudentsList(loadStudents().filter((s) => !isMockStudent(s)));
+      if (freshStudents.length > 0) setStudents(freshStudents);
+    }
   };
 
   // If user is not logged in, render the Login Screen with all registered users
