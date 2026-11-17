@@ -1146,10 +1146,10 @@ export function savePontoClosings(closings: PontoMonthClosing[]): void {
 export function loadSemanarioPlans(): SemanarioPlan[] {
   try {
     const data = localStorage.getItem(SEMANARIO_KEY);
-    if (data) {
+    if (data !== null) {
       const parsed: SemanarioPlan[] = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return deduplicateSemanarioPlans(parsed);
+      if (Array.isArray(parsed)) {
+        return parsed.length > 0 ? deduplicateSemanarioPlans(parsed) : [];
       }
     }
   } catch (e) {
@@ -1161,10 +1161,13 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
 }
 
 export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
-  const bounded = Array.isArray(plans) && plans.length > 20 ? plans.slice(0, 20) : plans;
-  safeLocalStorageSet(SEMANARIO_KEY, bounded, (pls) => {
-    // Mantém no cache local os 10 planos mais recentes em caso de pressão de cota
-    return Array.isArray(pls) ? pls.slice(0, 10) : [];
+  const clean = Array.isArray(plans) ? deduplicateSemanarioPlans(plans) : [];
+  safeLocalStorageSet(SEMANARIO_KEY, clean, (pls) => {
+    if (!Array.isArray(pls)) return [];
+    // Em caso de pressão de cota no localStorage, remove apenas fotos em base64 para preservar 100% dos textos de todos os dias e semanas
+    return pls.map((p) =>
+      p && Array.isArray(p.photos) && p.photos.length > 0 ? { ...p, photos: [] } : p
+    );
   });
 }
 

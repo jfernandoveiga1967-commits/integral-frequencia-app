@@ -68,6 +68,7 @@ import { formatCurrencyBR } from '../utils/pontoUtils';
 import { formatDateBR } from '../utils/dateUtils';
 import {
   EXPENSE_CATEGORIES_INFO,
+  STANDARD_MANUAL_EXPENSE_CATEGORIES,
   AVAILABLE_CUSTOM_CATEGORY_COLORS,
   getCategoryDisplayInfo,
   loadLocalCustomCategories,
@@ -139,14 +140,16 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   semanarioPlans = [],
   onUpdateStudents,
 }) => {
-  // Filtro de Exercício / Ano Letivo (2026 | 2027)
-  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(2026);
+  // Filtro de Exercício / Ano Letivo (2026 | 2027) — inicia no ano corrente
+  const [selectedAnoLetivo, setSelectedAnoLetivo] = useState<number>(() =>
+    new Date().getFullYear() === 2027 ? 2027 : 2026
+  );
 
   // Sub-abas internas: Receitas & Mensalidades vs Gestão de Despesas vs DRE Operacional
   const [activeSubTab, setActiveSubTab] = useState<'receitas' | 'despesas' | 'dre'>('receitas');
 
-  // Filtro de Mês Individual no DRE ('ALL' | 1..12)
-  const [selectedMonth, setSelectedMonth] = useState<number | 'ALL'>('ALL');
+  // Filtro de Mês Individual ('ALL' | 1..12) — sempre abre no mês atual
+  const [selectedMonth, setSelectedMonth] = useState<number | 'ALL'>(() => new Date().getMonth() + 1);
   // Modo de exibição da matriz: isolar a coluna do mês selecionado ou manter todas com destaque
   const [isolateMonthColumn, setIsolateMonthColumn] = useState<boolean>(false);
 
@@ -834,10 +837,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       }
       setCustomCategories(res.categories);
       if (editingExpense?.categoria === category.id) {
+        const fallbackStd = STANDARD_MANUAL_EXPENSE_CATEGORIES[0];
         setEditingExpense({
           ...editingExpense,
-          categoria: res.categories[0]?.id || '',
-          categoriaLabel: res.categories[0]?.label || '',
+          categoria: res.categories[0]?.id || fallbackStd.id,
+          categoriaLabel: res.categories[0]?.label || fallbackStd.label,
         });
       }
       showToast(`Categoria "${category.label}" excluída.`, 'success');
@@ -847,8 +851,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   };
 
   const handleOpenNewExpense = () => {
-    const defaultCat = customCategories[0];
-    setShowCreateCategoryInline(customCategories.length === 0);
+    const defaultStdCat = STANDARD_MANUAL_EXPENSE_CATEGORIES[0];
+    setShowCreateCategoryInline(false);
     setNewCategoryName('');
     const todayStr = new Date().toISOString().split('T')[0];
     const defaultDueDate =
@@ -857,8 +861,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         : todayStr;
     setEditingExpense({
       anoLetivo: selectedAnoLetivo,
-      categoria: defaultCat?.id || '',
-      categoriaLabel: defaultCat?.label || '',
+      categoria: defaultStdCat.id,
+      categoriaLabel: defaultStdCat.label,
       descricao: '',
       valor: 0,
       dataVencimento: defaultDueDate,
@@ -1733,11 +1737,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   Custos Operacionais Reais & DRE
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Custos sincronizados em tempo real a partir das abas oficiais: <strong>Livro Ponto</strong> (fracionado por cargo/categoria), <strong>Cardápio & Nutrição</strong> (refeições pela Rotina ativa), <strong>Oficinas de Culinária</strong> (Cardápio e Semanário) e suas <strong>Categorias Personalizadas</strong>.
+                  Custos sincronizados em tempo real a partir das abas oficiais: <strong>Livro Ponto</strong> (Coordenação, Auxiliar ADI, Monitor, Professor Horista, Professor Prestador e Nutricionista), <strong>Relatório Financeiro de Refeições (Almoço)</strong> e suas <strong>Categorias Personalizadas</strong>.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
                 <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
                   <span className="text-[10px] sm:text-[11px] text-indigo-300 font-medium block truncate">Folha (Livro Ponto)</span>
                   <span className="text-xs sm:text-sm font-black text-indigo-300 truncate block">
@@ -1745,15 +1749,9 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   </span>
                 </div>
                 <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Refeições (Cardápio)</span>
+                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Refeições (Almoço)</span>
                   <span className="text-xs sm:text-sm font-black text-emerald-300 truncate block">
                     {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
-                  </span>
-                </div>
-                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-amber-300 font-medium block truncate">Culinária (Oficinas)</span>
-                  <span className="text-xs sm:text-sm font-black text-amber-300 truncate block">
-                    {formatCurrencyBR(metrics.custoCulinariaReal || 0)}
                   </span>
                 </div>
                 <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
@@ -1876,7 +1874,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         (exp.origemModulo === 'FOLHA_PONTO'
                           ? 'Livro Ponto'
                           : exp.origemModulo === 'CARDAPIO_REFEICOES'
-                          ? 'Cardápio / Refeições'
+                          ? 'Relatório de Refeições (Almoço)'
                           : exp.origemModulo === 'CULINARIA_OFICINAS'
                           ? 'Culinária / Oficinas'
                           : exp.origemModulo === 'SEMANARIO_CULINARIA'
@@ -2024,14 +2022,14 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     DRE Realista Auditado • Exercício {selectedAnoLetivo}
                   </span>
                   <span className="text-xs text-slate-400 font-mono">
-                    Conexão Direta: Livro Ponto + Cardápio + Culinária + Personalizadas
+                    Conexão Direta: Livro Ponto + Cardápio + Personalizadas
                   </span>
                 </div>
                 <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
                   Demonstração do Resultado do Exercício (DRE)
                 </h3>
                 <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                  Demonstração transparente integrando os contratos ativos dos alunos de {selectedAnoLetivo}, a folha do Livro Ponto fracionada por cargo, as refeições do Cardápio Escolar, as oficinas de Culinária e todas as categorias personalizadas criadas pela gestão.
+                  Demonstração transparente integrando os contratos ativos dos alunos de {selectedAnoLetivo}, a folha do Livro Ponto fracionada por cargo, as refeições do Relatório Financeiro de Refeições e todas as categorias personalizadas criadas pela gestão.
                 </p>
               </div>
 
@@ -2152,7 +2150,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     -{formatCurrencyBR(activeDREData.custosOperacionais)}
                   </span>
                   <span className="text-[10px] text-rose-600 font-medium block truncate">
-                    Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)} • Culin./Outras: {formatCurrencyBR(activeDREData.custoCulinaria + activeDREData.custoOutrasCategorias)}
+                    Folha: {formatCurrencyBR(activeDREData.custoFolha)} • Refeições: {formatCurrencyBR(activeDREData.custoAlimentacao)} • Outras: {formatCurrencyBR(activeDREData.custoOutrasCategorias)}
                   </span>
                 </div>
 
@@ -2682,7 +2680,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                         {catRow.origemModulo === 'FOLHA_PONTO'
                           ? 'Folha de colaboradores ativos do Livro Ponto agrupada por cargo/função'
                           : catRow.origemModulo === 'CARDAPIO_REFEICOES'
-                          ? 'Refeições sincronizadas com o Cardápio & Nutrição e censo ativo da Rotina'
+                          ? 'Refeições sincronizadas com o Relatório Financeiro de Refeições (Almoço)'
                           : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
                             catRow.origemModulo === 'SEMANARIO_CULINARIA'
                           ? 'Insumos e práticas culinárias sincronizados do Cardápio e Semanário'
@@ -2805,26 +2803,36 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     <select
                       value={editingExpense.categoria || ''}
                       onChange={(e) => {
-                        const chosen = customCategories.find((c) => c.id === e.target.value);
+                        const val = e.target.value;
+                        const chosenStd = STANDARD_MANUAL_EXPENSE_CATEGORIES.find((c) => c.id === val);
+                        const chosenCustom = customCategories.find((c) => c.id === val);
                         setEditingExpense({
                           ...editingExpense,
-                          categoria: e.target.value as ExpenseCategory,
-                          categoriaLabel: chosen?.label || editingExpense.categoriaLabel,
+                          categoria: val as ExpenseCategory,
+                          categoriaLabel:
+                            chosenStd?.label || chosenCustom?.label || editingExpense.categoriaLabel,
                         });
                       }}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
                     >
-                      <option value="">
-                        {customCategories.length === 0
-                          ? 'Nenhuma categoria criada — clique em "+ Criar Nova Categoria"'
-                          : 'Selecione uma categoria personalizada...'}
-                      </option>
-                      {customCategories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.label}
-                        </option>
-                      ))}
+                      <optgroup label="Categorias Padronizadas">
+                        {STANDARD_MANUAL_EXPENSE_CATEGORIES.map((std) => (
+                          <option key={std.id} value={std.id}>
+                            {std.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {customCategories.length > 0 && (
+                        <optgroup label="Categorias Personalizadas">
+                          {customCategories.map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                       {editingExpense.categoria &&
+                        !STANDARD_MANUAL_EXPENSE_CATEGORIES.some((s) => s.id === editingExpense.categoria) &&
                         !customCategories.some((c) => c.id === editingExpense.categoria) && (
                           <option value={editingExpense.categoria}>
                             {getCategoryDisplayInfo(editingExpense.categoria, customCategories, editingExpense.categoriaLabel).label}

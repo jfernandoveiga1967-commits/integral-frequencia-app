@@ -49,9 +49,11 @@ import {
   isReforcoActivity,
   getReforcoStudentsForTurmaAndDay,
   getReforcoStudentsForCard,
+  normalizeKeyComponent,
+  normalizeTimeKey,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
-import { getISOWeekNumber, getWeekInfo, getWeekDays } from '../../utils/dateUtils';
+import { getISOWeekNumber, getWeekInfo, getWeekDays, normalizeDayOfWeek, getDayOfWeekFromDate } from '../../utils/dateUtils';
 import { generateSemanarioPDFReport } from '../../utils/pdfGenerator';
 import { triggerPrint, safeWindowPrint } from '../../utils/printUtils';
 import { PdfViewerModal } from '../PdfViewerModal';
@@ -291,9 +293,16 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
   // Filtered Plans for Current Week (Sanitized against official schedule)
   const weekPlans = useMemo(() => {
-    const raw = activities.filter(
-      (p) => p.weekNumber === currentWeek.weekNumber && p.year === currentWeek.year
-    );
+    const raw = activities.filter((p) => {
+      if (!p) return false;
+      if (Number(p.weekNumber) === currentWeek.weekNumber && Number(p.year) === currentWeek.year) {
+        return true;
+      }
+      if ((!p.weekNumber || Number(p.weekNumber) === 0) && p.date) {
+        return p.date >= currentWeek.startDate && p.date <= currentWeek.endDate;
+      }
+      return false;
+    });
     return cleanupInvalidTurmaPlans(raw, schedules);
   }, [activities, currentWeek, schedules]);
 
@@ -312,7 +321,12 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   // Plans of the selected Turma (when in detailed view)
   const activeTurmaPlans = useMemo(() => {
     if (!activeTurma) return [];
-    return weekPlans.filter((p) => p.turma === activeTurma && !deletedActivityIds.has(p.id));
+    const normActive = normalizeKeyComponent(activeTurma);
+    return weekPlans.filter(
+      (p) =>
+        (p.turma === activeTurma || normalizeKeyComponent(p.turma) === normActive) &&
+        !deletedActivityIds.has(p.id)
+    );
   }, [weekPlans, activeTurma, deletedActivityIds]);
 
   // Vínculo Estrito com a Grade Horária Oficial da Turma no Dia Selecionado:
@@ -327,6 +341,9 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     const weekDays = getWeekDays(currentWeek.startDate);
     const dayIndex = DAYS_OF_WEEK_CONFIG.findIndex((d) => d.id === selectedDay);
     const dayDate = weekDays[dayIndex >= 0 ? dayIndex : 0]?.dateStr || currentWeek.startDate;
+
+    const getResolvedDay = (p: SemanarioPlan): DayOfWeek | null =>
+      normalizeDayOfWeek(p.dayOfWeek) || (p.date ? getDayOfWeekFromDate(p.date) : null);
 
     const usedExistingPlanIds = new Set<string>();
 
@@ -344,17 +361,21 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           return null;
         }
 
-        // Procura plano já salvo que coincida rigorosamente por ID ou horário específico
+        const normBlockCat = normalizeKeyComponent(block.activityId);
+        const normOfficialTime = normalizeTimeKey(officialTimeSlot);
+
+        // Procura plano já salvo que coincida rigorosamente por ID ou categoria + horário
         const existingPlan = activeTurmaPlans.find((p) => {
-          if (p.dayOfWeek !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
+          if (getResolvedDay(p) !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
           if (deletedActivityIds.has(p.id)) return false;
           if (p.id === generatedId || p.id === block.id) return true;
-          if (p.id && (p.id.includes(block.id) || (p.id.includes(safeCatId) && p.id.includes(safeTime)))) return true;
-          if (
-            p.timeSlot &&
-            p.timeSlot.trim() === officialTimeSlot.trim() &&
-            (p.category || '').toLowerCase().trim() === (block.activityId || '').toLowerCase().trim()
-          ) {
+          if (p.id && p.id.includes(block.id)) return true;
+
+          const sameCat = normalizeKeyComponent(p.category) === normBlockCat;
+          if (!sameCat) return false;
+
+          if (p.id && p.id.includes(safeCatId) && p.id.includes(safeTime)) return true;
+          if (p.timeSlot && normalizeTimeKey(p.timeSlot) === normOfficialTime) {
             return true;
           }
           return false;
@@ -364,6 +385,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           usedExistingPlanIds.add(existingPlan.id);
           return {
             ...existingPlan,
+            dayOfWeek: selectedDay,
             timeSlot: existingPlan.timeSlot || officialTimeSlot,
             status: existingPlan.status || 'pendente',
           };
@@ -404,7 +426,10 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
     // Planos adicionais cadastrados pelo usuário para o dia que não coincidem com os blocos oficiais
     const extraPlans = activeTurmaPlans.filter(
-      (p) => p.dayOfWeek === selectedDay && !usedExistingPlanIds.has(p.id) && !deletedActivityIds.has(p.id)
+      (p) =>
+        getResolvedDay(p) === selectedDay &&
+        !usedExistingPlanIds.has(p.id) &&
+        !deletedActivityIds.has(p.id)
     );
 
     return [...officialMappedPlans, ...extraPlans];
@@ -613,10 +638,13 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       const dayDate = weekDays[dayIndex]?.dateStr || currentWeek.startDate;
       const scheduledBlocks = getScheduleBlocksForTurma(targetTurma, day.id, schedules);
 
-      scheduledBlocks.forEach((block, bIdx) => {
+      scheduledBlocks.forEach((block) => {
         const prop = generateCuratedProposal(targetTurma, block.activityId);
+        const safeTurmaId = targetTurma.replace(/\s+/g, '_').toLowerCase();
+        const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
+        const safeTime = (block.startTime || '').replace(':', '');
         newBatchPlans.push({
-          id: `plan_ai_${Date.now()}_${day.id}_${bIdx}_${block.activityId.replace(/\s+/g, '_').toLowerCase()}`,
+          id: `plan_sched_${safeTurmaId}_${day.id}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`,
           turma: targetTurma,
           weekNumber: currentWeek.weekNumber,
           year: currentWeek.year,
@@ -631,6 +659,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           teacherName: currentUser?.name || 'Monitora / ADI do Integral',
           status: 'pendente',
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         });
       });
     });

@@ -29,9 +29,11 @@ import {
   isTurmaEligibleForProjeto,
   deduplicateSemanarioPlans,
   upsertSemanarioPlans,
+  normalizeKeyComponent,
+  normalizeTimeKey,
 } from '../../utils/semanarioUtils';
 import { loadSemanarioPlans } from '../../utils/storageUtils';
-import { getWeekInfo, getWeekDays } from '../../utils/dateUtils';
+import { getWeekInfo, getWeekDays, normalizeDayOfWeek, getDayOfWeekFromDate } from '../../utils/dateUtils';
 import { isCoordenador } from '../../utils/authUtils';
 import { fetchGeminiProposal } from '../../utils/semanarioAiGenerator';
 import { loadLocalQuadroAtribuicoes, resolveAtribuicaoForTurma } from '../../utils/atribuicoesStorage';
@@ -292,7 +294,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     );
   };
 
-  // Image Upload handler (Base64 file reader)
+  // Image Upload handler with lightweight compression so large photos never exceed Firestore/localStorage limits
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -301,10 +303,43 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       if (!file.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (result) {
-          setPhotos((prev) => [...prev, result]);
-        }
+        const rawResult = event.target?.result as string;
+        if (!rawResult) return;
+
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const MAX_DIM = 1024;
+            let width = img.width;
+            let height = img.height;
+            if (width > MAX_DIM || height > MAX_DIM) {
+              if (width > height) {
+                height = Math.round((height * MAX_DIM) / width);
+                width = MAX_DIM;
+              } else {
+                width = Math.round((width * MAX_DIM) / height);
+                height = MAX_DIM;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              const compressed = canvas.toDataURL('image/jpeg', 0.72);
+              setPhotos((prev) => [...prev, compressed || rawResult]);
+              return;
+            }
+          } catch {
+            // Fallback para imagem original se canvas falhar
+          }
+          setPhotos((prev) => [...prev, rawResult]);
+        };
+        img.onerror = () => {
+          setPhotos((prev) => [...prev, rawResult]);
+        };
+        img.src = rawResult;
       };
       reader.readAsDataURL(file);
     });
@@ -459,17 +494,114 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     const savedDesc = development.trim();
     const savedTitle = title.trim();
     const savedObj = objectives.trim();
+    const targetYear = initialPlan?.year || year;
+    const targetWeekNumber = initialPlan?.weekNumber || weekNumber;
+    const resolvedCategory = category.trim() || availableCategories[0] || 'Acolhimento';
+
+    // Recalcula a data correta caso o dia da semana tenha sido alterado na edição/criação
+    const primaryDate =
+      initialPlan?.dayOfWeek && initialPlan.dayOfWeek !== dayOfWeek
+        ? getDateForDay(dayOfWeek)
+        : initialPlan?.date || getDateForDay(dayOfWeek);
+
+    const currentAllPlans = existingPlans && existingPlans.length > 0 ? existingPlans : loadSemanarioPlans();
+    const cleanAllPlans = deduplicateSemanarioPlans(currentAllPlans);
+
+    const findExistingPlanForSlot = (
+      targetTurma: string,
+      targetDay: DayOfWeek,
+      targetDateStr: string,
+      targetCat: string,
+      targetTime: string,
+      targetTitleStr: string
+    ): SemanarioPlan | undefined => {
+      const normTargetTurma = normalizeKeyComponent(targetTurma);
+      const normTargetCat = normalizeKeyComponent(targetCat);
+      const normTargetTime = normalizeTimeKey(targetTime);
+      const normTargetTitle = normalizeKeyComponent(targetTitleStr);
+
+      return cleanAllPlans.find((p) => {
+        const sameWeek =
+          (Number(p.weekNumber) === targetWeekNumber && Number(p.year) === targetYear) ||
+          ((!p.weekNumber || Number(p.weekNumber) === 0) && p.date === targetDateStr);
+        if (!sameWeek) return false;
+
+        if (normalizeKeyComponent(p.turma) !== normTargetTurma) return false;
+
+        const pDay = normalizeDayOfWeek(p.dayOfWeek) || (p.date ? getDayOfWeekFromDate(p.date) : null);
+        if (pDay !== targetDay && p.date !== targetDateStr) return false;
+
+        const pCat = normalizeKeyComponent(p.category);
+        const pTime = normalizeTimeKey(p.timeSlot);
+        const pTitle = normalizeKeyComponent(p.title);
+
+        if (normTargetCat && pCat) {
+          if (pCat !== normTargetCat) return false;
+          if (normTargetTime && pTime && pTime !== normTargetTime) {
+            return Boolean(normTargetTitle && pTitle === normTargetTitle);
+          }
+          return true;
+        }
+        return Boolean(normTargetTime && pTime === normTargetTime && normTargetTitle && pTitle === normTargetTitle);
+      });
+    };
+
+    const buildDeterministicSlotId = (
+      targetTurma: string,
+      targetDay: DayOfWeek,
+      targetCat: string,
+      targetTime: string
+    ): string | null => {
+      const blocks = getScheduleBlocksForTurma(targetTurma, targetDay, schedules);
+      const normCat = normalizeKeyComponent(targetCat);
+      const normTime = normalizeTimeKey(targetTime);
+      const matchingBlock =
+        blocks.find(
+          (b) =>
+            normalizeKeyComponent(b.activityId) === normCat &&
+            normalizeTimeKey(`${b.startTime} - ${b.endTime}`) === normTime
+        ) ||
+        blocks.find((b) => normalizeKeyComponent(b.activityId) === normCat);
+      if (!matchingBlock) return null;
+      const safeTurmaId = targetTurma.replace(/\s+/g, '_').toLowerCase();
+      const safeCatId = (matchingBlock.activityId || targetCat).replace(/\s+/g, '_').toLowerCase();
+      const safeTime = (matchingBlock.startTime || '').replace(':', '');
+      return `plan_sched_${safeTurmaId}_${targetDay}_${safeCatId}_${safeTime}_w${targetWeekNumber}_${targetYear}`;
+    };
+
+    // Se era um ID de slot padrão e o usuário mudou turma/dia/categoria, não sobrescrever o ID do slot anterior
+    const slotChanged =
+      Boolean(initialPlan?.id?.startsWith('plan_sched_')) &&
+      ((initialPlan?.turma && normalizeKeyComponent(initialPlan.turma) !== normalizeKeyComponent(turma)) ||
+        (initialPlan?.dayOfWeek && initialPlan.dayOfWeek !== dayOfWeek) ||
+        (initialPlan?.category && normalizeKeyComponent(initialPlan.category) !== normalizeKeyComponent(resolvedCategory)));
+
+    const existingPrimaryMatch = findExistingPlanForSlot(
+      turma,
+      dayOfWeek,
+      primaryDate,
+      resolvedCategory,
+      timeSlot,
+      savedTitle
+    );
+
+    const primaryId =
+      initialPlan?.id && !slotChanged
+        ? initialPlan.id
+        : existingPrimaryMatch?.id ||
+          buildDeterministicSlotId(turma, dayOfWeek, resolvedCategory, timeSlot) ||
+          `plan_${Date.now()}_w${targetWeekNumber}_${targetYear}_${Math.random().toString(36).substring(2, 7)}`;
 
     const primaryPlan: SemanarioPlan = {
-      id: initialPlan?.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: primaryId,
       turma,
-      weekNumber: initialPlan?.weekNumber || weekNumber,
-      year: initialPlan?.year || year,
-      date: initialPlan?.date || getDateForDay(dayOfWeek),
+      weekNumber: targetWeekNumber,
+      year: targetWeekNumber ? targetYear : year,
+      date: primaryDate,
       dayOfWeek,
       timeSlot,
       weekTheme: weekTheme.trim() || undefined,
-      category: category.trim() || availableCategories[0] || 'Acolhimento',
+      category: resolvedCategory,
       title: savedTitle,
       adiResponsible: adiResponsible.trim() || undefined,
       monitors: monitors.trim() || undefined,
@@ -481,7 +613,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       substitutionReason: status === 'substituida' ? substitutionReason.trim() : undefined,
       photos: photos.length > 0 ? photos : undefined,
       notes: notes.trim() || undefined,
-      createdAt: initialPlan?.createdAt || new Date().toISOString(),
+      createdAt: (!slotChanged ? initialPlan?.createdAt : undefined) || existingPrimaryMatch?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name || 'Coordenação/Professor',
       ...({
@@ -498,9 +630,6 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     const targetTurmas = [turma, ...selectedCopyTurmas.filter((t) => t !== turma)];
     const targetDays = [dayOfWeek, ...selectedCopyDays.filter((d) => d !== dayOfWeek)];
 
-    const currentAllPlans = existingPlans && existingPlans.length > 0 ? existingPlans : loadSemanarioPlans();
-    const cleanAllPlans = deduplicateSemanarioPlans(currentAllPlans);
-
     const replicatedPlans: SemanarioPlan[] = [];
     let replicaIndex = 1;
 
@@ -512,28 +641,48 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         }
 
         const targetDate = getDateForDay(d);
-        // Trava de Deduplicação / Reescrita Inteligente (Upsert):
-        // Antes de inserir a modalidade no dia de destino, verifica se já existe um registro
-        // com a mesma turma, horário e modalidade/atividade. Se já existir, substitui (Upsert).
-        const existingMatch = cleanAllPlans.find((p) => {
-          const matchTurma = p.turma === t;
-          const matchDay = p.dayOfWeek === d || p.date === targetDate;
-          const matchTime = (p.timeSlot || '').trim() === (timeSlot || '').trim();
-          const matchCategory =
-            ((p.category || '').trim().toLowerCase() === (category || '').trim().toLowerCase()) &&
-            category.trim() !== '';
-          const matchTitle =
-            ((p.title || '').trim().toLowerCase() === (savedTitle || '').trim().toLowerCase()) &&
-            savedTitle.trim() !== '';
-          return matchTurma && matchDay && (matchTime || (matchCategory && matchTitle));
-        });
+
+        // Para outras turmas/dias, tenta alinhar ao horário oficial da mesma categoria na grade daquela turma/dia
+        let targetTimeSlot = timeSlot;
+        const targetBlocks = getScheduleBlocksForTurma(t, d, schedules);
+        const normCat = normalizeKeyComponent(resolvedCategory);
+        const matchingCategoryBlocks = targetBlocks.filter(
+          (b) => normalizeKeyComponent(b.activityId) === normCat
+        );
+        if (matchingCategoryBlocks.length > 0) {
+          const sameTimeBlock = matchingCategoryBlocks.find(
+            (b) => normalizeTimeKey(`${b.startTime} - ${b.endTime}`) === normalizeTimeKey(timeSlot)
+          );
+          const chosenBlock = sameTimeBlock || matchingCategoryBlocks[0];
+          if (chosenBlock && (t !== turma || !targetTimeSlot)) {
+            targetTimeSlot = `${chosenBlock.startTime} - ${chosenBlock.endTime}`;
+          }
+        }
+
+        // Trava de Deduplicação / Reescrita Inteligente (Upsert) estritamente dentro da mesma semana e modalidade
+        const existingMatch = findExistingPlanForSlot(
+          t,
+          d,
+          targetDate,
+          resolvedCategory,
+          targetTimeSlot,
+          savedTitle
+        );
+
+        const replicaId =
+          existingMatch?.id ||
+          buildDeterministicSlotId(t, d, resolvedCategory, targetTimeSlot) ||
+          `plan_${Date.now()}_${replicaIndex++}_w${targetWeekNumber}_${targetYear}_${d}_${Math.random().toString(36).substring(2, 7)}`;
 
         replicatedPlans.push({
           ...primaryPlan,
-          id: existingMatch?.id || `plan_${Date.now()}_${replicaIndex++}_${Math.random().toString(36).substring(2, 7)}`,
+          id: replicaId,
           turma: t,
+          weekNumber: targetWeekNumber,
+          year: targetYear,
           dayOfWeek: d,
           date: targetDate,
+          timeSlot: targetTimeSlot,
           status: copyExecutionRecords ? status : 'pendente',
           substitutionReason: copyExecutionRecords && status === 'substituida' ? substitutionReason.trim() : undefined,
           photos: copyExecutionRecords && photos.length > 0 ? [...photos] : undefined,

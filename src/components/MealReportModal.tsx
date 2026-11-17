@@ -236,9 +236,22 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         return sanitized;
       };
 
+      const DEFAULT_PROVIDER = 'Cantina & Nutrição Escolar';
+      const resolveProviderName = (...candidates: Array<string | undefined | null>) => {
+        for (const c of candidates) {
+          const clean = (c || '').trim();
+          if (clean && clean !== DEFAULT_PROVIDER) return clean;
+        }
+        return DEFAULT_PROVIDER;
+      };
+
       // Aplica valores iniciais do cache
       const initialPrice = localMonth?.defaultUnitPrice ?? cachedGlobal?.unitPrice ?? 9.0;
-      const initialProvider = localMonth?.providerName || localMonth?.contractCompany || cachedGlobal?.providerName || 'Cantina & Nutrição Escolar';
+      const initialProvider = resolveProviderName(
+        localMonth?.providerName,
+        localMonth?.contractCompany,
+        cachedGlobal?.providerName
+      );
 
       setDefaultUnitPrice(initialPrice);
       setContractCompany(initialProvider);
@@ -260,11 +273,20 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
 
         // Configurações globais persistidas no Firestore
         const globalPrice = firestoreGlobal?.unitPrice ?? cachedGlobal?.unitPrice ?? 9.0;
-        const globalProvider = firestoreGlobal?.providerName ?? cachedGlobal?.providerName ?? 'Cantina & Nutrição Escolar';
+        const globalProvider = resolveProviderName(
+          firestoreGlobal?.providerName,
+          cachedGlobal?.providerName
+        );
 
         if (firestoreMonth) {
           setDefaultUnitPrice(firestoreMonth.defaultUnitPrice !== undefined ? Number(firestoreMonth.defaultUnitPrice) : globalPrice);
-          setContractCompany(firestoreMonth.providerName || firestoreMonth.contractCompany || globalProvider);
+          setContractCompany(
+            resolveProviderName(
+              firestoreMonth.providerName,
+              firestoreMonth.contractCompany,
+              globalProvider
+            )
+          );
           if (firestoreMonth.responsibleCoordinator) setResponsibleCoordinator(firestoreMonth.responsibleCoordinator);
           if (firestoreMonth.coordinatorRole) setCoordinatorRole(firestoreMonth.coordinatorRole);
           if (firestoreMonth.responsibleFinancial) setResponsibleFinancial(firestoreMonth.responsibleFinancial);
@@ -443,10 +465,19 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
         lastCalculatedMealsCount?: number;
         isReopenedCall?: boolean;
       }
-    >
+    >,
+    metaOverride?: {
+      contractCompany?: string;
+      defaultUnitPrice?: number;
+    }
   ): MealReportConfig => {
-    const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
-    const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
+    const cleanUnitPrice =
+      metaOverride?.defaultUnitPrice !== undefined
+        ? Number(metaOverride.defaultUnitPrice) || 9.0
+        : Number(defaultUnitPrice) || 9.0;
+    const rawCompany =
+      metaOverride?.contractCompany !== undefined ? metaOverride.contractCompany : contractCompany;
+    const cleanCompany = (rawCompany || '').trim() || 'Cantina & Nutrição Escolar';
     const sourceEntries = entriesOverride || customEntries || {};
 
     const entriesToSave: Record<string, any> = {
@@ -510,15 +541,55 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     };
   };
 
+  const persistMealConfigNow = async (config: MealReportConfig) => {
+    saveMealConfig(config);
+    try {
+      await saveMealReportGlobalSettings({
+        unitPrice: Number(config.defaultUnitPrice) || 9.0,
+        providerName: (config.providerName || config.contractCompany || 'Cantina & Nutrição Escolar').trim(),
+        responsibleCoordinator: config.responsibleCoordinator,
+        coordinatorRole: config.coordinatorRole,
+        responsibleFinancial: config.responsibleFinancial,
+        financialRole: config.financialRole,
+        updatedBy: config.updatedBy,
+      });
+      await saveMealReportToFirestore(config, { skipGlobalSettingsSync: true });
+      broadcastSyncEvent('SYNC_CARDAPIO', { monthKey: config.monthKey, source: 'mealReport' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('app_meal_report_updated', { detail: { monthKey: config.monthKey, baseReport: config } }));
+      }
+      pendingConfigRef.current = null;
+    } catch (err) {
+      console.warn('Erro durante auto-salvamento no Firestore:', err);
+      throw err;
+    }
+  };
+
   // Auto-salvamento debounced de 500ms para edições manuais
   const scheduleDebouncedAutoSave = (
-    updatedEntries: Record<string, { manualCount?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>
+    updatedEntries?: Record<string, { manualCount?: number; editableStudents?: number; unitPrice?: number; notes?: string; isManualOverride?: boolean; lastCalculatedMealsCount?: number; isReopenedCall?: boolean }>,
+    metaOverride?: { contractCompany?: string; defaultUnitPrice?: number }
   ) => {
-    const config = buildConfigToSave(updatedEntries);
+    const config = buildConfigToSave(updatedEntries, metaOverride);
     pendingConfigRef.current = config;
 
     // 1. Gravação imediata no LocalStorage para blindar contra fechamento ou perda em 1ms
     saveMealConfig(config);
+    try {
+      const existingGlobalRaw = localStorage.getItem('crescer_meal_global_settings');
+      const existingGlobal = existingGlobalRaw ? JSON.parse(existingGlobalRaw) : {};
+      localStorage.setItem(
+        'crescer_meal_global_settings',
+        JSON.stringify({
+          ...existingGlobal,
+          id: 'mealReport',
+          unitPrice: Number(config.defaultUnitPrice) || 9.0,
+          providerName: config.providerName,
+          updatedAt: config.updatedAt,
+          updatedBy: config.updatedBy,
+        })
+      );
+    } catch {}
 
     // 2. Debounce de 500ms no Firestore
     if (debounceTimerRef.current) {
@@ -529,13 +600,12 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     debounceTimerRef.current = setTimeout(async () => {
       if (pendingConfigRef.current) {
         try {
-          await saveMealReportToFirestore(pendingConfigRef.current);
+          await persistMealConfigNow(pendingConfigRef.current);
           setAutoSaveStatus('saved');
           setTimeout(() => {
             setAutoSaveStatus('idle');
           }, 2500);
-        } catch (err) {
-          console.warn('Erro durante auto-salvamento no Firestore:', err);
+        } catch {
           setAutoSaveStatus('idle');
         }
       }
@@ -545,7 +615,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
   const handleSafeClose = () => {
     if (debounceTimerRef.current && pendingConfigRef.current) {
       clearTimeout(debounceTimerRef.current);
-      saveMealReportToFirestore(pendingConfigRef.current).catch((err) => console.warn('Aviso no salvamento ao fechar:', err));
+      persistMealConfigNow(pendingConfigRef.current).catch((err) => console.warn('Aviso no salvamento ao fechar:', err));
     }
     onClose();
   };
@@ -554,7 +624,7 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
     return () => {
       if (debounceTimerRef.current && pendingConfigRef.current) {
         clearTimeout(debounceTimerRef.current);
-        saveMealReportToFirestore(pendingConfigRef.current).catch(() => {});
+        persistMealConfigNow(pendingConfigRef.current).catch(() => {});
       }
     };
   }, []);
@@ -758,28 +828,34 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
       clearTimeout(debounceTimerRef.current);
     }
     const cleanUnitPrice = Number(defaultUnitPrice) || 9.0;
-    const cleanCompany = (contractCompany || 'Cantina & Nutrição Escolar').trim();
-    const configToSave = buildConfigToSave();
+    const cleanCompany = (contractCompany || '').trim() || 'Cantina & Nutrição Escolar';
+    const configToSave = buildConfigToSave(undefined, {
+      contractCompany: cleanCompany,
+      defaultUnitPrice: cleanUnitPrice,
+    });
     pendingConfigRef.current = configToSave;
 
     await saveAction.execute(
       async () => {
-        // Grava no Firestore primeiro com confirmação real
-        await Promise.all([
-          saveMealReportToFirestore(configToSave),
-          saveMealReportGlobalSettings({
-            unitPrice: cleanUnitPrice,
-            providerName: cleanCompany,
-            responsibleCoordinator,
-            coordinatorRole,
-            responsibleFinancial,
-            financialRole,
-            updatedBy: currentUser?.name || 'Coordenação',
-          }),
-        ]);
+        // Grava no Firestore primeiro com confirmação real (sem corrida dupla em settings/mealReport)
+        await saveMealReportGlobalSettings({
+          unitPrice: cleanUnitPrice,
+          providerName: cleanCompany,
+          responsibleCoordinator,
+          coordinatorRole,
+          responsibleFinancial,
+          financialRole,
+          updatedBy: currentUser?.name || 'Coordenação',
+        });
+        await saveMealReportToFirestore(configToSave, { skipGlobalSettingsSync: true });
+        pendingConfigRef.current = null;
+
         // Salva cópia local após a confirmação do servidor
         saveMealConfig(configToSave);
         broadcastSyncEvent('SYNC_CARDAPIO', { monthKey, source: 'mealReport' });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('app_meal_report_updated', { detail: { monthKey, baseReport: configToSave } }));
+        }
         setAutoSaveStatus('saved');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
       },
@@ -1038,9 +1114,29 @@ export const MealReportModal: React.FC<MealReportModalProps> = ({
                 <input
                   type="text"
                   value={contractCompany}
-                  onChange={(e) => setContractCompany(e.target.value)}
-                  placeholder="Ex: Cantina Escolar"
-                  className="text-xs font-semibold text-slate-800 bg-transparent border-b border-slate-300 focus:border-indigo-600 focus:outline-none px-1 w-36"
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    setContractCompany(nextVal);
+                    scheduleDebouncedAutoSave(undefined, { contractCompany: nextVal });
+                  }}
+                  onBlur={(e) => {
+                    const nextVal = e.target.value.trim() || 'Cantina & Nutrição Escolar';
+                    setContractCompany(nextVal);
+                    if (debounceTimerRef.current) {
+                      clearTimeout(debounceTimerRef.current);
+                    }
+                    const cfg = buildConfigToSave(undefined, { contractCompany: nextVal });
+                    pendingConfigRef.current = cfg;
+                    setAutoSaveStatus('saving');
+                    persistMealConfigNow(cfg)
+                      .then(() => {
+                        setAutoSaveStatus('saved');
+                        setTimeout(() => setAutoSaveStatus('idle'), 2500);
+                      })
+                      .catch(() => setAutoSaveStatus('idle'));
+                  }}
+                  placeholder="Ex: Cantina do Sandrão"
+                  className="text-xs font-semibold text-slate-800 bg-transparent border-b border-slate-300 focus:border-indigo-600 focus:outline-none px-1 w-44"
                 />
               </div>
 

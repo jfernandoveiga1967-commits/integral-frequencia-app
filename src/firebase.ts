@@ -61,7 +61,7 @@ import {
 import { INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import { generateTurmaAtribuicaoId, getDefaultHorarioTurnoForTurma } from './utils/atribuicoesStorage';
 import { normalizeAttendanceStatus, getDailyConsolidatedMetrics } from './utils/frequenciaUtils';
-import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays } from './utils/dateUtils';
+import { toISODateString, getISOWeekNumber, getEffectiveSchoolDays, normalizeDayOfWeek, getDayOfWeekFromDate } from './utils/dateUtils';
 import { saveMealConfig } from './utils/mealFinanceUtils';
 import { sortTurmasPedagogical } from './utils/turmaUtils';
 
@@ -2633,6 +2633,128 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
 
 import { SemanarioPlan } from './types';
 
+function resolvePlanWeekAndYear(data: {
+  weekNumber?: unknown;
+  year?: unknown;
+  date?: string;
+}): { weekNumber: number; year: number } {
+  const rawWeek = Number(data.weekNumber) || 0;
+  const rawYear = Number(data.year) || 0;
+  if (rawWeek > 0 && rawYear > 0) {
+    return { weekNumber: rawWeek, year: rawYear };
+  }
+  if (typeof data.date === 'string' && data.date.includes('-')) {
+    const parts = data.date.split('-').map(Number);
+    if (parts.length === 3 && parts.every((n) => !Number.isNaN(n) && n > 0)) {
+      const iso = getISOWeekNumber(new Date(parts[0], parts[1] - 1, parts[2]));
+      return {
+        weekNumber: rawWeek > 0 ? rawWeek : iso.weekNumber,
+        year: rawYear > 0 ? rawYear : iso.year,
+      };
+    }
+  }
+  return {
+    weekNumber: rawWeek,
+    year: rawYear || new Date().getFullYear(),
+  };
+}
+
+function mapFirestoreDocToSemanarioPlan(docId: string, data: any): SemanarioPlan {
+  const { weekNumber, year } = resolvePlanWeekAndYear(data);
+  const resolvedDay =
+    normalizeDayOfWeek(data.dayOfWeek) ||
+    (typeof data.date === 'string' ? getDayOfWeekFromDate(data.date) : null) ||
+    'segunda';
+
+  return {
+    id: docId,
+    turma: data.turma || '',
+    weekNumber,
+    year,
+    date: data.date || '',
+    dayOfWeek: resolvedDay,
+    timeSlot: data.timeSlot || '',
+    ...(data.horaInicio ? { horaInicio: data.horaInicio } : {}),
+    ...(data.horaFim ? { horaFim: data.horaFim } : {}),
+    weekTheme: data.weekTheme || '',
+    category: data.category || '',
+    title: data.title || data.proposta || '',
+    objectives: data.objectives || data.conteudo || '',
+    development: data.development || data.descricao || '',
+    materials: data.materials || '',
+    adiResponsible: data.adiResponsible || '',
+    monitors: data.monitors || '',
+    teacherName: data.teacherName || '',
+    instructorId: data.instructorId || '',
+    instructorName: data.instructorName || '',
+    status: data.status || 'pendente',
+    substitutionReason: data.substitutionReason || '',
+    photos: Array.isArray(data.photos) ? data.photos : [],
+    notes: data.notes || '',
+    createdAt: data.createdAt || '',
+    updatedAt: data.updatedAt || '',
+    updatedBy: data.updatedBy || '',
+    ...({
+      descricao: data.descricao || data.development || '',
+      proposta: data.proposta || data.title || '',
+      conteudo: data.conteudo || data.objectives || '',
+      isSavedByUser: data.isSavedByUser !== undefined ? Boolean(data.isSavedByUser) : true,
+      hasSavedContent:
+        data.hasSavedContent !== undefined
+          ? Boolean(data.hasSavedContent)
+          : Boolean((data.development || data.title || data.objectives || '').trim()),
+      isPlaceholder: false,
+    } as any),
+  };
+}
+
+function buildSemanarioFirestorePayload(plan: SemanarioPlan, includePhotos = true) {
+  const { weekNumber, year } = resolvePlanWeekAndYear(plan);
+  const resolvedDay =
+    normalizeDayOfWeek(plan.dayOfWeek) ||
+    (plan.date ? getDayOfWeekFromDate(plan.date) : null) ||
+    'segunda';
+  const nowIso = new Date().toISOString();
+
+  return {
+    id: plan.id,
+    turma: plan.turma || '',
+    weekNumber,
+    year,
+    date: plan.date || '',
+    dayOfWeek: resolvedDay,
+    timeSlot: plan.timeSlot || '',
+    horaInicio: plan.horaInicio || '',
+    horaFim: plan.horaFim || '',
+    weekTheme: plan.weekTheme || '',
+    category: plan.category || '',
+    title: plan.title || '',
+    objectives: plan.objectives || '',
+    development: plan.development || '',
+    materials: plan.materials || '',
+    adiResponsible: plan.adiResponsible || '',
+    monitors: plan.monitors || '',
+    teacherName: plan.teacherName || '',
+    instructorId: plan.instructorId || '',
+    instructorName: plan.instructorName || '',
+    status: plan.status || 'pendente',
+    substitutionReason: plan.substitutionReason || '',
+    photos: includePhotos && Array.isArray(plan.photos) ? plan.photos : [],
+    notes: plan.notes || '',
+    descricao: (plan as any).descricao || plan.development || '',
+    proposta: (plan as any).proposta || plan.title || '',
+    conteudo: (plan as any).conteudo || plan.objectives || '',
+    isSavedByUser: true,
+    hasSavedContent: Boolean(
+      (plan.development || '').trim() || (plan.title || '').trim() || (plan.objectives || '').trim()
+    ),
+    isPlaceholder: false,
+    createdAt: plan.createdAt || nowIso,
+    updatedAt: plan.updatedAt || nowIso,
+    updatedBy: plan.updatedBy || '',
+  };
+}
+
 export function subscribeSemanarioPlans(
   onData: (plans: SemanarioPlan[]) => void,
   onError?: (err: Error) => void
@@ -2646,28 +2768,7 @@ export function subscribeSemanarioPlans(
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         if (!data) return;
-        list.push({
-          id: docSnap.id,
-          turma: data.turma || '',
-          weekNumber: Number(data.weekNumber) || 0,
-          year: Number(data.year) || 2026,
-          date: data.date || '',
-          dayOfWeek: data.dayOfWeek || 'segunda',
-          timeSlot: data.timeSlot || '',
-          category: data.category || '',
-          title: data.title || '',
-          objectives: data.objectives || '',
-          development: data.development || '',
-          materials: data.materials || '',
-          teacherName: data.teacherName || '',
-          status: data.status || 'pendente',
-          substitutionReason: data.substitutionReason || '',
-          photos: Array.isArray(data.photos) ? data.photos : [],
-          notes: data.notes || '',
-          createdAt: data.createdAt || '',
-          updatedAt: data.updatedAt || '',
-          updatedBy: data.updatedBy || '',
-        });
+        list.push(mapFirestoreDocToSemanarioPlan(docSnap.id, data));
       });
       onData(list);
     },
@@ -2693,28 +2794,7 @@ export function subscribeTodaySemanarioPlans(
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         if (!data) return;
-        list.push({
-          id: docSnap.id,
-          turma: data.turma || '',
-          weekNumber: Number(data.weekNumber) || 0,
-          year: Number(data.year) || 2026,
-          date: data.date || '',
-          dayOfWeek: data.dayOfWeek || 'segunda',
-          timeSlot: data.timeSlot || '',
-          category: data.category || '',
-          title: data.title || '',
-          objectives: data.objectives || '',
-          development: data.development || '',
-          materials: data.materials || '',
-          teacherName: data.teacherName || '',
-          status: data.status || 'pendente',
-          substitutionReason: data.substitutionReason || '',
-          photos: Array.isArray(data.photos) ? data.photos : [],
-          notes: data.notes || '',
-          createdAt: data.createdAt || '',
-          updatedAt: data.updatedAt || '',
-          updatedBy: data.updatedBy || '',
-        });
+        list.push(mapFirestoreDocToSemanarioPlan(docSnap.id, data));
       });
       onData(list);
     },
@@ -2726,37 +2806,28 @@ export function subscribeTodaySemanarioPlans(
 }
 
 export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
+  const docRef = doc(db, 'semanarioPlans', plan.id);
   try {
-    const docRef = doc(db, 'semanarioPlans', plan.id);
-    await setDoc(
-      docRef,
-      {
-        id: plan.id,
-        turma: plan.turma || '',
-        weekNumber: Number(plan.weekNumber) || 0,
-        year: Number(plan.year) || 2026,
-        date: plan.date || '',
-        dayOfWeek: plan.dayOfWeek || 'segunda',
-        timeSlot: plan.timeSlot || '',
-        category: plan.category || '',
-        title: plan.title || '',
-        objectives: plan.objectives || '',
-        development: plan.development || '',
-        materials: plan.materials || '',
-        teacherName: plan.teacherName || '',
-        instructorId: plan.instructorId || '',
-        instructorName: plan.instructorName || '',
-        status: plan.status || 'pendente',
-        substitutionReason: plan.substitutionReason || '',
-        photos: plan.photos || [],
-        notes: plan.notes || '',
-        createdAt: plan.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        updatedBy: plan.updatedBy || '',
-      },
-      { merge: true }
-    );
-  } catch (error) {
+    await setDoc(docRef, buildSemanarioFirestorePayload(plan, true), { merge: true });
+  } catch (error: any) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    const isSizeError =
+      msg.includes('exceeds the maximum') ||
+      msg.includes('too large') ||
+      msg.includes('invalid-argument') ||
+      error?.code === 'invalid-argument';
+
+    // Se falhou por tamanho de fotos em base64 (>1MB), garante o salvamento imediato do conteúdo pedagógico sem as fotos pesadas
+    if (isSizeError && Array.isArray(plan.photos) && plan.photos.length > 0) {
+      try {
+        console.warn('[Semanario] Documento excedeu limite de tamanho com fotos; salvando conteúdo sem anexos grandes:', plan.id);
+        await setDoc(docRef, buildSemanarioFirestorePayload(plan, false), { merge: true });
+        return;
+      } catch (retryErr) {
+        handleFirestoreError(retryErr, OperationType.WRITE, `semanarioPlans/${plan.id}`);
+        throw retryErr;
+      }
+    }
     handleFirestoreError(error, OperationType.WRITE, `semanarioPlans/${plan.id}`);
     throw error;
   }
@@ -2775,40 +2846,23 @@ export async function deleteSemanarioPlanFromFirestore(planId: string) {
 export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[]) {
   if (!plans || plans.length === 0) return;
   try {
-    const CHUNK_SIZE = 250;
+    const CHUNK_SIZE = 25;
     for (let i = 0; i < plans.length; i += CHUNK_SIZE) {
       const chunk = plans.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
-      for (const p of chunk) {
-        const docRef = doc(db, 'semanarioPlans', p.id);
-        batch.set(
-          docRef,
-          {
-            id: p.id,
-            turma: p.turma || '',
-            weekNumber: Number(p.weekNumber) || 0,
-            year: Number(p.year) || 2026,
-            date: p.date || '',
-            dayOfWeek: p.dayOfWeek || 'segunda',
-            timeSlot: p.timeSlot || '',
-            category: p.category || '',
-            title: p.title || '',
-            objectives: p.objectives || '',
-            development: p.development || '',
-            materials: p.materials || '',
-            teacherName: p.teacherName || '',
-            status: p.status || 'pendente',
-            substitutionReason: p.substitutionReason || '',
-            photos: p.photos || [],
-            notes: p.notes || '',
-            createdAt: p.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            updatedBy: p.updatedBy || '',
-          },
-          { merge: true }
-        );
+      try {
+        const batch = writeBatch(db);
+        for (const p of chunk) {
+          const docRef = doc(db, 'semanarioPlans', p.id);
+          batch.set(docRef, buildSemanarioFirestorePayload(p, true), { merge: true });
+        }
+        await batch.commit();
+      } catch (chunkErr) {
+        // Fallback individual por documento para não abortar outros dias/turmas se um item tiver foto grande
+        console.warn('[Semanario] Falha em lote parcial; salvando individualmente para preservar todos os dias:', chunkErr);
+        for (const p of chunk) {
+          await saveSemanarioPlanToFirestore(p);
+        }
       }
-      await batch.commit();
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
@@ -3021,8 +3075,33 @@ export function subscribeDepartureAlertSettings(
 /**
  * Salva o relatório consolidado de refeições do mês no Firestore (mealReports/{monthKey})
  */
-export async function saveMealReportToFirestore(config: MealReportConfig): Promise<void> {
+export async function saveMealReportToFirestore(
+  config: MealReportConfig,
+  options?: { skipGlobalSettingsSync?: boolean }
+): Promise<void> {
   const docRef = doc(db, 'mealReports', config.monthKey);
+  const DEFAULT_PROVIDER = 'Cantina & Nutrição Escolar';
+  const explicitProvider = (config.providerName || config.contractCompany || '').trim();
+
+  let resolvedProvider = explicitProvider;
+  if (!resolvedProvider || resolvedProvider === DEFAULT_PROVIDER) {
+    try {
+      const cachedGlobalRaw = typeof window !== 'undefined' ? localStorage.getItem('crescer_meal_global_settings') : null;
+      const cachedGlobal = cachedGlobalRaw ? JSON.parse(cachedGlobalRaw) : null;
+      if (cachedGlobal?.providerName && cachedGlobal.providerName !== DEFAULT_PROVIDER) {
+        resolvedProvider = String(cachedGlobal.providerName).trim();
+      } else {
+        const remoteGlobal = await getMealReportGlobalSettings();
+        if (remoteGlobal?.providerName && remoteGlobal.providerName !== DEFAULT_PROVIDER) {
+          resolvedProvider = String(remoteGlobal.providerName).trim();
+        }
+      }
+    } catch {}
+  }
+  if (!resolvedProvider) {
+    resolvedProvider = DEFAULT_PROVIDER;
+  }
+
   const payload = {
     id: config.monthKey,
     monthKey: config.monthKey,
@@ -3032,8 +3111,8 @@ export async function saveMealReportToFirestore(config: MealReportConfig): Promi
     endDate: config.endDate || '',
     defaultUnitPrice: Number(config.defaultUnitPrice) || 9.0,
     unitPrice: Number(config.defaultUnitPrice) || 9.0,
-    contractCompany: config.contractCompany || config.providerName || 'Cantina & Nutrição Escolar',
-    providerName: config.providerName || config.contractCompany || 'Cantina & Nutrição Escolar',
+    contractCompany: resolvedProvider,
+    providerName: resolvedProvider,
     responsibleCoordinator: config.responsibleCoordinator || 'Fernando Veiga',
     coordinatorRole: config.coordinatorRole || 'Coordenação do Integral / DP GAVAR',
     responsibleFinancial: config.responsibleFinancial || 'Departamento Financeiro',
@@ -3046,16 +3125,17 @@ export async function saveMealReportToFirestore(config: MealReportConfig): Promi
 
   try {
     await setDoc(docRef, payload, { merge: true });
-    // Also save global settings to keep settings/mealReport automatically synchronized
-    await saveMealReportGlobalSettings({
-      unitPrice: payload.unitPrice,
-      providerName: payload.providerName,
-      responsibleCoordinator: payload.responsibleCoordinator,
-      coordinatorRole: payload.coordinatorRole,
-      responsibleFinancial: payload.responsibleFinancial,
-      financialRole: payload.financialRole,
-      updatedBy: payload.updatedBy,
-    });
+    if (!options?.skipGlobalSettingsSync && explicitProvider && explicitProvider !== DEFAULT_PROVIDER) {
+      await saveMealReportGlobalSettings({
+        unitPrice: payload.unitPrice,
+        providerName: explicitProvider,
+        responsibleCoordinator: payload.responsibleCoordinator,
+        coordinatorRole: payload.coordinatorRole,
+        responsibleFinancial: payload.responsibleFinancial,
+        financialRole: payload.financialRole,
+        updatedBy: payload.updatedBy,
+      });
+    }
   } catch (error) {
     console.warn('Erro ao salvar mealReports no Firestore, mantendo cópia local:', error);
     handleFirestoreError(error, OperationType.WRITE, `mealReports/${config.monthKey}`);
@@ -3263,7 +3343,7 @@ export async function recalculateAndTriggerConsolidation(
 
     baseReport.entries[date] = updatedEntry;
     saveMealConfig(baseReport);
-    await saveMealReportToFirestore(baseReport);
+    await saveMealReportToFirestore(baseReport, { skipGlobalSettingsSync: true });
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(

@@ -42,13 +42,10 @@ import {
   loadPontoRecords,
   loadHolidays,
   loadSchedules,
-  loadSemanarioPlans,
   loadAttendanceRecords,
 } from '../utils/storageUtils';
-import { loadMealConfig } from '../utils/mealFinanceUtils';
-import { loadAllLocalCookingRecipesForYear } from '../utils/cardapioStorage';
+import { loadMealConfig, buildMonthMealEntries, calculateMealTotals, getRollCallPresencesForDate } from '../utils/mealFinanceUtils';
 import {
-  isRoutineActivity,
   calculateApuracaoAulasEfetivasPrestador,
 } from '../utils/frequenciaUtils';
 import {
@@ -57,11 +54,10 @@ import {
   DIVISOR_MENSAL_PADRAO,
   DURACAO_AULA_PADRAO_MINUTOS,
 } from '../utils/pontoUtils';
-import { isUserInactiveOrDismissed } from '../utils/authUtils';
+import { isUserInactiveOrDismissed, detectCargoCategory } from '../utils/authUtils';
 import {
   calculateFolhaProfessorHorista,
 } from './FolhaService';
-import { isHolidayOrRecess } from '../utils/dateUtils';
 import { broadcastSyncEvent } from './syncService';
 
 const FINANCIAL_COLLECTION = 'studentFinancialProfiles';
@@ -144,21 +140,82 @@ export const AVAILABLE_CUSTOM_CATEGORY_COLORS: Array<{
   { id: 'slate', label: 'Grafite', dotClass: 'bg-slate-500', ...COLOR_THEME_MAP.slate },
 ];
 
-// Categorias sincronizadas automaticamente das abas internas (Livro Ponto, Cardápio/Refeições, Culinária/Oficinas)
+// Categorias padronizadas pré-fixadas no formulário "Lançar Nova Despesa"
+export const STANDARD_MANUAL_EXPENSE_CATEGORIES: Array<{ id: ExpenseCategory; label: string }> = [
+  { id: 'FOLHA_COORDENACAO', label: 'Folha: Coordenação' },
+  { id: 'FOLHA_AUXILIAR_ADI', label: 'Folha: Auxiliar (ADI)' },
+  { id: 'FOLHA_MONITOR', label: 'Folha: Monitor' },
+  { id: 'FOLHA_PROFESSOR_HORISTA', label: 'Folha: Professor Horista' },
+  { id: 'FOLHA_PROFESSOR_PRESTADOR', label: 'Folha: Professor Prestador' },
+  { id: 'FOLHA_NUTRICIONISTA', label: 'Folha: Nutricionista' },
+  { id: 'ALIMENTACAO_REFEICOES', label: 'Refeições (Almoço)' },
+];
+
+// Categorias sincronizadas automaticamente das abas internas (Livro Ponto, Relatório de Refeições)
 export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   FOLHA_COORDENACAO: {
     id: 'FOLHA_COORDENACAO',
-    label: 'Folha Ponto — Coordenação',
+    label: 'Folha: Coordenação',
     shortLabel: 'Folha: Coordenação',
+    bgClass: 'bg-amber-50',
+    textClass: 'text-amber-800',
+    borderClass: 'border-amber-200',
+    isSyncedSystem: true,
+    origemAbaLabel: 'Livro Ponto',
+  },
+  FOLHA_AUXILIAR_ADI: {
+    id: 'FOLHA_AUXILIAR_ADI',
+    label: 'Folha: Auxiliar (ADI)',
+    shortLabel: 'Folha: Auxiliar (ADI)',
     bgClass: 'bg-indigo-50',
     textClass: 'text-indigo-700',
     borderClass: 'border-indigo-200',
     isSyncedSystem: true,
     origemAbaLabel: 'Livro Ponto',
   },
+  FOLHA_MONITOR: {
+    id: 'FOLHA_MONITOR',
+    label: 'Folha: Monitor',
+    shortLabel: 'Folha: Monitor',
+    bgClass: 'bg-sky-50',
+    textClass: 'text-sky-700',
+    borderClass: 'border-sky-200',
+    isSyncedSystem: true,
+    origemAbaLabel: 'Livro Ponto',
+  },
+  FOLHA_PROFESSOR_HORISTA: {
+    id: 'FOLHA_PROFESSOR_HORISTA',
+    label: 'Folha: Professor Horista',
+    shortLabel: 'Folha: Professor Horista',
+    bgClass: 'bg-purple-50',
+    textClass: 'text-purple-700',
+    borderClass: 'border-purple-200',
+    isSyncedSystem: true,
+    origemAbaLabel: 'Livro Ponto',
+  },
+  FOLHA_PROFESSOR_PRESTADOR: {
+    id: 'FOLHA_PROFESSOR_PRESTADOR',
+    label: 'Folha: Professor Prestador',
+    shortLabel: 'Folha: Professor Prestador',
+    bgClass: 'bg-fuchsia-50',
+    textClass: 'text-fuchsia-700',
+    borderClass: 'border-fuchsia-200',
+    isSyncedSystem: true,
+    origemAbaLabel: 'Livro Ponto',
+  },
+  FOLHA_NUTRICIONISTA: {
+    id: 'FOLHA_NUTRICIONISTA',
+    label: 'Folha: Nutricionista',
+    shortLabel: 'Folha: Nutricionista',
+    bgClass: 'bg-teal-50',
+    textClass: 'text-teal-700',
+    borderClass: 'border-teal-200',
+    isSyncedSystem: true,
+    origemAbaLabel: 'Livro Ponto',
+  },
   FOLHA_MONITORIA: {
     id: 'FOLHA_MONITORIA',
-    label: 'Folha Ponto — Monitoria / ADIs',
+    label: 'Folha: Monitoria / ADIs',
     shortLabel: 'Folha: Monitoria',
     bgClass: 'bg-indigo-50',
     textClass: 'text-indigo-700',
@@ -168,7 +225,7 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   FOLHA_PROFESSORES_OFICINAS: {
     id: 'FOLHA_PROFESSORES_OFICINAS',
-    label: 'Folha Ponto — Professores de Oficinas',
+    label: 'Folha: Professores de Oficinas',
     shortLabel: 'Folha: Prof. Oficinas',
     bgClass: 'bg-purple-50',
     textClass: 'text-purple-700',
@@ -178,8 +235,8 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   FOLHA_NUTRICAO: {
     id: 'FOLHA_NUTRICAO',
-    label: 'Folha Ponto — Nutrição',
-    shortLabel: 'Folha: Nutrição',
+    label: 'Folha: Nutricionista',
+    shortLabel: 'Folha: Nutricionista',
     bgClass: 'bg-teal-50',
     textClass: 'text-teal-700',
     borderClass: 'border-teal-200',
@@ -188,7 +245,7 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   FOLHA_APOIO_LIMPEZA: {
     id: 'FOLHA_APOIO_LIMPEZA',
-    label: 'Folha Ponto — Apoio / Limpeza',
+    label: 'Folha: Apoio / Limpeza',
     shortLabel: 'Folha: Apoio / Limpeza',
     bgClass: 'bg-sky-50',
     textClass: 'text-sky-700',
@@ -198,7 +255,7 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   FOLHA_SECRETARIA_ADMIN: {
     id: 'FOLHA_SECRETARIA_ADMIN',
-    label: 'Folha Ponto — Secretaria / Administrativo',
+    label: 'Folha: Secretaria / Administrativo',
     shortLabel: 'Folha: Secretaria / Admin',
     bgClass: 'bg-slate-100',
     textClass: 'text-slate-700',
@@ -208,7 +265,7 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   FOLHA_OUTROS: {
     id: 'FOLHA_OUTROS',
-    label: 'Folha Ponto — Outros Cargos',
+    label: 'Folha: Outros Cargos',
     shortLabel: 'Folha: Outros',
     bgClass: 'bg-indigo-50',
     textClass: 'text-indigo-700',
@@ -228,27 +285,27 @@ export const SYNCED_SYSTEM_CATEGORIES: Record<string, CategoryDisplayStyle> = {
   },
   ALIMENTACAO_REFEICOES: {
     id: 'ALIMENTACAO_REFEICOES',
-    label: 'Refeições (Almoço Escolar)',
+    label: 'Refeições (Almoço)',
     shortLabel: 'Refeições (Almoço)',
     bgClass: 'bg-emerald-50',
     textClass: 'text-emerald-700',
     borderClass: 'border-emerald-200',
     isSyncedSystem: true,
-    origemAbaLabel: 'Cardápio / Refeições',
+    origemAbaLabel: 'Relatório de Refeições (Almoço)',
   },
   ALIMENTACAO_HORTIFRUTI: {
     id: 'ALIMENTACAO_HORTIFRUTI',
-    label: 'Refeições (Almoço Escolar)',
+    label: 'Refeições (Almoço)',
     shortLabel: 'Refeições (Almoço)',
     bgClass: 'bg-emerald-50',
     textClass: 'text-emerald-700',
     borderClass: 'border-emerald-200',
     isSyncedSystem: true,
-    origemAbaLabel: 'Cardápio / Refeições',
+    origemAbaLabel: 'Relatório de Refeições (Almoço)',
   },
   CULINARIA_OFICINAS: {
     id: 'CULINARIA_OFICINAS',
-    label: 'Culinária (Oficinas & Insumos)',
+    label: 'Culinária (Oficinas)',
     shortLabel: 'Culinária (Oficinas)',
     bgClass: 'bg-orange-50',
     textClass: 'text-orange-700',
@@ -545,6 +602,12 @@ export const OBSOLETE_EXPENSE_IDS = new Set([
   'exp_2027_alimentacao_cantina',
   'exp_2026_folha_livro_ponto', // Bloco único antigo substituído pelo fracionamento por cargo
   'exp_2027_folha_livro_ponto', // Bloco único antigo substituído pelo fracionamento por cargo
+  'exp_2026_folha_cat_monitoria', // Substituído pelos cargos específicos Auxiliar (ADI) e Monitor
+  'exp_2027_folha_cat_monitoria',
+  'exp_2026_folha_cat_professores_oficinas', // Substituído por Professor Horista e Professor Prestador
+  'exp_2027_folha_cat_professores_oficinas',
+  'exp_2026_folha_cat_nutricao', // Padronizado para exp_*_folha_cat_nutricionista
+  'exp_2027_folha_cat_nutricao',
   'exp_2026_oficinas_natacao',
   'exp_2027_oficinas_natacao',
   'exp_2026_oficinas_artes',
@@ -559,11 +622,15 @@ export const OBSOLETE_EXPENSE_IDS = new Set([
   'exp_2027_auto_expense_oficinas',
   'exp_2026_auto_expense_natacao',
   'exp_2027_auto_expense_natacao',
+  'exp_2026_culinaria_oficinas', // Despesa fictícia antiga erradicada
+  'exp_2027_culinaria_oficinas', // Despesa fictícia antiga erradicada
+  'sync_culinaria_oficinas_2026',
+  'sync_culinaria_oficinas_2027',
 ]);
 
 /**
- * Identifica EXCLUSIVAMENTE registros obsoletos/duplicados legados de seed antigo ou mock.
- * NUNCA bloqueia despesas manuais, categorias personalizadas, folha fracionada ou Culinária (Oficinas).
+ * Identifica registros obsoletos/fictícios/duplicados legados.
+ * Nunca bloqueia despesas manuais ou categorias personalizadas criadas pelo gestor.
  */
 export function isObsoleteOrDuplicateExpense(exp: Partial<FinancialExpense> | null | undefined): boolean {
   if (!exp) return true;
@@ -580,14 +647,16 @@ export function isObsoleteOrDuplicateExpense(exp: Partial<FinancialExpense> | nu
     return false;
   }
 
-  // Nunca bloquear a nova categoria oficial de Culinária (Oficinas)
+  // Erradica definitivamente a despesa fictícia auto-gerada de Culinária (Oficinas)
   if (
     cat === 'culinaria_oficinas' ||
+    cat === 'oficinas_culinaria' ||
     origem === 'culinaria_oficinas' ||
     origem === 'semanario_culinaria' ||
-    id.includes('culinaria_oficinas')
+    id.includes('culinaria_oficinas') ||
+    syncKey.includes('culinaria_oficinas')
   ) {
-    return false;
+    return true;
   }
 
   // Bloqueia apenas repasses antigos de oficinas extras terceirizadas (natação, balé, judô) e mocks antigos
@@ -989,29 +1058,41 @@ const PAYROLL_GROUP_DEFS: Record<string, StaffPayrollGroupDef> = {
     label: 'Coordenação',
     shortLabel: 'Folha: Coordenação',
   },
+  auxiliar_adi: {
+    key: 'auxiliar_adi',
+    categoria: 'FOLHA_AUXILIAR_ADI',
+    label: 'Auxiliar (ADI)',
+    shortLabel: 'Folha: Auxiliar (ADI)',
+  },
+  monitor: {
+    key: 'monitor',
+    categoria: 'FOLHA_MONITOR',
+    label: 'Monitor',
+    shortLabel: 'Folha: Monitor',
+  },
+  professor_horista: {
+    key: 'professor_horista',
+    categoria: 'FOLHA_PROFESSOR_HORISTA',
+    label: 'Professor Horista',
+    shortLabel: 'Folha: Professor Horista',
+  },
+  professor_prestador: {
+    key: 'professor_prestador',
+    categoria: 'FOLHA_PROFESSOR_PRESTADOR',
+    label: 'Professor Prestador',
+    shortLabel: 'Folha: Professor Prestador',
+  },
+  nutricionista: {
+    key: 'nutricionista',
+    categoria: 'FOLHA_NUTRICIONISTA',
+    label: 'Nutricionista',
+    shortLabel: 'Folha: Nutricionista',
+  },
   secretaria: {
     key: 'secretaria',
     categoria: 'FOLHA_SECRETARIA_ADMIN',
     label: 'Secretaria / Administrativo',
     shortLabel: 'Folha: Secretaria / Admin',
-  },
-  monitoria: {
-    key: 'monitoria',
-    categoria: 'FOLHA_MONITORIA',
-    label: 'Monitoria',
-    shortLabel: 'Folha: Monitoria',
-  },
-  professores_oficinas: {
-    key: 'professores_oficinas',
-    categoria: 'FOLHA_PROFESSORES_OFICINAS',
-    label: 'Professores de Oficinas',
-    shortLabel: 'Folha: Prof. Oficinas',
-  },
-  nutricao: {
-    key: 'nutricao',
-    categoria: 'FOLHA_NUTRICAO',
-    label: 'Nutrição',
-    shortLabel: 'Folha: Nutrição',
   },
   apoio_limpeza: {
     key: 'apoio_limpeza',
@@ -1028,78 +1109,53 @@ const PAYROLL_GROUP_DEFS: Record<string, StaffPayrollGroupDef> = {
 };
 
 /**
- * Classifica o colaborador ativo em seu grupo funcional para fracionamento da folha.
+ * Classifica o colaborador ativo em seu cargo oficial do Livro Ponto / Gestão de Pessoas:
+ * Coordenação, Auxiliar (ADI), Monitor, Professor Horista, Professor Prestador ou Nutricionista.
  */
 export function classifyStaffPayrollGroup(u: UserProfile): StaffPayrollGroupDef {
-  const role = String(u.role || '').toLowerCase();
   const cargo = String(u.cargoLabel || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+
+  const unifiedCargo = detectCargoCategory(u);
 
   if (
     cargo.includes('limpeza') ||
     cargo.includes('servicos gerais') ||
     cargo.includes('zelad') ||
     cargo.includes('porteir') ||
-    cargo.includes('manuten') ||
-    cargo.includes('cozinh') ||
-    cargo.includes('copeir') ||
-    cargo.includes('apoio operacional')
+    cargo.includes('copeir')
   ) {
     return PAYROLL_GROUP_DEFS.apoio_limpeza;
   }
 
   if (
-    cargo.includes('secretar') ||
-    cargo.includes('financeir') ||
-    cargo.includes('recep') ||
-    cargo.includes('tesour') ||
-    cargo.includes('auxiliar administrativo') ||
-    (cargo.includes('admin') && role !== 'coordenador')
+    (cargo.includes('secretar') ||
+      cargo.includes('recep') ||
+      cargo.includes('tesour') ||
+      cargo.includes('auxiliar administrativo')) &&
+    unifiedCargo !== 'coordenador'
   ) {
     return PAYROLL_GROUP_DEFS.secretaria;
   }
 
-  if (role === 'nutricionista' || cargo.includes('nutri') || cargo.includes('lactar')) {
-    return PAYROLL_GROUP_DEFS.nutricao;
+  switch (unifiedCargo) {
+    case 'coordenador':
+      return PAYROLL_GROUP_DEFS.coordenacao;
+    case 'auxiliar_adi':
+      return PAYROLL_GROUP_DEFS.auxiliar_adi;
+    case 'monitor':
+      return PAYROLL_GROUP_DEFS.monitor;
+    case 'professor_horista':
+      return PAYROLL_GROUP_DEFS.professor_horista;
+    case 'professor_prestador':
+      return PAYROLL_GROUP_DEFS.professor_prestador;
+    case 'nutricionista':
+      return PAYROLL_GROUP_DEFS.nutricionista;
+    default:
+      return PAYROLL_GROUP_DEFS.monitor;
   }
-
-  if (role === 'coordenador' || cargo.includes('coordena') || cargo.includes('diret') || cargo.includes('gestor') || cargo.includes('gestao')) {
-    return PAYROLL_GROUP_DEFS.coordenacao;
-  }
-
-  if (
-    u.regimeTrabalho === 'professor_horista' ||
-    u.regimeTrabalho === 'prestador_aula_efetiva' ||
-    role === 'professor' ||
-    cargo.includes('prof') ||
-    cargo.includes('instrutor') ||
-    cargo.includes('docente') ||
-    cargo.includes('oficina') ||
-    cargo.includes('bale') ||
-    cargo.includes('judo') ||
-    cargo.includes('natacao') ||
-    cargo.includes('futebol') ||
-    cargo.includes('flauta') ||
-    cargo.includes('musica')
-  ) {
-    return PAYROLL_GROUP_DEFS.professores_oficinas;
-  }
-
-  if (
-    role === 'auxiliar' ||
-    cargo.includes('monitor') ||
-    cargo.includes('estagi') ||
-    cargo.includes('adi') ||
-    cargo.includes('auxiliar') ||
-    cargo.includes('bercar') ||
-    cargo.includes('recrea')
-  ) {
-    return PAYROLL_GROUP_DEFS.monitoria;
-  }
-
-  return PAYROLL_GROUP_DEFS.outros;
 }
 
 function getMonthNumberFromCompetencia(
@@ -1150,62 +1206,6 @@ function getMonthNumberFromCompetencia(
   return 8; // Agosto como referência escolar padrão para outros exercícios sem lançamentos
 }
 
-function getSchoolDaysInMonth(year: number, month: number, holidays: HolidayItem[]): string[] {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const schoolDays: string[] = [];
-  const padM = String(month).padStart(2, '0');
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${padM}-${String(d).padStart(2, '0')}`;
-    const dt = new Date(year, month - 1, d);
-    const dow = dt.getDay();
-    if (dow === 0 || dow === 6) continue;
-    if (isHolidayOrRecess(dateStr, holidays)) continue;
-    schoolDays.push(dateStr);
-  }
-  return schoolDays;
-}
-
-function estimateRecipeIngredientCost(recipe: CookingRecipe): number {
-  if (recipe.custoInsumos !== undefined && recipe.custoInsumos !== null && Number(recipe.custoInsumos) > 0) {
-    return Math.round(Number(recipe.custoInsumos) * 100) / 100;
-  }
-  const ingredientsCount = Array.isArray(recipe.ingredients) ? recipe.ingredients.length : 0;
-  // Estimativa transparente baseada nos insumos da receita (R$ 8,50 por item de ingrediente quando custo explícito não foi preenchido)
-  const baseEstimate = Math.max(1, ingredientsCount) * 8.5;
-  return Math.round(baseEstimate * 100) / 100;
-}
-
-function isCulinaryPlan(plan: SemanarioPlan): boolean {
-  const cat = String(plan.category || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  const title = String(plan.title || plan.nome || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  return (
-    cat.includes('culinari') ||
-    cat.includes('gastronomi') ||
-    cat.includes('cozinha') ||
-    title.includes('oficina de culinari') ||
-    title.includes('culinaria')
-  );
-}
-
-function estimateSemanarioCulinaryCost(plan: SemanarioPlan): number {
-  if (plan.custoInsumos !== undefined && plan.custoInsumos !== null && Number(plan.custoInsumos) > 0) {
-    return Math.round(Number(plan.custoInsumos) * 100) / 100;
-  }
-  const materialsText = (plan.materials || '').trim();
-  if (!materialsText) return 35.0; // Custo base mínimo de oficina prática registrada no Semanário
-  const items = materialsText
-    .split(/[,;\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return Math.round(Math.max(1, items.length) * 12.0 * 100) / 100;
-}
-
 export interface ModuleSyncContext {
   anoLetivo: number;
   selectedMonth?: number | 'ALL';
@@ -1251,11 +1251,20 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
   const endDate = `${monthKey}-${String(daysInMonth).padStart(2, '0')}`;
   const monthLabel = MONTH_NAMES_DRE[targetMonth - 1]?.full || padM;
 
-  // Filtra apenas colaboradores ATIVOS
+  // Filtra colaboradores ATIVOS (e ignora apenas admin técnico sem dados financeiros/fechamento)
   const activeStaff = users.filter((u) => {
     if (!u || !u.id) return false;
     if (isUserInactiveOrDismissed(u)) return false;
-    if (String(u.role).toLowerCase() === 'admin') return false;
+    const isTechnicalAdmin = String(u.role).toLowerCase() === 'admin';
+    if (isTechnicalAdmin) {
+      const hasSalaryOrAid =
+        (u.baseSalary !== undefined && u.baseSalary !== null && Number(u.baseSalary) > 0) ||
+        (u.ajudaDeCusto !== undefined && u.ajudaDeCusto !== null && Number(u.ajudaDeCusto) > 0);
+      const hasMonthClosing = pontoClosings.some(
+        (c) => c.userId === u.id && c.monthKey === monthKey && Number(c.netTotal) > 0
+      );
+      if (!hasSalaryOrAid && !hasMonthClosing) return false;
+    }
     return true;
   });
 
@@ -1269,42 +1278,31 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
   >();
 
   activeStaff.forEach((u) => {
-    const userClosing =
-      pontoClosings.find((c) => c.userId === u.id && c.monthKey === monthKey) ||
-      pontoClosings.find((c) => c.userId === u.id && Number(c.year) === anoLetivo);
-
-    // Se coordenador administrador possui baseSalary === 0 explícito e nenhum fechamento pago, não gera lançamento R$ 0
-    const explicitZeroSalary = u.baseSalary !== undefined && u.baseSalary !== null && Number(u.baseSalary) === 0;
-    if (
-      String(u.role).toLowerCase() === 'coordenador' &&
-      explicitZeroSalary &&
-      (!userClosing || Number(userClosing.netTotal) <= 0)
-    ) {
-      return;
-    }
+    // Busca fechamento estritamente do mês selecionado (sem herdar fechamento de outros meses)
+    const userClosing = pontoClosings.find((c) => c.userId === u.id && c.monthKey === monthKey) || null;
+    const isMonthClosed = Boolean(userClosing?.isClosed);
 
     let netCost = 0;
 
-    if (userClosing && userClosing.isClosed && Number(userClosing.netTotal) > 0) {
+    if (isMonthClosed && userClosing) {
       netCost = Number(userClosing.netTotal) || 0;
     } else {
       const userMonthRecords = pontoRecords.filter(
         (r) => r.userId === u.id && r.date && r.date.startsWith(monthKey)
       );
-      const regime = userClosing?.regimeTrabalho || u.regimeTrabalho || 'mensalista';
+      // Espelha 100% os Dados do Contribuinte / Dados Contratuais do Livro Ponto
+      const regime = u.regimeTrabalho || 'mensalista';
       const baseSalary =
-        userClosing?.baseSalary !== undefined && userClosing.baseSalary !== null
-          ? Number(userClosing.baseSalary)
-          : u.baseSalary !== undefined && u.baseSalary !== null
-          ? Number(u.baseSalary)
-          : 1200;
+        u.baseSalary !== undefined && u.baseSalary !== null ? Number(u.baseSalary) : 1200;
       const ajudaDeCusto =
-        userClosing?.ajudaDeCusto !== undefined && userClosing.ajudaDeCusto !== null
-          ? Number(userClosing.ajudaDeCusto)
-          : Number(u.ajudaDeCusto) || 0;
-      const divisorHours = userClosing?.divisorHours || u.contractDivisorHours || DIVISOR_MENSAL_PADRAO;
-      const duracaoAulaMinutos = userClosing?.duracaoAulaMinutos || u.duracaoAulaMinutos || DURACAO_AULA_PADRAO_MINUTOS;
-      const contractSchedule = userClosing?.contractSchedule || u.contractSchedule || '11:40 - 17:40';
+        u.ajudaDeCusto !== undefined && u.ajudaDeCusto !== null
+          ? Math.max(0, Number(u.ajudaDeCusto))
+          : 0;
+      const divisorHours = u.contractDivisorHours || DIVISOR_MENSAL_PADRAO;
+      const duracaoAulaMinutos = u.duracaoAulaMinutos || DURACAO_AULA_PADRAO_MINUTOS;
+      const contractSchedule = u.contractSchedule || '11:40 - 17:40';
+      const valorHoraAula =
+        u.valorHoraAula !== undefined && u.valorHoraAula !== null ? Number(u.valorHoraAula) : undefined;
       const manualAddition = userClosing?.manualAddition || 0;
       const manualDiscount = userClosing?.manualDiscount || 0;
 
@@ -1334,11 +1332,12 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
           year: anoLetivo,
           month: targetMonth,
           regimeTrabalho: 'professor_horista',
-          valorHoraAula: u.valorHoraAula,
+          valorHoraAula,
           duracaoAulaMinutos,
           customFolhaHorista: folhaHorista,
           baseSalary,
           divisorHours,
+          divisorDays: 30,
           ajudaDeCusto,
           contractDailyHours: u.contractDailyHours,
           contractDailyMinutes: u.contractDailyMinutes,
@@ -1369,12 +1368,13 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
           holidays,
           year: anoLetivo,
           month: targetMonth,
-          regimeTrabalho: 'professor_horista',
-          valorHoraAula: u.valorHoraAula,
+          regimeTrabalho: 'prestador_aula_efetiva',
+          valorHoraAula,
           duracaoAulaMinutos,
           customTotalAulas: apuracao.totalAulasDadas,
           baseSalary,
           divisorHours,
+          divisorDays: 30,
           ajudaDeCusto,
           contractDailyHours: u.contractDailyHours,
           contractDailyMinutes: u.contractDailyMinutes,
@@ -1394,6 +1394,7 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
           regimeTrabalho: 'mensalista',
           baseSalary,
           divisorHours,
+          divisorDays: 30,
           ajudaDeCusto,
           contractDailyHours: u.contractDailyHours,
           contractDailyMinutes: u.contractDailyMinutes,
@@ -1424,7 +1425,17 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
   const dueDate = `${monthKey}-05`;
 
   const result: FinancialExpense[] = [];
-  const order = ['coordenacao', 'monitoria', 'professores_oficinas', 'nutricao', 'secretaria', 'apoio_limpeza', 'outros'];
+  const order = [
+    'coordenacao',
+    'auxiliar_adi',
+    'monitor',
+    'professor_horista',
+    'professor_prestador',
+    'nutricionista',
+    'secretaria',
+    'apoio_limpeza',
+    'outros',
+  ];
 
   order.forEach((groupKey) => {
     const entry = groupsMap.get(groupKey);
@@ -1442,7 +1453,7 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
       categoria: entry.def.categoria,
       categoriaLabel: entry.def.shortLabel,
       subcategoriaCargo: entry.def.label,
-      descricao: `Folha ${entry.def.label} (${count} ${count === 1 ? 'colaborador ativo' : 'colaboradores ativos'})`,
+      descricao: `Folha: ${entry.def.label} (${count} ${count === 1 ? 'colaborador ativo' : 'colaboradores ativos'})`,
       valor: entry.subtotal,
       dataVencimento: dueDate,
       dataPagamento: dueDate,
@@ -1450,7 +1461,7 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
       formaPagamento: 'Transferência Bancária (Folha)',
       fornecedorOuBeneficiario: `Equipe ${entry.def.label} — Livro Ponto`,
       fornecedor: `Equipe ${entry.def.label} — Livro Ponto`,
-      observacoes: `Auto-Sync Livro Ponto (${monthLabel}/${anoLetivo}): ${namesPreview}.`,
+      observacoes: `Auto-Sync Livro Ponto • Dados do Contribuinte (${monthLabel}/${anoLetivo}): ${namesPreview}.`,
       createdAt: nowIso,
       updatedAt: nowIso,
       isAutoGenerated: true,
@@ -1465,8 +1476,20 @@ export function extractPayrollExpensesByRoleCategory(ctx: ModuleSyncContext): Fi
 }
 
 /**
- * Extrai e sincroniza dinamicamente o custo real de Refeições (Almoço) com base no módulo
- * Cardápio & Nutrição e no censo de alunos ativos da Rotina do ano letivo (227 ativos em 2026).
+ * Lê as configurações globais de refeição com fallback para cache local.
+ */
+function resolveMealGlobalSettings(ctx: ModuleSyncContext): MealReportGlobalSettings | null {
+  if (ctx.mealGlobalSettings) return ctx.mealGlobalSettings;
+  try {
+    const raw = localStorage.getItem('crescer_meal_global_settings');
+    if (raw) return JSON.parse(raw) as MealReportGlobalSettings;
+  } catch {}
+  return null;
+}
+
+/**
+ * Extrai e sincroniza dinamicamente o custo real de Refeições (Almoço) puxando exatamente
+ * a apuração do Relatório Financeiro de Refeições (Almoço) do mês selecionado.
  */
 export function extractMealExpense(ctx: ModuleSyncContext): FinancialExpense {
   const { anoLetivo } = ctx;
@@ -1475,6 +1498,8 @@ export function extractMealExpense(ctx: ModuleSyncContext): FinancialExpense {
   const pontoClosings = ctx.pontoClosings || [];
   const pontoRecords = ctx.pontoRecords || [];
   const mealReports = ctx.mealReports || [];
+  const attendanceRecords =
+    ctx.attendanceRecords && ctx.attendanceRecords.length > 0 ? ctx.attendanceRecords : loadAttendanceRecords();
 
   const targetMonth = getMonthNumberFromCompetencia(
     anoLetivo,
@@ -1487,71 +1512,86 @@ export function extractMealExpense(ctx: ModuleSyncContext): FinancialExpense {
   const monthKey = `${anoLetivo}-${padM}`;
   const monthLabel = MONTH_NAMES_DRE[targetMonth - 1]?.full || padM;
 
-  // Censo estritamente real de alunos ATIVOS da Rotina no ano letivo (sem fallback antigo de 228!)
-  const activeStudents = students.filter(
-    (s) =>
-      Number(s.anoLetivo || 2026) === Number(anoLetivo) &&
-      s.status !== 'inativo' &&
-      s.status !== 'cancelado' &&
-      s.statusMatricula !== 'inativo' &&
-      s.statusMatricula !== 'cancelado'
-  );
+  // Config estrita do mês selecionado no Relatório Financeiro de Refeições (Almoço)
+  const remoteMealReport = mealReports.find((r) => r.monthKey === monthKey) || null;
+  const localMealConfig = loadMealConfig(monthKey);
+  const effectiveMealConfig: MealReportConfig | null =
+    remoteMealReport && localMealConfig
+      ? !remoteMealReport.updatedAt || (localMealConfig.updatedAt && localMealConfig.updatedAt > remoteMealReport.updatedAt)
+        ? localMealConfig
+        : remoteMealReport
+      : remoteMealReport || localMealConfig;
 
-  const rotinaStudents = activeStudents.filter(
-    (s) =>
-      !s.activities ||
-      s.activities.length === 0 ||
-      s.activities.some((a) => isRoutineActivity(a) || a.toLowerCase().includes('rotina')) ||
-      s.tipoContrato !== 'avulso'
-  );
-
-  const totalAlunosRotina = rotinaStudents.length;
-
-  // Configurações de refeição do Firestore / localStorage
-  const remoteMealReport =
-    mealReports.find((r) => r.monthKey === monthKey) ||
-    mealReports.find((r) => Number(r.year) === anoLetivo);
-  const localMealConfig = loadMealConfig(monthKey) || loadMealConfig(`${anoLetivo}-08`) || loadMealConfig(`${anoLetivo}-09`);
-  const effectiveMealConfig = remoteMealReport || localMealConfig;
-
-  const globalSettings = ctx.mealGlobalSettings;
+  const globalSettings = resolveMealGlobalSettings(ctx);
   const unitPrice =
-    globalSettings?.unitPrice && globalSettings.unitPrice > 0
+    remoteMealReport && remoteMealReport.defaultUnitPrice !== undefined
+      ? Number(remoteMealReport.defaultUnitPrice)
+      : globalSettings?.unitPrice !== undefined
       ? Number(globalSettings.unitPrice)
-      : effectiveMealConfig?.defaultUnitPrice && effectiveMealConfig.defaultUnitPrice > 0
+      : effectiveMealConfig?.defaultUnitPrice !== undefined
       ? Number(effectiveMealConfig.defaultUnitPrice)
       : 9.0;
 
-  const schoolDays = getSchoolDaysInMonth(anoLetivo, targetMonth, holidays);
-  const schoolDaysCount = schoolDays.length > 0 ? schoolDays.length : 22;
+  // Sanitiza entradas salvas exatamente como o Relatório Financeiro de Refeições (MealReportModal)
+  const sanitizedEntries: Record<string, any> = {};
+  if (effectiveMealConfig?.entries) {
+    Object.entries(effectiveMealConfig.entries).forEach(([dateKey, val]) => {
+      if (!val) return;
+      const rawCount = val.editableStudents !== undefined ? val.editableStudents : val.manualCount;
+      const hasCount = rawCount !== undefined && rawCount !== null;
+      let count = hasCount ? Number(rawCount) : undefined;
+      const rollCallCount = getRollCallPresencesForDate(dateKey, attendanceRecords);
+      if ((count === undefined || count === 0) && rollCallCount > 0) {
+        count = rollCallCount;
+      }
+      const isExplicitOverride =
+        count !== undefined && count > 0 && rollCallCount > 0
+          ? count !== rollCallCount && Boolean(val.isManualOverride)
+          : Boolean(val.isManualOverride);
 
-  // Calcula soma mensal respeitando overrides diários manuais do Cardápio/Refeições quando houver,
-  // e usando o censo real de alunos ativos da Rotina para os demais dias letivos.
-  let totalMealsInMonth = 0;
-  let manualOverridesUsed = 0;
-  const entries = effectiveMealConfig?.entries || {};
-
-  schoolDays.forEach((dateStr) => {
-    const entry = entries[dateStr];
-    if (entry && entry.isManualOverride && (entry.manualCount !== undefined || entry.editableStudents !== undefined)) {
-      const qty = Math.max(0, Number(entry.manualCount ?? entry.editableStudents ?? totalAlunosRotina));
-      totalMealsInMonth += qty;
-      manualOverridesUsed++;
-    } else {
-      totalMealsInMonth += totalAlunosRotina;
-    }
-  });
-
-  if (schoolDays.length === 0) {
-    totalMealsInMonth = totalAlunosRotina * schoolDaysCount;
+      sanitizedEntries[dateKey] = {
+        ...val,
+        manualCount: count,
+        editableStudents: count,
+        isManualOverride: isExplicitOverride,
+      };
+    });
   }
 
-  const totalMealCost = Math.round(totalMealsInMonth * unitPrice * 100) / 100;
-  const providerName =
-    globalSettings?.providerName ||
-    effectiveMealConfig?.contractCompany ||
-    effectiveMealConfig?.providerName ||
-    'Cantina & Nutrição Escolar';
+  const mealConfigForCalc: MealReportConfig | null = effectiveMealConfig
+    ? { ...effectiveMealConfig, defaultUnitPrice: unitPrice, entries: sanitizedEntries }
+    : null;
+
+  const mealEntries = buildMonthMealEntries(
+    anoLetivo,
+    targetMonth,
+    students,
+    attendanceRecords,
+    holidays,
+    mealConfigForCalc,
+    unitPrice
+  );
+  const mealTotals = calculateMealTotals(mealEntries);
+  const totalMealCost = Math.round(mealTotals.totalAmount * 100) / 100;
+
+  const DEFAULT_MEAL_PROVIDER = 'Cantina & Nutrição Escolar';
+  const pickCustomProvider = (...candidates: Array<string | undefined | null>): string => {
+    for (const c of candidates) {
+      const trimmed = typeof c === 'string' ? c.trim() : '';
+      if (trimmed && trimmed !== DEFAULT_MEAL_PROVIDER) {
+        return trimmed;
+      }
+    }
+    return DEFAULT_MEAL_PROVIDER;
+  };
+
+  const providerName = pickCustomProvider(
+    remoteMealReport?.providerName,
+    remoteMealReport?.contractCompany,
+    globalSettings?.providerName,
+    effectiveMealConfig?.providerName,
+    effectiveMealConfig?.contractCompany
+  );
 
   const nowIso = new Date().toISOString();
   const dueDate = `${monthKey}-10`;
@@ -1561,7 +1601,7 @@ export function extractMealExpense(ctx: ModuleSyncContext): FinancialExpense {
     anoLetivo,
     categoria: 'ALIMENTACAO_REFEICOES',
     categoriaLabel: 'Refeições (Almoço)',
-    descricao: `Refeições — Almoço Escolar (${totalAlunosRotina} alunos ativos)`,
+    descricao: `Refeições (Almoço) — ${mealTotals.totalMeals} refeições (${monthLabel}/${anoLetivo})`,
     valor: totalMealCost,
     dataVencimento: dueDate,
     dataPagamento: dueDate,
@@ -1569,125 +1609,28 @@ export function extractMealExpense(ctx: ModuleSyncContext): FinancialExpense {
     formaPagamento: 'Boleto Bancário',
     fornecedorOuBeneficiario: providerName,
     fornecedor: providerName,
-    observacoes: `Auto-Sync Cardápio & Nutrição (${monthLabel}/${anoLetivo}): ${totalAlunosRotina} alunos ativos da Rotina × ${schoolDaysCount} dias letivos × ${formatCurrencyBR(unitPrice)}/refeição${manualOverridesUsed > 0 ? ` (${manualOverridesUsed} dia(s) com ajuste manual)` : ''}.`,
+    observacoes: `Auto-Sync Relatório Financeiro de Refeições (Almoço) • ${monthLabel}/${anoLetivo}: ${mealTotals.totalMeals} refeições em ${mealTotals.attendedDaysCount}/${mealTotals.schoolDaysCount} dia(s) letivo(s) • Média ${mealTotals.averageMealsPerDay} alunos/dia • Unitário padrão ${formatCurrencyBR(unitPrice)}.`,
     createdAt: nowIso,
     updatedAt: nowIso,
     isAutoGenerated: true,
     origemModulo: 'CARDAPIO_REFEICOES',
-    origemAbaLabel: 'Cardápio / Refeições',
+    origemAbaLabel: 'Relatório de Refeições (Almoço)',
     autoSyncKey: `sync_refeicoes_cardapio_${anoLetivo}`,
     competenciaMonthKey: monthKey,
   };
 }
 
 /**
- * Extrai e sincroniza automaticamente os custos das Oficinas de Culinária
- * (Receitas/Ingredientes do módulo Cardápio & Culinária + aulas práticas do Semanário).
+ * Despesa fictícia de Culinária (Oficinas) removida definitivamente (retorna sempre null).
  */
-export function extractCulinaryWorkshopExpense(ctx: ModuleSyncContext): FinancialExpense | null {
-  const { anoLetivo } = ctx;
-  const pontoClosings = ctx.pontoClosings || [];
-  const pontoRecords = ctx.pontoRecords || [];
-  const mealReports = ctx.mealReports || [];
-
-  const targetMonth = getMonthNumberFromCompetencia(
-    anoLetivo,
-    ctx.selectedMonth ?? 'ALL',
-    pontoClosings,
-    pontoRecords,
-    mealReports
-  );
-  const padM = String(targetMonth).padStart(2, '0');
-  const monthKey = `${anoLetivo}-${padM}`;
-  const monthLabel = MONTH_NAMES_DRE[targetMonth - 1]?.full || padM;
-
-  // 1. Receitas do módulo Cardápio & Culinária
-  const localRecipes = loadAllLocalCookingRecipesForYear(anoLetivo);
-  const remoteRecipes = ctx.cookingRecipes && ctx.cookingRecipes.length > 0 ? ctx.cookingRecipes : [];
-  const mergedRecipesMap = new Map<string, CookingRecipe>();
-  localRecipes.forEach((r) => mergedRecipesMap.set(r.id, r));
-  remoteRecipes.forEach((r) => mergedRecipesMap.set(r.id, r));
-  const allYearRecipes = Array.from(mergedRecipesMap.values());
-
-  // Quando mês específico selecionado e existem receitas nesse mês, filtra para o mês;
-  // caso contrário, considera as receitas cadastradas no mês mais recente/ativo do exercício.
-  const monthRecipes = allYearRecipes.filter((r) => (r.monthKey || '').startsWith(monthKey));
-  const effectiveRecipes = monthRecipes.length > 0 ? monthRecipes : allYearRecipes;
-
-  let recipesTotalCost = 0;
-  let totalIngredients = 0;
-  effectiveRecipes.forEach((rec) => {
-    recipesTotalCost += estimateRecipeIngredientCost(rec);
-    totalIngredients += Array.isArray(rec.ingredients) ? rec.ingredients.length : 0;
-  });
-
-  // 2. Planos de Culinária registrados no Semanário / Oficinas
-  const allSemanario =
-    ctx.semanarioPlans && ctx.semanarioPlans.length > 0 ? ctx.semanarioPlans : loadSemanarioPlans();
-
-  const culinaryPlansYear = allSemanario.filter(
-    (p) => Number(p.year || (p.date || '').slice(0, 4) || anoLetivo) === anoLetivo && isCulinaryPlan(p)
-  );
-  const culinaryPlansMonth = culinaryPlansYear.filter((p) => (p.date || '').startsWith(monthKey));
-  const effectiveCulinaryPlans = culinaryPlansMonth.length > 0 ? culinaryPlansMonth : culinaryPlansYear;
-
-  let semanarioTotalCost = 0;
-  effectiveCulinaryPlans.forEach((plan) => {
-    // Soma explicitamente custos ou materiais lançados no Semanário de Culinária
-    if (plan.custoInsumos && Number(plan.custoInsumos) > 0) {
-      semanarioTotalCost += Number(plan.custoInsumos);
-    } else if (plan.materials && plan.materials.trim().length > 0) {
-      semanarioTotalCost += estimateSemanarioCulinaryCost(plan);
-    } else if (effectiveRecipes.length === 0) {
-      // Caso não haja receitas cadastradas no Cardápio, estima pela aula do Semanário
-      semanarioTotalCost += estimateSemanarioCulinaryCost(plan);
-    }
-  });
-
-  const totalCulinaryCost = Math.round((recipesTotalCost + semanarioTotalCost) * 100) / 100;
-  if (totalCulinaryCost <= 0 && effectiveRecipes.length === 0 && effectiveCulinaryPlans.length === 0) {
-    return null;
-  }
-
-  const nowIso = new Date().toISOString();
-  const dueDate = `${monthKey}-15`;
-
-  const sourceParts: string[] = [];
-  if (effectiveRecipes.length > 0) {
-    sourceParts.push(`${effectiveRecipes.length} receita(s) (${totalIngredients} ingredientes) no Cardápio`);
-  }
-  if (effectiveCulinaryPlans.length > 0) {
-    sourceParts.push(`${effectiveCulinaryPlans.length} oficina(s) no Semanário`);
-  }
-
-  return {
-    id: `exp_${anoLetivo}_culinaria_oficinas`,
-    anoLetivo,
-    categoria: 'CULINARIA_OFICINAS',
-    categoriaLabel: 'Culinária (Oficinas)',
-    descricao: `Culinária — Oficinas & Insumos (${effectiveRecipes.length || effectiveCulinaryPlans.length} prática(s))`,
-    valor: totalCulinaryCost,
-    dataVencimento: dueDate,
-    status: 'PENDENTE',
-    formaPagamento: 'Cartão Corporativo',
-    fornecedorOuBeneficiario: 'Insumos & Cozinha Pedagógica (Cardápio / Semanário)',
-    fornecedor: 'Insumos & Cozinha Pedagógica (Cardápio / Semanário)',
-    observacoes: `Auto-Sync Culinária (${monthLabel}/${anoLetivo}): ${sourceParts.join(' + ')}.`,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    isAutoGenerated: true,
-    origemModulo: 'CULINARIA_OFICINAS',
-    origemAbaLabel: 'Culinária / Oficinas',
-    autoSyncKey: `sync_culinaria_oficinas_${anoLetivo}`,
-    competenciaMonthKey: monthKey,
-  };
+export function extractCulinaryWorkshopExpense(_ctx: ModuleSyncContext): FinancialExpense | null {
+  return null;
 }
 
 /**
- * Calcula TODAS as despesas operacionais automáticas a partir dos módulos reais:
+ * Calcula TODAS as despesas operacionais automáticas reais a partir dos módulos:
  * 1. Livro Ponto fracionado por Cargo / Categoria
- * 2. Refeições (Almoço) com base no Cardápio & Nutrição e censo real da Rotina
- * 3. Culinária (Oficinas) com base nas receitas e aulas práticas de Culinária
+ * 2. Refeições (Almoço) com base no Relatório Financeiro de Refeições (Almoço)
  */
 export function calculateModuleExpenses(
   anoLetivo: number,
@@ -1704,13 +1647,8 @@ export function calculateModuleExpenses(
 
   const payrollExpenses = extractPayrollExpensesByRoleCategory(ctx);
   const mealExpense = extractMealExpense(ctx);
-  const culinaryExpense = extractCulinaryWorkshopExpense(ctx);
 
-  const combined: FinancialExpense[] = [...payrollExpenses, mealExpense];
-  if (culinaryExpense) {
-    combined.push(culinaryExpense);
-  }
-  return combined;
+  return [...payrollExpenses, mealExpense];
 }
 
 // ---------------------------------------------------------------------------
@@ -1720,6 +1658,7 @@ export function calculateModuleExpenses(
 /**
  * Mescla uma despesa auto-gerada com a cópia existente no Firestore/LocalStorage:
  * - O `valor` e `observacoes` auto-calculados refletem sempre a fonte real em tempo real;
+ * - Em Refeições (Almoço), o nome da cantina/prestador salvo no Relatório de Refeições prevalece quando personalizado;
  * - As edições administrativas do gestor (`status`, `dataPagamento`, `formaPagamento`, `dataVencimento`, `fornecedor`)
  *   são preservadas.
  */
@@ -1735,12 +1674,18 @@ export function mergeAutoSyncedExpense(
       ? existing.dataPagamento || autoGenerated.dataPagamento || new Date().toISOString().split('T')[0]
       : undefined;
 
-  const fornecedorVal =
+  const autoProvider = (autoGenerated.fornecedorOuBeneficiario || autoGenerated.fornecedor || '').trim();
+  const existingProvider =
     (existing.fornecedorOuBeneficiario && existing.fornecedorOuBeneficiario.trim()) ||
     (existing.fornecedor && existing.fornecedor.trim()) ||
-    autoGenerated.fornecedorOuBeneficiario ||
-    autoGenerated.fornecedor ||
     '';
+
+  const fornecedorVal =
+    autoGenerated.origemModulo === 'CARDAPIO_REFEICOES' &&
+    autoProvider &&
+    autoProvider !== 'Cantina & Nutrição Escolar'
+      ? autoProvider
+      : existingProvider || autoProvider || '';
 
   const sameMonth =
     !existing.competenciaMonthKey ||
@@ -1865,14 +1810,19 @@ export async function forceRewriteSanitizedExpensesToFirestore(
         const merged = mergeAutoSyncedExpense(autoExp, existing);
         mergedMap.set(autoExp.id, merged);
 
-        // Só grava no Firestore se for novo ou se valor/observacoes/descricao mudaram
+        // Só grava no Firestore se for novo ou se valor/observacoes/descricao/competencia mudaram
         const changed =
           !existing ||
           Math.abs((Number(existing.valor) || 0) - merged.valor) > 0.009 ||
           existing.observacoes !== merged.observacoes ||
           existing.descricao !== merged.descricao ||
           existing.categoria !== merged.categoria ||
-          existing.origemAbaLabel !== merged.origemAbaLabel;
+          existing.categoriaLabel !== merged.categoriaLabel ||
+          existing.origemAbaLabel !== merged.origemAbaLabel ||
+          existing.competenciaMonthKey !== merged.competenciaMonthKey ||
+          existing.dataVencimento !== merged.dataVencimento ||
+          (existing.fornecedorOuBeneficiario || '') !== (merged.fornecedorOuBeneficiario || '') ||
+          (existing.fornecedor || '') !== (merged.fornecedor || '');
 
         if (changed) {
           await setDoc(doc(db, EXPENSES_COLLECTION, merged.id), merged, { merge: true }).catch(() => {});

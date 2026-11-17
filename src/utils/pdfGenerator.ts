@@ -6316,7 +6316,7 @@ export function generateFinancialReportPDF({
   doc.setFontSize(5.8);
   doc.setTextColor(153, 27, 27);
   doc.text(
-    `Folha: ${formatCurrencyBR(metrics.custoFolhaReal || 0)} | Refeições: ${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)} | Culin./Outras: ${formatCurrencyBR((metrics.custoCulinariaReal || 0) + (metrics.custoOutrasCategoriasReal || 0))}`,
+    `Folha: ${formatCurrencyBR(metrics.custoFolhaReal || 0)} | Refeições: ${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)} | Outras: ${formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}`,
     card2X + 4,
     startY + 15
   );
@@ -6686,7 +6686,7 @@ export function generateDREMonthlyReportPDF({
       `Ano Letivo: ${schoolYear}`,
       targetMonth ? `Competência: ${targetMonth.monthFullName}` : `Regime: Competência Mensal Contratual`,
       `Base Ativa: ${profilesCount > 0 ? `${profilesCount} Contratos` : 'Base Integrada'}`,
-      `Integração: Livro Ponto + Cardápio + Culinária + Personalizadas`,
+      `Integração: Livro Ponto + Cardápio + Personalizadas`,
     ],
     'landscape'
   );
@@ -6969,7 +6969,7 @@ export function generateDREMonthlyReportPDF({
     notesY + 8
   );
   doc.text(
-    `2. Custos integrados em tempo real: Folha Ponto (${formatCurrencyBR(metrics.custoFolhaReal || 0)}), Refeições Cardápio (${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}), Culinária Oficinas (${formatCurrencyBR(metrics.custoCulinariaReal || 0)}) e Categorias Personalizadas (${formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}). Total mensal: ${formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}.`,
+    `2. Custos integrados em tempo real: Folha Ponto (${formatCurrencyBR(metrics.custoFolhaReal || 0)}), Refeições Cardápio (${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}) e Categorias Personalizadas (${formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}). Total mensal: ${formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}.`,
     leftX + 4,
     notesY + 11.5
   );

@@ -782,15 +782,46 @@ export default function App() {
     };
   }, [shouldSyncPonto]);
 
+  const pendingSemanarioWritesRef = useRef<Map<string, SemanarioPlan>>(new Map());
+  const pendingSemanarioDeletesRef = useRef<Set<string>>(new Set());
+
   // 9. Semanário Pedagógico em Tempo Real
   useEffect(() => {
     if (!shouldSyncSemanario) return;
 
     const unsubSemanario = subscribeSemanarioPlans((fsPlans) => {
-      if (fsPlans && fsPlans.length > 0) {
-        const cleanPlans = deduplicateSemanarioPlans(fsPlans);
-        setSemanarioPlans(cleanPlans);
-        saveSemanarioPlans(cleanPlans);
+      const fsFiltered = (fsPlans || []).filter(
+        (p) => p && !pendingSemanarioDeletesRef.current.has(p.id)
+      );
+
+      // Limpa da lista de exclusões pendentes os IDs que já sumiram do Firestore
+      const fsIdMap = new Map(fsFiltered.map((p) => [p.id, p]));
+      pendingSemanarioDeletesRef.current.forEach((delId) => {
+        if (!fsPlans?.some((p) => p.id === delId)) {
+          pendingSemanarioDeletesRef.current.delete(delId);
+        }
+      });
+
+      // Preserva gravações locais recentes ainda em sincronização para evitar sumiço entre snapshots
+      const stillPendingWrites: SemanarioPlan[] = [];
+      pendingSemanarioWritesRef.current.forEach((pendingPlan, id) => {
+        const remote = fsIdMap.get(id);
+        const pendingTime = pendingPlan.updatedAt ? new Date(pendingPlan.updatedAt).getTime() : 0;
+        const remoteTime = remote?.updatedAt ? new Date(remote.updatedAt).getTime() : 0;
+        if (remote && remoteTime >= pendingTime) {
+          pendingSemanarioWritesRef.current.delete(id);
+        } else {
+          stillPendingWrites.push(pendingPlan);
+        }
+      });
+
+      if (fsFiltered.length > 0 || stillPendingWrites.length > 0) {
+        const merged =
+          stillPendingWrites.length > 0
+            ? upsertSemanarioPlans(fsFiltered, stillPendingWrites)
+            : deduplicateSemanarioPlans(fsFiltered);
+        setSemanarioPlans(merged);
+        saveSemanarioPlans(merged);
       } else {
         const localPlans = loadSemanarioPlans();
         if (localPlans.length > 0) {
@@ -1854,32 +1885,57 @@ export default function App() {
 
   // Semanário Pedagogical Planning Handlers
   const handleSaveSemanarioPlan = useCallback((plan: SemanarioPlan) => {
+    const stampedPlan: SemanarioPlan = {
+      ...plan,
+      updatedAt: plan.updatedAt || new Date().toISOString(),
+    };
+    pendingSemanarioDeletesRef.current.delete(stampedPlan.id);
+    pendingSemanarioWritesRef.current.set(stampedPlan.id, stampedPlan);
+
     setSemanarioPlans((prev) => {
-      const next = upsertSemanarioPlans(prev, [plan]);
+      const next = upsertSemanarioPlans(prev, [stampedPlan]);
       saveSemanarioPlans(next);
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
-    saveSemanarioPlanToFirestore(plan).catch((err) => console.warn('Falha na gravação remota:', err));
+    saveSemanarioPlanToFirestore(stampedPlan).catch((err) => {
+      console.error('Falha na gravação remota do Semanário (mantido em cache local):', err);
+    });
   }, []);
 
   const handleDeleteSemanarioPlan = useCallback((planId: string) => {
+    pendingSemanarioWritesRef.current.delete(planId);
+    pendingSemanarioDeletesRef.current.add(planId);
+
     setSemanarioPlans((prev) => {
       const next = prev.filter((p) => p.id !== planId);
       saveSemanarioPlans(next);
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
-    deleteSemanarioPlanFromFirestore(planId).catch((err) => console.warn('Falha na gravação remota:', err));
+    deleteSemanarioPlanFromFirestore(planId).catch((err) => {
+      console.error('Falha na exclusão remota do Semanário:', err);
+    });
   }, []);
 
   const handleBatchSaveSemanarioPlans = useCallback((plansToSave: SemanarioPlan[]) => {
+    const nowIso = new Date().toISOString();
+    const stampedList = (plansToSave || []).map((p) => {
+      const stamped = { ...p, updatedAt: p.updatedAt || nowIso };
+      pendingSemanarioDeletesRef.current.delete(stamped.id);
+      pendingSemanarioWritesRef.current.set(stamped.id, stamped);
+      return stamped;
+    });
+
     setSemanarioPlans((prev) => {
-      const merged = upsertSemanarioPlans(prev, plansToSave);
+      const merged = upsertSemanarioPlans(prev, stampedList);
       saveSemanarioPlans(merged);
+      broadcastSyncEvent('SYNC_SEMANARIO', merged);
       return merged;
     });
-    batchSaveSemanarioPlansToFirestore(plansToSave).catch((err) => console.warn('Falha na gravação remota:', err));
+    batchSaveSemanarioPlansToFirestore(stampedList).catch((err) => {
+      console.error('Falha na gravação em lote do Semanário (mantido em cache local):', err);
+    });
   }, []);
 
   const handleSaveTurmaAtribuicao = useCallback((item: TurmaAtribuicao) => {

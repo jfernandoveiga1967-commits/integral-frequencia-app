@@ -1,4 +1,5 @@
 import { SemanarioPlan, ScheduleBlock } from '../types';
+import { getISOWeekNumber, getDayOfWeekFromDate, normalizeDayOfWeek } from './dateUtils';
 
 /**
  * Normaliza qualquer componente de string para geração de chaves únicas:
@@ -27,30 +28,82 @@ export function normalizeTimeKey(timeStr?: string): string {
 }
 
 /**
- * Gera a chave única oficial do Semanário: turma_dia_horario_modalidade
+ * Resolve o escopo semanal (ano + semana ISO) de um plano do Semanário.
+ * Garante que registros de semanas distintas jamais colidam na deduplicação.
+ */
+function resolveSemanarioWeekScope(plan: {
+  weekNumber?: number;
+  year?: number;
+  date?: string;
+}): string {
+  const weekNum = Number(plan.weekNumber) || 0;
+  const yearNum = Number(plan.year) || 0;
+  if (weekNum > 0 && yearNum > 0) {
+    return `${yearNum}w${weekNum}`;
+  }
+  if (plan.date) {
+    const parts = plan.date.split('-').map(Number);
+    if (parts.length === 3 && parts.every((n) => !Number.isNaN(n) && n > 0)) {
+      const iso = getISOWeekNumber(new Date(parts[0], parts[1] - 1, parts[2]));
+      return `${iso.year}w${iso.weekNumber}`;
+    }
+    const cleanDate = normalizeKeyComponent(plan.date);
+    if (cleanDate) return cleanDate;
+  }
+  if (yearNum > 0) return `${yearNum}`;
+  return 'unscoped';
+}
+
+/**
+ * Gera a chave única oficial do Semanário: semana_turma_dia_horario_modalidade
  */
 export function getSemanarioPlanUniqueKey(plan: {
+  weekNumber?: number;
+  year?: number;
+  date?: string;
   turma?: string;
   dayOfWeek?: string;
-  date?: string;
   timeSlot?: string;
   category?: string;
   title?: string;
 }): string {
+  const weekScope = resolveSemanarioWeekScope(plan);
   const turmaKey = normalizeKeyComponent(plan.turma);
-  const dayKey = normalizeKeyComponent(plan.dayOfWeek);
+  const resolvedDay =
+    normalizeDayOfWeek(plan.dayOfWeek) ||
+    (plan.date ? getDayOfWeekFromDate(plan.date) : null) ||
+    plan.dayOfWeek;
+  const dayKey = normalizeKeyComponent(resolvedDay || '');
   const timeKey = normalizeTimeKey(plan.timeSlot);
   // Modalidade: categoria tem prioridade; se não houver, usa o título
   const modalidadeKey = normalizeKeyComponent(plan.category || plan.title);
 
-  return `${turmaKey}_${dayKey}_${timeKey}_${modalidadeKey}`;
+  return `${weekScope}_${turmaKey}_${dayKey}_${timeKey}_${modalidadeKey}`;
+}
+
+function hasPlanPedagogicalContent(plan: SemanarioPlan): boolean {
+  if (!plan || (plan as any).isPlaceholder) return false;
+  const dev = (plan.development || (plan as any).descricao || '').trim();
+  const obj = (plan.objectives || (plan as any).conteudo || '').trim();
+  const title = (plan.title || (plan as any).proposta || '').trim();
+  if (!dev && !obj && !title) return false;
+  const combined = `${dev} ${obj} ${title}`.toLowerCase().trim();
+  if (
+    combined === 'aguardando preenchimento' ||
+    combined === 'a preencher' ||
+    combined === 'sem proposta' ||
+    combined === 'pendente'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
- * Sanitização automática de SemanarioPlan por chave única (turma_dia_horario_modalidade).
+ * Sanitização automática de SemanarioPlan por chave única (semana_turma_dia_horario_modalidade).
  * Em caso de registros duplicados no banco/cache:
  * - Mantém o registro mais atualizado ou com conteúdo efetivamente preenchido
- * - Elimina duplicações garantindo exatamente 1 registro por modalidade no bloco
+ * - Elimina duplicações garantindo exatamente 1 registro por modalidade no bloco daquela semana
  */
 export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan[] {
   if (!Array.isArray(plans) || plans.length === 0) return [];
@@ -63,12 +116,8 @@ export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan
       map.set(key, plan);
     } else {
       const existing = map.get(key)!;
-      const existingHasContent = Boolean(
-        existing.development?.trim() || existing.objectives?.trim() || existing.title?.trim()
-      );
-      const currentHasContent = Boolean(
-        plan.development?.trim() || plan.objectives?.trim() || plan.title?.trim()
-      );
+      const existingHasContent = hasPlanPedagogicalContent(existing);
+      const currentHasContent = hasPlanPedagogicalContent(plan);
 
       // Prioriza o plano que possui conteúdo pedagógico preenchido
       if (currentHasContent && !existingHasContent) {
@@ -82,7 +131,9 @@ export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan
       // Se ambos tiverem ou não conteúdo, prioriza o atualizado mais recentemente
       const existingDate = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
       const currentDate = plan.updatedAt ? new Date(plan.updatedAt).getTime() : 0;
-      if (currentDate >= existingDate) {
+      if (currentDate > existingDate) {
+        map.set(key, plan);
+      } else if (currentDate === existingDate && (plan as any).isSavedByUser && !(existing as any).isSavedByUser) {
         map.set(key, plan);
       }
     }
@@ -94,7 +145,7 @@ export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan
 /**
  * Upsert inteligente para planos do semanário:
  * Antes de inserir novos planos (como em cópias/duplicações), verifica se já existe
- * um registro com a mesma turma, dia, horário e modalidade/atividade.
+ * um registro com a mesma semana, turma, dia, horário e modalidade/atividade.
  * Se existir, substitui/atualiza o registro em vez de concatenar (Append).
  */
 export function upsertSemanarioPlans(
@@ -108,7 +159,7 @@ export function upsertSemanarioPlans(
     if (!incoming) return;
     const incomingKey = getSemanarioPlanUniqueKey(incoming);
 
-    // Procura por ID ou pela chave única turma_dia_horario_modalidade
+    // Procura por ID ou pela chave única semana_turma_dia_horario_modalidade
     const existingIndex = result.findIndex(
       (p) => p.id === incoming.id || getSemanarioPlanUniqueKey(p) === incomingKey
     );

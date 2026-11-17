@@ -2,7 +2,7 @@ import { ActivityItem, DayOfWeek, ScheduleBlock, SemanarioPlan, SemanarioStatus,
 import { getTurmaPedagogicalWeight } from './turmaUtils';
 import { loadActivities, loadSchedules } from './storageUtils';
 import { ACTIVITIES_LIST, TURMAS_LIST } from '../data/initialData';
-import { getISOWeekNumber, getWeekInfo, getWeekDays, isStudentScheduledForDay, isStudentScheduledForDate, isStudentActiveOnDate, toISODateString } from './dateUtils';
+import { getISOWeekNumber, getWeekInfo, getWeekDays, isStudentScheduledForDay, isStudentScheduledForDate, isStudentActiveOnDate, toISODateString, normalizeDayOfWeek, getDayOfWeekFromDate } from './dateUtils';
 import { OFFICIAL_SCHEDULE_TEMPLATES, getDefaultScheduleBlocks } from './scheduleDefaults';
 
 export const CATEGORIA_PROJETO = 'Projeto';
@@ -276,31 +276,50 @@ export function normalizeAndSyncSemanarioPlans(
   const normalized: SemanarioPlan[] = [];
 
   plans.forEach((p) => {
-    if (!p || !p.turma || !p.dayOfWeek) return;
+    if (!p || !p.turma) return;
 
-    // Obtém os blocos da grade oficial daquela turma para aquele dia da semana
-    const dayBlocks = getScheduleBlocksForTurma(p.turma, p.dayOfWeek, schedules);
-    if (dayBlocks.length === 0) {
+    const resolvedDay =
+      normalizeDayOfWeek(p.dayOfWeek) ||
+      (p.date ? getDayOfWeekFromDate(p.date) : null);
+
+    if (!resolvedDay) {
       normalized.push(p);
       return;
     }
 
-    // Procura se a atividade/categoria do plano existe nos blocos daquele dia
-    const matchingBlock = dayBlocks.find(
-      (b) =>
-        (b.activityId || '').trim().toLowerCase() === (p.category || '').trim().toLowerCase() ||
-        (p.timeSlot && p.timeSlot.includes(b.startTime))
-    );
+    // Obtém os blocos da grade oficial daquela turma para aquele dia da semana
+    const dayBlocks = getScheduleBlocksForTurma(p.turma, resolvedDay, schedules);
+    if (dayBlocks.length === 0) {
+      normalized.push({
+        ...p,
+        dayOfWeek: resolvedDay,
+        status: p.status || 'pendente',
+      });
+      return;
+    }
 
-    // Se houver bloco oficial correspondente, sincroniza o horário oficial
-    const officialTimeSlot = matchingBlock
-      ? `${matchingBlock.startTime} - ${matchingBlock.endTime}`
-      : p.timeSlot || '13:00 - 14:00';
+    const planCat = (p.category || '').trim().toLowerCase();
+    // Procura bloco oficial com a MESMA categoria/modalidade (priorizando horário coincidente caso haja mais de um bloco igual no dia)
+    const categoryBlocks = planCat
+      ? dayBlocks.filter((b) => (b.activityId || '').trim().toLowerCase() === planCat)
+      : [];
+    const matchingBlock =
+      categoryBlocks.find((b) => p.timeSlot && p.timeSlot.includes(b.startTime)) ||
+      categoryBlocks[0];
+
+    // Se houver bloco oficial da mesma categoria e o plano ainda não tiver horário definido, preenche o horário oficial
+    const officialTimeSlot =
+      p.timeSlot && p.timeSlot.trim()
+        ? p.timeSlot
+        : matchingBlock
+        ? `${matchingBlock.startTime} - ${matchingBlock.endTime}`
+        : '13:00 - 14:00';
 
     const effectiveStatus: SemanarioStatus = p.status || 'pendente';
 
     normalized.push({
       ...p,
+      dayOfWeek: resolvedDay,
       timeSlot: officialTimeSlot,
       status: effectiveStatus,
     });
@@ -312,12 +331,11 @@ export function normalizeAndSyncSemanarioPlans(
 export function loadSemanarioPlans(): SemanarioPlan[] {
   try {
     const raw = localStorage.getItem(SEMANARIO_STORAGE_KEY);
-    if (!raw) return getInitialSamplePlans();
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      // Limpa planos espúrios e sincroniza horários oficiais da grade
-      const cleaned = normalizeAndSyncSemanarioPlans(parsed);
-      return cleaned.length > 0 ? cleaned : getInitialSamplePlans();
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.length > 0 ? normalizeAndSyncSemanarioPlans(parsed) : [];
+      }
     }
     return getInitialSamplePlans();
   } catch (err) {
@@ -330,7 +348,15 @@ export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
   try {
     localStorage.setItem(SEMANARIO_STORAGE_KEY, JSON.stringify(plans));
   } catch (err) {
-    console.error('Erro ao salvar planos do Semanário no localStorage:', err);
+    console.warn('Erro ao salvar planos do Semanário no localStorage (tentando sem fotos):', err);
+    try {
+      const withoutPhotos = (Array.isArray(plans) ? plans : []).map((p) =>
+        p && Array.isArray(p.photos) && p.photos.length > 0 ? { ...p, photos: [] } : p
+      );
+      localStorage.setItem(SEMANARIO_STORAGE_KEY, JSON.stringify(withoutPhotos));
+    } catch (retryErr) {
+      console.error('Erro ao salvar planos do Semanário no localStorage:', retryErr);
+    }
   }
 }
 
