@@ -1549,7 +1549,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setEditFormError(null);
     } catch (err: any) {
       console.error('Error saving student modifications:', err);
-      setEditFormError(err?.message || 'Ocorreu um erro ao salvar os dados do aluno. Tente novamente.');
+      const errMsg = err?.message || 'Ocorreu um erro ao salvar os dados do aluno. Tente novamente.';
+      setEditFormError(errMsg);
+      setToastMsg({
+        text: errMsg,
+        type: 'error',
+      });
     } finally {
       setIsSavingEdit(false);
     }
@@ -3013,6 +3018,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           setEditingStudent({
                             ...editingStudent,
                             status: st.id,
+                            statusMatricula: st.id,
                             inactivationDate:
                               st.id !== 'ativo' && !editingStudent.inactivationDate
                                 ? toISODateString(new Date())
@@ -3716,57 +3722,64 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             </div>
 
             {/* Modal Fixed/Sticky Footer */}
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
-                  className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
-                  title="Emitir Ficha Cadastral de Matrícula (PDF)"
-                >
-                  <FileText className="w-4 h-4 text-emerald-600" />
-                  <span>📄 Ficha de Matrícula (PDF)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOpenTermoSaidaAvulsa(editingStudent)}
-                  className="px-3 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
-                  title="Emitir Termo de Liberação Excepcional / Ficha de Saída de Balcão (PDF)"
-                >
-                  <Car className="w-4 h-4 text-amber-600" />
-                  <span>🚗 Termo de Saída Avulsa</span>
-                </button>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  disabled={isSavingEdit}
-                  onClick={() => {
-                    setEditingStudent(null);
-                    setOriginalStudentForEdit(null);
-                    setEditFormError(null);
-                  }}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEdit}
-                  className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
-                >
-                  {isSavingEdit ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Salvando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Salvar Alterações</span>
-                    </>
-                  )}
-                </button>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 p-4 z-10 flex flex-col gap-2 shrink-0 shadow-xs">
+              {editFormError && (
+                <div className="w-full p-2.5 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-semibold">
+                  ⚠️ {editFormError}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenFichaMatriculaPDF(editingStudent)}
+                    className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
+                    title="Emitir Ficha Cadastral de Matrícula (PDF)"
+                  >
+                    <FileText className="w-4 h-4 text-emerald-600" />
+                    <span>📄 Ficha de Matrícula (PDF)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenTermoSaidaAvulsa(editingStudent)}
+                    className="px-3 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl cursor-pointer flex items-center space-x-1.5 transition-all shadow-xs"
+                    title="Emitir Termo de Liberação Excepcional / Ficha de Saída de Balcão (PDF)"
+                  >
+                    <Car className="w-4 h-4 text-amber-600" />
+                    <span>🚗 Termo de Saída Avulsa</span>
+                  </button>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={() => {
+                      setEditingStudent(null);
+                      setOriginalStudentForEdit(null);
+                      setEditFormError(null);
+                    }}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-md cursor-pointer flex items-center space-x-1.5 transition-all"
+                  >
+                    {isSavingEdit ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Salvar Alterações</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </form>

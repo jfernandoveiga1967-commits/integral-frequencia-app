@@ -13,8 +13,9 @@ import {
   markStudentAsDeleted,
   removeStudentFromLocalStorage,
   pickMostRecentStudentRecord,
+  isJoseRicardoManeghin,
 } from '../utils/storageUtils';
-import { saveStudentToFirestore, batchDeleteStudentsFromFirestore } from '../firebase';
+import { saveStudentToFirestore, batchDeleteStudentsFromFirestore, isFirestoreQuotaExceeded } from '../firebase';
 import { broadcastSyncEvent } from './syncService';
 import { normalizeStudentNameForMatching } from '../utils/e1Parser';
 
@@ -482,29 +483,62 @@ export async function restoreMiniMaternal2026(): Promise<{
   currentStudents.forEach((s) => studentMap.set(s.id, s));
 
   const remoteExistingMap = new Map<string, Student>();
-  try {
-    const { db } = await import('../firebase');
-    const { doc, getDoc } = await import('firebase/firestore');
-    await Promise.all(
-      OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map(async (st) => {
-        try {
-          const [alunoSnap, studentSnap] = await Promise.all([
-            getDoc(doc(db, 'alunos', st.id)),
-            getDoc(doc(db, 'students', st.id)),
-          ]);
-          const alunoData = alunoSnap.exists() ? ({ ...alunoSnap.data(), id: st.id } as Student) : null;
-          const studentData = studentSnap.exists() ? ({ ...studentSnap.data(), id: st.id } as Student) : null;
-          const remoteData = pickMostRecentStudentRecord(alunoData, studentData);
-          if (remoteData) {
-            remoteExistingMap.set(st.id, remoteData);
+  const checkedRemoteIds = new Set<string>();
+  const canQueryFirestore =
+    !isFirestoreQuotaExceeded &&
+    (typeof navigator === 'undefined' || navigator.onLine !== false);
+
+  if (canQueryFirestore) {
+    try {
+      const { db } = await import('../firebase');
+      const { doc, getDoc, collection, getDocs, query, where } = await import('firebase/firestore');
+      await Promise.all(
+        OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map(async (st) => {
+          try {
+            const [alunoSnap, studentSnap] = await Promise.all([
+              getDoc(doc(db, 'alunos', st.id)),
+              getDoc(doc(db, 'students', st.id)),
+            ]);
+            const alunoData = alunoSnap.exists() ? ({ ...alunoSnap.data(), id: st.id } as Student) : null;
+            const studentData = studentSnap.exists() ? ({ ...studentSnap.data(), id: st.id } as Student) : null;
+            let remoteData = pickMostRecentStudentRecord(alunoData, studentData);
+
+            // Se não encontrou pelo ID canônico, busca pelo nome nas coleções antes de assumir que está ausente
+            if (!remoteData) {
+              const [alunosByName, studentsByName] = await Promise.all([
+                getDocs(query(collection(db, 'alunos'), where('name', '==', st.name))),
+                getDocs(query(collection(db, 'students'), where('name', '==', st.name))),
+              ]);
+              const nameMatches: Student[] = [];
+              const collectMatches = (snap: any) => {
+                snap.forEach((d: any) => {
+                  const data = d.data();
+                  if (!data) return;
+                  const ano = data.anoLetivo !== undefined ? Number(data.anoLetivo) : 2026;
+                  if (ano === 2026) {
+                    nameMatches.push({ ...data, id: d.id } as Student);
+                  }
+                });
+              };
+              collectMatches(alunosByName);
+              collectMatches(studentsByName);
+              for (const cand of nameMatches) {
+                remoteData = pickMostRecentStudentRecord(remoteData, cand);
+              }
+            }
+
+            checkedRemoteIds.add(st.id);
+            if (remoteData) {
+              remoteExistingMap.set(st.id, remoteData);
+            }
+          } catch {
+            // Erro pontual de leitura/rede: NÃO marca como verificado para evitar criar cópia com ['Rotina']
           }
-        } catch {
-          // Modo offline ou erro pontual de leitura: respeita estado local
-        }
-      })
-    );
-  } catch {
-    // Fallback offline silencioso
+        })
+      );
+    } catch {
+      // Fallback offline silencioso
+    }
   }
 
   // Conjunto dos 8 IDs e nomes normalizados oficiais ativos do Mini Maternal 2026
@@ -512,15 +546,13 @@ export async function restoreMiniMaternal2026(): Promise<{
   const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
 
   // Identificar e expurgar alunos indevidamente vinculados ao Mini Maternal 2026 fora dos oficiais
-  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin caso exista
+  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin/Meneghin caso exista
   const extraneousMiniMaternal2026Ids: string[] = [];
   studentMap.forEach((s, sId) => {
     const isMiniMaternal = (s.turma || '').toLowerCase().includes('mini') && (s.turma || '').toLowerCase().includes('maternal');
     const is2026 = (s.anoLetivo || 2026) === 2026;
     const normName = normalizeStudentNameForMatching(s.name);
-    const isJoseRicardo =
-      sId === 'st-2026-minimaternal-jose-ricardo-bijora-maneghin' ||
-      normName === 'jose ricardo bijora maneghin';
+    const isJoseRicardo = isJoseRicardoManeghin({ id: sId, name: s.name });
     if (isMiniMaternal && is2026 && !isJoseRicardo && !officialIds.has(sId) && !officialNames.has(normName)) {
       extraneousMiniMaternal2026Ids.push(sId);
       studentMap.delete(sId);
@@ -555,23 +587,28 @@ export async function restoreMiniMaternal2026(): Promise<{
       };
     }
 
+    // Só cria o documento padrão se a leitura remota foi confirmada com sucesso e não encontrou nada
     const created: Student = {
       ...st,
       updatedAt: nowIso,
     };
-    missingStudentsToCreate.push(created);
+    if (checkedRemoteIds.has(st.id)) {
+      missingStudentsToCreate.push(created);
+    }
     return created;
   });
 
-  // Atualizar mapa local preservando as edições existentes
+  // Atualizar mapa local preservando as edições existentes (somente quando existia ou foi confirmado ausente)
   restoredStudents.forEach((st) => {
-    studentMap.set(st.id, st);
+    if (studentMap.has(st.id) || remoteExistingMap.has(st.id) || checkedRemoteIds.has(st.id)) {
+      studentMap.set(st.id, st);
+    }
   });
 
   const updatedStudents = Array.from(studentMap.values());
   saveStudents(updatedStudents);
 
-  // 4. Persistir no Firestore APENAS os documentos que estavam ausentes e purgar eventuais excedentes
+  // 4. Persistir no Firestore APENAS os documentos comprovadamente ausentes e purgar eventuais excedentes
   try {
     for (const st of missingStudentsToCreate) {
       await saveStudentToFirestore(st);

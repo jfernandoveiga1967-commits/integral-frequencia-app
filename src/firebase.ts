@@ -45,6 +45,8 @@ import {
   saveAttendanceRecords,
   loadAttendanceRecords,
   pickMostRecentStudentRecord,
+  isJoseRicardoManeghin,
+  getStudentDeduplicationKey,
 } from './utils/storageUtils';
 import {
   normalizeAndDeduplicateUsers,
@@ -1297,12 +1299,14 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
 
     const normalized = normalizeStudent(student);
     const isAtivo = (normalized.status || 'ativo') === 'ativo';
+    const nowIso = new Date().toISOString();
     const payload = {
       id: normalized.id,
       name: normalized.name,
       turma: normalized.turma,
       activities: normalized.activities,
       modalidadesEspeciais: normalized.modalidadesEspeciais || [],
+      specialties: normalized.modalidadesEspeciais || [],
       tipoContrato: normalized.tipoContrato || 'regular',
       dataInicioContrato: normalized.dataInicioContrato || '',
       dataTerminoContrato: normalized.dataTerminoContrato || '',
@@ -1326,7 +1330,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       valorOficinas: normalized.valorOficinas !== undefined ? normalized.valorOficinas : null,
       valorExtras: normalized.valorExtras !== undefined ? normalized.valorExtras : null,
       notes: normalized.notes || '',
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
 
     const results = await withWriteTimeout(
@@ -1341,6 +1345,68 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
     }
     if (results[1].status === 'rejected') {
       throw results[1].reason;
+    }
+
+    // Propaga edição (modalidades, status/cancelamento, etc.) para eventuais documentos paralelos/duplicados
+    // do mesmo aluno nas coleções 'alunos' e 'students', impedindo ressincronização de dados antigos
+    try {
+      const targetDedupKey = getStudentDeduplicationKey(normalized);
+      const isJose = isJoseRicardoManeghin(normalized);
+      const nameVariants = new Set<string>();
+      if (normalized.name) nameVariants.add(normalized.name);
+      if (isJose) {
+        nameVariants.add('José Ricardo Bijora Maneghin');
+        nameVariants.add('José Ricardo Bijora Meneghin');
+        nameVariants.add('Jose Ricardo Bijora Maneghin');
+        nameVariants.add('Jose Ricardo Bijora Meneghin');
+      }
+
+      const duplicateQueries: Promise<any>[] = [
+        getDocs(query(collection(db, 'alunos'), where('id', '==', normalized.id))),
+        getDocs(query(collection(db, 'students'), where('id', '==', normalized.id))),
+      ];
+      nameVariants.forEach((nVar) => {
+        duplicateQueries.push(
+          getDocs(query(collection(db, 'alunos'), where('name', '==', nVar))),
+          getDocs(query(collection(db, 'students'), where('name', '==', nVar)))
+        );
+      });
+
+      const qResults = await Promise.allSettled(duplicateQueries);
+      const shadowUpdates = new Map<string, { ref: any; docId: string }>();
+
+      qResults.forEach((res) => {
+        if (res.status !== 'fulfilled' || !res.value || typeof res.value.forEach !== 'function') return;
+        res.value.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          if (!data) return;
+          const colId = docSnap.ref.parent.id;
+          const pathKey = `${colId}/${docSnap.id}`;
+          if (docSnap.id === normalized.id) return;
+
+          const docAno = data.anoLetivo !== undefined ? Number(data.anoLetivo) : 2026;
+          const targetAno = normalized.anoLetivo !== undefined ? Number(normalized.anoLetivo) : 2026;
+          if (docAno !== targetAno) return;
+
+          const docDedupKey = getStudentDeduplicationKey({ ...data, id: docSnap.id });
+          const sameInternalId = data.id === normalized.id;
+          const sameJose = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: data.name });
+
+          if (sameInternalId || docDedupKey === targetDedupKey || sameJose) {
+            shadowUpdates.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
+          }
+        });
+      });
+
+      if (shadowUpdates.size > 0) {
+        const batch = writeBatch(db);
+        shadowUpdates.forEach(({ ref, docId }) => {
+          batch.set(ref, { ...payload, id: docId }, { merge: true });
+        });
+        await withWriteTimeout(batch.commit(), 'sincronizar cópias do aluno');
+      }
+    } catch (syncErr) {
+      console.warn('Aviso ao sincronizar eventuais cópias duplicadas do aluno no Firestore:', syncErr);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `alunos/${student.id}`);

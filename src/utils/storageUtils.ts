@@ -46,6 +46,25 @@ export const PROTECTED_MINI_MATERNAL_2026_IDS = new Set<string>([
 ]);
 
 /**
+ * Identifica o aluno José Ricardo Bijora Maneghin/Meneghin independentemente de acentos ou grafia do sobrenome.
+ */
+export function isJoseRicardoManeghin(student?: { id?: string; name?: string } | null): boolean {
+  if (!student) return false;
+  const id = (student.id || '').toLowerCase();
+  if (id.includes('jose-ricardo-bijora-maneghin') || id.includes('jose-ricardo-bijora-meneghin')) {
+    return true;
+  }
+  const norm = (student.name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return norm.includes('jose ricardo') && (norm.includes('maneghin') || norm.includes('meneghin'));
+}
+
+/**
  * Identifica alunos excedentes ou cadastros avulsos fora do lote oficial de 133 alunos do E1 em 2027.
  */
 export function isSurplus2027Student(student: { id?: string; name?: string; anoLetivo?: number }): boolean {
@@ -626,23 +645,47 @@ export function extractStudentTimestamp(student: any): number {
  */
 export function getStudentDeduplicationKey(student: any): string {
   const ano = student?.anoLetivo ? Number(student.anoLetivo) : 2026;
+  const rawName = (student?.name || student?.nomeCompleto || student?.nome || '').toString();
+  let normName = rawName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (isJoseRicardoManeghin({ id: student?.id, name: rawName })) {
+    normName = 'jose ricardo bijora maneghin';
+  }
+
+  let normTurma = (student?.turma || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (normTurma.includes('mini') && normTurma.includes('maternal')) {
+    normTurma = 'mini maternal azul';
+  }
+
+  if (normName) {
+    return `name_turma_ano:${ano}__${normName}__${normTurma}`;
+  }
+
   const emailResp = student?.emailResponsavel || student?.parentEmail || student?.email;
   if (emailResp && typeof emailResp === 'string' && emailResp.trim().includes('@')) {
     return `email:${ano}__${emailResp.trim().toLowerCase()}`;
   }
-  const normName = (student?.name || student?.nomeCompleto || student?.nome || '')
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-  const normTurma = (student?.turma || '').toString().trim().toLowerCase();
-  return `name_turma_ano:${ano}__${normName}__${normTurma}`;
+
+  return `id:${ano}__${String(student?.id || '')}`;
 }
 
 /**
- * Agrupa registros pelo e-mail do responsável ou nomeCompleto + turma.
- * Se existirem dois ou mais documentos com o mesmo nome na mesma turma,
- * consolida-os mantendo apenas o ID mais recente.
+ * Agrupa registros pelo nome normalizado + turma + anoLetivo (ou e-mail se sem nome).
+ * Se existirem dois ou mais documentos do mesmo aluno na mesma turma/ano,
+ * consolida-os mantendo apenas o mais recente (e resolvendo empates de forma determinística).
  */
 export function deduplicateStudentsList(
   students: Student[],
@@ -668,11 +711,21 @@ export function deduplicateStudentsList(
       return;
     }
 
-    // Ordenar: mais recente primeiro
+    // Ordenar: mais recente primeiro; em empate exato de timestamp, prioriza status cancelado/inativo e modalidades configuradas
     const sorted = [...group].sort((a, b) => {
       const tA = extractStudentTimestamp(a);
       const tB = extractStudentTimestamp(b);
-      return tB - tA;
+      if (tB !== tA) return tB - tA;
+
+      const aNonActive = a.status === 'cancelado' || a.status === 'inativo' ? 1 : 0;
+      const bNonActive = b.status === 'cancelado' || b.status === 'inativo' ? 1 : 0;
+      if (bNonActive !== aNonActive) return bNonActive - aNonActive;
+
+      const aActs = Array.isArray(a.activities) ? a.activities.length : 0;
+      const bActs = Array.isArray(b.activities) ? b.activities.length : 0;
+      if (bActs !== aActs) return bActs - aActs;
+
+      return (a.id || '').localeCompare(b.id || '');
     });
 
     const mostRecent = sorted[0];

@@ -32,6 +32,8 @@ import {
   isMockStudent,
   checkAndInactivateExpiredTemporaryStudents,
   pickMostRecentStudentRecord,
+  deduplicateStudentsList,
+  getStudentDeduplicationKey,
 } from './utils/storageUtils';
 import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas, generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
@@ -351,13 +353,14 @@ export default function App() {
         setTurmas(sortTurmasPedagogical(loadTurmas()));
         const restoredList = loadStudents().filter((s) => !isMockStudent(s));
         setStudents((prev) => {
-          if (!prev || prev.length === 0) return restoredList;
-          const prevMap = new Map(prev.map((s) => [s.id, s]));
-          const merged = restoredList.map((st) => {
-            const current = prevMap.get(st.id);
-            return pickMostRecentStudentRecord(current, st) || st;
+          if (!prev || prev.length === 0) return deduplicateStudentsList(restoredList);
+          const mergedMap = new Map<string, Student>();
+          restoredList.forEach((st) => mergedMap.set(st.id, st));
+          prev.forEach((cur) => {
+            const existing = mergedMap.get(cur.id);
+            mergedMap.set(cur.id, pickMostRecentStudentRecord(cur, existing) || cur);
           });
-          return merged;
+          return deduplicateStudentsList(Array.from(mergedMap.values()));
         });
       } catch {}
     });
@@ -1136,22 +1139,31 @@ export default function App() {
       throw err;
     }
 
+    const targetKey = getStudentDeduplicationKey(mergedStudent);
     let nextStudentsList: Student[] = [];
     setStudents((prev) => {
       const prevExisting = prev.find((s) => s.id === stampedIncoming.id);
       const prevMerged = mergeStudentData(prevExisting, stampedIncoming);
-      const updated = prev.some((s) => s.id === prevMerged.id)
-        ? prev.map((s) => (s.id === prevMerged.id ? prevMerged : s))
+      const mapped = prev.some((s) => s.id === prevMerged.id)
+        ? prev.map((s) => {
+            if (s.id === prevMerged.id) return prevMerged;
+            if (getStudentDeduplicationKey(s) === targetKey) {
+              return { ...prevMerged, id: s.id };
+            }
+            return s;
+          })
         : [prevMerged, ...prev];
+      const updated = deduplicateStudentsList(mapped);
       nextStudentsList = updated;
       saveStudents(updated);
       return updated;
     });
 
     if (nextStudentsList.length === 0) {
-      nextStudentsList = students.some((s) => s.id === mergedStudent.id)
+      const rawNext = students.some((s) => s.id === mergedStudent.id)
         ? students.map((s) => (s.id === mergedStudent.id ? mergedStudent : s))
         : [mergedStudent, ...students];
+      nextStudentsList = deduplicateStudentsList(rawNext);
       saveStudents(nextStudentsList);
     }
     broadcastSyncEvent('SYNC_STUDENTS', nextStudentsList);

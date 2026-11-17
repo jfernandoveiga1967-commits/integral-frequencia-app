@@ -675,6 +675,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           oficinasExtras: extras,
           valorOficinas: extras,
           valorExtras: extras,
+          updatedAt: updated.updatedAt,
         };
 
         try {
