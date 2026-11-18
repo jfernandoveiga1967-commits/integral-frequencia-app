@@ -14,7 +14,7 @@ import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, D
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
-import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS } from '../utils/storageUtils';
+import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS, getStudentDeduplicationKey } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
 import {
@@ -400,14 +400,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     try {
       // Exclusão efetiva no Firestore de forma assíncrona
       await onDeleteStudent(studentId, studentName, studentTurma);
+      const deletedDedupKey = getStudentDeduplicationKey(studentToDelete);
       setStudents((prev) =>
         prev.filter(
-          (s) =>
-            s.id !== studentId &&
-            !(
-              s.name.trim().toLowerCase() === studentName.trim().toLowerCase() &&
-              s.turma.trim().toLowerCase() === studentTurma.trim().toLowerCase()
-            )
+          (s) => s.id !== studentId && getStudentDeduplicationKey(s) !== deletedDedupKey
         )
       );
       setToastMsg({
@@ -1298,9 +1294,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           const cleanMat = cleanMatriculaValue(st.matricula);
           const cleanTurma = mapE1TurmaNameToOfficial(st.turma) as TurmaType;
 
-          // Busca por aluno pré-existente no mesmo ano letivo (por RA numérico ou nome normalizado)
+          // Busca por aluno regular pré-existente no mesmo ano letivo (nunca sobrescreve ocorrências avulsas)
           const existingMatch = currentLocal.find((ex) => {
             if (ex.anoLetivo !== targetYear) return false;
+            if ((ex.tipoContrato || 'regular') === 'avulso') return false;
             const exCleanMat = ex.matricula ? cleanMatriculaValue(ex.matricula) : '';
             if (cleanMat && isNumericMatricula(cleanMat) && exCleanMat && isNumericMatricula(exCleanMat)) {
               return cleanMat === exCleanMat;

@@ -1623,6 +1623,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       const normTargetTurma = normalizeTurmaForMatch(normalized.turma);
       const isJose = isJoseRicardoManeghin(normalized);
       const targetAno = normalized.anoLetivo !== undefined ? Number(normalized.anoLetivo) : 2026;
+      const isTargetAvulso = (normalized.tipoContrato || 'regular') === 'avulso';
 
       const [alunosAllRes, studentsAllRes] = await Promise.allSettled([
         getDocs(collection(db, 'alunos')),
@@ -1643,6 +1644,10 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
 
           const rawCandidateName = data.name || data.nomeCompleto || data.nome || '';
           const docDedupKey = getStudentDeduplicationKey({ ...data, id: docSnap.id, name: rawCandidateName });
+          const rawDocContract = String(data.tipoContrato || 'regular').trim().toLowerCase();
+          const isDocAvulso =
+            rawDocContract === 'avulso' || rawDocContract === 'temporario' || rawDocContract === 'temporário';
+
           const sameInternalId = data.id === normalized.id;
           const sameJose = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: rawCandidateName });
           const sameNormNameAndTurma =
@@ -1650,7 +1655,14 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
             normalizeTextForMatch(rawCandidateName) === normTargetName &&
             (!normTargetTurma || !data.turma || normalizeTurmaForMatch(data.turma) === normTargetTurma);
 
-          if (sameInternalId || docDedupKey === targetDedupKey || sameJose || sameNormNameAndTurma) {
+          // Isolamento de múltiplos contratos avulsos:
+          // - Se o aluno salvo é avulso, só propaga para cópias do mesmo ID ou do mesmo período exato (targetDedupKey).
+          // - Nunca sobrescreve outras ocorrências avulsas de datas diferentes nem cadastros regulares.
+          const shouldSyncShadow = isTargetAvulso
+            ? sameInternalId || (isDocAvulso && docDedupKey === targetDedupKey)
+            : sameInternalId || (!isDocAvulso && (docDedupKey === targetDedupKey || sameJose || sameNormNameAndTurma));
+
+          if (shouldSyncShadow) {
             allTargets.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
             unmarkStudentAsDeleted(docSnap.id);
           }
@@ -1681,11 +1693,21 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
 export async function deleteStudentFromFirestore(
   alunoId: string,
   studentName?: string,
-  studentTurma?: string
+  studentTurma?: string,
+  targetMeta?: {
+    anoLetivo?: number;
+    tipoContrato?: 'regular' | 'avulso';
+    dataInicioContrato?: string;
+    dataTerminoContrato?: string;
+  }
 ): Promise<{ deletedIds: string[]; count: number }> {
   const cleanId = (alunoId || '').trim();
   let resolvedName = (studentName || '').trim();
   let resolvedTurma = (studentTurma || '').trim();
+  let resolvedAno = targetMeta?.anoLetivo;
+  let resolvedContract = targetMeta?.tipoContrato;
+  let resolvedInicio = targetMeta?.dataInicioContrato;
+  let resolvedTermino = targetMeta?.dataTerminoContrato;
 
   try {
     if (isFirestoreQuotaExceeded) {
@@ -1694,24 +1716,30 @@ export async function deleteStudentFromFirestore(
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       throw new Error('Sem conexão com a internet. Não foi possível confirmar a exclusão no Firestore.');
     }
-    // 1. Se o nome não foi passado, tenta obter os dados a partir do próprio documento se existir
-    if (!resolvedName && cleanId) {
+    // 1. Obtém metadados do documento alvo se algum atributo chave (nome, contrato, anoLetivo) ainda não foi informado
+    if (cleanId && (!resolvedName || !resolvedContract || resolvedAno === undefined)) {
       try {
         const [snapAlunosDirect, snapStudentsDirect] = await Promise.allSettled([
           getDoc(doc(db, 'alunos', cleanId)),
           getDoc(doc(db, 'students', cleanId)),
         ]);
-        if (snapAlunosDirect.status === 'fulfilled' && snapAlunosDirect.value.exists()) {
-          const d = snapAlunosDirect.value.data();
-          if (d?.name || d?.nome) resolvedName = String(d.name || d.nome).trim();
-          if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
-        } else if (snapStudentsDirect.status === 'fulfilled' && snapStudentsDirect.value.exists()) {
-          const d = snapStudentsDirect.value.data();
-          if (d?.name || d?.nome) resolvedName = String(d.name || d.nome).trim();
-          if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
+        const directData =
+          (snapAlunosDirect.status === 'fulfilled' && snapAlunosDirect.value.exists() && snapAlunosDirect.value.data()) ||
+          (snapStudentsDirect.status === 'fulfilled' && snapStudentsDirect.value.exists() && snapStudentsDirect.value.data()) ||
+          null;
+        if (directData) {
+          if (!resolvedName && (directData.name || directData.nome)) resolvedName = String(directData.name || directData.nome).trim();
+          if (!resolvedTurma && directData.turma) resolvedTurma = String(directData.turma).trim();
+          if (resolvedAno === undefined && directData.anoLetivo !== undefined) resolvedAno = Number(directData.anoLetivo);
+          if (!resolvedContract && directData.tipoContrato) {
+            const c = String(directData.tipoContrato).trim().toLowerCase();
+            resolvedContract = c === 'avulso' || c === 'temporario' || c === 'temporário' ? 'avulso' : 'regular';
+          }
+          if (!resolvedInicio && directData.dataInicioContrato) resolvedInicio = String(directData.dataInicioContrato).trim();
+          if (!resolvedTermino && directData.dataTerminoContrato) resolvedTermino = String(directData.dataTerminoContrato).trim();
         }
       } catch (err) {
-        console.warn('Aviso ao consultar documento para obter nome do aluno:', err);
+        console.warn('Aviso ao consultar documento para obter dados do aluno:', err);
       }
     }
 
@@ -1727,6 +1755,18 @@ export async function deleteStudentFromFirestore(
     const normTargetName = normalizeTextForMatch(resolvedName);
     const normTargetTurma = normalizeTurmaForMatch(resolvedTurma);
     const isJose = isJoseRicardoManeghin({ id: cleanId, name: resolvedName });
+    const targetIsAvulso = resolvedContract === 'avulso';
+    const targetDedupKey = resolvedName
+      ? getStudentDeduplicationKey({
+          id: cleanId,
+          name: resolvedName,
+          turma: resolvedTurma,
+          anoLetivo: resolvedAno,
+          tipoContrato: resolvedContract || 'regular',
+          dataInicioContrato: resolvedInicio,
+          dataTerminoContrato: resolvedTermino,
+        })
+      : '';
 
     const [alunosAllRes, studentsAllRes] = await Promise.allSettled([
       getDocs(collection(db, 'alunos')),
@@ -1741,15 +1781,24 @@ export async function deleteStudentFromFirestore(
         const rawDocName = data.name || data.nomeCompleto || data.nome || '';
         const normDocName = normalizeTextForMatch(rawDocName);
         const normDocTurma = normalizeTurmaForMatch(data.turma);
+        const docAno = data.anoLetivo !== undefined ? Number(data.anoLetivo) : undefined;
+        const anoMatches = resolvedAno === undefined || docAno === undefined || Number(resolvedAno) === docAno;
+        const rawDocContract = String(data.tipoContrato || 'regular').trim().toLowerCase();
+        const docIsAvulso = rawDocContract === 'avulso' || rawDocContract === 'temporario' || rawDocContract === 'temporário';
+        const docDedupKey = getStudentDeduplicationKey({ ...data, id: docSnap.id, name: rawDocName });
 
         const idMatches = Boolean(cleanId) && (docSnap.id === cleanId || docInternalId === cleanId);
-        const joseMatches = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: rawDocName });
+        const joseMatches = isJose && anoMatches && !docIsAvulso && isJoseRicardoManeghin({ id: docSnap.id, name: rawDocName });
         const nameMatches =
           Boolean(normTargetName) &&
           normDocName === normTargetName &&
           (!normTargetTurma || !normDocTurma || normDocTurma === normTargetTurma);
 
-        if (idMatches || joseMatches || nameMatches) {
+        const secondaryMatches = targetIsAvulso
+          ? Boolean(targetDedupKey && docIsAvulso && docDedupKey === targetDedupKey)
+          : !docIsAvulso && anoMatches && (joseMatches || nameMatches);
+
+        if (idMatches || secondaryMatches) {
           const colPath = docSnap.ref.parent.id;
           docRefsToDelete.set(`${colPath}/${docSnap.id}`, docSnap.ref);
           deletedIds.add(docSnap.id);

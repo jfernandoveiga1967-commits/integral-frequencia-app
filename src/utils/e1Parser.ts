@@ -914,6 +914,27 @@ export function findDuplicateStudentGroups(
           return false;
         }
 
+        // Contratos avulsos de períodos distintos (ou confronto avulso x regular) nunca são duplicatas:
+        // um mesmo aluno pode ter diversas ocorrências avulsas ao longo do ano.
+        const stContract = String(student.tipoContrato || 'regular').trim().toLowerCase();
+        const memContract = String(member.tipoContrato || 'regular').trim().toLowerCase();
+        const stIsAvulso = stContract === 'avulso' || stContract === 'temporario' || stContract === 'temporário';
+        const memIsAvulso = memContract === 'avulso' || memContract === 'temporario' || memContract === 'temporário';
+        if (stIsAvulso !== memIsAvulso) {
+          return false;
+        }
+        if (stIsAvulso && memIsAvulso) {
+          const stInicio = String(student.dataInicioContrato || '').trim();
+          const stTermino = String(student.dataTerminoContrato || '').trim();
+          const memInicio = String(member.dataInicioContrato || '').trim();
+          const memTermino = String(member.dataTerminoContrato || '').trim();
+          const stTurma = String(student.turma || '').trim().toLowerCase();
+          const memTurma = String(member.turma || '').trim().toLowerCase();
+          if (stInicio !== memInicio || stTermino !== memTermino || stTurma !== memTurma) {
+            return false;
+          }
+        }
+
         const memCleanMat = member.matricula ? cleanMatriculaValue(member.matricula) : '';
         const memHasNumMat = Boolean(memCleanMat && isNumericMatricula(memCleanMat));
         const memNormName = normalizeStudentNameForMatching(member.name);

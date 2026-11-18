@@ -752,7 +752,19 @@ export function getStudentDeduplicationKey(student: any): string {
     normTurma = 'mini maternal azul';
   }
 
+  const rawContract = String(student?.tipoContrato || '').trim().toLowerCase();
+  const isAvulso =
+    rawContract === 'avulso' || rawContract === 'temporario' || rawContract === 'temporário';
+
   if (normName) {
+    if (isAvulso) {
+      const inicio = String(student?.dataInicioContrato || '').trim();
+      const termino = String(student?.dataTerminoContrato || '').trim();
+      if (inicio || termino) {
+        return `avulso:${ano}__${normName}__${normTurma}__${inicio}__${termino}`;
+      }
+      return `avulso_id:${ano}__${normName}__${normTurma}__${String(student?.id || '')}`;
+    }
     return `name_turma_ano:${ano}__${normName}__${normTurma}`;
   }
 
@@ -876,13 +888,12 @@ export function mergeStudentsList(
 ): Student[] {
   const deletedIds = getDeletedStudentIds();
   const currentMap = new Map<string, Student>();
-  const nameTurmaMap = new Map<string, Student>();
+  const dedupKeyMap = new Map<string, Student>();
 
   (currentStudents || []).forEach((s) => {
-    if (s.id && !deletedIds.has(s.id)) currentMap.set(s.id, s);
-    if (s.name && s.turma && !deletedIds.has(s.id)) {
-      const key = `${s.name.toLowerCase().trim()}_${s.turma.toLowerCase().trim()}`;
-      nameTurmaMap.set(key, s);
+    if (s.id && !deletedIds.has(s.id)) {
+      currentMap.set(s.id, s);
+      dedupKeyMap.set(getStudentDeduplicationKey(s), s);
     }
   });
 
@@ -895,9 +906,8 @@ export function mergeStudentsList(
     if (deletedIds.has(incoming.id)) return;
 
     let existing = incoming.id ? currentMap.get(incoming.id) : undefined;
-    if (!existing && incoming.name && incoming.turma) {
-      const key = `${incoming.name.toLowerCase().trim()}_${incoming.turma.toLowerCase().trim()}`;
-      existing = nameTurmaMap.get(key);
+    if (!existing) {
+      existing = dedupKeyMap.get(getStudentDeduplicationKey(incoming));
     }
 
     const merged = mergeStudentData(existing, incoming);

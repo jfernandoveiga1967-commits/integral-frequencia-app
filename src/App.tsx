@@ -1198,16 +1198,22 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (id: string, studentName?: string, studentTurma?: string): Promise<void> => {
-    // 1. Identifica nome e turma caso não tenham sido passados
+    // 1. Identifica nome, turma e metadados contratuais caso não tenham sido passados
     const targetStudent = students.find((s) => s.id === id);
     const resolvedName = (studentName || targetStudent?.name || '').trim();
     const resolvedTurma = (studentTurma || targetStudent?.turma || '').trim();
+    const targetDedupKey = targetStudent ? getStudentDeduplicationKey(targetStudent) : '';
 
     // 2. Exclusão obrigatória no Firestore (coleções 'alunos' e 'students')
     // Propaga qualquer erro de permissão, cota ou rede para impedir falsa exclusão na interface
     let deletedIds: string[] = [];
     try {
-      const res = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma);
+      const res = await deleteStudentFromFirestore(id, resolvedName, resolvedTurma, targetStudent ? {
+        anoLetivo: targetStudent.anoLetivo,
+        tipoContrato: targetStudent.tipoContrato,
+        dataInicioContrato: targetStudent.dataInicioContrato,
+        dataTerminoContrato: targetStudent.dataTerminoContrato,
+      } : undefined);
       deletedIds = res.deletedIds || [];
     } catch (err) {
       console.error('Falha na exclusão remota no Firestore:', err);
@@ -1221,15 +1227,10 @@ export default function App() {
       markStudentAsDeleted(sid);
     });
 
-    // 4. Atualiza estado da tela removendo tanto pelo ID quanto pelo par nome+turma (para garantir que réplicas sumam da tela)
+    // 4. Atualiza estado da tela removendo pelo ID e apenas eventuais réplicas com a mesma chave contratual
     const shouldKeep = (s: Student) => {
       if (allIdsToPurge.has(s.id)) return false;
-      if (
-        resolvedName &&
-        resolvedTurma &&
-        (s.name || '').trim().toLowerCase() === resolvedName.toLowerCase() &&
-        (s.turma || '').trim().toLowerCase() === resolvedTurma.toLowerCase()
-      ) {
+      if (targetDedupKey && getStudentDeduplicationKey(s) === targetDedupKey) {
         return false;
       }
       return true;
@@ -1521,7 +1522,14 @@ export default function App() {
       saveStudents(updatedStudents);
       broadcastSyncEvent('SYNC_STUDENTS', updatedStudents);
 
-      studentsToRemove.forEach((s) => deleteStudentFromFirestore(s.id, s.name, s.turma).catch((err) => console.warn('Falha na gravação remota:', err)));
+      studentsToRemove.forEach((s) =>
+        deleteStudentFromFirestore(s.id, s.name, s.turma, {
+          anoLetivo: s.anoLetivo,
+          tipoContrato: s.tipoContrato,
+          dataInicioContrato: s.dataInicioContrato,
+          dataTerminoContrato: s.dataTerminoContrato,
+        }).catch((err) => console.warn('Falha na gravação remota:', err))
+      );
 
       // Clean attendance records for removed students
       const updatedRecords = records.filter((r) => !studentIdsToRemove.has(r.studentId));
