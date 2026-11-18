@@ -1194,6 +1194,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           ? (newDiasContratados && newDiasContratados.length > 0 ? newDiasContratados : defaultWeekDays)
           : (newDiasFrequencia && newDiasFrequencia.length > 0 ? newDiasFrequencia : defaultWeekDays);
 
+      const resolvedLimite =
+        (newHorarioPermanenciaLimite || '').trim() ||
+        getTabelaPlanosPorAno(newAnoLetivo)[newPlanoContratual]?.horarioPadrao ||
+        '18:30h';
+
       await Promise.resolve(
         onAddStudent({
           name: trimmedName,
@@ -1210,11 +1215,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           diasFrequencia: effectiveDias,
           horariosSaida: newHorariosSaida,
           status: 'ativo',
+          statusMatricula: 'ativo',
+          inactivationDate: '',
+          inactivationReason: '',
+          notes: '',
           anoLetivo: newAnoLetivo,
           tipoSaida: newTipoSaida,
           nomeCondutor: newTipoSaida === 'TRANSPORTE_ESCOLAR' ? newNomeCondutor.trim() : undefined,
           planoContratual: newPlanoContratual,
-          horarioPermanenciaLimite: newHorarioPermanenciaLimite,
+          horarioPermanenciaLimite: resolvedLimite,
           valorPlanoBase: newValorPlanoBase,
           descontoBolsa: newDescontoBolsa,
           valorMensalidadeFinal: newValorMensalidadeFinal,
@@ -1671,13 +1680,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 onClick={() => {
                   if (!showAddForm) {
                     const today = toISODateString(new Date());
+                    const resetTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
+                    const defaultPlano: PlanoContratualType = 'Integral Semana (18:30h)';
                     setSingleFormError(null);
+                    setNewName('');
+                    if (selectedTurma !== 'TODAS' && (isCoordenador || allowedTurmas.includes(selectedTurma))) {
+                      setNewTurma(selectedTurma);
+                    } else if (allowedTurmas.length > 0) {
+                      setNewTurma(allowedTurmas[0] as TurmaType);
+                    }
+                    setNewTipoContrato('regular');
+                    setNewTipoSaida('PAIS');
+                    setNewNomeCondutor('');
                     setNewActivities(['Rotina']);
+                    setNewHasReforco(false);
+                    setNewReforcoStartDate('');
+                    setNewReforcoEndDate('');
                     setNewDataInicio(today);
                     setNewDataTermino(today);
                     setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
                     setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
+                    setNewHorariosSaida({});
                     setNewAnoLetivo(selectedAnoLetivo);
+                    setNewPlanoContratual(defaultPlano);
+                    setNewHorarioPermanenciaLimite(resetTabela[defaultPlano].horarioPadrao);
+                    setNewValorPlanoBase(resetTabela[defaultPlano].valorBase);
+                    setNewDescontoBolsa(0);
                   }
                   setShowAddForm(!showAddForm);
                   setShowBatchForm(false);
@@ -1726,6 +1754,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       {showAddForm && (
         <form
           onSubmit={handleSingleAdd}
+          noValidate
           className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-5 space-y-4 animate-in fade-in duration-150"
         >
           <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
@@ -2862,6 +2891,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
           <form
             onSubmit={handleEditSave}
+            noValidate
             className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col animate-in fade-in duration-150 overflow-hidden"
           >
             {/* Modal Header (Fixed at top) */}

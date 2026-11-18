@@ -51,6 +51,9 @@ import {
   isJoseRicardoManeghin,
   getStudentDeduplicationKey,
   PROTECTED_MINI_MATERNAL_2026_IDS,
+  parseUpdatedAtMs,
+  normalizeUpdatedAtIso,
+  extractStudentTimestamp,
 } from './utils/storageUtils';
 import {
   normalizeAndDeduplicateUsers,
@@ -388,21 +391,25 @@ function scheduleDuplicateReconciliationInFirestore(
   const winnerContrato = winner.tipoContrato || 'regular';
   const winnerInicio = winnerContrato === 'avulso' ? (winner.dataInicioContrato || '') : '';
   const winnerTermino = winnerContrato === 'avulso' ? (winner.dataTerminoContrato || '') : '';
-  const winnerUpdatedAt = winner.updatedAt || new Date().toISOString();
+  const winnerTsMs = parseUpdatedAtMs(winner.updatedAt) || extractStudentTimestamp(winner);
+  const winnerUpdatedAt = winnerTsMs > 0 ? new Date(winnerTsMs).toISOString() : '1970-01-01T00:00:00.000Z';
   const sigBase = `${winnerStatus}:${winnerMat}:${winnerContrato}:${winnerInicio}:${winnerTermino}:${winnerActs.slice().sort().join(',')}:${winner.turma || ''}:${winner.inactivationDate || ''}`;
 
   const writes: Array<{ col: 'alunos' | 'students'; id: string }> = [];
   for (const tid of targetIds) {
     const aDoc = alunosDocs.get(tid);
     const sDoc = studentsDocs.get(tid);
-    if (aDoc && studentSyncStateDiffers(aDoc, winner)) {
+    const aDocMs = aDoc ? (parseUpdatedAtMs(aDoc.updatedAt) || extractStudentTimestamp(aDoc)) : 0;
+    const sDocMs = sDoc ? (parseUpdatedAtMs(sDoc.updatedAt) || extractStudentTimestamp(sDoc)) : 0;
+
+    if (aDoc && studentSyncStateDiffers(aDoc, winner) && !(aDocMs > 0 && winnerTsMs > 0 && aDocMs > winnerTsMs)) {
       const key = `alunos/${tid}:${sigBase}`;
       if (!reconciledStudentDriftKeys.has(key)) {
         reconciledStudentDriftKeys.add(key);
         writes.push({ col: 'alunos', id: tid });
       }
     }
-    if (sDoc && studentSyncStateDiffers(sDoc, winner)) {
+    if (sDoc && studentSyncStateDiffers(sDoc, winner) && !(sDocMs > 0 && winnerTsMs > 0 && sDocMs > winnerTsMs)) {
       const key = `students/${tid}:${sigBase}`;
       if (!reconciledStudentDriftKeys.has(key)) {
         reconciledStudentDriftKeys.add(key);
@@ -1570,7 +1577,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       ).catch(() => {});
     }
     const isAtivo = (normalized.status || 'ativo') === 'ativo';
-    const nowIso = new Date().toISOString();
+    const nowIso = normalizeUpdatedAtIso(normalized.updatedAt) || new Date().toISOString();
     const payload = {
       id: normalized.id,
       name: normalized.name,
@@ -1604,22 +1611,12 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       updatedAt: nowIso,
     };
 
-    const results = await withWriteTimeout(
-      Promise.allSettled([
-        setDoc(doc(db, 'alunos', normalized.id), payload, { merge: true }),
-        setDoc(doc(db, 'students', normalized.id), payload, { merge: true }),
-      ]),
-      'salvar aluno'
-    );
-    if (results[0].status === 'rejected') {
-      throw results[0].reason;
-    }
-    if (results[1].status === 'rejected') {
-      throw results[1].reason;
-    }
+    // Descobre eventuais documentos paralelos/duplicados ANTES da escrita para gravar tudo em um único batch atômico
+    // e eliminar a janela de corrida em que um onSnapshot parcial enxerga a cópia antiga como divergente.
+    const allTargets = new Map<string, { ref: any; docId: string }>();
+    allTargets.set(`alunos/${normalized.id}`, { ref: doc(db, 'alunos', normalized.id), docId: normalized.id });
+    allTargets.set(`students/${normalized.id}`, { ref: doc(db, 'students', normalized.id), docId: normalized.id });
 
-    // Propaga edição (modalidades, status/cancelamento, etc.) para TODOS os eventuais documentos paralelos/duplicados
-    // do mesmo aluno nas coleções 'alunos' e 'students', independente de variação de maiúsculas, acentos ou grafia
     try {
       const targetDedupKey = getStudentDeduplicationKey(normalized);
       const normTargetName = normalizeTextForMatch(normalized.name);
@@ -1631,8 +1628,6 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
         getDocs(collection(db, 'alunos')),
         getDocs(collection(db, 'students')),
       ]);
-
-      const shadowUpdates = new Map<string, { ref: any; docId: string }>();
 
       const inspectSnap = (res: PromiseSettledResult<any>) => {
         if (res.status !== 'fulfilled' || !res.value || typeof res.value.forEach !== 'function') return;
@@ -1656,27 +1651,26 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
             (!normTargetTurma || !data.turma || normalizeTurmaForMatch(data.turma) === normTargetTurma);
 
           if (sameInternalId || docDedupKey === targetDedupKey || sameJose || sameNormNameAndTurma) {
-            shadowUpdates.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
+            allTargets.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
+            unmarkStudentAsDeleted(docSnap.id);
           }
         });
       };
 
       inspectSnap(alunosAllRes);
       inspectSnap(studentsAllRes);
+    } catch (discoverErr) {
+      console.warn('Aviso ao mapear eventuais cópias duplicadas antes de salvar aluno:', discoverErr);
+    }
 
-      if (shadowUpdates.size > 0) {
-        const shadowList = Array.from(shadowUpdates.values());
-        for (let i = 0; i < shadowList.length; i += 200) {
-          const chunk = shadowList.slice(i, i + 200);
-          const batch = writeBatch(db);
-          chunk.forEach(({ ref, docId }) => {
-            batch.set(ref, { ...payload, id: docId }, { merge: true });
-          });
-          await withWriteTimeout(batch.commit(), 'sincronizar cópias do aluno');
-        }
-      }
-    } catch (syncErr) {
-      console.warn('Aviso ao sincronizar eventuais cópias duplicadas do aluno no Firestore:', syncErr);
+    const targetList = Array.from(allTargets.values());
+    for (let i = 0; i < targetList.length; i += 200) {
+      const chunk = targetList.slice(i, i + 200);
+      const batch = writeBatch(db);
+      chunk.forEach(({ ref, docId }) => {
+        batch.set(ref, { ...payload, id: docId }, { merge: true });
+      });
+      await withWriteTimeout(batch.commit(), 'salvar aluno');
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `alunos/${student.id}`);

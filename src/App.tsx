@@ -273,18 +273,13 @@ export default function App() {
       }
     }
 
-    // Verificação de expiração de contratos avulsos ao realizar login
+    // Verificação local de expiração de contratos avulsos ao realizar login (sem sobrescrever o Firestore a partir de cache local obsoleto; o snapshot oficial em subscribeStudents cuida da persistência autoritativa)
     const currentStudents = loadStudents();
     const { updatedStudents: postLoginStudents, inactivatedStudents: loginInactivated } =
       checkAndInactivateExpiredTemporaryStudents(currentStudents);
     if (loginInactivated.length > 0) {
       setStudents(postLoginStudents);
       saveStudents(postLoginStudents);
-      loginInactivated.forEach((st) => {
-        saveStudentToFirestore(st).catch((err) =>
-          console.error('Erro ao salvar inativação automática no login:', err)
-        );
-      });
     }
 
     // Redirect user to appropriate initial tab:
@@ -1106,6 +1101,13 @@ export default function App() {
       saveStudents(updated);
       return updated;
     });
+    if (updatedList.length === 0) {
+      const filtered = students.filter(
+        (s) => s.id !== newStudent.id && getStudentDeduplicationKey(s) !== candidateKey
+      );
+      updatedList = deduplicateStudentsList([newStudent, ...filtered]);
+      saveStudents(updatedList);
+    }
     broadcastSyncEvent('SYNC_STUDENTS', updatedList);
   };
 
@@ -1115,6 +1117,7 @@ export default function App() {
     activities: ActivityType[],
     diasFrequencia?: DayOfWeek[]
   ) => {
+    const nowIso = new Date().toISOString();
     const newStudentsList: Student[] = names.map((name, idx) =>
       normalizeStudent({
         id: `st-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1124,16 +1127,21 @@ export default function App() {
         diasFrequencia: diasFrequencia && diasFrequencia.length > 0 ? diasFrequencia : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
         horariosSaida: {},
         status: 'ativo',
+        updatedAt: nowIso,
       })
     );
 
     let updatedList: Student[] = [];
     setStudents((prev) => {
-      const updated = [...newStudentsList, ...prev];
+      const updated = deduplicateStudentsList([...newStudentsList, ...prev]);
       updatedList = updated;
       saveStudents(updated);
       return updated;
     });
+    if (updatedList.length === 0) {
+      updatedList = deduplicateStudentsList([...newStudentsList, ...students]);
+      saveStudents(updatedList);
+    }
     broadcastSyncEvent('SYNC_STUDENTS', updatedList);
 
     try {
