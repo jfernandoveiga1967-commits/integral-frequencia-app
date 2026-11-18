@@ -120,6 +120,26 @@ export function markStudentAsDeleted(id: string): void {
   }
 }
 
+export function unmarkStudentAsDeleted(id: string): void {
+  if (!id) return;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_STUDENTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.includes(id)) {
+          localStorage.setItem(
+            DELETED_STUDENTS_KEY,
+            JSON.stringify(parsed.filter((item) => item !== id))
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao remover aluno da lista de excluídos:', e);
+  }
+}
+
 /**
  * Limpeza de Cache ao Deletar:
  * Remove o aluno do LocalStorage e registra o ID na lista de exclusão
@@ -304,22 +324,45 @@ export function normalizeStudent(
       : 'ativo';
 
   // Preservação de Tipo de Contrato e Período (Regular vs. Avulso/Temporário)
-  const tipoContrato: ContractType = (s.tipoContrato === 'avulso' || existingStudent?.tipoContrato === 'avulso') ? 'avulso' : 'regular';
-  const dataInicioContrato = s.dataInicioContrato != null ? s.dataInicioContrato : (existingStudent?.dataInicioContrato || undefined);
-  const dataTerminoContrato = s.dataTerminoContrato != null ? s.dataTerminoContrato : (existingStudent?.dataTerminoContrato || undefined);
-  
-  let diasContratados: DayOfWeek[] | undefined = undefined;
-  if (Array.isArray(s.diasContratados) && s.diasContratados.length > 0) {
-    diasContratados = [...s.diasContratados];
-  } else if (existingStudent && Array.isArray(existingStudent.diasContratados) && existingStudent.diasContratados.length > 0) {
-    diasContratados = [...existingStudent.diasContratados];
-  } else if (tipoContrato === 'avulso' && diasFrequencia.length > 0) {
-    diasContratados = [...diasFrequencia];
-  }
+  const rawContract = typeof s.tipoContrato === 'string' ? s.tipoContrato.trim().toLowerCase() : '';
+  const existContract = typeof existingStudent?.tipoContrato === 'string' ? existingStudent.tipoContrato.trim().toLowerCase() : '';
+  const tipoContrato: ContractType =
+    rawContract === 'avulso' || rawContract === 'temporario' || rawContract === 'temporário'
+      ? 'avulso'
+      : rawContract === 'regular'
+      ? 'regular'
+      : existContract === 'avulso' || existContract === 'temporario' || existContract === 'temporário'
+      ? 'avulso'
+      : 'regular';
 
-  // Para alunos avulsos, garante sincronia entre diasContratados e diasFrequencia
-  if (tipoContrato === 'avulso' && diasContratados && diasContratados.length > 0) {
-    diasFrequencia = [...diasContratados];
+  const rawInicio = s.dataInicioContrato != null && String(s.dataInicioContrato).trim() !== ''
+    ? String(s.dataInicioContrato).trim()
+    : (existingStudent?.dataInicioContrato && String(existingStudent.dataInicioContrato).trim() !== ''
+        ? String(existingStudent.dataInicioContrato).trim()
+        : undefined);
+  const rawTermino = s.dataTerminoContrato != null && String(s.dataTerminoContrato).trim() !== ''
+    ? String(s.dataTerminoContrato).trim()
+    : (existingStudent?.dataTerminoContrato && String(existingStudent.dataTerminoContrato).trim() !== ''
+        ? String(existingStudent.dataTerminoContrato).trim()
+        : undefined);
+
+  const dataInicioContrato = tipoContrato === 'avulso' ? rawInicio : undefined;
+  const dataTerminoContrato = tipoContrato === 'avulso' ? rawTermino : undefined;
+
+  let diasContratados: DayOfWeek[] | undefined = undefined;
+  if (tipoContrato === 'avulso') {
+    if (Array.isArray(s.diasContratados) && s.diasContratados.length > 0) {
+      diasContratados = [...s.diasContratados];
+    } else if (existingStudent && Array.isArray(existingStudent.diasContratados) && existingStudent.diasContratados.length > 0) {
+      diasContratados = [...existingStudent.diasContratados];
+    } else if (diasFrequencia.length > 0) {
+      diasContratados = [...diasFrequencia];
+    }
+
+    // Para alunos avulsos, garante sincronia entre diasContratados e diasFrequencia
+    if (diasContratados && diasContratados.length > 0) {
+      diasFrequencia = [...diasContratados];
+    }
   }
 
   // Preservação de Modalidades Especiais / Paralelas (ex: ['Reforço'])
@@ -531,12 +574,34 @@ export function mergeStudentData(
     ? ''
     : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : (existingStudent.inactivationReason || ''));
 
-  const tipoContrato: ContractType = incomingStudent.tipoContrato || existingStudent.tipoContrato || 'regular';
-  const dataInicioContrato = incomingStudent.dataInicioContrato != null ? incomingStudent.dataInicioContrato : existingStudent.dataInicioContrato;
-  const dataTerminoContrato = incomingStudent.dataTerminoContrato != null ? incomingStudent.dataTerminoContrato : existingStudent.dataTerminoContrato;
-  const diasContratados = Array.isArray(incomingStudent.diasContratados) && incomingStudent.diasContratados.length > 0
-    ? incomingStudent.diasContratados
-    : (existingStudent.diasContratados || (tipoContrato === 'avulso' ? incomingDays : undefined));
+  const rawIncContract = typeof incomingStudent.tipoContrato === 'string' ? incomingStudent.tipoContrato.trim().toLowerCase() : '';
+  const rawExContract = typeof existingStudent.tipoContrato === 'string' ? existingStudent.tipoContrato.trim().toLowerCase() : '';
+  const tipoContrato: ContractType =
+    rawIncContract === 'avulso' || rawIncContract === 'temporario' || rawIncContract === 'temporário'
+      ? 'avulso'
+      : rawIncContract === 'regular'
+      ? 'regular'
+      : rawExContract === 'avulso'
+      ? 'avulso'
+      : 'regular';
+  const dataInicioContrato =
+    tipoContrato === 'avulso'
+      ? (incomingStudent.dataInicioContrato != null && String(incomingStudent.dataInicioContrato).trim() !== ''
+          ? String(incomingStudent.dataInicioContrato).trim()
+          : existingStudent.dataInicioContrato)
+      : undefined;
+  const dataTerminoContrato =
+    tipoContrato === 'avulso'
+      ? (incomingStudent.dataTerminoContrato != null && String(incomingStudent.dataTerminoContrato).trim() !== ''
+          ? String(incomingStudent.dataTerminoContrato).trim()
+          : existingStudent.dataTerminoContrato)
+      : undefined;
+  const diasContratados =
+    tipoContrato === 'avulso'
+      ? (Array.isArray(incomingStudent.diasContratados) && incomingStudent.diasContratados.length > 0
+          ? incomingStudent.diasContratados
+          : (existingStudent.diasContratados || incomingDays))
+      : undefined;
 
   return {
     ...existingStudent,
@@ -612,8 +677,9 @@ export function checkAndInactivateExpiredTemporaryStudents(
 
   const updated = (students || []).map((student) => {
     if (!student) return student;
-    const isAvulso = student.tipoContrato === 'avulso';
-    const isActive = (student.status || 'ativo') === 'ativo';
+    const isAvulso = String(student.tipoContrato || '').trim().toLowerCase() === 'avulso';
+    const currentStatus = String(student.status || student.statusMatricula || 'ativo').trim().toLowerCase();
+    const isActive = currentStatus === 'ativo' || currentStatus === 'regular';
     const hasEndDate = Boolean(student.dataTerminoContrato && student.dataTerminoContrato.trim().length > 0);
     const isExpired = hasEndDate && student.dataTerminoContrato!.trim() < today;
 
@@ -624,6 +690,7 @@ export function checkAndInactivateExpiredTemporaryStudents(
         statusMatricula: 'inativo',
         inactivationDate: student.dataTerminoContrato!.trim(),
         inactivationReason: 'Contrato Concluído',
+        updatedAt: new Date().toISOString(),
       };
       inactivated.push(inactivatedStudent);
       return inactivatedStudent;

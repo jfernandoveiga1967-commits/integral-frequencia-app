@@ -551,15 +551,17 @@ export async function restoreMiniMaternal2026(): Promise<{
   const officialIds = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => st.id));
   const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
 
-  // Identificar e expurgar alunos indevidamente vinculados ao Mini Maternal 2026 fora dos oficiais
-  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin/Meneghin caso exista
+  // Identificar e expurgar alunos regulares indevidamente vinculados ao Mini Maternal 2026 fora dos oficiais
+  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin/Meneghin
+  // e preserva integralmente matrículas temporárias/avulsas cadastradas no Mini Maternal.
   const extraneousMiniMaternal2026Ids: string[] = [];
   studentMap.forEach((s, sId) => {
     const isMiniMaternal = (s.turma || '').toLowerCase().includes('mini') && (s.turma || '').toLowerCase().includes('maternal');
     const is2026 = (s.anoLetivo || 2026) === 2026;
+    const isAvulso = String(s.tipoContrato || '').trim().toLowerCase() === 'avulso';
     const normName = normalizeStudentNameForMatching(s.name);
     const isJoseRicardo = isJoseRicardoManeghin({ id: sId, name: s.name });
-    if (isMiniMaternal && is2026 && !isJoseRicardo && !officialIds.has(sId) && !officialNames.has(normName)) {
+    if (isMiniMaternal && is2026 && !isAvulso && !isJoseRicardo && !officialIds.has(sId) && !officialNames.has(normName)) {
       extraneousMiniMaternal2026Ids.push(sId);
       studentMap.delete(sId);
     }

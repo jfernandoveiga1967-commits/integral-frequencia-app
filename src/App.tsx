@@ -1073,24 +1073,40 @@ export default function App() {
 
   // Save student modifications
   const handleAddStudent = async (newStudentData: Omit<Student, 'id'>) => {
+    const nowIso = new Date().toISOString();
+    const candidateKey = getStudentDeduplicationKey(newStudentData);
+    const existingMatch = students.find((s) => getStudentDeduplicationKey(s) === candidateKey);
+
     const rawStudent: Student = {
       ...newStudentData,
-      id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: existingMatch?.id || `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      status: newStudentData.status || 'ativo',
+      statusMatricula: newStudentData.statusMatricula || newStudentData.status || 'ativo',
+      inactivationDate: (newStudentData.status || 'ativo') === 'ativo' ? '' : newStudentData.inactivationDate,
+      inactivationReason: (newStudentData.status || 'ativo') === 'ativo' ? '' : newStudentData.inactivationReason,
+      updatedAt: nowIso,
     };
     const newStudent = normalizeStudent(rawStudent);
+
+    // Persiste primeiro no Firestore e propaga qualquer erro para a interface (evita perda silenciosa)
+    try {
+      await saveStudentToFirestore(newStudent);
+    } catch (err) {
+      console.error('Error adding student to Firestore:', err);
+      throw err;
+    }
+
     let updatedList: Student[] = [];
     setStudents((prev) => {
-      const updated = [newStudent, ...prev];
+      const filtered = prev.filter(
+        (s) => s.id !== newStudent.id && getStudentDeduplicationKey(s) !== candidateKey
+      );
+      const updated = deduplicateStudentsList([newStudent, ...filtered]);
       updatedList = updated;
       saveStudents(updated);
       return updated;
     });
     broadcastSyncEvent('SYNC_STUDENTS', updatedList);
-    try {
-      await saveStudentToFirestore(newStudent);
-    } catch (err) {
-      console.error('Error adding student to Firestore:', err);
-    }
   };
 
   const handleBatchAddStudents = async (

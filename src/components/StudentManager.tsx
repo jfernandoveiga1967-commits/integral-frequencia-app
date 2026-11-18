@@ -975,6 +975,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           status: can.status || 'ativo',
           statusMatricula: can.statusMatricula || 'ativo',
           tipoContrato: can.tipoContrato || 'regular',
+          dataInicioContrato: can.tipoContrato === 'avulso' ? (can.dataInicioContrato || '') : '',
+          dataTerminoContrato: can.tipoContrato === 'avulso' ? (can.dataTerminoContrato || '') : '',
+          diasContratados: can.tipoContrato === 'avulso' ? (can.diasContratados || can.diasFrequencia || []) : [],
           diasFrequencia: can.diasFrequencia,
           horariosSaida: can.horariosSaida || {},
           planoContratual: can.planoContratual || 'Integral Semana (18:30h)',
@@ -1238,9 +1241,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setNewDescontoBolsa(0);
       setShowAddForm(false);
       setSingleFormError(null);
+      setToastMsg({
+        text:
+          newTipoContrato === 'avulso'
+            ? `Aluno avulso "${trimmedName}" cadastrado com sucesso (${formatDateBR(newDataInicio)} a ${formatDateBR(newDataTermino)})!`
+            : `Aluno "${trimmedName}" cadastrado com sucesso!`,
+        type: 'success',
+      });
     } catch (err: any) {
       console.error('Error saving new student:', err);
-      setSingleFormError(err?.message || 'Erro ao cadastrar aluno. Tente novamente.');
+      const errMsg = err?.message || 'Erro ao cadastrar aluno no Firestore. Verifique sua conexão e tente novamente.';
+      setSingleFormError(errMsg);
+      setToastMsg({
+        text: errMsg,
+        type: 'error',
+      });
     } finally {
       setIsSavingSingle(false);
     }
@@ -1485,17 +1500,24 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             : defaultWeekDays);
 
       const newStatus = editingStudent.status || 'ativo';
-      const isReactivatingToAtivo = newStatus === 'ativo';
+      const today = toISODateString(new Date());
 
-      // Se for alterado para ativo e for avulso com contrato expirado, converte para regular
-      const shouldConvertToRegular =
-        isReactivatingToAtivo &&
-        editingStudent.tipoContrato === 'avulso' &&
-        Boolean(editingStudent.dataTerminoContrato && editingStudent.dataTerminoContrato.trim().length > 0 && editingStudent.dataTerminoContrato.trim() < toISODateString(new Date()));
+      if (
+        newStatus === 'ativo' &&
+        isAvulso &&
+        editingStudent.dataTerminoContrato &&
+        editingStudent.dataTerminoContrato.trim().length > 0 &&
+        editingStudent.dataTerminoContrato.trim() < today
+      ) {
+        const expiredMsg =
+          'Para salvar um contrato Avulso ativo, informe uma Data de Término igual ou posterior a hoje (ou altere o tipo de contrato para Regular).';
+        setEditFormError(expiredMsg);
+        setToastMsg({ text: expiredMsg, type: 'error' });
+        setIsSavingEdit(false);
+        return;
+      }
 
-      const finalTipoContrato: ContractType = shouldConvertToRegular
-        ? 'regular'
-        : (editingStudent.tipoContrato || 'regular');
+      const finalTipoContrato: ContractType = editingStudent.tipoContrato || 'regular';
 
       const studentToSave: Student = {
         ...editingStudent,
@@ -1507,14 +1529,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         reforcoStartDate: hasReforco && editingStudent.reforcoStartDate ? editingStudent.reforcoStartDate : undefined,
         reforcoEndDate: hasReforco && editingStudent.reforcoEndDate ? editingStudent.reforcoEndDate : undefined,
         tipoContrato: finalTipoContrato,
-        dataInicioContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataInicioContrato : undefined,
-        dataTerminoContrato: isAvulso && !shouldConvertToRegular ? editingStudent.dataTerminoContrato : undefined,
-        diasContratados: isAvulso && !shouldConvertToRegular ? editingStudent.diasContratados : undefined,
+        dataInicioContrato: isAvulso ? editingStudent.dataInicioContrato : undefined,
+        dataTerminoContrato: isAvulso ? editingStudent.dataTerminoContrato : undefined,
+        diasContratados: isAvulso ? effectiveDias : undefined,
         status: newStatus,
         statusMatricula: newStatus,
         inactivationDate:
           newStatus === 'inativo' || newStatus === 'cancelado'
-            ? editingStudent.inactivationDate || toISODateString(new Date())
+            ? editingStudent.inactivationDate || today
             : '',
         inactivationReason:
           newStatus === 'inativo' || newStatus === 'cancelado'
@@ -1648,7 +1670,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 id="btn-toggle-add-student"
                 onClick={() => {
                   if (!showAddForm) {
+                    const today = toISODateString(new Date());
+                    setSingleFormError(null);
                     setNewActivities(['Rotina']);
+                    setNewDataInicio(today);
+                    setNewDataTermino(today);
+                    setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
+                    setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
+                    setNewAnoLetivo(selectedAnoLetivo);
                   }
                   setShowAddForm(!showAddForm);
                   setShowBatchForm(false);
@@ -1906,7 +1935,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
               <button
                 type="button"
-                onClick={() => setNewTipoContrato('avulso')}
+                onClick={() => {
+                  const today = toISODateString(new Date());
+                  setNewTipoContrato('avulso');
+                  if (!newDataInicio || newDataInicio < today) setNewDataInicio(today);
+                  if (!newDataTermino || newDataTermino < today) setNewDataTermino(today);
+                  if (newDiasFrequencia && newDiasFrequencia.length > 0) {
+                    setNewDiasContratados(newDiasFrequencia);
+                  }
+                }}
                 className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
                   newTipoContrato === 'avulso'
                     ? 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
@@ -1934,6 +1971,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>Configuração do Período e Dias Contratados (Obrigatórios):</span>
                 </div>
+
+                {newDataInicio && Number(newDataInicio.slice(0, 4)) !== newAnoLetivo && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px] text-rose-800 font-semibold">
+                    <span>
+                      ⚠️ O período selecionado começa em <strong>{newDataInicio.slice(0, 4)}</strong>, mas o Ano Letivo marcado acima está em <strong>{newAnoLetivo}</strong>.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeNewAnoLetivo(Number(newDataInicio.slice(0, 4)))}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10.5px] font-bold cursor-pointer"
+                    >
+                      Ajustar Ano Letivo para {newDataInicio.slice(0, 4)}
+                    </button>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -1972,21 +2024,33 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     <div className="flex items-center space-x-1">
                       <button
                         type="button"
-                        onClick={() => setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                        onClick={() => {
+                          const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+                          setNewDiasContratados(days);
+                          setNewDiasFrequencia(days);
+                        }}
                         className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
                       >
                         Seg a Sex
                       </button>
                       <button
                         type="button"
-                        onClick={() => setNewDiasContratados(['segunda', 'quarta', 'sexta'])}
+                        onClick={() => {
+                          const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
+                          setNewDiasContratados(days);
+                          setNewDiasFrequencia(days);
+                        }}
                         className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                       >
                         Seg / Qua / Sex
                       </button>
                       <button
                         type="button"
-                        onClick={() => setNewDiasContratados(['terca', 'quinta'])}
+                        onClick={() => {
+                          const days: DayOfWeek[] = ['terca', 'quinta'];
+                          setNewDiasContratados(days);
+                          setNewDiasFrequencia(days);
+                        }}
                         className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                       >
                         Ter / Qui
@@ -2007,7 +2071,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         <button
                           type="button"
                           key={d.id}
-                          onClick={() => setNewDiasContratados(toggleDayInList(newDiasContratados, d.id))}
+                          onClick={() => {
+                            const updated = toggleDayInList(newDiasContratados, d.id);
+                            setNewDiasContratados(updated);
+                            setNewDiasFrequencia(updated);
+                          }}
                           className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                             isSelected
                               ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
@@ -2254,21 +2322,33 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta'])}
+                  onClick={() => {
+                    const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+                    setNewDiasFrequencia(days);
+                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                  }}
                   className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 shadow-2xs"
                 >
                   Seg a Sex
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewDiasFrequencia(['segunda', 'quarta', 'sexta'])}
+                  onClick={() => {
+                    const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
+                    setNewDiasFrequencia(days);
+                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                  }}
                   className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
                 >
                   Seg / Qua / Sex
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewDiasFrequencia(['terca', 'quinta'])}
+                  onClick={() => {
+                    const days: DayOfWeek[] = ['terca', 'quinta'];
+                    setNewDiasFrequencia(days);
+                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                  }}
                   className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
                 >
                   Ter / Qui
@@ -2314,7 +2394,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   <div key={d.id} className="flex flex-col space-y-1.5">
                     <button
                       type="button"
-                      onClick={() => setNewDiasFrequencia(toggleDayInList(newDiasFrequencia, d.id))}
+                      onClick={() => {
+                        const updated = toggleDayInList(newDiasFrequencia, d.id);
+                        setNewDiasFrequencia(updated);
+                        if (newTipoContrato === 'avulso') {
+                          setNewDiasContratados(updated);
+                        }
+                      }}
                       className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
                         isSelected
                           ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
@@ -2359,6 +2445,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               💡 O aluno constará na chamada diária exclusivamente nos dias marcados, com o horário de saída específico cadastrado.
             </p>
           </div>
+
+          {singleFormError && (
+            <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-semibold">
+              ⚠️ {singleFormError}
+            </div>
+          )}
 
           <div className="flex justify-end space-x-2 pt-2 border-t border-indigo-100">
             <button
@@ -3146,17 +3238,34 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     disabled={isSavingEdit}
                     onClick={() => {
                       const today = toISODateString(new Date());
+                      const hasValidCurrentDates =
+                        editingStudent.dataTerminoContrato &&
+                        editingStudent.dataTerminoContrato.trim() >= today;
+                      const currentDias =
+                        editingStudent.diasContratados && editingStudent.diasContratados.length > 0
+                          ? editingStudent.diasContratados
+                          : editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
+                          ? editingStudent.diasFrequencia
+                          : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+                      const wasInactiveOrCancelled =
+                        (editingStudent.status || 'ativo') !== 'ativo' ||
+                        (editingStudent.statusMatricula || 'ativo') !== 'ativo';
+
                       setEditingStudent({
                         ...editingStudent,
                         tipoContrato: 'avulso',
-                        dataInicioContrato: editingStudent.dataInicioContrato || today,
-                        dataTerminoContrato: editingStudent.dataTerminoContrato || today,
-                        diasContratados:
-                          editingStudent.diasContratados && editingStudent.diasContratados.length > 0
-                            ? editingStudent.diasContratados
-                            : editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
-                            ? editingStudent.diasFrequencia
-                            : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
+                        dataInicioContrato: hasValidCurrentDates
+                          ? editingStudent.dataInicioContrato || today
+                          : today,
+                        dataTerminoContrato: hasValidCurrentDates
+                          ? editingStudent.dataTerminoContrato || today
+                          : today,
+                        diasContratados: currentDias,
+                        diasFrequencia: currentDias,
+                        status: wasInactiveOrCancelled ? 'ativo' : (editingStudent.status || 'ativo'),
+                        statusMatricula: wasInactiveOrCancelled ? 'ativo' : (editingStudent.statusMatricula || 'ativo'),
+                        inactivationDate: wasInactiveOrCancelled ? '' : editingStudent.inactivationDate,
+                        inactivationReason: wasInactiveOrCancelled ? '' : editingStudent.inactivationReason,
                       });
                     }}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
@@ -3218,12 +3327,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           type="date"
                           value={editingStudent.dataTerminoContrato || toISODateString(new Date())}
                           disabled={isSavingEdit}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const newEnd = e.target.value;
+                            const today = toISODateString(new Date());
+                            const shouldReactivate =
+                              Boolean(newEnd && newEnd >= today) &&
+                              editingStudent.status === 'inativo';
                             setEditingStudent({
                               ...editingStudent,
-                              dataTerminoContrato: e.target.value,
-                            })
-                          }
+                              dataTerminoContrato: newEnd,
+                              status: shouldReactivate ? 'ativo' : editingStudent.status,
+                              statusMatricula: shouldReactivate ? 'ativo' : editingStudent.statusMatricula,
+                              inactivationDate: shouldReactivate ? '' : editingStudent.inactivationDate,
+                              inactivationReason: shouldReactivate ? '' : editingStudent.inactivationReason,
+                            });
+                          }}
                           required
                           className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
                         />
@@ -3239,36 +3357,42 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         <div className="flex items-center space-x-1">
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
                               setEditingStudent({
                                 ...editingStudent,
-                                diasContratados: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-                              })
-                            }
+                                diasContratados: days,
+                                diasFrequencia: days,
+                              });
+                            }}
                             className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
                           >
                             Seg a Sex
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
                               setEditingStudent({
                                 ...editingStudent,
-                                diasContratados: ['segunda', 'quarta', 'sexta'],
-                              })
-                            }
+                                diasContratados: days,
+                                diasFrequencia: days,
+                              });
+                            }}
                             className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                           >
                             Seg / Qua / Sex
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const days: DayOfWeek[] = ['terca', 'quinta'];
                               setEditingStudent({
                                 ...editingStudent,
-                                diasContratados: ['terca', 'quinta'],
-                              })
-                            }
+                                diasContratados: days,
+                                diasFrequencia: days,
+                              });
+                            }}
                             className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                           >
                             Ter / Qui
@@ -3294,12 +3418,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                               type="button"
                               key={d.id}
                               disabled={isSavingEdit}
-                              onClick={() =>
+                              onClick={() => {
+                                const updated = toggleDayInList(editingStudent.diasContratados, d.id);
                                 setEditingStudent({
                                   ...editingStudent,
-                                  diasContratados: toggleDayInList(editingStudent.diasContratados, d.id),
-                                })
-                              }
+                                  diasContratados: updated,
+                                  diasFrequencia: updated,
+                                });
+                              }}
                               className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                                 isSelected
                                   ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
@@ -3581,36 +3707,42 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   <div className="flex items-center space-x-1">
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
                         setEditingStudent({
                           ...editingStudent,
-                          diasFrequencia: ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
-                        })
-                      }
+                          diasFrequencia: days,
+                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        });
+                      }}
                       className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200"
                     >
                       Seg a Sex
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
                         setEditingStudent({
                           ...editingStudent,
-                          diasFrequencia: ['segunda', 'quarta', 'sexta'],
-                        })
-                      }
+                          diasFrequencia: days,
+                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        });
+                      }}
                       className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
                     >
                       Seg/Qua/Sex
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const days: DayOfWeek[] = ['terca', 'quinta'];
                         setEditingStudent({
                           ...editingStudent,
-                          diasFrequencia: ['terca', 'quinta'],
-                        })
-                      }
+                          diasFrequencia: days,
+                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        });
+                      }}
                       className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
                     >
                       Ter/Qui
@@ -3671,12 +3803,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         <button
                           type="button"
                           disabled={isSavingEdit}
-                          onClick={() =>
+                          onClick={() => {
+                            const updated = toggleDayInList(editingStudent.diasFrequencia, d.id);
                             setEditingStudent({
                               ...editingStudent,
-                              diasFrequencia: toggleDayInList(editingStudent.diasFrequencia, d.id),
-                            })
-                          }
+                              diasFrequencia: updated,
+                              ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: updated } : {}),
+                            });
+                          }}
                           className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
                             isSelected
                               ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'

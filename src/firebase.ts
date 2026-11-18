@@ -22,6 +22,7 @@ import {
   enableNetwork,
   disableNetwork,
   arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord, CustomExpenseCategory } from './types';
@@ -37,6 +38,7 @@ import {
   isMockStudent,
   getDeletedStudentIds,
   markStudentAsDeleted,
+  unmarkStudentAsDeleted,
   removeStudentFromLocalStorage,
   deduplicateStudentsList,
   saveStudents,
@@ -357,6 +359,11 @@ function studentSyncStateDiffers(docA: any, docB: any): boolean {
   const smA = String(docA.statusMatricula || docA.status || 'ativo').trim().toLowerCase();
   const smB = String(docB.statusMatricula || docB.status || 'ativo').trim().toLowerCase();
   if (smA !== smB) return true;
+  const tcA = String(docA.tipoContrato || 'regular').trim().toLowerCase();
+  const tcB = String(docB.tipoContrato || 'regular').trim().toLowerCase();
+  if (tcA !== tcB) return true;
+  if (String(docA.dataInicioContrato || '') !== String(docB.dataInicioContrato || '')) return true;
+  if (String(docA.dataTerminoContrato || '') !== String(docB.dataTerminoContrato || '')) return true;
   const actsA = (Array.isArray(docA.activities) ? docA.activities : []).slice().sort().join('|');
   const actsB = (Array.isArray(docB.activities) ? docB.activities : []).slice().sort().join('|');
   if (actsA !== actsB) return true;
@@ -378,8 +385,11 @@ function scheduleDuplicateReconciliationInFirestore(
   const winnerActs = Array.isArray(winner.activities) && winner.activities.length > 0 ? winner.activities : ['Rotina'];
   const winnerStatus = winner.status || 'ativo';
   const winnerMat = winner.statusMatricula || winnerStatus;
+  const winnerContrato = winner.tipoContrato || 'regular';
+  const winnerInicio = winnerContrato === 'avulso' ? (winner.dataInicioContrato || '') : '';
+  const winnerTermino = winnerContrato === 'avulso' ? (winner.dataTerminoContrato || '') : '';
   const winnerUpdatedAt = winner.updatedAt || new Date().toISOString();
-  const sigBase = `${winnerStatus}:${winnerMat}:${winnerActs.slice().sort().join(',')}:${winner.turma || ''}:${winner.inactivationDate || ''}`;
+  const sigBase = `${winnerStatus}:${winnerMat}:${winnerContrato}:${winnerInicio}:${winnerTermino}:${winnerActs.slice().sort().join(',')}:${winner.turma || ''}:${winner.inactivationDate || ''}`;
 
   const writes: Array<{ col: 'alunos' | 'students'; id: string }> = [];
   for (const tid of targetIds) {
@@ -408,6 +418,11 @@ function scheduleDuplicateReconciliationInFirestore(
     activities: winnerActs,
     modalidadesEspeciais: winner.modalidadesEspeciais || [],
     specialties: winner.specialties || winner.modalidadesEspeciais || [],
+    tipoContrato: winnerContrato,
+    dataInicioContrato: winnerInicio,
+    dataTerminoContrato: winnerTermino,
+    diasContratados: winnerContrato === 'avulso' ? (winner.diasContratados || winner.diasFrequencia || []) : [],
+    diasFrequencia: winner.diasFrequencia || [],
     status: winnerStatus,
     statusMatricula: winnerMat,
     inactivationDate: winnerStatus === 'ativo' ? '' : (winner.inactivationDate || ''),
@@ -1545,6 +1560,15 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
     }
 
     const normalized = normalizeStudent(student);
+    unmarkStudentAsDeleted(normalized.id);
+    if (cloudDeletedStudentIds.has(normalized.id)) {
+      cloudDeletedStudentIds.delete(normalized.id);
+      setDoc(
+        doc(db, 'settings', 'deleted_student_ids'),
+        { ids: arrayRemove(normalized.id), updatedAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(() => {});
+    }
     const isAtivo = (normalized.status || 'ativo') === 'ativo';
     const nowIso = new Date().toISOString();
     const payload = {
