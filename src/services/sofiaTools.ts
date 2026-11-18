@@ -1,7 +1,7 @@
 /**
  * sofiaTools.ts
- * Catálogo e Executores de Ferramentas Reais da Assistente Inteligente Sofia (Colégio Crescer).
- * Suporte a Gemini Function Calling (Tool Use) com execução determinística no cliente.
+ * Catálogo e Executores de Ferramentas Reais da Assistente Sofia (Colégio Crescer).
+ * Cobre todas as áreas do Integral com respeito às permissões por perfil e linguagem natural.
  */
 
 import jsPDF from 'jspdf';
@@ -13,8 +13,13 @@ import {
   PontoRecord,
   UserProfile,
   ScheduleBlock,
+  SemanarioPlan,
+  TurmaAtribuicao,
+  HolidayItem,
+  ActivityItem,
   AppStateSummary,
   ALL_APP_TAB_IDS,
+  TabType,
 } from '../types';
 import {
   generateLivroPontoPDFReport,
@@ -26,10 +31,40 @@ import {
   getMonthNameBR,
   formatCurrencyBR,
 } from '../utils/pontoUtils';
-import { formatDateBR, toISODateString, getDayOfWeekFromDate } from '../utils/dateUtils';
+import {
+  formatDateBR,
+  toISODateString,
+  getDayOfWeekFromDate,
+  isHolidayOrRecess,
+  isStudentActiveOnDate,
+  isStudentScheduledForDate,
+  isWeekend,
+} from '../utils/dateUtils';
 import { formatPhoneDisplay } from '../utils/whatsappUtils';
+import {
+  getCurrentActivityForTurma,
+  getNextSlot,
+  extractSlotLimits,
+  normalizeTime,
+} from '../utils/timeUtils';
+import { findMatchingSemanarioPlan } from '../utils/semanarioMatching';
+import { loadMonthlyMenu } from '../utils/cardapioStorage';
+import {
+  loadLocalQuadroAtribuicoes,
+  resolveAtribuicaoForTurma,
+} from '../utils/atribuicoesStorage';
+import { loadSemanarioPlans } from '../utils/storageUtils';
+import { NORMAS_DATA } from '../data/normasData';
+import {
+  isAdmin,
+  isTabAllowed,
+  canManageStudents,
+  canMarkAttendance,
+  canManageCardapio,
+} from '../utils/authUtils';
+import { formatHourPTBR, getDayOfWeekFullPTBR } from '../utils/sofiaPromptBuilder';
 import { getUsers, saveUser } from './userService';
-import { getAttendanceSummaryByDate, lancarFrequenciaTurma } from './frequencyService';
+import { getAttendanceSummaryByDate, lancarFrequenciaTurma, normalizeDateInput } from './frequencyService';
 import { createStudent, updateStudent } from './studentService';
 import { cadastrarRefeicaoCardapio as cadastrarRefeicaoCardapioService } from './menuService';
 import {
@@ -47,10 +82,18 @@ export interface SofiaToolExecutionContext {
   selectedDate: string;
   selectedTurma?: string;
   selectedActivity?: string;
+  activeTab?: string;
   schedules?: ScheduleBlock[];
+  semanarioPlans?: SemanarioPlan[];
+  quadroAtribuicoes?: TurmaAtribuicao[];
+  users?: UserProfile[];
+  holidays?: HolidayItem[];
+  activitiesList?: ActivityItem[];
   activeTurmas?: string[];
   onSaveRecord?: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
   onNavigateTab?: (tab: any) => void;
+  onSelectTurma?: (turma: any) => void;
+  onSelectDate?: (date: string) => void;
   appState?: AppStateSummary;
 }
 
@@ -59,19 +102,245 @@ export interface SofiaToolExecutionContext {
  */
 export const SOFIA_FUNCTION_DECLARATIONS = [
   {
+    name: 'consultarAtividadesMomento',
+    description:
+      'Consulta o que cada turma (ou uma turma específica) está fazendo agora ou em um horário simulado na grade horária do Integral: atividade, local, monitora/ADI, horário de término e turmas sem atividade.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Nome opcional da turma (ex: "Maternal Azul", "Infantil 2", "1º Ano Azul"). Se omitido, mostra o panorama das turmas.',
+        },
+        horarioSimulado: {
+          type: 'STRING',
+          description: 'Horário opcional no formato HH:mm para simular (ex: "15:30"). Se omitido, usa o horário atual.',
+        },
+        data: {
+          type: 'STRING',
+          description: 'Data opcional YYYY-MM-DD. Se omitido, usa hoje.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarFrequenciaHoje',
+    description:
+      'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma e listar nomes de presentes ou faltosos.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal").',
+        },
+        listarNomes: {
+          type: 'BOOLEAN',
+          description: 'Se verdadeiro, inclui os nomes dos alunos faltantes, presentes ou pendentes.',
+        },
+      },
+    },
+  },
+  {
+    name: 'obterResumoFrequenciaPorData',
+    description:
+      'Consulta o histórico de frequência de alunos e relatório de faltas e presenças para uma data específica passada ou informada (ex: ontem, anteontem, dia 28 ou data YYYY-MM-DD / DD/MM/YYYY).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        data: {
+          type: 'STRING',
+          description: 'Data da consulta no formato YYYY-MM-DD ou DD/MM/YYYY.',
+        },
+      },
+      required: ['data'],
+    },
+  },
+  {
+    name: 'registrarSaidaAntecipada',
+    description:
+      'Registra rapidamente o aviso/horário de saída antecipada de um aluno hoje (ex: "O Pedro vai sair 16h", "João do Infantil 1 sai mais cedo 15h30"). Detecta automaticamente se há dois alunos com o mesmo nome.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: {
+          type: 'STRING',
+          description: 'Nome ou identificador do aluno.',
+        },
+        turma: {
+          type: 'STRING',
+          description: 'Nome da turma se informado (ex: "Infantil 1", "Maternal Azul").',
+        },
+        horario: {
+          type: 'STRING',
+          description: 'Horário previsto da saída (ex: "16:00", "15:30").',
+        },
+        justificativa: {
+          type: 'STRING',
+          description: 'Motivo ou quem vem buscar, se informado.',
+        },
+      },
+      required: ['alunoId', 'horario'],
+    },
+  },
+  {
+    name: 'consultarAlertasSaidaHoje',
+    description:
+      'Consulta os alertas e relatórios de saídas de hoje: alunos de transporte escolar (van), saídas antecipadas agendadas e alunos já liberados.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        tipo: {
+          type: 'STRING',
+          description: 'Foco da consulta: "van", "antecipada" ou "geral".',
+          enum: ['van', 'antecipada', 'geral'],
+        },
+        turma: {
+          type: 'STRING',
+          description: 'Nome da turma opcional para filtro.',
+        },
+        detalhesVan: {
+          type: 'BOOLEAN',
+          description: 'Se verdadeiro, lista os nomes de cada aluno e condutor.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarCardapio',
+    description:
+      'Consulta o cardápio de hoje, de outra data ou da semana (almoço, guarnição, salada, sobremesa, lanche/observações) e verifica se há alunos com alergias ou restrições alimentares.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        data: {
+          type: 'STRING',
+          description: 'Data opcional ("hoje", "amanha", YYYY-MM-DD ou DD/MM/YYYY). Padrão: hoje.',
+        },
+        turma: {
+          type: 'STRING',
+          description: 'Turma opcional para checar restrições alimentares.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarSemanario',
+    description:
+      'Consulta o planejamento semanal (Semanário) de uma turma ou dia específico: atividades planejadas, objetivos e materiais.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Turma opcional para filtrar o planejamento.',
+        },
+        data: {
+          type: 'STRING',
+          description: 'Data opcional (YYYY-MM-DD ou dia da semana). Padrão: hoje.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarManualNormas',
+    description:
+      'Pesquisa regras, condutas, protocolos de emergência, uso de celular, saídas, alergias ou orientações no Manual Oficial do Colégio Crescer.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        termoOuTema: {
+          type: 'STRING',
+          description: 'Palavra-chave, assunto ou dúvida sobre regra do colégio.',
+        },
+      },
+      required: ['termoOuTema'],
+    },
+  },
+  {
+    name: 'consultarAlunosOuTurma',
+    description:
+      'Busca alunos por nome aproximado ou lista os alunos de uma turma, trazendo turma, tipo de contrato (regular/avulso), horário de saída e transporte.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        busca: {
+          type: 'STRING',
+          description: 'Nome parcial ou completo do aluno.',
+        },
+        turma: {
+          type: 'STRING',
+          description: 'Turma opcional para filtrar.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarQuadroAtribuicoes',
+    description:
+      'Consulta quem são as monitoras titulares, assistentes, ADIs, horários de turno e salas base no Quadro de Atribuições.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Turma opcional para filtrar.',
+        },
+        colaborador: {
+          type: 'STRING',
+          description: 'Nome da monitora/ADI opcional para saber qual turma atende.',
+        },
+      },
+    },
+  },
+  {
+    name: 'consultarLivroPonto',
+    description:
+      'Consulta os registros do Livro Ponto de um colaborador ou do dia (entradas, intervalos, saídas e registros em aberto).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        colaborador: {
+          type: 'STRING',
+          description: 'Nome opcional do colaborador.',
+        },
+        data: {
+          type: 'STRING',
+          description: 'Data opcional YYYY-MM-DD. Padrão: hoje.',
+        },
+      },
+    },
+  },
+  {
+    name: 'navegarModulo',
+    description:
+      'Abre uma aba/tela do aplicativo para o usuário (Atividades do Momento, Chamada, Semanário, Livro Ponto, Cardápio, Alunos, Relatórios, Financeiro ou Manual).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        modulo: {
+          type: 'STRING',
+          description: 'Aba de destino: momento, frequencia, semanario, ponto, cardapio, alunos, financeiro, relatorio, manual.',
+          enum: ['momento', 'frequencia', 'semanario', 'ponto', 'cardapio', 'alunos', 'financeiro', 'relatorio', 'manual'],
+        },
+      },
+      required: ['modulo'],
+    },
+  },
+  {
     name: 'gerarEspelhoPontoPDF',
     description:
-      'Gera o Espelho de Ponto oficial em PDF de um colaborador para determinado mês e ano, calculando horas, fechamento e link imediato de download.',
+      'Gera o Espelho de Ponto oficial em PDF de um colaborador para determinado mês e ano.',
     parameters: {
       type: 'OBJECT',
       properties: {
         colaboradorId: {
           type: 'STRING',
-          description: 'Nome completo, e-mail ou identificador único do colaborador.',
+          description: 'Nome completo ou e-mail do colaborador.',
         },
         mesAno: {
           type: 'STRING',
-          description: 'Mês e ano no formato MM/AAAA (ex: 09/2026) ou YYYY-MM (ex: 2026-09).',
+          description: 'Mês e ano no formato MM/AAAA ou YYYY-MM.',
         },
       },
       required: ['colaboradorId', 'mesAno'],
@@ -80,17 +349,17 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'gerarAutorizacaoEntradaSaidaPDF',
     description:
-      'Gera documento oficial do Colégio Crescer de Autorização de Entrada com Atraso ou Saída Antecipada de um aluno em PDF.',
+      'Gera documento oficial de Autorização de Entrada com Atraso ou Saída Antecipada de um aluno em PDF.',
     parameters: {
       type: 'OBJECT',
       properties: {
         alunoId: {
           type: 'STRING',
-          description: 'Nome completo ou ID do aluno.',
+          description: 'Nome completo ou identificador do aluno.',
         },
         motivo: {
           type: 'STRING',
-          description: 'Motivo da ocorrência: "atraso" (entrada com atraso) ou "saida_antecipada".',
+          description: '"atraso" ou "saida_antecipada".',
           enum: ['atraso', 'saida_antecipada'],
         },
         horario: {
@@ -99,7 +368,7 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
         },
         justificativa: {
           type: 'STRING',
-          description: 'Observação ou justificativa apresentada pelo responsável (opcional).',
+          description: 'Observação ou motivo informado.',
         },
       },
       required: ['alunoId', 'motivo', 'horario'],
@@ -108,13 +377,13 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'registrarFaltaFrequencia',
     description:
-      'Registra a falta de um aluno na lista de chamada do dia com justificativa opcional, persistindo no sistema de frequência.',
+      'Registra a falta de um aluno na lista de chamada do dia com justificativa opcional.',
     parameters: {
       type: 'OBJECT',
       properties: {
         alunoId: {
           type: 'STRING',
-          description: 'Nome completo ou ID do aluno.',
+          description: 'Nome completo ou identificador do aluno.',
         },
         data: {
           type: 'STRING',
@@ -122,7 +391,7 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
         },
         justificativa: {
           type: 'STRING',
-          description: 'Justificativa ou motivo da ausência.',
+          description: 'Motivo da ausência.',
         },
       },
       required: ['alunoId', 'data'],
@@ -131,7 +400,7 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'dispararAlertaWhatsApp',
     description:
-      'Prepara um alerta ou comunicado institucional via WhatsApp com texto e link pronto para disparo rápido.',
+      'Prepara uma mensagem rápida para WhatsApp da equipe ou coordenação.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -141,7 +410,7 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
         },
         mensagem: {
           type: 'STRING',
-          description: 'Texto completo e amigável da mensagem ou alerta a enviar.',
+          description: 'Texto da mensagem pronta para envio.',
         },
       },
       required: ['destinatario', 'mensagem'],
@@ -150,65 +419,13 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'analisarDesarranjosDoDia',
     description:
-      'Diagnostica o estado ao vivo da escola: identifica turmas com chamadas pendentes no horário atual, ausências inesperadas e inconsistências de batidas de ponto.',
+      'Diagnostica o estado ao vivo do Integral: turmas com chamadas pendentes hoje, presenças, faltas e registros de ponto em aberto.',
     parameters: {
       type: 'OBJECT',
       properties: {
         foco: {
           type: 'STRING',
-          description: 'Foco opcional da análise: "geral", "frequencia" ou "ponto".',
-        },
-      },
-    },
-  },
-  {
-    name: 'obterResumoFrequenciaPorData',
-    description:
-      'Consulta o histórico de frequência de alunos e relatório de faltas e presenças para uma data específica passada ou informada (ex: ontem, anteontem, dia 28 ou data YYYY-MM-DD / DD/MM/YYYY). Retorna o total de alunos faltantes, lista de faltas por turma e aluno, e o total de presenças consolidadas.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        data: {
-          type: 'STRING',
-          description: 'Data da consulta no formato YYYY-MM-DD ou DD/MM/YYYY (ex: "2026-10-28" ou "28/10/2026").',
-        },
-      },
-      required: ['data'],
-    },
-  },
-  {
-    name: 'consultarFrequenciaHoje',
-    description:
-      'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turma: {
-          type: 'STRING',
-          description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal").',
-        },
-      },
-    },
-  },
-  {
-    name: 'consultarAlertasSaidaHoje',
-    description:
-      'Consulta os alertas e relatórios de saídas de hoje: alunos de transporte escolar (van), saídas antecipadas agendadas e alunos já liberados pela portaria.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        tipo: {
-          type: 'STRING',
-          description: 'Foco da consulta: "van" (transporte escolar), "antecipada" (saídas antecipadas) ou "geral" (todos os alertas de saída).',
-          enum: ['van', 'antecipada', 'geral'],
-        },
-        turma: {
-          type: 'STRING',
-          description: 'Nome da turma opcional para filtro.',
-        },
-        detalhesVan: {
-          type: 'BOOLEAN',
-          description: 'Se verdadeiro, lista os nomes de cada aluno e condutor de van.',
+          description: 'Foco opcional: "geral", "frequencia" ou "ponto".',
         },
       },
     },
@@ -216,33 +433,33 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'gerarTermoSaidaAvulsa',
     description:
-      'Registra a liberação antecipada de um aluno na portaria e gera o Termo de Saída Avulsa oficial em PDF pronto para impressão e assinatura.',
+      'Registra a liberação antecipada de um aluno na portaria com dados de quem retira e gera o Termo de Saída Avulsa em PDF.',
     parameters: {
       type: 'OBJECT',
       properties: {
         alunoId: {
           type: 'STRING',
-          description: 'Nome completo ou ID do aluno (suporta busca aproximada, ex: "Lyan Adolpho").',
+          description: 'Nome do aluno.',
         },
         nomeRetirante: {
           type: 'STRING',
-          description: 'Nome completo da pessoa que está retirando o aluno (ex: "Marcos Silva").',
+          description: 'Nome completo da pessoa que está retirando o aluno.',
         },
         documentoRetirante: {
           type: 'STRING',
-          description: 'RG ou CPF do retirante (ex: "RG 12345").',
+          description: 'RG ou CPF de quem está retirando.',
         },
         parentesco: {
           type: 'STRING',
-          description: 'Grau de parentesco ou vínculo com o aluno (ex: "Pai", "Mãe", "Tio", "Responsável").',
+          description: 'Parentesco ou vínculo.',
         },
         motivoSaida: {
           type: 'STRING',
-          description: 'Motivo da saída antecipada (ex: "Consulta médica", "Solicitação dos pais").',
+          description: 'Motivo da saída antecipada.',
         },
         horarioSaida: {
           type: 'STRING',
-          description: 'Horário do registro da liberação (ex: "14:30").',
+          description: 'Horário do registro.',
         },
       },
       required: ['alunoId', 'nomeRetirante'],
@@ -251,17 +468,17 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'alterarAnoLetivoAluno',
     description:
-      'Realiza a rematrícula ou troca de ano letivo de um aluno no sistema (ex: 2026 ou 2027).',
+      'Realiza a rematrícula ou troca de ano letivo de um aluno (2026 ou 2027). Requer perfil administrativo.',
     parameters: {
       type: 'OBJECT',
       properties: {
         alunoId: {
           type: 'STRING',
-          description: 'Nome completo ou ID do aluno a ser rematriculado.',
+          description: 'Nome completo do aluno.',
         },
         novoAnoLetivo: {
           type: 'INTEGER',
-          description: 'Ano letivo de destino da matrícula (2026 ou 2027).',
+          description: 'Ano letivo de destino (2026 ou 2027).',
         },
       },
       required: ['alunoId', 'novoAnoLetivo'],
@@ -270,13 +487,13 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'consultarResumoFinanceiro',
     description:
-      'Retorna os indicadores financeiros do Programa Integral para determinado exercício (receita confirmada, despesas operacionais e taxa de adimplência).',
+      'Retorna os indicadores financeiros do Programa Integral para determinado ano letivo. Exclusivo para Coordenação/Direção.',
     parameters: {
       type: 'OBJECT',
       properties: {
         anoLetivo: {
           type: 'INTEGER',
-          description: 'Ano letivo do exercício contábil (ex: 2026 ou 2027, padrão 2026).',
+          description: 'Ano letivo (2026 ou 2027).',
         },
       },
     },
@@ -284,15 +501,15 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'cadastrarAluno',
     description:
-      'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
+      'Cadastra um novo aluno no Integral. Requer permissão de gestão de alunos.',
     parameters: {
       type: 'OBJECT',
       properties: {
         nome: { type: 'STRING', description: 'Nome completo do aluno' },
-        turmaId: { type: 'STRING', description: 'Identificador ou nome da turma (ex: "1º Ano Azul", "Maternal")' },
-        responsavel: { type: 'STRING', description: 'Nome do responsável legal pelo aluno' },
-        telefone: { type: 'STRING', description: 'Telefone ou WhatsApp de contato do responsável' },
-        horarioEntradaSaida: { type: 'STRING', description: 'Horário contratual de entrada e saída (ex: "11:40 - 17:40" ou "17:30")' },
+        turmaId: { type: 'STRING', description: 'Nome da turma' },
+        responsavel: { type: 'STRING', description: 'Nome do responsável' },
+        telefone: { type: 'STRING', description: 'Telefone de contato' },
+        horarioEntradaSaida: { type: 'STRING', description: 'Horário contratual' },
       },
       required: ['nome', 'turmaId', 'responsavel', 'telefone'],
     },
@@ -300,14 +517,14 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'editarAluno',
     description:
-      'Atualiza os dados cadastrais de um aluno existente no sistema.',
+      'Atualiza dados de um aluno existente. Requer permissão de gestão de alunos.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        alunoId: { type: 'STRING', description: 'ID ou nome completo do aluno a ser editado' },
+        alunoId: { type: 'STRING', description: 'Nome ou identificador do aluno' },
         dadosAtualizados: {
           type: 'OBJECT',
-          description: 'Campos atualizados do aluno (nome, turma, status, horarioSaida, notes, etc.)',
+          description: 'Campos a atualizar',
         },
       },
       required: ['alunoId', 'dadosAtualizados'],
@@ -316,17 +533,17 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'cadastrarUsuario',
     description:
-      'Registra um novo usuário ou colaborador institucional no sistema do Colégio Crescer com perfil e cargo.',
+      'Registra um novo colaborador no sistema. Exclusivo para Coordenação/Administração.',
     parameters: {
       type: 'OBJECT',
       properties: {
         nome: { type: 'STRING', description: 'Nome completo do colaborador' },
-        email: { type: 'STRING', description: 'E-mail institucional ou pessoal do colaborador' },
-        funcao: { type: 'STRING', description: 'Função desempenhada no Integral' },
-        cargo: { type: 'STRING', description: 'Cargo oficial (ex: "Monitor de Recreação", "Auxiliar de Desenvolvimento Infantil", "Coordenador")' },
+        email: { type: 'STRING', description: 'E-mail do colaborador' },
+        funcao: { type: 'STRING', description: 'Função no Integral' },
+        cargo: { type: 'STRING', description: 'Cargo' },
         perfil: {
           type: 'STRING',
-          description: 'Perfil de acesso institucional: "ADMIN", "MONITOR" ou "ADI"',
+          description: 'Perfil: ADMIN, MONITOR ou ADI',
           enum: ['ADMIN', 'MONITOR', 'ADI'],
         },
       },
@@ -336,11 +553,11 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'gerarListaChamadaPDF',
     description:
-      'Gera o PDF oficial da lista de chamada nominal de uma turma específica para impressão ou download imediato.',
+      'Gera o PDF da lista de chamada nominal de uma turma.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        turmaId: { type: 'STRING', description: 'Nome da turma (ex: "1º Ano Azul", "Mini Maternal", "5º Ano")' },
+        turmaId: { type: 'STRING', description: 'Nome da turma' },
       },
       required: ['turmaId'],
     },
@@ -348,19 +565,19 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'lancarFrequenciaTurma',
     description:
-      'Realiza a chamada completa em lote de uma turma em determinada data, marcando a presença ou falta de cada aluno.',
+      'Lança a chamada de uma turma em determinada data.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        turmaId: { type: 'STRING', description: 'Nome ou identificador da turma' },
-        data: { type: 'STRING', description: 'Data da chamada no formato YYYY-MM-DD' },
+        turmaId: { type: 'STRING', description: 'Nome da turma' },
+        data: { type: 'STRING', description: 'Data YYYY-MM-DD' },
         chamadas: {
           type: 'ARRAY',
-          description: 'Lista de registros contendo alunoId e booleano presente (true/false)',
+          description: 'Lista de alunos com booleano presente',
           items: {
             type: 'OBJECT',
             properties: {
-              alunoId: { type: 'STRING', description: 'ID ou nome do aluno' },
+              alunoId: { type: 'STRING', description: 'Nome ou identificador do aluno' },
               presente: { type: 'BOOLEAN', description: 'true para presença, false para falta' },
               observation: { type: 'STRING', description: 'Observação opcional' },
             },
@@ -374,17 +591,17 @@ export const SOFIA_FUNCTION_DECLARATIONS = [
   {
     name: 'cadastrarRefeicaoCardapio',
     description:
-      'Cadastra ou atualiza uma refeição (Almoço ou Lanche) no cardápio de uma data específica.',
+      'Cadastra ou atualiza uma refeição (Almoço ou Lanche) no cardápio de uma data. Requer permissão de cardápio/coordenação.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        data: { type: 'STRING', description: 'Data da refeição no formato YYYY-MM-DD ou DD/MM/YYYY' },
+        data: { type: 'STRING', description: 'Data YYYY-MM-DD ou DD/MM/YYYY' },
         tipo: {
           type: 'STRING',
-          description: 'Tipo da refeição: "Almoço" ou "Lanche"',
+          description: 'Almoço ou Lanche',
           enum: ['Almoço', 'Lanche'],
         },
-        descricao: { type: 'STRING', description: 'Descrição detalhada do prato principal, guarnições ou lanche' },
+        descricao: { type: 'STRING', description: 'Descrição da refeição' },
       },
       required: ['data', 'tipo', 'descricao'],
     },
@@ -420,27 +637,26 @@ export function fuzzyMatch(target: string, query: string): boolean {
 
 /**
  * Localiza turma por busca aproximada (Fuzzy Search)
- * Ex: "Maternal" bate com "Maternal Azul", "Mini" bate com "Mini Maternal Azul"
  */
 export function findTurmaFuzzy(turmas: string[], query: string): string | undefined {
   if (!query) return undefined;
   const qNorm = normalizeStr(query);
 
-  // 1. Match exato
   const exact = turmas.find((t) => normalizeStr(t) === qNorm);
   if (exact) return exact;
 
-  // 2. Substring direta
   const sub = turmas.find((t) => normalizeStr(t).includes(qNorm) || qNorm.includes(normalizeStr(t)));
   if (sub) return sub;
 
-  // 3. Regras de mapeamento semântico
   if (qNorm.includes('mini')) return turmas.find((t) => normalizeStr(t).includes('mini')) || 'Mini Maternal Azul';
   if (qNorm.includes('maternal')) return turmas.find((t) => normalizeStr(t).includes('maternal') && !normalizeStr(t).includes('mini')) || 'Maternal Azul';
   if (qNorm.includes('infantil 1') || qNorm.includes('infantil i')) return turmas.find((t) => normalizeStr(t).includes('infantil 1') || normalizeStr(t).includes('infantil i')) || 'Infantil 1';
   if (qNorm.includes('infantil 2') || qNorm.includes('infantil ii')) return turmas.find((t) => normalizeStr(t).includes('infantil 2') || normalizeStr(t).includes('infantil ii')) || 'Infantil 2';
-  if (qNorm.includes('1') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('1') && normalizeStr(t).includes('ano')) || '1º Ano Azul';
-  if (qNorm.includes('2') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('2') && normalizeStr(t).includes('ano')) || '2º Ano';
+  if (qNorm.includes('1') && (qNorm.includes('ano') || qNorm.includes('laranja') || qNorm.includes('azul'))) {
+    if (qNorm.includes('laranja')) return turmas.find((t) => normalizeStr(t).includes('1') && normalizeStr(t).includes('laranja')) || '1º Ano Laranja';
+    return turmas.find((t) => normalizeStr(t).includes('1') && normalizeStr(t).includes('ano')) || '1º Ano Azul';
+  }
+  if (qNorm.includes('2') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('2') && normalizeStr(t).includes('ano')) || '2º Ano Azul';
   if (qNorm.includes('3') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('3') && normalizeStr(t).includes('ano')) || '3º Ano';
   if (qNorm.includes('4') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('4') && normalizeStr(t).includes('ano')) || '4º Ano';
   if (qNorm.includes('5') && qNorm.includes('ano')) return turmas.find((t) => normalizeStr(t).includes('5') && normalizeStr(t).includes('ano')) || '5º Ano';
@@ -449,63 +665,76 @@ export function findTurmaFuzzy(turmas: string[], query: string): string | undefi
 }
 
 /**
- * Localiza aluno por ID ou correspondência de nome aproximada (Fuzzy Search)
- * Ex: "Lyan Adolpho" -> localiza "Lyan Adolpho ..."
+ * Busca todos os alunos candidatos para detectar ambiguidades (homônimos como "dois Pedros").
  */
-export function findStudent(students: Student[], query: string): Student | undefined {
-  if (!query || !students || students.length === 0) return undefined;
+export function findMatchingStudents(students: Student[], query: string, turmaFilter?: string): Student[] {
+  if (!query || !students || students.length === 0) return [];
   const qClean = query.trim();
   const qNorm = normalizeStr(qClean);
+  const tNorm = turmaFilter ? normalizeStr(turmaFilter) : '';
 
-  // 1. Busca por ID exato
-  const byId = students.find((s) => s.id === qClean);
-  if (byId) return byId;
+  const activePool = students.filter((s) => (s.status || s.statusMatricula || 'ativo') === 'ativo');
+  const pool = activePool.length > 0 ? activePool : students;
+  const scopedPool = tNorm
+    ? pool.filter((s) => {
+        const st = normalizeStr(s.turma);
+        return st.includes(tNorm) || tNorm.includes(st);
+      })
+    : pool;
+  const effectivePool = scopedPool.length > 0 ? scopedPool : pool;
 
-  // 2. Nome completo exato
-  const exactName = students.find((s) => normalizeStr(s.name) === qNorm);
-  if (exactName) return exactName;
+  const byId = effectivePool.filter((s) => s.id === qClean);
+  if (byId.length > 0) return byId;
 
-  // 3. Substring direta
-  const substringMatch = students.find(
+  const exactName = effectivePool.filter((s) => normalizeStr(s.name) === qNorm);
+  if (exactName.length > 0) return exactName;
+
+  const substringMatches = effectivePool.filter(
     (s) => normalizeStr(s.name).includes(qNorm) || qNorm.includes(normalizeStr(s.name))
   );
-  if (substringMatch) return substringMatch;
+  if (substringMatches.length > 0) return deduplicateMatchedNames(substringMatches);
 
-  // 4. Quebra de tokens da busca (ex: "Lyan Adolpho" busca aluno que contenha "lyan" e "adolpho")
-  const queryTokens = qNorm.split(/\s+/).filter((t) => t.length >= 3);
+  const queryTokens = qNorm.split(/\s+/).filter((t) => t.length >= 2);
   if (queryTokens.length > 0) {
-    const allTokensMatch = students.find((s) => {
-      const sNorm = normalizeStr(s.name);
-      return queryTokens.every((token) => sNorm.includes(token));
+    const allTokens = effectivePool.filter((s) => {
+      const sTokens = normalizeStr(s.name).split(/\s+/);
+      return queryTokens.every((qt) => sTokens.some((st) => st.startsWith(qt) || st.includes(qt)));
     });
-    if (allTokensMatch) return allTokensMatch;
+    if (allTokens.length > 0) return deduplicateMatchedNames(allTokens);
 
-    // Se mais de 1 token, testa se a maioria bate
-    if (queryTokens.length >= 2) {
-      const majorityMatch = students.find((s) => {
-        const sNorm = normalizeStr(s.name);
-        const matchCount = queryTokens.filter((token) => sNorm.includes(token)).length;
-        return matchCount >= Math.ceil(queryTokens.length / 2);
-      });
-      if (majorityMatch) return majorityMatch;
-    }
-
-    // Primeiro token apenas (primeiro nome)
-    const firstNameMatch = students.find((s) => {
-      const sNorm = normalizeStr(s.name);
-      return sNorm.startsWith(queryTokens[0]) || sNorm.split(' ')[0] === queryTokens[0];
+    const firstTokenMatches = effectivePool.filter((s) => {
+      const sTokens = normalizeStr(s.name).split(/\s+/);
+      return sTokens.some((st) => st === queryTokens[0] || st.startsWith(queryTokens[0]));
     });
-    if (firstNameMatch) return firstNameMatch;
+    if (firstTokenMatches.length > 0) return deduplicateMatchedNames(firstTokenMatches);
   }
 
-  return undefined;
+  return [];
+}
+
+function deduplicateMatchedNames(list: Student[]): Student[] {
+  const seen = new Set<string>();
+  return list.filter((s) => {
+    const k = `${normalizeStr(s.name)}__${normalizeStr(s.turma)}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 /**
- * Localiza colaborador institucional por ID, e-mail ou nome
+ * Localiza aluno por identificador ou correspondência de nome aproximada
  */
-async function findCollaborator(query: string): Promise<UserProfile | undefined> {
-  const users = await getUsers();
+export function findStudent(students: Student[], query: string): Student | undefined {
+  const matches = findMatchingStudents(students, query);
+  return matches[0];
+}
+
+/**
+ * Localiza colaborador institucional
+ */
+async function findCollaborator(query: string, usersList?: UserProfile[]): Promise<UserProfile | undefined> {
+  const users = usersList && usersList.length > 0 ? usersList : await getUsers();
   const qNorm = normalizeStr(query);
 
   return users.find(
@@ -515,6 +744,19 @@ async function findCollaborator(query: string): Promise<UserProfile | undefined>
       normalizeStr(u.name) === qNorm ||
       normalizeStr(u.name).includes(qNorm)
   );
+}
+
+/**
+ * Verifica se o usuário atual tem acesso a uma turma (coordenador vê tudo; monitora/professora vê suas turmas ou todas se sem restrição).
+ */
+function filterTurmasByUserScope(turmas: string[], user?: UserProfile | null): string[] {
+  if (!user || isAdmin(user)) return turmas;
+  const assigned = [
+    ...(Array.isArray(user.allowedClassIds) ? user.allowedClassIds : []),
+    ...(Array.isArray(user.assignedTurmas) ? user.assignedTurmas : []),
+  ].filter(Boolean);
+  if (assigned.length === 0) return turmas;
+  return turmas.filter((t) => assigned.some((a) => normalizeStr(a) === normalizeStr(t)));
 }
 
 /**
@@ -528,7 +770,7 @@ function generateAutorizacaoPDFBlob(params: {
   justificativa?: string;
   emissor?: string;
 }): { filename: string; blobUrl: string } {
-  const doc = new jsPDF({
+  const pdfDoc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
@@ -539,95 +781,88 @@ function generateAutorizacaoPDFBlob(params: {
     ? 'AUTORIZAÇÃO DE ENTRADA COM ATRASO'
     : 'AUTORIZAÇÃO DE SAÍDA ANTECIPADA';
 
-  // Cabeçalho institucional estilizado
-  doc.setFillColor(15, 23, 42); // slate-900
-  doc.rect(0, 0, 210, 36, 'F');
+  pdfDoc.setFillColor(15, 23, 42);
+  pdfDoc.rect(0, 0, 210, 36, 'F');
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.text('COLÉGIO CRESCER • PROGRAMA INTEGRAL', 105, 16, { align: 'center' });
+  pdfDoc.setTextColor(255, 255, 255);
+  pdfDoc.setFont('helvetica', 'bold');
+  pdfDoc.setFontSize(16);
+  pdfDoc.text('COLÉGIO CRESCER • PROGRAMA INTEGRAL', 105, 16, { align: 'center' });
 
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(203, 213, 225); // slate-300
-  doc.text('Protocolo de Registro e Controle Institucional de Portaria', 105, 25, { align: 'center' });
+  pdfDoc.setFontSize(11);
+  pdfDoc.setFont('helvetica', 'normal');
+  pdfDoc.setTextColor(203, 213, 225);
+  pdfDoc.text('Protocolo de Registro e Controle Institucional de Portaria', 105, 25, { align: 'center' });
 
-  // Tarja de Título do Documento
-  doc.setFillColor(241, 245, 249); // slate-100
-  doc.rect(15, 44, 180, 14, 'F');
-  doc.setDrawColor(203, 213, 225);
-  doc.rect(15, 44, 180, 14, 'S');
+  pdfDoc.setFillColor(241, 245, 249);
+  pdfDoc.rect(15, 44, 180, 14, 'F');
+  pdfDoc.setDrawColor(203, 213, 225);
+  pdfDoc.rect(15, 44, 180, 14, 'S');
 
-  doc.setTextColor(30, 41, 59);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.text(tipoTitulo, 105, 53, { align: 'center' });
+  pdfDoc.setTextColor(30, 41, 59);
+  pdfDoc.setFont('helvetica', 'bold');
+  pdfDoc.setFontSize(12);
+  pdfDoc.text(tipoTitulo, 105, 53, { align: 'center' });
 
-  // Corpo dos Dados
   let y = 70;
   const lineSpacing = 11;
-
-  doc.setFontSize(10);
-  doc.setTextColor(71, 85, 105); // slate-600
+  pdfDoc.setFontSize(10);
+  pdfDoc.setTextColor(71, 85, 105);
 
   const drawField = (label: string, value: string) => {
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${label}:`, 20, y);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(15, 23, 42);
-    doc.text(value, 65, y);
-    doc.setTextColor(71, 85, 105);
+    pdfDoc.setFont('helvetica', 'bold');
+    pdfDoc.text(`${label}:`, 20, y);
+    pdfDoc.setFont('helvetica', 'normal');
+    pdfDoc.setTextColor(15, 23, 42);
+    pdfDoc.text(value, 65, y);
+    pdfDoc.setTextColor(71, 85, 105);
     y += lineSpacing;
   };
 
   const protocolo = `AUT-${Date.now().toString().slice(-6)}`;
   drawField('Número do Protocolo', protocolo);
   drawField('Nome do Aluno(a)', params.student.name);
-  drawField('Turma / Agrupamento', params.student.turma || 'Programa Integral');
-  drawField('Data da Ocorrência', formatDateBR(params.data));
-  drawField('Horário Registrado', params.horario);
-  drawField('Tipo de Registro', isAtraso ? 'Entrada com Atraso' : 'Saída Antecipada');
-  drawField('Justificativa / Motivo', params.justificativa || 'Autorizado pela Coordenação do Integral');
-  drawField('Registrado por', params.emissor || 'Sofia • Assistente Oficial');
+  drawField('Turma', params.student.turma || 'Programa Integral');
+  drawField('Data', formatDateBR(params.data));
+  drawField('Horário', params.horario);
+  drawField('Tipo', isAtraso ? 'Entrada com Atraso' : 'Saída Antecipada');
+  drawField('Motivo', params.justificativa || 'Autorizado pela Coordenação do Integral');
+  drawField('Registrado por', params.emissor || 'Sofia • Integral Crescer');
 
-  // Box de Termo de Ciência
   y += 6;
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(15, y, 180, 36, 3, 3, 'FD');
+  pdfDoc.setFillColor(248, 250, 252);
+  pdfDoc.setDrawColor(226, 232, 240);
+  pdfDoc.roundedRect(15, y, 180, 36, 3, 3, 'FD');
 
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(71, 85, 105);
+  pdfDoc.setFontSize(9);
+  pdfDoc.setFont('helvetica', 'italic');
+  pdfDoc.setTextColor(71, 85, 105);
   const termo =
-    'O presente documento atesta o registro formal junto à Portaria e Coordenação do Programa Integral, em conformidade com as normas pedagógicas e de segurança institucional do Colégio Crescer.';
-  doc.text(doc.splitTextToSize(termo, 170), 20, y + 10);
+    'O presente documento atesta o registro formal junto à Portaria e Coordenação do Programa Integral, em conformidade com as normas de segurança institucional do Colégio Crescer.';
+  pdfDoc.text(pdfDoc.splitTextToSize(termo, 170), 20, y + 10);
 
-  // Assinaturas
   y += 65;
-  doc.setDrawColor(148, 163, 184); // slate-400
-  doc.line(25, y, 95, y);
-  doc.line(115, y, 185, y);
+  pdfDoc.setDrawColor(148, 163, 184);
+  pdfDoc.line(25, y, 95, y);
+  pdfDoc.line(115, y, 185, y);
 
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(51, 65, 85);
-  doc.text('Assinatura do Responsável', 60, y + 6, { align: 'center' });
-  doc.text('Visto da Coordenação do Integral', 150, y + 6, { align: 'center' });
+  pdfDoc.setFontSize(9);
+  pdfDoc.setFont('helvetica', 'normal');
+  pdfDoc.setTextColor(51, 65, 85);
+  pdfDoc.text('Assinatura do Responsável', 60, y + 6, { align: 'center' });
+  pdfDoc.text('Visto da Coordenação do Integral', 150, y + 6, { align: 'center' });
 
-  // Rodapé
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text(
-    `Documento emitido digitalmente em ${new Date().toLocaleString('pt-BR')} • Colégio Crescer`,
+  pdfDoc.setFontSize(8);
+  pdfDoc.setTextColor(148, 163, 184);
+  pdfDoc.text(
+    `Emitido em ${new Date().toLocaleString('pt-BR')} • Colégio Crescer`,
     105,
     285,
     { align: 'center' }
   );
 
   const filename = `Autorizacao_${params.motivo}_${params.student.name.replace(/\s+/g, '_')}_${params.data}.pdf`;
-  const blob = doc.output('blob');
+  const blob = pdfDoc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
 
   return { filename, blobUrl };
@@ -642,8 +877,647 @@ export async function executeSofiaTool(
   context: SofiaToolExecutionContext
 ): Promise<SofiaToolResult> {
   const currentDate = context.selectedDate || toISODateString(new Date());
+  const isUserAdmin = isAdmin(context.currentUser);
 
   switch (toolName) {
+    // -------------------------------------------------------------------
+    // consultarAtividadesMomento(turma?, horarioSimulado?, data?)
+    // -------------------------------------------------------------------
+    case 'consultarAtividadesMomento': {
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
+      const now = new Date();
+      const refTime = normalizeTime(args.horarioSimulado) ||
+        now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const refTimeLabel = formatHourPTBR(refTime);
+      const dayFull = getDayOfWeekFullPTBR(targetDate);
+
+      if (isWeekend(targetDate)) {
+        return {
+          toolName,
+          success: true,
+          message: `Em ${dayFull} (${formatDateBR(targetDate)}) não há atividades do Integral na grade.`,
+          spokenText: `Em ${dayFull} não temos atividades programadas no Integral.`,
+        };
+      }
+
+      const holiday = isHolidayOrRecess(targetDate, context.holidays || []);
+      if (holiday) {
+        return {
+          toolName,
+          success: true,
+          message: `${formatDateBR(targetDate)} (${dayFull}) está marcado como ${holiday.type === 'feriado' ? 'feriado' : 'recesso'}: ${holiday.name}.`,
+          spokenText: `Dia ${formatDateBR(targetDate)} é ${holiday.name}, sem atividades na grade.`,
+        };
+      }
+
+      const dayOfWeek = getDayOfWeekFromDate(targetDate);
+      const turmasList = context.activeTurmas && context.activeTurmas.length > 0
+        ? context.activeTurmas
+        : Array.from(new Set((context.students || []).map((s) => s.turma).filter(Boolean)));
+      const allSchedules = context.schedules || [];
+      const atribuicoes = context.quadroAtribuicoes && context.quadroAtribuicoes.length > 0
+        ? context.quadroAtribuicoes
+        : loadLocalQuadroAtribuicoes();
+      const semanario = context.semanarioPlans && context.semanarioPlans.length > 0
+        ? context.semanarioPlans
+        : loadSemanarioPlans();
+
+      if (args.turma) {
+        const matchedTurma = findTurmaFuzzy(turmasList, String(args.turma)) || String(args.turma);
+        const turmaBlocks = allSchedules.filter(
+          (b) => normalizeStr(b.turma) === normalizeStr(matchedTurma) && b.dayOfWeek === dayOfWeek
+        );
+        const currentBlock = getCurrentActivityForTurma(turmaBlocks, refTime);
+        const nextBlock = getNextSlot(turmaBlocks, refTime);
+        const atrib = resolveAtribuicaoForTurma(matchedTurma, atribuicoes, context.users || []);
+        const responsavel = [atrib.monitoraName, atrib.adiName].filter(Boolean).join(' e ');
+
+        if (!currentBlock) {
+          const nextInfo = nextBlock
+            ? ` A próxima é ${nextBlock.activityId} às ${formatHourPTBR(extractSlotLimits(nextBlock).horaInicio)}.`
+            : ' Não há mais blocos programados para hoje.';
+          const msg = `${matchedTurma} está sem atividade marcada na grade às ${refTimeLabel}.${nextInfo}`;
+          return {
+            toolName,
+            success: true,
+            message: msg,
+            spokenText: msg,
+            data: { turma: matchedTurma, horario: refTime, atividadeAtual: null },
+          };
+        }
+
+        const limits = extractSlotLimits(currentBlock);
+        const semPlan = findMatchingSemanarioPlan(
+          semanario,
+          matchedTurma,
+          targetDate,
+          currentBlock
+        );
+        const local = currentBlock.location || atrib.espacoBase || '';
+        const localPart = local ? ` (${local})` : '';
+        const endPart = limits.horaFim ? `, até ${formatHourPTBR(limits.horaFim)}` : '';
+        const respPart = responsavel ? ` Com ${responsavel}.` : '';
+        const temaPart = semPlan?.title ? ` Proposta: ${semPlan.title}.` : '';
+        const nextPart = nextBlock
+          ? ` Depois vem ${nextBlock.activityId} às ${formatHourPTBR(extractSlotLimits(nextBlock).horaInicio)}.`
+          : '';
+
+        const msg = `${args.horarioSimulado ? `Às ${refTimeLabel}` : `Agora, às ${refTimeLabel}`}, o ${matchedTurma} está em ${currentBlock.activityId}${localPart}${endPart}.${respPart}${temaPart}${nextPart}`;
+        return {
+          toolName,
+          success: true,
+          message: msg,
+          spokenText: msg,
+          data: {
+            turma: matchedTurma,
+            horario: refTime,
+            atividadeAtual: currentBlock.activityId,
+            local,
+            ate: limits.horaFim,
+            responsavel,
+          },
+        };
+      }
+
+      // Panorama geral das turmas
+      const emAtividade: string[] = [];
+      const semAtividade: string[] = [];
+      turmasList.forEach((t) => {
+        const blocks = allSchedules.filter(
+          (b) => normalizeStr(b.turma) === normalizeStr(t) && b.dayOfWeek === dayOfWeek
+        );
+        const cur = getCurrentActivityForTurma(blocks, refTime);
+        if (cur) {
+          const limits = extractSlotLimits(cur);
+          const loc = cur.location ? ` (${cur.location})` : '';
+          emAtividade.push(`• ${t}: ${cur.activityId}${loc} até ${formatHourPTBR(limits.horaFim)}`);
+        } else {
+          semAtividade.push(t);
+        }
+      });
+
+      let msg = `${args.horarioSimulado ? `Simulação para ${refTimeLabel}` : `Agora, às ${refTimeLabel}`} (${dayFull}): ${emAtividade.length} turma(s) em atividade`;
+      if (semAtividade.length > 0) {
+        msg += ` e ${semAtividade.length} sem atividade marcada na grade (${semAtividade.join(', ')})`;
+      }
+      msg += '.\n';
+      if (emAtividade.length > 0) {
+        msg += emAtividade.join('\n');
+      }
+
+      return {
+        toolName,
+        success: true,
+        message: msg,
+        spokenText: `Agora às ${refTimeLabel}, temos ${emAtividade.length} turmas em atividade e ${semAtividade.length} sem atividade na grade.`,
+        data: { horario: refTime, emAtividade, semAtividade },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // registrarSaidaAntecipada(alunoId, horario, turma?, justificativa?)
+    // -------------------------------------------------------------------
+    case 'registrarSaidaAntecipada': {
+      const alunoQuery = String(args.alunoId || '').trim();
+      const turmaQuery = args.turma ? String(args.turma).trim() : undefined;
+      const rawHorario = String(args.horario || '').trim();
+      const normalizedHorario = normalizeTime(rawHorario) || rawHorario;
+      const horarioDisplay = formatHourPTBR(normalizedHorario) || rawHorario;
+
+      if (!alunoQuery) {
+        return {
+          toolName,
+          success: false,
+          message: 'De qual aluno é a saída antecipada?',
+        };
+      }
+
+      const matches = findMatchingStudents(context.students || [], alunoQuery, turmaQuery);
+      if (matches.length === 0) {
+        return {
+          toolName,
+          success: false,
+          message: turmaQuery
+            ? `Não achei nenhum "${alunoQuery}" no ${turmaQuery}. Quer que eu procure em todas as turmas?`
+            : `Não achei nenhum "${alunoQuery}" nas turmas do Integral. Pode conferir o nome?`,
+        };
+      }
+
+      if (matches.length > 1) {
+        const opts = matches.slice(0, 5).map((s) => `${s.name} (${s.turma})`).join(' ou ');
+        return {
+          toolName,
+          success: false,
+          needsDisambiguation: true,
+          message: `Tenho mais de um aluno com esse nome: ${opts}. Qual deles vai sair às ${horarioDisplay}?`,
+          data: { options: matches.map((s) => ({ name: s.name, turma: s.turma })) },
+        };
+      }
+
+      const student = matches[0];
+      if (!normalizedHorario) {
+        return {
+          toolName,
+          success: false,
+          message: `Qual horário o(a) ${student.name} (${student.turma}) vai sair?`,
+        };
+      }
+
+      if (!context.onSaveRecord) {
+        return {
+          toolName,
+          success: false,
+          message: 'Não consegui salvar a saída agora. Quer que eu tente de novo?',
+        };
+      }
+
+      const parsedDate = new Date(`${currentDate}T12:00:00`);
+      const year = parsedDate.getFullYear() || new Date().getFullYear();
+      const firstJan = new Date(year, 0, 1);
+      const pastDays = (parsedDate.getTime() - firstJan.getTime()) / 86400000;
+      const weekNumber = Math.max(1, Math.ceil((pastDays + firstJan.getDay() + 1) / 7)) || 1;
+
+      await context.onSaveRecord({
+        studentId: student.id,
+        turma: student.turma,
+        date: currentDate,
+        weekNumber,
+        year,
+        status: 'saida_antecipada',
+        activity: 'Rotina',
+        exitTime: normalizedHorario,
+        observation: args.justificativa
+          ? `Saída antecipada às ${horarioDisplay}: ${args.justificativa}`
+          : `Saída antecipada registrada para às ${horarioDisplay}`,
+      });
+
+      const atribuicoes = context.quadroAtribuicoes && context.quadroAtribuicoes.length > 0
+        ? context.quadroAtribuicoes
+        : loadLocalQuadroAtribuicoes();
+      const atrib = resolveAtribuicaoForTurma(student.turma, atribuicoes, context.users || []);
+      const monitoraHint = atrib.monitoraName ? ` (${atrib.monitoraName})` : '';
+
+      return {
+        toolName,
+        success: true,
+        message: `Anotado! Registrei a saída antecipada de ${student.name} (${student.turma}) hoje às ${horarioDisplay}. Quer que eu prepare um aviso para a monitora da turma${monitoraHint}?`,
+        spokenText: `Anotado! Registrei a saída antecipada de ${student.name} hoje às ${horarioDisplay}.`,
+        data: {
+          aluno: student.name,
+          turma: student.turma,
+          horario: normalizedHorario,
+        },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarCardapio(data?, turma?)
+    // -------------------------------------------------------------------
+    case 'consultarCardapio': {
+      const rawData = String(args.data || '').trim().toLowerCase();
+      let targetDate = currentDate;
+      if (rawData === 'amanha' || rawData === 'amanhã') {
+        const d = new Date(`${currentDate}T12:00:00`);
+        d.setDate(d.getDate() + 1);
+        targetDate = toISODateString(d);
+      } else if (rawData && rawData !== 'hoje') {
+        targetDate = normalizeDateInput(rawData);
+      }
+
+      const [yearStr, monthStr] = targetDate.split('-');
+      const monthKey = `${yearStr}-${monthStr}`;
+      const menu = loadMonthlyMenu(monthKey);
+      const dayItem = menu?.days?.[targetDate];
+      const dayFull = getDayOfWeekFullPTBR(targetDate);
+
+      if (!dayItem) {
+        return {
+          toolName,
+          success: true,
+          message: `Ainda não há cardápio preenchido para ${dayFull} (${formatDateBR(targetDate)}). Quer que eu abra a aba de Cardápio para você conferir ou lançar?`,
+          spokenText: `Ainda não há cardápio cadastrado para ${dayFull}.`,
+        };
+      }
+
+      if (dayItem.isHoliday) {
+        return {
+          toolName,
+          success: true,
+          message: `${dayFull} (${formatDateBR(targetDate)}) está marcado como ${dayItem.holidayDescription || 'feriado/recesso'}, sem refeições programadas.`,
+        };
+      }
+
+      const parts: string[] = [];
+      if (dayItem.protein) parts.push(`Prato principal: ${dayItem.protein}`);
+      if (Array.isArray(dayItem.base) && dayItem.base.length > 0) parts.push(`Base: ${dayItem.base.join(', ')}`);
+      if (dayItem.garnish) parts.push(`Guarnição: ${dayItem.garnish}`);
+      if (dayItem.salad) parts.push(`Salada: ${dayItem.salad}`);
+      if (dayItem.dessert) parts.push(`Sobremesa: ${dayItem.dessert}`);
+      if (dayItem.specialNotes) parts.push(dayItem.specialNotes);
+
+      // Verifica restrições/alergias em observações dos alunos da turma (se houver)
+      const allergyKeywords = ['alerg', 'intoler', 'lactose', 'gluten', 'glúten', 'aplv', 'ovo', 'amendoim', 'restric', 'restriç'];
+      const scopeTurma = args.turma ? normalizeStr(args.turma) : '';
+      const studentsWithRestrictions = (context.students || []).filter((s) => {
+        if ((s.status || s.statusMatricula || 'ativo') !== 'ativo') return false;
+        if (scopeTurma && !normalizeStr(s.turma).includes(scopeTurma)) return false;
+        const n = normalizeStr(s.notes);
+        return allergyKeywords.some((kw) => n.includes(kw));
+      });
+
+      let msg = `${rawData === 'amanha' || rawData === 'amanhã' ? 'Amanhã' : 'Hoje'} é ${dayFull} (${formatDateBR(targetDate)}): ${parts.length > 0 ? parts.join(' • ') : 'itens ainda não detalhados'}.`;
+      if (studentsWithRestrictions.length > 0) {
+        const namesList = isUserAdmin
+          ? studentsWithRestrictions.slice(0, 4).map((s) => `${s.name} (${s.turma})`).join(', ')
+          : `${studentsWithRestrictions.length} aluno(s)`;
+        msg += `\nAtenção: há registro de restrição alimentar para ${namesList}. Vale confirmar com a cozinha antes de servir.`;
+      } else {
+        msg += ' Tem algum aluno com restrição na sua turma? Posso conferir para você.';
+      }
+
+      return {
+        toolName,
+        success: true,
+        message: msg,
+        spokenText: msg,
+        data: { date: targetDate, dayItem, restrictionsCount: studentsWithRestrictions.length },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarSemanario(turma?, data?)
+    // -------------------------------------------------------------------
+    case 'consultarSemanario': {
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
+      const plans = context.semanarioPlans && context.semanarioPlans.length > 0
+        ? context.semanarioPlans
+        : loadSemanarioPlans();
+      const turmasList = context.activeTurmas || [];
+      const matchedTurma = args.turma
+        ? findTurmaFuzzy(turmasList, String(args.turma)) || String(args.turma)
+        : undefined;
+
+      const filtered = plans.filter((p) => {
+        if (p.date !== targetDate) return false;
+        if (matchedTurma && normalizeStr(p.turma) !== normalizeStr(matchedTurma)) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        return {
+          toolName,
+          success: true,
+          message: matchedTurma
+            ? `Não encontrei planejamento salvo no Semanário do ${matchedTurma} para ${formatDateBR(targetDate)}. Quer que eu abra o Semanário ou sugira uma atividade?`
+            : `Não há atividades registradas no Semanário para ${formatDateBR(targetDate)}. Quer que eu abra o Semanário?`,
+        };
+      }
+
+      const lines = filtered.slice(0, 6).map((p) => {
+        const hora = p.horaInicio || (p.timeSlot ? p.timeSlot.split('-')[0]?.trim() : '');
+        const horaStr = hora ? `${formatHourPTBR(hora)} — ` : '';
+        const mat = p.materials ? ` (Materiais: ${p.materials})` : '';
+        return `• ${horaStr}${p.turma}: ${p.title || p.category}${mat}`;
+      });
+
+      const extra = filtered.length > 6 ? `\nE mais ${filtered.length - 6} atividade(s) no Semanário.` : '';
+      return {
+        toolName,
+        success: true,
+        message: `No Semanário de ${getDayOfWeekFullPTBR(targetDate)} (${formatDateBR(targetDate)}):\n${lines.join('\n')}${extra}`,
+        data: { date: targetDate, count: filtered.length },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarManualNormas(termoOuTema)
+    // -------------------------------------------------------------------
+    case 'consultarManualNormas': {
+      const termo = normalizeStr(args.termoOuTema || '');
+      const tokens = termo.split(/\s+/).filter((t) => t.length >= 3);
+
+      let bestMatch = NORMAS_DATA[0];
+      let bestScore = 0;
+
+      NORMAS_DATA.forEach((n) => {
+        const titleN = normalizeStr(n.title);
+        const sumN = normalizeStr(n.summary);
+        const secN = normalizeStr(n.sectionTitle);
+        const modN = normalizeStr(n.moduleTitle);
+        const tagsN = Array.isArray(n.tags) ? n.tags.map(normalizeStr).join(' ') : '';
+        const blob = `${titleN} ${secN} ${modN} ${tagsN} ${sumN}`;
+
+        let score = 0;
+        if (blob.includes(termo)) score += 10;
+        tokens.forEach((tk) => {
+          if (titleN.includes(tk)) score += 4;
+          if (tagsN.includes(tk)) score += 3;
+          if (sumN.includes(tk) || secN.includes(tk)) score += 2;
+        });
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = n;
+        }
+      });
+
+      if (bestScore === 0) {
+        return {
+          toolName,
+          success: false,
+          message: `Não achei uma regra exata sobre "${args.termoOuTema}" no Manual. Quer que eu abra o Manual de Normas para você dar uma olhada ou me explica melhor a situação?`,
+        };
+      }
+
+      return {
+        toolName,
+        success: true,
+        message: `Pelo nosso Manual (${bestMatch.title}): ${bestMatch.summary}\nSe precisar, posso abrir a página do Manual para você.`,
+        spokenText: `Pelo Manual do Colégio Crescer, sobre ${bestMatch.title}: ${bestMatch.summary.slice(0, 180)}`,
+        data: { section: bestMatch.sectionNumber, title: bestMatch.title },
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarAlunosOuTurma(busca?, turma?)
+    // -------------------------------------------------------------------
+    case 'consultarAlunosOuTurma': {
+      const busca = String(args.busca || '').trim();
+      const turmaArg = String(args.turma || '').trim();
+      const turmasList = context.activeTurmas || [];
+      const matchedTurma = turmaArg ? (findTurmaFuzzy(turmasList, turmaArg) || turmaArg) : '';
+
+      const activeStudents = (context.students || []).filter((s) =>
+        isStudentActiveOnDate(s, currentDate)
+      );
+
+      if (busca) {
+        const matches = findMatchingStudents(activeStudents, busca, matchedTurma);
+        if (matches.length === 0) {
+          return {
+            toolName,
+            success: false,
+            message: matchedTurma
+              ? `Não achei nenhum "${busca}" no ${matchedTurma}. Quer que eu procure em todas as turmas?`
+              : `Não achei nenhum aluno chamado "${busca}" no cadastro ativo.`,
+          };
+        }
+
+        const lines = matches.slice(0, 6).map((s) => {
+          const dayKey = getDayOfWeekFromDate(currentDate);
+          const saida = s.horariosSaida?.[dayKey] || s.horarioSaida || s.horarioPermanenciaLimite || '18h30';
+          const tipo = s.tipoContrato === 'avulso' ? ' • Avulso' : '';
+          const van = s.tipoSaida === 'TRANSPORTE_ESCOLAR'
+            ? ` • Vai de van${s.nomeCondutor ? ` (${s.nomeCondutor})` : ''}`
+            : '';
+          const notesPart = isUserAdmin && s.notes ? ` • Obs: ${s.notes}` : '';
+          return `• ${s.name} — ${s.turma}${tipo} • Saída: ${formatHourPTBR(saida) || saida}${van}${notesPart}`;
+        });
+
+        return {
+          toolName,
+          success: true,
+          message: matches.length === 1
+            ? lines[0].replace(/^•\s*/, '')
+            : `Encontrei ${matches.length} aluno(s):\n${lines.join('\n')}`,
+          data: { count: matches.length },
+        };
+      }
+
+      if (matchedTurma) {
+        const allowed = filterTurmasByUserScope([matchedTurma], context.currentUser);
+        if (allowed.length === 0) {
+          return {
+            toolName,
+            success: false,
+            message: `Você só tem acesso aos alunos das suas turmas vinculadas. Se precisar de outra turma, vale confirmar com a coordenação.`,
+          };
+        }
+
+        const turmaStudents = activeStudents.filter(
+          (s) => normalizeStr(s.turma) === normalizeStr(matchedTurma)
+        );
+        const expectedToday = turmaStudents.filter((s) => isStudentScheduledForDate(s, currentDate));
+        const preview = expectedToday.slice(0, 8).map((s) => s.name).join(', ');
+        const extra = expectedToday.length > 8 ? ` e mais ${expectedToday.length - 8}` : '';
+
+        return {
+          toolName,
+          success: true,
+          message: `O ${matchedTurma} tem ${turmaStudents.length} aluno(s) ativo(s), sendo ${expectedToday.length} esperado(s) hoje${expectedToday.length > 0 ? `: ${preview}${extra}.` : '.'}`,
+          data: { turma: matchedTurma, total: turmaStudents.length, esperadosHoje: expectedToday.length },
+        };
+      }
+
+      return {
+        toolName,
+        success: true,
+        message: `Temos ${activeStudents.length} alunos ativos hoje no Integral. Quer que eu filtre por alguma turma ou nome específico?`,
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarQuadroAtribuicoes(turma?, colaborador?)
+    // -------------------------------------------------------------------
+    case 'consultarQuadroAtribuicoes': {
+      const atribuicoes = context.quadroAtribuicoes && context.quadroAtribuicoes.length > 0
+        ? context.quadroAtribuicoes
+        : loadLocalQuadroAtribuicoes();
+      const turmasList = context.activeTurmas || atribuicoes.map((a) => a.turma);
+
+      if (args.turma) {
+        const matched = findTurmaFuzzy(turmasList, String(args.turma)) || String(args.turma);
+        const atrib = resolveAtribuicaoForTurma(matched, atribuicoes, context.users || []);
+        const partes: string[] = [];
+        if (atrib.monitoraName) partes.push(`Monitora: ${atrib.monitoraName}`);
+        if (atrib.monitoraAssistenteName) partes.push(`Assistente: ${atrib.monitoraAssistenteName}`);
+        if (atrib.adiName) partes.push(`ADI: ${atrib.adiName}`);
+        if (atrib.horarioTurno) partes.push(`Turno: ${atrib.horarioTurno}`);
+        if (atrib.espacoBase) partes.push(`Espaço: ${atrib.espacoBase}`);
+
+        return {
+          toolName,
+          success: true,
+          message: partes.length > 0
+            ? `No ${atrib.turma}: ${partes.join(' • ')}.`
+            : `Ainda não há equipe atribuída para o ${matched} no Quadro de Atribuições.`,
+          data: atrib,
+        };
+      }
+
+      if (args.colaborador) {
+        const cNorm = normalizeStr(String(args.colaborador));
+        const found = atribuicoes.filter(
+          (a) =>
+            normalizeStr(a.monitoraName).includes(cNorm) ||
+            normalizeStr(a.monitoraAssistenteName).includes(cNorm) ||
+            normalizeStr(a.adiName).includes(cNorm)
+        );
+        if (found.length === 0) {
+          return {
+            toolName,
+            success: false,
+            message: `Não encontrei "${args.colaborador}" atribuída a nenhuma turma hoje no Quadro de Atribuições.`,
+          };
+        }
+        const desc = found.map((a) => `${a.turma}${a.horarioTurno ? ` (${a.horarioTurno})` : ''}`).join(', ');
+        return {
+          toolName,
+          success: true,
+          message: `${args.colaborador} está atribuída em: ${desc}.`,
+          data: found,
+        };
+      }
+
+      const filled = atribuicoes.filter((a) => a.monitoraName || a.adiName);
+      if (filled.length === 0) {
+        return {
+          toolName,
+          success: true,
+          message: 'O Quadro de Atribuições ainda não tem monitoras/ADIs preenchidas aqui.',
+        };
+      }
+      const lines = filled.slice(0, 8).map((a) => {
+        const equipe = [a.monitoraName, a.adiName].filter(Boolean).join(' / ');
+        return `• ${a.turma}: ${equipe}`;
+      });
+      return {
+        toolName,
+        success: true,
+        message: `Atribuições de hoje:\n${lines.join('\n')}`,
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // consultarLivroPonto(colaborador?, data?)
+    // -------------------------------------------------------------------
+    case 'consultarLivroPonto': {
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
+      const dayRecords = (context.pontoRecords || []).filter((r) => r.date === targetDate);
+      const users = context.users && context.users.length > 0 ? context.users : await getUsers();
+
+      // Segurança: colaboradores não-admin consultam apenas o próprio ponto
+      const targetColab = args.colaborador ? String(args.colaborador).trim() : '';
+      if (!isUserAdmin && targetColab && context.currentUser && !normalizeStr(context.currentUser.name).includes(normalizeStr(targetColab))) {
+        return {
+          toolName,
+          success: false,
+          message: 'Por privacidade da equipe, consigo consultar aqui apenas o seu próprio registro de ponto. Para outros colaboradores, fale com a coordenação.',
+        };
+      }
+
+      const filteredRecords = !isUserAdmin && context.currentUser
+        ? dayRecords.filter((r) => r.userId === context.currentUser!.id)
+        : targetColab
+        ? dayRecords.filter((r) => {
+            const u = users.find((usr) => usr.id === r.userId);
+            const rName = r.userName || u?.name || '';
+            return normalizeStr(rName).includes(normalizeStr(targetColab));
+          })
+        : dayRecords;
+
+      if (filteredRecords.length === 0) {
+        return {
+          toolName,
+          success: true,
+          message: targetColab
+            ? `Não encontrei batida de ponto para ${targetColab} em ${formatDateBR(targetDate)}.`
+            : `Ainda não há batidas de ponto registradas em ${formatDateBR(targetDate)}.`,
+        };
+      }
+
+      const lines = filteredRecords.slice(0, 8).map((r) => {
+        const u = users.find((usr) => usr.id === r.userId);
+        const nome = r.userName || u?.name || 'Colaborador(a)';
+        const e1 = r.entry1 || r.entrada_1 || '—';
+        const s1 = r.exit1 || r.saida_1;
+        const e2 = r.entry2 || r.entrada_2;
+        const s2 = r.exit2 || r.saida_2;
+        const intervalStr = s1 || e2 ? ` | Intervalo: ${s1 || '—'}–${e2 || '—'}` : '';
+        const saidaStr = s2 ? ` | Saída: ${s2}` : ' (em aberto)';
+        return `• ${nome}: Entrada ${e1}${intervalStr}${saidaStr}`;
+      });
+
+      return {
+        toolName,
+        success: true,
+        message: `Registros do Livro Ponto em ${formatDateBR(targetDate)}:\n${lines.join('\n')}`,
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // navegarModulo(modulo)
+    // -------------------------------------------------------------------
+    case 'navegarModulo': {
+      const targetTab = String(args.modulo || 'momento') as TabType;
+      if (context.currentUser && !isTabAllowed(targetTab, context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'Essa área não está liberada para o seu perfil de acesso. Se precisar, a coordenação pode liberar para você.',
+        };
+      }
+      if (context.onNavigateTab) {
+        context.onNavigateTab(targetTab);
+      }
+      const names: Record<string, string> = {
+        momento: 'Atividades do Momento',
+        frequencia: 'Chamada de Frequência',
+        semanario: 'Semanário',
+        ponto: 'Livro Ponto',
+        cardapio: 'Cardápio e Culinária',
+        alunos: 'Alunos e Turmas',
+        financeiro: 'Financeiro',
+        relatorio: 'Relatórios',
+        manual: 'Manual e Normas',
+      };
+      return {
+        toolName,
+        success: true,
+        message: `Abri a tela de ${names[targetTab] || targetTab} para você.`,
+      };
+    }
+
     // -------------------------------------------------------------------
     // 1. gerarEspelhoPontoPDF(colaboradorId, mesAno)
     // -------------------------------------------------------------------
@@ -655,20 +1529,27 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'Colaborador não informado. Por favor, indique o nome ou e-mail.',
+          message: 'De qual colaborador você quer o Espelho de Ponto?',
         };
       }
 
-      const collaborator = await findCollaborator(colaboradorQuery);
+      if (!isUserAdmin && context.currentUser && !normalizeStr(context.currentUser.name).includes(normalizeStr(colaboradorQuery))) {
+        return {
+          toolName,
+          success: false,
+          message: 'Só consigo gerar o espelho de ponto do seu próprio usuário. Para outro colaborador, fale com a coordenação.',
+        };
+      }
+
+      const collaborator = await findCollaborator(colaboradorQuery, context.users);
       if (!collaborator) {
         return {
           toolName,
           success: false,
-          message: `Colaborador "${colaboradorQuery}" não encontrado no cadastro de usuários ativos do Colégio Crescer.`,
+          message: `Não encontrei "${colaboradorQuery}" na lista de colaboradores. Quer conferir o nome?`,
         };
       }
 
-      // Decompõe mês e ano
       let targetMonth = new Date().getMonth() + 1;
       let targetYear = new Date().getFullYear();
 
@@ -687,7 +1568,6 @@ export async function executeSofiaTool(
         targetYear = new Date().getFullYear();
       }
 
-      // Constrói os dados de dias do mês
       const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
       const monthDaysGrid = [];
       const userRecords = (context.pontoRecords || []).filter(
@@ -705,10 +1585,9 @@ export async function executeSofiaTool(
         });
       }
 
-      // Calcula métricas financeiras
       const financials = calculateMonthlyPontoFinancials({
         records: userRecords,
-        holidays: [],
+        holidays: context.holidays || [],
         year: targetYear,
         month: targetMonth,
         regimeTrabalho: collaborator.regimeTrabalho || 'mensalista',
@@ -733,23 +1612,20 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: true,
-          message: `Espelho de Ponto de ${collaborator.name} referente a ${getMonthNameBR(targetMonth)}/${targetYear} gerado com sucesso!`,
+          message: `Pronto! Gere o Espelho de Ponto de ${collaborator.name} (${getMonthNameBR(targetMonth)}/${targetYear}). É só baixar aqui embaixo.`,
           filename: result.filename,
           downloadUrl: result.blobUrl || result.dataUrl,
           data: {
             colaborador: collaborator.name,
             mes: targetMonth,
             ano: targetYear,
-            totalHoras: financials.totalWorkedFormatted || '00:00',
-            saldoBancoHoras: financials.extraHoursFormatted || '00:00',
           },
         };
-      } catch (pdfErr: any) {
-        console.error('Erro ao gerar PDF do Espelho de Ponto:', pdfErr);
+      } catch {
         return {
           toolName,
           success: false,
-          message: `Falha técnica ao gerar o Espelho de Ponto: ${pdfErr?.message || 'erro desconhecido'}.`,
+          message: 'Não consegui gerar o PDF do Espelho de Ponto agora. Quer que eu tente de novo?',
         };
       }
     }
@@ -764,15 +1640,25 @@ export async function executeSofiaTool(
       const horario = args.horario || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       const justificativa = args.justificativa;
 
-      const student = findStudent(context.students, alunoQuery);
-      if (!student) {
+      const matches = findMatchingStudents(context.students, alunoQuery);
+      if (matches.length === 0) {
         return {
           toolName,
           success: false,
-          message: `Aluno(a) "${alunoQuery}" não encontrado na base de matrículas ativas.`,
+          message: `Não achei "${alunoQuery}" no cadastro. Pode conferir o nome completo?`,
+        };
+      }
+      if (matches.length > 1) {
+        const opts = matches.slice(0, 4).map((s) => `${s.name} (${s.turma})`).join(' ou ');
+        return {
+          toolName,
+          success: false,
+          needsDisambiguation: true,
+          message: `Qual aluno você quer autorizar? ${opts}`,
         };
       }
 
+      const student = matches[0];
       try {
         const { filename, blobUrl } = generateAutorizacaoPDFBlob({
           student,
@@ -783,11 +1669,11 @@ export async function executeSofiaTool(
           emissor: context.currentUser?.name || 'Coordenação do Integral',
         });
 
-        const rotulo = motivo === 'atraso' ? 'Entrada com Atraso' : 'Saída Antecipada';
+        const rotulo = motivo === 'atraso' ? 'entrada com atraso' : 'saída antecipada';
         return {
           toolName,
           success: true,
-          message: `Autorização de ${rotulo} para ${student.name} (${student.turma}) gerada com sucesso!`,
+          message: `Pronto! Preparei a autorização de ${rotulo} de ${student.name} (${student.turma}) para às ${formatHourPTBR(horario) || horario}.`,
           filename,
           downloadUrl: blobUrl,
           data: {
@@ -797,11 +1683,11 @@ export async function executeSofiaTool(
             horario,
           },
         };
-      } catch (err: any) {
+      } catch {
         return {
           toolName,
           success: false,
-          message: `Erro ao gerar autorização em PDF: ${err?.message || 'erro desconhecido'}.`,
+          message: 'Não consegui gerar a autorização em PDF agora. Quer que eu tente de novo?',
         };
       }
     }
@@ -810,21 +1696,38 @@ export async function executeSofiaTool(
     // 3. registrarFaltaFrequencia(alunoId, data, justificativa)
     // -------------------------------------------------------------------
     case 'registrarFaltaFrequencia': {
-      const alunoQuery = args.alunoId || '';
-      const targetDate = args.data || currentDate;
-      const justificativa = args.justificativa || 'Falta confirmada pela Assistente Sofia';
-
-      const student = findStudent(context.students, alunoQuery);
-      if (!student) {
+      if (context.currentUser && !canMarkAttendance(context.currentUser)) {
         return {
           toolName,
           success: false,
-          message: `Aluno(a) "${alunoQuery}" não localizado na lista de frequência.`,
+          message: 'Seu perfil não tem permissão para lançar chamada. Posso avisar a monitora da turma ou a coordenação se você quiser.',
+        };
+      }
+      const alunoQuery = args.alunoId || '';
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
+      const justificativa = args.justificativa || 'Falta registrada via Sofia';
+
+      const matches = findMatchingStudents(context.students, alunoQuery);
+      if (matches.length === 0) {
+        return {
+          toolName,
+          success: false,
+          message: `Não achei nenhum "${alunoQuery}" nas turmas ativas.`,
+        };
+      }
+      if (matches.length > 1) {
+        const opts = matches.slice(0, 4).map((s) => `${s.name} (${s.turma})`).join(' ou ');
+        return {
+          toolName,
+          success: false,
+          needsDisambiguation: true,
+          message: `Tenho mais de um aluno com esse nome: ${opts}. Em qual deles devo lançar a falta?`,
         };
       }
 
+      const student = matches[0];
       if (context.onSaveRecord) {
-        const targetDateObj = new Date(targetDate);
+        const targetDateObj = new Date(`${targetDate}T12:00:00`);
         const year = targetDateObj.getFullYear() || new Date().getFullYear();
         const firstJan = new Date(year, 0, 1);
         const pastDaysOfYear = (targetDateObj.getTime() - firstJan.getTime()) / 86400000;
@@ -845,14 +1748,12 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: true,
-        message: `Falta de ${student.name} (${student.turma}) em ${formatDateBR(targetDate)} registrada e computada no sistema.`,
+        message: `Anotado! Registrei falta para ${student.name} (${student.turma}) em ${formatDateBR(targetDate)}.`,
         data: {
-          alunoId: student.id,
           alunoNome: student.name,
           turma: student.turma,
           data: targetDate,
           status: 'falta',
-          justificativa,
         },
       };
     }
@@ -868,16 +1769,15 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'A mensagem do alerta não pode ser vazia.',
+          message: 'Me diz o que você quer escrever na mensagem para eu deixar pronta.',
         };
       }
 
-      // Determina telefone
       let phone = '5519999999999';
       const cleanDest = normalizeStr(destinatario);
 
       if (cleanDest.includes('coord')) {
-        phone = '5519981234567'; // Coordenação Integral
+        phone = '5519981234567';
       } else {
         const rawDigits = String(destinatario).replace(/\D/g, '');
         if (rawDigits.length >= 10) {
@@ -891,7 +1791,7 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: true,
-        message: `Alerta pronto para envio para ${destinatario}. Clique no botão abaixo para abrir a conversa no WhatsApp.`,
+        message: `Deixei a mensagem pronta para ${destinatario}. É só clicar no botão abaixo para enviar pelo WhatsApp.`,
         whatsappUrl,
         data: {
           destinatario,
@@ -906,23 +1806,24 @@ export async function executeSofiaTool(
     // -------------------------------------------------------------------
     case 'analisarDesarranjosDoDia': {
       const now = new Date();
-      const horaAtual = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const activeStudents = (context.students || []).filter(
-        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      const horaAtual = formatHourPTBR(now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+      const expectedStudents = (context.students || []).filter(
+        (s) => isStudentActiveOnDate(s, currentDate) && isStudentScheduledForDate(s, currentDate)
       );
       const todayRecords = (context.records || []).filter((r) => r.date === currentDate);
-      const presentes = todayRecords.filter((r) => r.status === 'presente').length;
+      const presentes = todayRecords.filter((r) => r.status === 'presente' || r.status === 'sem_equipamento' || r.status === 'saida_antecipada').length;
       const faltas = todayRecords.filter((r) => r.status === 'falta').length;
 
-      // Localiza turmas sem lançamento hoje
       const turmasList = context.activeTurmas && context.activeTurmas.length > 0
         ? context.activeTurmas
-        : ['Mini Maternal', 'Maternal', '1º Ano Azul', '1º Ano Laranja', '2º Ano', '3º Ano', '4º Ano', '5º Ano'];
+        : ['Mini Maternal Azul', 'Maternal Azul', '1º Ano Azul', '1º Ano Laranja', '2º Ano Azul', '3º Ano', '4º Ano', '5º Ano'];
 
       const turmasComLancamento = new Set(todayRecords.map((r) => r.turma));
-      const turmasPendentesHoje = turmasList.filter((t) => !turmasComLancamento.has(t));
+      const turmasPendentesHoje = turmasList.filter((t) => {
+        const hasExpected = expectedStudents.some((s) => normalizeStr(s.turma) === normalizeStr(t));
+        return hasExpected && !turmasComLancamento.has(t);
+      });
 
-      // Inconsistências de ponto do dia
       const pontoHoje = (context.pontoRecords || []).filter((p) => p.date === currentDate);
       const pontosIncompletos = pontoHoje.filter((p) => {
         const hasEntrada = Boolean(p.entrada_1 || p.entry1);
@@ -930,29 +1831,24 @@ export async function executeSofiaTool(
         return hasEntrada && !hasSaida;
       });
 
-      let diagnosticoTexto = `Diagnóstico ao Vivo de ${formatDateBR(currentDate)} (${horaAtual}):\n`;
-      diagnosticoTexto += `• Alunos: ${presentes} presentes, ${faltas} faltas registradas de um total de ${activeStudents.length} matriculados.\n`;
+      const tudoEmDia = turmasPendentesHoje.length === 0;
+      let msg = tudoEmDia
+        ? `Está tudo em dia agora (${horaAtual}): nenhuma turma com chamada pendente, ${presentes} presentes e ${faltas} faltas hoje.`
+        : `Agora (${horaAtual}): ${presentes} presentes e ${faltas} faltas hoje, mas temos ${turmasPendentesHoje.length} turma(s) ainda sem chamada (${turmasPendentesHoje.join(', ')}).`;
 
-      if (turmasPendentesHoje.length > 0) {
-        diagnosticoTexto += `• Atenção: ${turmasPendentesHoje.length} turma(s) sem lançamento de chamada hoje (${turmasPendentesHoje.join(', ')}).\n`;
-      } else {
-        diagnosticoTexto += `• Frequência: Todas as turmas possuem lançamento no sistema.\n`;
-      }
-
-      if (pontosIncompletos.length > 0) {
-        diagnosticoTexto += `• Livro Ponto: ${pontosIncompletos.length} colaborador(es) com registro em aberto no dia.\n`;
-      } else {
-        diagnosticoTexto += `• Livro Ponto: Sem inconsistências críticas no momento.\n`;
+      if (isUserAdmin && pontosIncompletos.length > 0) {
+        msg += ` No Livro Ponto, ${pontosIncompletos.length} colaborador(es) ainda estão com a saída em aberto.`;
       }
 
       return {
         toolName,
         success: true,
-        message: diagnosticoTexto,
+        message: msg,
+        spokenText: msg,
         data: {
           presentes,
           faltas,
-          totalAlunos: activeStudents.length,
+          totalEsperados: expectedStudents.length,
           turmasPendentes: turmasPendentesHoje,
           pontosIncompletos: pontosIncompletos.length,
         },
@@ -966,19 +1862,17 @@ export async function executeSofiaTool(
       const targetDate = args.data || currentDate;
       const summary = getAttendanceSummaryByDate(targetDate, context.records, context.students);
 
-      let msg = `Relatório Oficial de Frequência do dia ${summary.formattedDate}:\n`;
-      msg += `• Presenças consolidadas: ${summary.totalPresentes}\n`;
-      msg += `• Total de alunos faltantes: ${summary.totalFaltas}\n`;
+      let msg = `Em ${getDayOfWeekFullPTBR(summary.date)} (${summary.formattedDate}), tivemos ${summary.totalPresentes} presentes e ${summary.totalFaltas} falta(s).`;
 
       if (summary.totalFaltas > 0) {
-        msg += `\nLista detalhada de faltas por turma:\n`;
         const turmas = Object.keys(summary.faltasPorTurma);
-        turmas.forEach((turma) => {
+        const lines = turmas.map((turma) => {
           const alunos = summary.faltasPorTurma[turma];
-          msg += `• ${turma} (${alunos.length}): ${alunos.map((a) => a.name).join(', ')}\n`;
+          return `• ${turma} (${alunos.length}): ${alunos.map((a) => a.name).join(', ')}`;
         });
-      } else {
-        msg += `• Excelente: não constam faltas registradas nesta data (100% de comparecimento nas turmas apuradas).\n`;
+        msg += `\n${lines.join('\n')}`;
+      } else if (summary.totalPresentes === 0) {
+        msg = `Não encontrei chamada lançada para ${summary.formattedDate}. Quer que eu consulte outro dia?`;
       }
 
       return {
@@ -998,35 +1892,23 @@ export async function executeSofiaTool(
     }
 
     // -------------------------------------------------------------------
-    // consultarFrequenciaHoje(turma?)
+    // consultarFrequenciaHoje(turma?, listarNomes?)
     // -------------------------------------------------------------------
     case 'consultarFrequenciaHoje': {
       const targetDate = context.selectedDate || toISODateString(new Date());
-      const dayOfWeek = getDayOfWeekFromDate(targetDate);
       const filterTurma = args.turma ? normalizeStr(args.turma) : '';
 
-      const activeStudents = (context.students || []).filter(
-        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      const activeExpected = (context.students || []).filter(
+        (s) => isStudentActiveOnDate(s, targetDate) && isStudentScheduledForDate(s, targetDate)
       );
 
-      // Filtra por turma se informada
-      const filteredStudents = filterTurma
-        ? activeStudents.filter((s) => {
+      const expectedStudents = filterTurma
+        ? activeExpected.filter((s) => {
             const sTurma = normalizeStr(s.turma);
             return sTurma.includes(filterTurma) || filterTurma.includes(sTurma);
           })
-        : activeStudents;
+        : activeExpected;
 
-      // Alunos esperados no dia da semana correspondente
-      const expectedStudents = filteredStudents.filter((s) => {
-        const dias = s.diasFrequencia || s.diasContratados;
-        if (Array.isArray(dias) && dias.length > 0) {
-          return dias.includes(dayOfWeek as any);
-        }
-        return true;
-      });
-
-      // Mapeamento dos registros de frequência de hoje
       const recordMap = new Map<string, AttendanceRecord>();
       (context.records || []).forEach((r) => {
         if (r.date === targetDate) {
@@ -1038,29 +1920,43 @@ export async function executeSofiaTool(
       let faltas = 0;
       let saidasAntecipadas = 0;
       let pendentes = 0;
+      const faltantesNomes: string[] = [];
+      const pendentesNomes: string[] = [];
 
       expectedStudents.forEach((s) => {
         const rec = recordMap.get(s.id);
         if (!rec || !rec.status) {
           pendentes++;
-        } else if (rec.status === 'presente') {
-          presentes++;
+          pendentesNomes.push(s.name);
         } else if (rec.status === 'falta') {
           faltas++;
+          faltantesNomes.push(s.name);
         } else if (rec.status === 'saida_antecipada') {
           saidasAntecipadas++;
+          presentes++;
         } else {
           presentes++;
         }
       });
 
       const turmaLabel = filterTurma
-        ? (filteredStudents[0]?.turma || args.turma)
+        ? (expectedStudents[0]?.turma || args.turma)
         : '';
 
-      const respostaTexto = turmaLabel
-        ? `Na turma ${turmaLabel}, temos ${presentes} alunos presentes, ${faltas} faltas, ${saidasAntecipadas} saídas antecipadas e ${pendentes} pendentes.`
-        : `Hoje temos ${presentes} alunos presentes, ${faltas} faltas, ${saidasAntecipadas} saídas antecipadas e ${pendentes} pendentes.`;
+      let respostaTexto = '';
+      if (turmaLabel) {
+        respostaTexto = `No ${turmaLabel} hoje: ${presentes} presentes, ${faltas} falta(s)${saidasAntecipadas > 0 ? `, ${saidasAntecipadas} saída(s) antecipada(s)` : ''} e ${pendentes} pendente(s) de ${expectedStudents.length} esperado(s).`;
+        if (args.listarNomes && faltantesNomes.length > 0) {
+          respostaTexto += ` Faltaram: ${faltantesNomes.join(', ')}.`;
+        }
+        if (args.listarNomes && pendentesNomes.length > 0 && pendentesNomes.length <= 10) {
+          respostaTexto += ` Aguardando chamada: ${pendentesNomes.join(', ')}.`;
+        }
+      } else {
+        respostaTexto = pendentes === 0
+          ? `Chamada de hoje em dia! ${presentes} presentes e ${faltas} faltas${saidasAntecipadas > 0 ? ` (${saidasAntecipadas} saídas antecipadas)` : ''}.`
+          : `Hoje temos ${presentes} presentes, ${faltas} faltas e ${pendentes} aluno(s) ainda pendente(s) de chamada.`;
+      }
 
       return {
         toolName,
@@ -1075,6 +1971,7 @@ export async function executeSofiaTool(
           faltas,
           saidasAntecipadas,
           pendentes,
+          faltantesNomes,
         },
       };
     }
@@ -1088,24 +1985,16 @@ export async function executeSofiaTool(
       const filterTurma = args.turma ? normalizeStr(args.turma) : '';
       const tipoConsulta = args.tipo || 'geral';
 
-      const activeStudents = (context.students || []).filter(
-        (s) => (s.status || s.statusMatricula || 'ativo') === 'ativo'
+      const activeExpected = (context.students || []).filter(
+        (s) => isStudentActiveOnDate(s, targetDate) && isStudentScheduledForDate(s, targetDate)
       );
 
-      const targetStudents = filterTurma
-        ? activeStudents.filter((s) => {
+      const expectedStudents = filterTurma
+        ? activeExpected.filter((s) => {
             const sTurma = normalizeStr(s.turma);
             return sTurma.includes(filterTurma) || filterTurma.includes(sTurma);
           })
-        : activeStudents;
-
-      const expectedStudents = targetStudents.filter((s) => {
-        const dias = s.diasFrequencia || s.diasContratados;
-        if (Array.isArray(dias) && dias.length > 0) {
-          return dias.includes(dayOfWeek as any);
-        }
-        return true;
-      });
+        : activeExpected;
 
       const recordMap = new Map<string, AttendanceRecord>();
       (context.records || []).forEach((r) => {
@@ -1114,12 +2003,10 @@ export async function executeSofiaTool(
         }
       });
 
-      // 1. Alunos de Transporte Escolar (Van)
       const alunosVan = expectedStudents.filter(
         (s) => s.tipoSaida === 'TRANSPORTE_ESCOLAR' || Boolean(s.nomeCondutor)
       );
 
-      // 2. Saídas antecipadas (agendadas ou com registro de saída antecipada)
       const alunosSaidaAntecipada = expectedStudents.filter((s) => {
         const rec = recordMap.get(s.id);
         if (rec && (rec.status === 'saida_antecipada' || rec.exitTime)) {
@@ -1135,7 +2022,6 @@ export async function executeSofiaTool(
         return false;
       });
 
-      // 3. Alunos já liberados pela portaria / checkout confirmado
       const alunosLiberados = expectedStudents.filter((s) => {
         const rec = recordMap.get(s.id);
         return Boolean(rec && (rec.checkoutConfirmed || rec.status === 'saida_antecipada'));
@@ -1145,28 +2031,30 @@ export async function executeSofiaTool(
       const totalAntecipadas = alunosSaidaAntecipada.length;
       const totalLiberados = alunosLiberados.length;
 
-      let baseMsg = `Para hoje, temos ${totalVan} alunos cadastrados para Transporte Escolar (Van) e ${totalAntecipadas} saídas antecipadas agendadas.`;
+      let baseMsg = `Hoje temos ${totalVan} aluno(s) de van e ${totalAntecipadas} saída(s) antecipada(s)${totalLiberados > 0 ? ` (${totalLiberados} já liberado(s))` : ''}.`;
       let spokenText = baseMsg;
 
       if (tipoConsulta === 'van' || args.detalhesVan) {
         if (totalVan > 0) {
-          baseMsg += `\n\nAlunos do Transporte Escolar (Van):\n` +
-            alunosVan.map((s) => `• ${s.name} (${s.turma}${s.nomeCondutor ? ` - Condutor: ${s.nomeCondutor}` : ''})`).join('\n');
-          spokenText = `Para hoje, temos ${totalVan} alunos cadastrados para Transporte Escolar e ${totalAntecipadas} saídas antecipadas. Os alunos de van são: ${alunosVan.slice(0, 5).map((s) => s.name).join(', ')}${totalVan > 5 ? ' entre outros' : ''}.`;
+          baseMsg += `\n` +
+            alunosVan.slice(0, 10).map((s) => `• ${s.name} (${s.turma}${s.nomeCondutor ? ` — ${s.nomeCondutor}` : ''})`).join('\n');
+          if (totalVan > 10) baseMsg += `\nE mais ${totalVan - 10} aluno(s).`;
+          spokenText = `Hoje temos ${totalVan} alunos de van, incluindo ${alunosVan.slice(0, 4).map((s) => s.name).join(', ')}.`;
+        } else {
+          baseMsg = 'Não há alunos de transporte escolar (van) esperados hoje neste filtro.';
         }
       } else if (tipoConsulta === 'antecipada') {
         if (totalAntecipadas > 0) {
-          baseMsg += `\n\nAlunos com Saída Antecipada:\n` +
+          baseMsg = `Saídas antecipadas de hoje (${totalAntecipadas}):\n` +
             alunosSaidaAntecipada.map((s) => {
               const rec = recordMap.get(s.id);
-              const hora = rec?.exitTime || s.horariosSaida?.[dayOfWeek as any] || s.horarioSaida || 'Horário especial';
-              return `• ${s.name} (${s.turma}) - Horário: ${hora}`;
+              const h = rec?.exitTime || s.horariosSaida?.[dayOfWeek as any] || s.horarioSaida || 'A confirmar';
+              return `• ${s.name} (${s.turma}) — ${formatHourPTBR(h) || h}`;
             }).join('\n');
+          spokenText = `Hoje temos ${totalAntecipadas} saída antecipada agendada: ${alunosSaidaAntecipada.slice(0, 4).map((s) => s.name).join(', ')}.`;
+        } else {
+          baseMsg = 'Nenhuma saída antecipada agendada para hoje até agora.';
         }
-      }
-
-      if (totalLiberados > 0) {
-        baseMsg += `\n• Alunos já liberados na portaria: ${totalLiberados}.`;
       }
 
       return {
@@ -1179,52 +2067,61 @@ export async function executeSofiaTool(
           totalVan,
           totalAntecipadas,
           totalLiberados,
-          alunosVan: alunosVan.map((s) => ({ id: s.id, name: s.name, turma: s.turma, condutor: s.nomeCondutor })),
-          alunosSaidaAntecipada: alunosSaidaAntecipada.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
-          alunosLiberados: alunosLiberados.map((s) => ({ id: s.id, name: s.name, turma: s.turma })),
         },
       };
     }
 
     // -------------------------------------------------------------------
-    // gerarTermoSaidaAvulsa(alunoId, nomeRetirante, documentoRetirante, parentesco, motivoSaida, horarioSaida)
+    // gerarTermoSaidaAvulsa(alunoId, nomeRetirante, ...)
     // -------------------------------------------------------------------
     case 'gerarTermoSaidaAvulsa': {
-      const alunoQuery = args.alunoId || args.nomeAluno || '';
-      const nomeRetirante = args.nomeRetirante || args.retirante || 'Responsável Autorizado';
-      const documentoRetirante = args.documentoRetirante || args.documento || args.rg || 'Não informado';
-      const parentesco = args.parentesco || args.vinculo || 'Responsável Autorizado';
-      const motivoSaida = args.motivoSaida || args.motivo || 'Liberação Excepcional de Balcão';
-      const targetDate = args.data || context.selectedDate || toISODateString(new Date());
-      const horarioSaida = args.horarioSaida || args.horario || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const alunoQuery = args.alunoId || '';
+      const nomeRetirante = args.nomeRetirante || 'Responsável Autorizado';
+      const documentoRetirante = args.documentoRetirante || 'Informado na portaria';
+      const parentesco = args.parentesco || 'Responsável';
+      const motivoSaida = args.motivoSaida || 'Saída antecipada autorizada';
+      const horarioSaida = args.horarioSaida || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-      const student = findStudent(context.students, alunoQuery);
-      if (!student) {
+      const matches = findMatchingStudents(context.students, alunoQuery);
+      if (matches.length === 0) {
         return {
           toolName,
           success: false,
-          message: `Não localizei o aluno(a) "${alunoQuery}" no cadastro escolar ativo para emitir o termo de saída.`,
+          message: `Não achei "${alunoQuery}" no cadastro. Pode conferir o nome?`,
+        };
+      }
+      if (matches.length > 1) {
+        const opts = matches.slice(0, 4).map((s) => `${s.name} (${s.turma})`).join(' ou ');
+        return {
+          toolName,
+          success: false,
+          needsDisambiguation: true,
+          message: `Tem mais de um aluno com esse nome: ${opts}. Para qual deles devo gerar o termo?`,
         };
       }
 
+      const student = matches[0];
       try {
-        const pdfResult = generateTermoSaidaAvulsaPDF({
-          student,
-          nomeRetirante,
-          documentoRetirante,
-          parentesco,
-          motivoSaida,
-          dataSaida: targetDate,
-          horarioSaida,
-          responsavelLiberacao: context.currentUser?.name || 'Coordenação do Integral',
-        }, false);
+        const pdfResult = generateTermoSaidaAvulsaPDF(
+          {
+            student,
+            nomeRetirante,
+            documentoRetirante,
+            parentesco,
+            motivoSaida,
+            dataSaida: currentDate,
+            horarioSaida,
+            responsavelLiberacao: context.currentUser?.name || 'Equipe Integral',
+          },
+          false
+        );
 
-        // Se houver manipulador de registro, registra no diário de frequência como saída antecipada confirmada
         if (context.onSaveRecord) {
-          const now = new Date();
-          const year = now.getFullYear();
+          const targetDate = currentDate;
+          const targetDateObj = new Date(`${targetDate}T12:00:00`);
+          const year = targetDateObj.getFullYear() || new Date().getFullYear();
           const firstJan = new Date(year, 0, 1);
-          const pastDaysOfYear = (now.getTime() - firstJan.getTime()) / 86400000;
+          const pastDaysOfYear = (targetDateObj.getTime() - firstJan.getTime()) / 86400000;
           const weekNumber = Math.max(1, Math.ceil((pastDaysOfYear + firstJan.getDay() + 1) / 7)) || 1;
 
           await context.onSaveRecord({
@@ -1241,30 +2138,26 @@ export async function executeSofiaTool(
           });
         }
 
-        const msgTexto = `Termo de Liberação de Saída Avulsa do aluno ${student.name} preparado com sucesso!\n• Retirante: ${nomeRetirante} (${documentoRetirante})\n• Grau de Parentesco: ${parentesco}\n• Horário de Saída: ${horarioSaida}\nO documento PDF já está pronto para download e assinatura física.`;
-        const spokenText = `Termo de liberação de saída do aluno ${student.name} preparado com sucesso. O documento já está pronto para impressão.`;
-
+        const horarioBr = formatHourPTBR(horarioSaida) || horarioSaida;
         return {
           toolName,
           success: true,
-          message: msgTexto,
-          spokenText,
+          message: `Pronto! Registrei a saída de ${student.name} (${student.turma}) às ${horarioBr} com ${nomeRetirante} e deixei o termo em PDF pronto para imprimir aqui embaixo.`,
+          spokenText: `Pronto! Preparei o termo de saída de ${student.name} às ${horarioBr}.`,
           filename: pdfResult.filename,
           downloadUrl: pdfResult.blobUrl,
           data: {
-            alunoId: student.id,
             alunoNome: student.name,
             turma: student.turma,
             retirante: nomeRetirante,
-            documento: documentoRetirante,
             horario: horarioSaida,
           },
         };
-      } catch (err: any) {
+      } catch {
         return {
           toolName,
           success: false,
-          message: `Erro ao gerar o Termo de Saída Avulsa: ${err?.message || 'erro interno'}.`,
+          message: 'Não consegui gerar o Termo de Saída agora. Quer que eu tente de novo?',
         };
       }
     }
@@ -1273,6 +2166,13 @@ export async function executeSofiaTool(
     // alterarAnoLetivoAluno(alunoId, novoAnoLetivo)
     // -------------------------------------------------------------------
     case 'alterarAnoLetivoAluno': {
+      if (!isUserAdmin && !canManageStudents(context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'Alteração de ano letivo e rematrícula são feitas apenas pela coordenação ou secretaria.',
+        };
+      }
       const alunoQuery = args.alunoId || args.nomeAluno || '';
       let novoAno = Number(args.novoAnoLetivo || args.anoLetivo || 2027);
       if (isNaN(novoAno) || (novoAno !== 2026 && novoAno !== 2027)) {
@@ -1284,7 +2184,7 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: `Aluno(a) "${alunoQuery}" não encontrado para alteração de ano letivo.`,
+          message: `Não achei nenhum "${alunoQuery}" no cadastro.`,
         };
       }
 
@@ -1293,24 +2193,18 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: `Falha ao persistir a atualização de ano letivo do aluno ${student.name}.`,
+          message: `Não consegui salvar a mudança de ano letivo agora. Quer que eu tente de novo?`,
         };
       }
 
-      // Atualiza no contexto local
       const idx = context.students.findIndex((s) => s.id === student.id);
-      if (idx !== -1) {
-        context.students[idx] = updated;
-      }
-
-      const msgTexto = `Ano letivo do aluno ${student.name} alterado com sucesso para ${novoAno}!\n• Matrícula atualizada no sistema.\n• Turma: ${student.turma}`;
-      const spokenText = `Ano letivo do aluno ${student.name} alterado com sucesso para ${novoAno}.`;
+      if (idx !== -1) context.students[idx] = updated;
 
       return {
         toolName,
         success: true,
-        message: msgTexto,
-        spokenText,
+        message: `Pronto! Passei ${student.name} (${student.turma}) para o ano letivo de ${novoAno}.`,
+        spokenText: `Pronto! Passei ${student.name} para ${novoAno}.`,
         data: updated,
       };
     }
@@ -1319,23 +2213,25 @@ export async function executeSofiaTool(
     // consultarResumoFinanceiro(anoLetivo?)
     // -------------------------------------------------------------------
     case 'consultarResumoFinanceiro': {
+      if (!isUserAdmin) {
+        return {
+          toolName,
+          success: false,
+          message: 'Os dados financeiros são restritos à coordenação e direção.',
+        };
+      }
       let targetAno = Number(args.anoLetivo || 2026);
       if (isNaN(targetAno)) targetAno = 2026;
 
       const allProfiles = loadLocalFinancialProfiles();
       let profiles = allProfiles.filter((p) => p.anoLetivo === targetAno);
-
-      // Se ainda não houver perfis no local storage, gera a partir dos estudantes do ano
       if (profiles.length === 0) {
-        const studentsAno = context.students.filter((s) => s.anoLetivo === targetAno);
-        profiles = studentsAno.map((s) =>
-          buildDefaultFinancialProfile(s, targetAno)
-        );
+        const studentsAno = context.students.filter((s) => (s.anoLetivo || 2026) === targetAno);
+        profiles = studentsAno.map((s) => buildDefaultFinancialProfile(s, targetAno));
       }
 
       const allExpenses = loadLocalFinancialExpenses();
       const expenses = allExpenses.filter((e) => e.anoLetivo === targetAno);
-
       const metrics = calculateFinancialMetrics(profiles, expenses);
 
       const recConfBR = formatCurrencyBR(metrics.receitaConfirmada);
@@ -1343,25 +2239,14 @@ export async function executeSofiaTool(
       const despesasBR = formatCurrencyBR(metrics.totalDespesasMes);
       const saldoLiqBR = formatCurrencyBR(metrics.saldoLiquidoOperacional);
 
-      const msgTexto = `Resumo Financeiro do Programa Integral — Ano Letivo ${targetAno}:\n` +
-        `• Receita Confirmada: ${recConfBR}\n` +
-        `• Receita Prevista Mensal: ${recPrevBR}\n` +
-        `• Despesas Operacionais: ${despesasBR}\n` +
-        `• Saldo Líquido Operacional: ${saldoLiqBR}\n` +
-        `• Taxa de Adimplência: ${metrics.taxaAdimplencia}%\n` +
-        `• Total de Contratos: ${metrics.totalContratos} (${metrics.totalEmDia} em dia, ${metrics.totalPendentes} pendentes, ${metrics.totalAtrasados} em atraso)`;
-
-      const spokenText = `Para o ano letivo de ${targetAno}, temos ${recConfBR} de receita confirmada, ${despesasBR} em despesas operacionais e taxa de adimplência de ${metrics.taxaAdimplencia}%.`;
+      const msgTexto = `Resumo financeiro de ${targetAno}: ${recConfBR} confirmados (de ${recPrevBR} previstos), ${despesasBR} em despesas e saldo de ${saldoLiqBR}. Adimplência em ${metrics.taxaAdimplencia}% (${metrics.totalEmDia} em dia, ${metrics.totalPendentes} pendentes, ${metrics.totalAtrasados} em atraso).`;
 
       return {
         toolName,
         success: true,
         message: msgTexto,
-        spokenText,
-        data: {
-          anoLetivo: targetAno,
-          ...metrics,
-        },
+        spokenText: `Em ${targetAno}, temos ${recConfBR} confirmados, ${despesasBR} em despesas e ${metrics.taxaAdimplencia}% de adimplência.`,
+        data: { anoLetivo: targetAno, ...metrics },
       };
     }
 
@@ -1369,6 +2254,13 @@ export async function executeSofiaTool(
     // 7. cadastrarAluno(dadosAluno)
     // -------------------------------------------------------------------
     case 'cadastrarAluno': {
+      if (!isUserAdmin && !canManageStudents(context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'O cadastro de novos alunos é liberado apenas para coordenação e secretaria.',
+        };
+      }
       const dados = args.dadosAluno || args;
       const nome = dados.nome || '';
       const turmaId = dados.turmaId || '1º Ano Azul';
@@ -1380,7 +2272,7 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'Nome do aluno não informado para cadastro.',
+          message: 'Qual é o nome completo do aluno para eu cadastrar?',
         };
       }
 
@@ -1399,7 +2291,7 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: true,
-        message: `Aluno(a) "${newStudent.name}" cadastrado(a) com sucesso na turma "${newStudent.turma}"!\n• Matrícula/ID: ${newStudent.id}\n• Responsável: ${responsavel || 'Não informado'}\n• Telefone: ${telefone || 'Não informado'}\n• Horário: ${horarioEntradaSaida}`,
+        message: `Pronto! Cadastrei ${newStudent.name} no ${newStudent.turma}. Quer já fixar as modalidades ou conferir o horário de saída?`,
         data: newStudent,
       };
     }
@@ -1408,6 +2300,13 @@ export async function executeSofiaTool(
     // 8. editarAluno(alunoId, dadosAtualizados)
     // -------------------------------------------------------------------
     case 'editarAluno': {
+      if (!isUserAdmin && !canManageStudents(context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'A alteração cadastral de alunos é feita pela coordenação ou secretaria.',
+        };
+      }
       const alunoId = args.alunoId || '';
       const dadosAtualizados = args.dadosAtualizados || args;
 
@@ -1415,34 +2314,28 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'ID ou nome do aluno não informado para edição.',
+          message: 'Qual aluno você quer atualizar?',
         };
       }
 
-      let targetStudentId = alunoId;
       const found = findStudent(context.students, alunoId);
-      if (found) {
-        targetStudentId = found.id;
-      }
-
+      const targetStudentId = found ? found.id : alunoId;
       const updated = await updateStudent(targetStudentId, dadosAtualizados);
       if (!updated) {
         return {
           toolName,
           success: false,
-          message: `Aluno(a) "${alunoId}" não foi localizado no cadastro escolar para atualização.`,
+          message: `Não achei "${alunoId}" no cadastro para atualizar.`,
         };
       }
 
       const idx = context.students.findIndex((s) => s.id === updated.id);
-      if (idx !== -1) {
-        context.students[idx] = updated;
-      }
+      if (idx !== -1) context.students[idx] = updated;
 
       return {
         toolName,
         success: true,
-        message: `Cadastro do aluno(a) "${updated.name}" atualizado com sucesso no sistema escolar!`,
+        message: `Pronto! Atualizei o cadastro de ${updated.name}.`,
         data: updated,
       };
     }
@@ -1451,6 +2344,13 @@ export async function executeSofiaTool(
     // 9. cadastrarUsuario(dadosUsuario)
     // -------------------------------------------------------------------
     case 'cadastrarUsuario': {
+      if (!isUserAdmin) {
+        return {
+          toolName,
+          success: false,
+          message: 'O cadastro de novos colaboradores é restrito à coordenação.',
+        };
+      }
       const dados = args.dadosUsuario || args;
       const nome = dados.nome || '';
       const email = dados.email || '';
@@ -1462,7 +2362,7 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'Nome e e-mail são obrigatórios para cadastrar um novo colaborador.',
+          message: 'Preciso do nome completo e do e-mail do colaborador para fazer o cadastro.',
         };
       }
 
@@ -1481,8 +2381,8 @@ export async function executeSofiaTool(
         allowedTabs: isAdm
           ? ALL_APP_TAB_IDS
           : isAdi
-          ? ['momento', 'frequencia']
-          : ['momento', 'frequencia', 'semanario'],
+          ? ['momento', 'frequencia', 'semanario', 'manual']
+          : ['momento', 'frequencia', 'semanario', 'manual'],
         contractSchedule: '07:30 - 17:30',
         contractDailyHoursFormatted: '8h 00m',
         baseSalary: 1200,
@@ -1494,7 +2394,7 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: true,
-        message: `Colaborador(a) "${saved.name}" registrado(a) com sucesso no sistema!\n• E-mail: ${saved.email}\n• Cargo: ${saved.cargoLabel}\n• Perfil: ${perfil}`,
+        message: `Pronto! Cadastrei ${saved.name} (${saved.cargoLabel}) no sistema com acesso de ${isAdm ? 'Coordenação' : isAdi ? 'ADI' : 'Monitora/Professora'}.`,
         data: saved,
       };
     }
@@ -1518,16 +2418,16 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: true,
-          message: `Lista de chamada nominal da turma "${turmaId}" gerada em PDF com sucesso!`,
+          message: `Pronto! A lista de chamada de ${turmaId} já está gerada em PDF aqui embaixo.`,
           filename: result.filename || `Lista_Chamada_${turmaId.replace(/\s+/g, '_')}.pdf`,
           downloadUrl: result.blobUrl || result.dataUrl,
           data: { turma: turmaId },
         };
-      } catch (err: any) {
+      } catch {
         return {
           toolName,
           success: false,
-          message: `Erro ao gerar lista de chamada em PDF: ${err?.message || 'erro desconhecido'}.`,
+          message: 'Não consegui gerar a lista em PDF agora. Quer que eu tente de novo?',
         };
       }
     }
@@ -1536,13 +2436,23 @@ export async function executeSofiaTool(
     // 11. lancarFrequenciaTurma(turmaId, data, chamadas)
     // -------------------------------------------------------------------
     case 'lancarFrequenciaTurma': {
+      if (context.currentUser && !canMarkAttendance(context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'Seu perfil não tem permissão para lançar chamada. Posso consultar a lista para você.',
+        };
+      }
       const turmaId = args.turmaId || '1º Ano Azul';
-      const targetDate = args.data || currentDate;
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
       let chamadas = Array.isArray(args.chamadas) ? args.chamadas : [];
 
       if (chamadas.length === 0) {
         const turmaStudents = context.students.filter(
-          (s) => s.turma?.toLowerCase() === turmaId.toLowerCase()
+          (s) =>
+            normalizeStr(s.turma) === normalizeStr(turmaId) &&
+            isStudentActiveOnDate(s, targetDate) &&
+            isStudentScheduledForDate(s, targetDate)
         );
         chamadas = turmaStudents.map((s) => ({ alunoId: s.id, presente: true }));
       }
@@ -1551,14 +2461,14 @@ export async function executeSofiaTool(
         turmaId,
         data: targetDate,
         chamadas,
-        instructorName: context.currentUser?.name || 'Sofia • Assistente IA',
+        instructorName: context.currentUser?.name || 'Sofia',
         onSaveRecord: context.onSaveRecord,
       });
 
       return {
         toolName,
         success: true,
-        message: `Chamada da turma "${res.turma}" realizada com sucesso para ${formatDateBR(res.data)}!\n• Total apurado: ${res.totalAlunos} alunos\n• Presenças: ${res.presentes}\n• Faltas: ${res.faltas}`,
+        message: `Pronto! Lancei a chamada de ${res.turma} (${formatDateBR(res.data)}): ${res.presentes} presentes e ${res.faltas} falta(s).`,
         data: res,
       };
     }
@@ -1567,7 +2477,14 @@ export async function executeSofiaTool(
     // 12. cadastrarRefeicaoCardapio(data, tipo, descricao)
     // -------------------------------------------------------------------
     case 'cadastrarRefeicaoCardapio': {
-      const targetDate = args.data || currentDate;
+      if (!isUserAdmin && !canManageCardapio(context.currentUser)) {
+        return {
+          toolName,
+          success: false,
+          message: 'A edição do cardápio é feita pela nutrição ou coordenação.',
+        };
+      }
+      const targetDate = args.data ? normalizeDateInput(String(args.data)) : currentDate;
       const tipo: 'Almoço' | 'Lanche' =
         String(args.tipo).toLowerCase().includes('lanche') ? 'Lanche' : 'Almoço';
       const descricao = args.descricao || '';
@@ -1576,7 +2493,7 @@ export async function executeSofiaTool(
         return {
           toolName,
           success: false,
-          message: 'Descrição da refeição não informada para o cardápio.',
+          message: `Qual é o ${tipo.toLowerCase()} que devo registrar no cardápio?`,
         };
       }
 
@@ -1585,7 +2502,7 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: true,
-        message: `Cardápio atualizado com sucesso!\n• Data: ${formatDateBR(targetDate)}\n• Refeição: ${tipo}\n• Detalhes: "${descricao}"`,
+        message: `Pronto! Atualizei o ${tipo.toLowerCase()} de ${formatDateBR(targetDate)}: "${descricao}".`,
         data: res.dayItem,
       };
     }
@@ -1594,18 +2511,7 @@ export async function executeSofiaTool(
       return {
         toolName,
         success: false,
-        message: `Ferramenta "${toolName}" não reconhecida.`,
+        message: 'Não consegui executar essa ação agora. Pode me explicar de outro jeito?',
       };
   }
 }
-
-/**
- * Função utilitária direta para consulta de frequência por data
- */
-export async function obterResumoFrequenciaPorData(
-  data: string,
-  context: SofiaToolExecutionContext
-): Promise<SofiaToolResult> {
-  return executeSofiaTool('obterResumoFrequenciaPorData', { data }, context);
-}
-

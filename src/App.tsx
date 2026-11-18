@@ -2861,18 +2861,26 @@ export default function App() {
         </div>
       )}
 
-      {/* Agente de IA Oficial — Sofia (Exclusivo para perfil Administrador / Coordenação) */}
-      {currentUser && isAdmin(currentUser) && (
+      {/* Assistente Sofia — Disponível para toda a equipe do Integral com guarda de privacidade por perfil */}
+      {currentUser && (
         <SofiaAssistant
           students={students}
           records={records}
           currentUser={currentUser}
           selectedDate={selectedDate}
+          selectedTurma={selectedClass}
+          activeTab={activeTab}
           schedules={schedules}
+          semanarioPlans={semanarioPlans}
+          quadroAtribuicoes={effectiveQuadroAtribuicoes}
+          users={users}
+          holidays={holidays}
+          activitiesList={activitiesList}
           pontoRecords={pontoRecords}
           activeTurmas={turmas}
           onSaveRecord={handleSaveRecord}
           onNavigateTab={(tab) => setActiveTab(tab)}
+          onSelectTurma={(turma) => setSelectedClass(turma)}
           onSelectDate={(date) => setSelectedDate(date)}
         />
       )}

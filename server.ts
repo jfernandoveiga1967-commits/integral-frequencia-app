@@ -29,7 +29,8 @@ import {
 } from './src/services/FolhaService';
 import {
   buildSofiaSystemPrompt,
-  SOFIA_DEFAULT_TEMPERATURE,
+  buildSofiaChatSystemInstruction,
+  SOFIA_DEFAULT_MODEL,
 } from './src/utils/sofiaPromptBuilder';
 
 dotenv.config();
@@ -60,7 +61,10 @@ function getAIClient(): GoogleGenAI | null {
   if (!aiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      aiClient = new GoogleGenAI({ apiKey });
+      aiClient = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
     }
   }
   return aiClient;
@@ -385,7 +389,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido no formato:
       try {
         attempts++;
         response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: SOFIA_DEFAULT_MODEL,
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
@@ -776,12 +780,11 @@ app.post('/api/gemini/generate-cordial-feedback', async (req, res) => {
         });
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: SOFIA_DEFAULT_MODEL,
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
             maxOutputTokens: 2500,
-            temperature: 0.3,
           },
         });
 
@@ -889,12 +892,11 @@ Responda estritamente em formato JSON:
 }`;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: SOFIA_DEFAULT_MODEL,
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
             maxOutputTokens: 600,
-            temperature: 0.2,
           },
         });
 
@@ -1018,12 +1020,138 @@ const SOFIA_SERVER_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'consultarAtividadesMomento',
+    description:
+      'Consulta o que cada turma (ou uma turma específica) está fazendo agora ou em um horário simulado na grade horária do Integral: atividade, local, monitora/ADI, horário de término e turmas sem atividade.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: {
+          type: 'STRING',
+          description: 'Nome opcional da turma (ex: "Maternal Azul", "Infantil 2", "1º Ano Azul").',
+        },
+        horarioSimulado: {
+          type: 'STRING',
+          description: 'Horário opcional no formato HH:mm para simular (ex: "15:30").',
+        },
+        data: {
+          type: 'STRING',
+          description: 'Data opcional YYYY-MM-DD. Padrão: hoje.',
+        },
+      },
+    },
+  },
+  {
+    name: 'registrarSaidaAntecipada',
+    description:
+      'Registra rapidamente o aviso/horário de saída antecipada de um aluno hoje (ex: "O Pedro vai sair às 16h"). Detecta automaticamente se há mais de um aluno com o mesmo nome.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        alunoId: { type: 'STRING', description: 'Nome ou identificador do aluno.' },
+        turma: { type: 'STRING', description: 'Nome da turma se informado.' },
+        horario: { type: 'STRING', description: 'Horário previsto da saída (ex: "16:00", "15:30").' },
+        justificativa: { type: 'STRING', description: 'Motivo ou quem vem buscar, se informado.' },
+      },
+      required: ['alunoId', 'horario'],
+    },
+  },
+  {
+    name: 'consultarCardapio',
+    description:
+      'Consulta o cardápio de hoje, de outra data ou da semana e verifica alunos com alergias ou restrições alimentares.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        data: { type: 'STRING', description: 'Data opcional ("hoje", "amanha", YYYY-MM-DD ou DD/MM/YYYY).' },
+        turma: { type: 'STRING', description: 'Turma opcional para checar restrições alimentares.' },
+      },
+    },
+  },
+  {
+    name: 'consultarSemanario',
+    description:
+      'Consulta o planejamento semanal (Semanário) de uma turma ou dia específico.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: { type: 'STRING', description: 'Turma opcional para filtrar o planejamento.' },
+        data: { type: 'STRING', description: 'Data opcional (YYYY-MM-DD ou dia da semana). Padrão: hoje.' },
+      },
+    },
+  },
+  {
+    name: 'consultarManualNormas',
+    description:
+      'Pesquisa regras, condutas, protocolos de emergência, uso de celular, saídas, alergias ou orientações no Manual Oficial do Colégio Crescer.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        termoOuTema: { type: 'STRING', description: 'Palavra-chave, assunto ou dúvida sobre regra do colégio.' },
+      },
+      required: ['termoOuTema'],
+    },
+  },
+  {
+    name: 'consultarAlunosOuTurma',
+    description:
+      'Busca alunos por nome aproximado ou lista os alunos de uma turma, com horário de saída, contrato e transporte.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        busca: { type: 'STRING', description: 'Nome parcial ou completo do aluno.' },
+        turma: { type: 'STRING', description: 'Turma opcional para filtrar.' },
+      },
+    },
+  },
+  {
+    name: 'consultarQuadroAtribuicoes',
+    description:
+      'Consulta quem são as monitoras titulares, assistentes, ADIs, horários e salas base no Quadro de Atribuições.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        turma: { type: 'STRING', description: 'Turma opcional para filtrar.' },
+        colaborador: { type: 'STRING', description: 'Nome da monitora/ADI opcional para saber qual turma atende.' },
+      },
+    },
+  },
+  {
+    name: 'consultarLivroPonto',
+    description:
+      'Consulta os registros do Livro Ponto de um colaborador ou do dia.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        colaborador: { type: 'STRING', description: 'Nome opcional do colaborador.' },
+        data: { type: 'STRING', description: 'Data opcional YYYY-MM-DD. Padrão: hoje.' },
+      },
+    },
+  },
+  {
+    name: 'navegarModulo',
+    description:
+      'Abre uma aba/tela do aplicativo para o usuário.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        modulo: {
+          type: 'STRING',
+          description: 'Aba de destino: momento, frequencia, semanario, ponto, cardapio, alunos, financeiro, relatorio, manual.',
+          enum: ['momento', 'frequencia', 'semanario', 'ponto', 'cardapio', 'alunos', 'financeiro', 'relatorio', 'manual'],
+        },
+      },
+      required: ['modulo'],
+    },
+  },
+  {
     name: 'consultarFrequenciaHoje',
-    description: 'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma.',
+    description: 'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma e listar nomes.',
     parameters: {
       type: 'OBJECT',
       properties: {
         turma: { type: 'STRING', description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal")' },
+        listarNomes: { type: 'BOOLEAN', description: 'Se verdadeiro, inclui os nomes dos alunos faltantes, presentes ou pendentes.' },
       },
     },
   },
@@ -1185,61 +1313,50 @@ const SOFIA_SERVER_TOOL_DECLARATIONS = [
 app.post('/api/sofia/chat', async (req, res) => {
   try {
     const { message, history = [], appState, toolResult, toolCall } = req.body;
-
-    const systemInstruction = `Você é a Sofia, a Assistente Inteligente Oficial do Programa Integral do Colégio Crescer. Você possui conhecimento total da estrutura pedagógica, rotinas de ponto, chamadas de frequência, normas internas, cardápio e gestão de turmas. Seu tom de voz é profissional, acolhedor, resolutivo e seguro. Você não é um bot rígido de menus: você conversa de forma natural, analisa a situação atual da escola, identifica inconsistências proativamente e executa ações diretas no sistema quando solicitada.
-
-PERMISSÕES E CAPACIDADE ADMINISTRATIVA PLENA:
-Você possui permissões administrativas totais para criar alunos, cadastrar usuários, lançar chamadas, alterar cardápios e gerar qualquer PDF do sistema. Quando o usuário pedir para cadastrar, editar ou lançar qualquer dado, invoque a ferramenta correspondente imediatamente e confirme a execução com os detalhes do registro efetuado.
-
-ESTADO GLOBAL EM TEMPO REAL DA ESCOLA (RAG LOCAL):
-- Horário Atual: ${appState?.currentTime || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-- Data Atual: ${appState?.formattedDate || appState?.currentDate || new Date().toLocaleDateString('pt-BR')} (${appState?.dayOfWeek || ''})
-- Total de Alunos Ativos: ${appState?.totalAlunosAtivos ?? 'Carregado no sistema'}
-- Presenças Confirmadas Hoje: ${appState?.totalPresentesHoje ?? 0}
-- Faltas Registradas Hoje: ${appState?.totalFaltasHoje ?? 0}
-- Chamadas Pendentes no Bloco Atual: ${appState?.totalChamadasPendentesBlocoAtual ?? 0}
-- Turmas com Chamada Pendente Hoje: ${(appState?.turmasComChamadaPendenteHoje || []).join(', ') || 'Nenhuma'}
-- Usuário Atual: ${appState?.currentUser?.name || 'Administrador'} (${appState?.currentUser?.cargoLabel || appState?.currentUser?.role || 'Coordenação'})
-
-DIRETRIZES DE ATUAÇÃO E RESOLUÇÃO:
-1. Responda em português brasileiro fluente, claro, profissional e acolhedor.
-2. Quando a solicitação envolver criar/editar aluno, cadastrar usuário, lançar chamada da turma, cadastrar refeição no cardápio, gerar lista nominal em PDF ou espelho de ponto, chame a ferramenta correspondente imediatamente através de function calling.
-3. CONSULTA DE HISTÓRICO DE FREQUÊNCIA E TERMOS TEMPORAIS:
-   - Interprete termos temporais como "ontem", "anteontem", "dia anterior", "semana passada" ou datas numéricas específicas (ex: "dia 28", "28/10", "15 de setembro").
-   - REGRA OBRIGATÓRIA: Quando o usuário perguntar pelas faltas, presenças ou chamada de um dia anterior ou data específica (ex: "quem faltou ontem?", "quantas faltas tivemos ontem?", "como foi a chamada do dia 28?"), você DEVE invocar obrigatoriamente a ferramenta "obterResumoFrequenciaPorData" passando a data calculada (por exemplo, a data de ontem correspondente à data atual), e NUNCA retornar o diagnóstico em tempo real do momento atual ("analisarDesarranjosDoDia").
-4. CONSULTAS DE FREQUÊNCIA DE HOJE:
-   - Quando o usuário perguntar sobre a frequência de hoje, quantos alunos vieram ou o resumo da chamada (ex: "qual a frequência de hoje?", "quantos alunos vieram hoje?", "qual o resumo da chamada do Maternal?"), invoque obrigatoriamente a ferramenta "consultarFrequenciaHoje" (passando a turma se informada).
-5. ALERTAS E CONSULTAS DE SAÍDAS DE HOJE:
-   - Quando o usuário perguntar sobre saídas, transporte escolar/van, saídas antecipadas ou portaria (ex: "quem sai de van hoje?", "quais são as saídas antecipadas de hoje?", "quantos alunos já foram liberados?"), invoque obrigatoriamente a ferramenta "consultarAlertasSaidaHoje".
-6. TERMO DE SAÍDA AVULSA E LIBERAÇÕES:
-   - Quando o usuário solicitar termo de saída, saída avulsa ou registrar que alguém veio retirar um aluno (ex: "prepare o termo de saída do aluno Lyan Adolpho retirado por Marcos Silva RG 12345"), invoque imediatamente "gerarTermoSaidaAvulsa".
-7. REMATRÍCULA E ANO LETIVO:
-   - Quando o usuário pedir para mudar o ano letivo ou rematricular aluno (ex: "mude o ano letivo do aluno Bernardo para 2027"), invoque "alterarAnoLetivoAluno".
-8. GESTÃO FINANCEIRA:
-   - Quando o usuário perguntar sobre resumo financeiro, receitas confirmadas, despesas ou inadimplência/adimplência, invoque "consultarResumoFinanceiro".
-9. Se o usuário fornecer informações parciais, seja prestativa e resolutiva.`;
+    const systemInstruction = buildSofiaChatSystemInstruction(appState);
 
     const ai = getAIClient();
     if (!ai) {
       return res.json({
         success: false,
         isFallback: true,
-        message: 'Assistente operando em modo de processamento local integrado.',
+        message: 'Operando no atendimento local do aplicativo.',
       });
     }
 
     // Se estiver reportando o resultado de uma ferramenta já executada
     if (toolResult && toolCall) {
-      const toolFollowUpPrompt = `O usuário havia solicitado uma ação e a ferramenta "${toolCall.name}" foi executada com sucesso pelo sistema local.
-Resultado da execução: ${JSON.stringify(toolResult)}
-Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário confirmando o resultado da ação e orientando sobre os próximos passos.`;
+      const followUpContents: any[] = [];
+      if (Array.isArray(history)) {
+        history.slice(-4).forEach((h: any) => {
+          if (h?.text && h?.sender) {
+            followUpContents.push({
+              role: h.sender === 'user' ? 'user' : 'model',
+              parts: [{ text: h.text }],
+            });
+          }
+        });
+      }
+      if (message) {
+        followUpContents.push({
+          role: 'user',
+          parts: [{ text: message }],
+        });
+      }
+      followUpContents.push({
+        role: 'user',
+        parts: [
+          {
+            text: `[Contexto interno da consulta "${toolCall.name}"]\n${JSON.stringify(toolResult)}\n\nResponda agora diretamente para a pessoa como a Sofia, em português natural do Brasil (1 a 3 frases curtas por padrão, salvo se ela pediu detalhes/lista/texto): dê a resposta logo na primeira frase, sem repetir a pergunta, sem mencionar termos técnicos, sem inventar dados e, se fizer sentido, feche com uma sugestão rápida ou alerta útil em 1 linha.`,
+          },
+        ],
+      });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: [toolFollowUpPrompt],
+        model: SOFIA_DEFAULT_MODEL,
+        contents: followUpContents,
         config: {
           systemInstruction,
-          temperature: 0.25,
         },
       });
 
@@ -1252,8 +1369,8 @@ Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário conf
     // Monta o histórico de conversa
     const contentsPayload: any[] = [];
     if (Array.isArray(history)) {
-      history.slice(-6).forEach((h: any) => {
-        if (h.text && h.sender) {
+      history.slice(-8).forEach((h: any) => {
+        if (h?.text && h?.sender) {
           contentsPayload.push({
             role: h.sender === 'user' ? 'user' : 'model',
             parts: [{ text: h.text }],
@@ -1270,12 +1387,11 @@ Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário conf
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: SOFIA_DEFAULT_MODEL,
       contents: contentsPayload,
       config: {
         systemInstruction,
         tools: [{ functionDeclarations: SOFIA_SERVER_TOOL_DECLARATIONS as any }],
-        temperature: 0.25,
       },
     });
 
@@ -1296,7 +1412,7 @@ Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário conf
     return res.json({
       success: true,
       hasFunctionCall: false,
-      text: response.text || 'Como posso te auxiliar com as rotinas do Integral hoje?',
+      text: response.text || 'Tô por aqui! O que você precisa ver ou resolver agora?',
     });
   } catch (error: any) {
     console.warn('[Sofia Agent API] Erro na rota de chat com Gemini:', error?.message || error);
@@ -1308,49 +1424,18 @@ Agora, sintetize uma resposta cordial, concisa e resolutiva para o usuário conf
   }
 });
 
-// API Route: Agente de Voz Sofia — Guia do Integral com Function Calling (Exclusivo Administrador)
+// API Route: Agente de Voz Sofia — Assistente da Equipe do Integral
 app.post('/api/gemini/voice-agent', async (req, res) => {
   try {
     const { prompt, context } = req.body;
     if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({ error: 'Comando de voz não fornecido.' });
-    }
-
-    // Validação de Segurança e Permissão: Acesso restrito exclusivo ao Administrador
-    const userRole = String(context?.userRole || '').trim().toLowerCase();
-    const userEmail = String(context?.userEmail || '').trim().toLowerCase();
-    const userCargo = String(context?.userCargoLabel || '').trim().toLowerCase();
-    const userId = String(context?.userId || '').trim().toLowerCase();
-
-    const isAuthorizedAdmin =
-      context?.isAdmin === true ||
-      userRole === 'coordenador' ||
-      userRole === 'admin' ||
-      userRole === 'administrador' ||
-      userRole.includes('admin') ||
-      userRole.includes('coord') ||
-      userCargo.includes('administrador') ||
-      userCargo.includes('coordenador') ||
-      userEmail === 'fernando.veiga@crescercampinas.com.br' ||
-      userEmail === 'jfernandoveiga1967@gmail.com' ||
-      userEmail === 'coordenacao@crescer.edu.br' ||
-      userId === 'usr_coord_1';
-
-    if (!isAuthorizedAdmin) {
-      return res.status(403).json({
-        success: false,
-        error: 'Acesso negado. A assistente de voz Sofia é de uso exclusivo de usuários com perfil de Administrador.',
-        code: 'FORBIDDEN_ADMIN_ONLY',
-      });
+      return res.status(400).json({ error: 'Comando não fornecido.' });
     }
 
     const ai = getAIClient();
     if (ai) {
       try {
         const systemInstruction = buildSofiaSystemPrompt(context);
-        const temperature = typeof req.body.temperature === 'number'
-          ? Math.max(0.2, Math.min(0.3, req.body.temperature))
-          : SOFIA_DEFAULT_TEMPERATURE;
 
         // Manipulador de Timeout resiliente ajustado para 20 segundos
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -1367,15 +1452,14 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
             },
           });
         }
-        contentsPayload.push(`Comando do usuário: "${prompt}". Contexto atual: Data: ${context?.selectedDate || 'hoje'}, Turma: ${context?.selectedTurma || 'todas'}, Usuário: ${context?.userName || 'colaborador'}.`);
+        contentsPayload.push(`Pedido: "${prompt}". Contexto: Data ${context?.selectedDate || 'hoje'}, Turma: ${context?.selectedTurma || 'todas'}, Pessoa: ${context?.userName || 'equipe'} (${context?.userCargoLabel || context?.userRole || 'Integral'}).`);
 
         const geminiCall = ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: SOFIA_DEFAULT_MODEL,
           contents: contentsPayload,
           config: {
             systemInstruction,
             responseMimeType: 'application/json',
-            temperature,
           },
         });
 
@@ -1415,39 +1499,34 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
 
         console.warn(`[Sofia Voice Agent] ${isRateLimit ? 'Rate Limit (429)' : isTimeout ? 'Timeout (20s)' : 'Erro'} no Gemini:`, errorMsg);
 
-        // Tratamento específico de erro HTTP 429 (Resource Exhausted / Rate Limit)
         if (isRateLimit) {
           return res.status(429).json({
             success: false,
             status: 'RATE_LIMIT_EXCEEDED',
             code: 'RATE_LIMIT_EXCEEDED',
-            error: 'Limite de requisições do Gemini atingido (Rate limit/429). Aguarde alguns instantes.',
-            spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+            spokenText: 'Tive um probleminha para consultar agora. Quer tentar de novo em um instante?',
             functionCall: null,
             isFallback: true,
             isQuotaOrTimeout: true,
           });
         }
 
-        // Tratamento específico de Timeout (20s)
         if (isTimeout) {
           return res.status(504).json({
             success: false,
             status: 'TIMEOUT_EXCEEDED',
             code: 'TIMEOUT_EXCEEDED',
-            error: 'Tempo limite de resposta de 20 segundos excedido.',
-            spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+            spokenText: 'Demorou um pouquinho mais que o normal por aqui. Pode repetir rapidinho?',
             functionCall: null,
             isFallback: true,
             isQuotaOrTimeout: true,
           });
         }
 
-        // Resposta vocal padrão resiliente para qualquer outro erro
         return res.json({
           success: true,
           status: 'FALLBACK',
-          spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+          spokenText: 'Tive um probleminha de conexão agora, mas continuo por aqui pelo atendimento local.',
           functionCall: null,
           isFallback: true,
           isQuotaOrTimeout: true,
@@ -1458,7 +1537,7 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
     // Heurística local de contingência do servidor
     const lower = prompt.toLowerCase();
     let functionCall: any = null;
-    let spokenText = 'Comando processado com sucesso.';
+    let spokenText = 'Pronto!';
 
     if (lower.includes('presenca') || lower.includes('chamada') || lower.includes('falta') || lower.includes('pendencia')) {
       functionCall = {
@@ -1467,21 +1546,21 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
           acao: lower.includes('presenca') ? 'lancar_presenca' : lower.includes('falta') ? 'lancar_falta' : 'consultar_pendencias',
         },
       };
-      spokenText = 'Consultando informações da chamada de frequência.';
+      spokenText = 'Tô vendo a chamada aqui pra você.';
     } else if (lower.includes('norma') || lower.includes('manual') || lower.includes('regra') || lower.includes('celular') || lower.includes('radio') || lower.includes('alergia')) {
       functionCall = {
         name: 'consultar_manual_normas',
         args: { termoOuTema: prompt },
       };
-      spokenText = 'Consultando as diretrizes oficiais no Manual de 50 Normas do Colégio Crescer.';
+      spokenText = 'Deixa eu conferir isso no Manual pra você.';
     } else if (lower.includes('cardapio') || lower.includes('almoco') || lower.includes('lanche') || lower.includes('semanario')) {
       functionCall = {
         name: 'consultar_cardapio_ou_semanario',
         args: { tipo: lower.includes('lanche') ? 'cardapio_lanche' : lower.includes('semanario') ? 'roteiro_semanario' : 'cardapio_almoco' },
       };
-      spokenText = 'Consultando cardápio e rotinas pedagógicas do Programa Integral.';
+      spokenText = 'Tô checando o cardápio e a programação aqui.';
     } else {
-      spokenText = 'Olá! Sou Sofia, assistente por voz do Integral. Como posso te orientar hoje?';
+      spokenText = 'Oi! Sou a Sofia, aqui do Integral. Como posso te ajudar agora?';
     }
 
     return res.json({
@@ -1490,10 +1569,10 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
       functionCall,
       isFallback: true,
     });
-  } catch (error: any) {
+  } catch {
     return res.json({
       success: true,
-      spokenText: 'Estou reestabelecendo minha conexão com o sistema do Crescer, tente novamente em alguns instantes.',
+      spokenText: 'Tive um probleminha agora. Pode tentar de novo em instantes?',
       isFallback: true,
     });
   }

@@ -174,7 +174,7 @@ export async function executeAttendanceAction(
     });
 
     if (faltantes.length === 0) {
-      const spokenText = `Excelente notícia! Não há registro de faltas na data de ${formatDateBR(targetDate)} para ${targetTurma === 'TODAS' ? 'as turmas' : targetTurma}.`;
+      const spokenText = `Nenhuma falta registrada em ${formatDateBR(targetDate)} para ${targetTurma === 'TODAS' ? 'as turmas' : targetTurma}.`;
       return {
         spokenText,
         displayText: `✅ Nenhuma falta registrada em ${formatDateBR(targetDate)}.`,
@@ -230,7 +230,7 @@ export async function executeAttendanceAction(
       };
     }
 
-    const spokenText = `Constam ${pendentes.length} pendências de chamada para ${formatDateBR(targetDate)}. Deseja abrir a tela de frequência?`;
+    const spokenText = `Tem ${pendentes.length} chamada(s) pendente(s) para ${formatDateBR(targetDate)}. Quer que eu abra a tela da chamada?`;
     const displayText = `⏳ **${pendentes.length} Chamadas Pendentes** para ${formatDateBR(targetDate)}.`;
 
     return {
@@ -268,8 +268,8 @@ export async function executeAttendanceAction(
 
     if (!aluno) {
       return {
-        spokenText: `Não localizei nenhum aluno com o nome ${args.nomeAluno} no cadastro ativo.`,
-        displayText: `Aluno "${args.nomeAluno}" não encontrado.`,
+        spokenText: `Não achei nenhum aluno chamado ${args.nomeAluno} por aqui. Quer que eu procure pelo sobrenome?`,
+        displayText: `Não achei "${args.nomeAluno}" entre os alunos ativos.`,
         action: {
           type: 'consultar_ou_lancar_chamada',
           title: 'Aluno não encontrado',
@@ -343,8 +343,8 @@ export function executeNormaConsultation(termo: string): { spokenText: string; d
 
   if (!found) {
     return {
-      spokenText: `Não encontrei nenhuma norma específica sobre ${termo}. Deseja que eu abra o Manual Oficial de Normas?`,
-      displayText: `Nenhuma norma encontrada para "${termo}". Abrindo catálogo completo.`,
+      spokenText: `Não achei nenhuma regra com "${termo}". Quer que eu abra o Manual pra gente olhar juntas?`,
+      displayText: `Não achei nada específico sobre "${termo}". Abrindo o Manual.`,
       action: {
         type: 'consultar_manual_normas',
         title: 'Manual de Normas',
@@ -386,16 +386,16 @@ export async function querySofiaAgent(
   const normPrompt = normalizeText(rawPrompt);
   const appContext = buildCurrentAppContext(context);
 
-  // 1. Verificação de permissão institucional: restrito ao perfil de Administrador / Coordenação
+  // 1. Verificação de usuário autenticado (permissões específicas são tratadas por função)
   const effectiveUser = context.currentUser || getStoredUser();
-  if (!isAdmin(effectiveUser)) {
+  if (!effectiveUser) {
     return {
-      spokenText: 'Acesso negado. A assistente de voz Sofia é permitida apenas para a Coordenação e Administrador.',
-      displayText: 'Acesso restrito ao perfil Administrador / Coordenação.',
+      spokenText: 'Preciso que você entre no aplicativo primeiro para acessar os dados da escola.',
+      displayText: 'Entre com seu login do Colégio Crescer para falar com a Sofia.',
       action: {
         type: 'info',
-        title: 'Acesso Restrito',
-        details: 'Perfil não autorizado',
+        title: 'Acesso necessário',
+        details: 'Faça login para continuar',
       },
     };
   }
@@ -413,14 +413,13 @@ export async function querySofiaAgent(
         prompt: rawPrompt,
         audioBase64: typeof input !== 'string' ? input.audioBase64 : undefined,
         mimeType: typeof input !== 'string' ? input.mimeType : undefined,
-        temperature: SOFIA_DEFAULT_TEMPERATURE,
         context: {
-          userName: effectiveUser?.name || 'Administrador',
-          userRole: effectiveUser?.role || 'coordenador',
-          userEmail: effectiveUser?.email || ADMIN_EMAIL,
-          userCargoLabel: effectiveUser?.cargoLabel || 'Coordenador(a)',
-          userId: effectiveUser?.id || 'usr_coord_1',
-          isAdmin: true,
+          userName: effectiveUser?.name || 'Equipe',
+          userRole: effectiveUser?.role || 'professor',
+          userEmail: effectiveUser?.email || '',
+          userCargoLabel: effectiveUser?.cargoLabel || 'Equipe do Integral',
+          userId: effectiveUser?.id || '',
+          isAdmin: isAdmin(effectiveUser),
           selectedDate: appContext.currentDate,
           selectedTurma: appContext.selectedTurma,
           selectedActivity: appContext.selectedActivity,
@@ -474,8 +473,8 @@ export async function querySofiaAgent(
             displayText: data.displayText || data.spokenText,
             action: {
               type: act.type as SofiaActionType,
-              title: 'Ação Executada',
-              details: act.targetTab ? `Módulo ${act.targetTab}` : 'Execução do comando',
+              title: 'Pronto',
+              details: act.targetTab ? `Tela ${act.targetTab}` : 'Concluído',
               targetTab: act.targetTab,
               success: true,
             },
@@ -641,14 +640,13 @@ export async function querySofiaAgent(
     return await executeAttendanceAction({ acao: 'consultar_pendencias' }, context);
   }
 
-  // Resposta padrão imediata e profissional
   return {
-    spokenText: 'Estou pronta. Posso consultar presenças, faltas, abrir o Livro Ponto, o Cardápio ou pesquisar no Manual de Normas.',
-    displayText: 'Olá! Sou Sofia, assistente do Integral. Como posso ajudar com a frequência, ponto, atividades ou normas hoje?',
+    spokenText: 'Tô por aqui! Posso ver chamadas, horários das turmas, cardápio, saídas ou dúvidas do Manual.',
+    displayText: 'Oi! Tô por aqui. No que posso te ajudar agora — chamada, atividades de agora, cardápio ou alguma saída?',
     action: {
       type: 'info',
       title: 'Sofia • Integral',
-      details: 'Assistente pronta para comandos',
+      details: 'Pronta para ajudar',
     },
   };
 }

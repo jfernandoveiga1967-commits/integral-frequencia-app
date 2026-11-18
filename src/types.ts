@@ -930,11 +930,20 @@ export type SofiaAgentToolName =
   | 'gerarEspelhoPontoPDF'
   | 'gerarAutorizacaoEntradaSaidaPDF'
   | 'registrarFaltaFrequencia'
+  | 'registrarSaidaAntecipada'
   | 'dispararAlertaWhatsApp'
   | 'analisarDesarranjosDoDia'
   | 'obterResumoFrequenciaPorData'
   | 'consultarFrequenciaHoje'
   | 'consultarAlertasSaidaHoje'
+  | 'consultarAtividadesMomento'
+  | 'consultarCardapio'
+  | 'consultarManualNormas'
+  | 'consultarSemanario'
+  | 'consultarAlunosOuTurma'
+  | 'consultarQuadroAtribuicoes'
+  | 'consultarLivroPonto'
+  | 'navegarModulo'
   | 'gerarTermoSaidaAvulsa'
   | 'alterarAnoLetivoAluno'
   | 'consultarResumoFinanceiro'
@@ -959,6 +968,7 @@ export interface SofiaToolResult {
   filename?: string;
   whatsappUrl?: string;
   spokenText?: string;
+  needsDisambiguation?: boolean;
 }
 
 export interface SofiaChatMessage {
@@ -976,13 +986,18 @@ export interface AppStateSummary {
   currentTime: string;
   currentDate: string; // YYYY-MM-DD
   dayOfWeek: string;
+  dayOfWeekFull?: string; // ex: "quarta-feira"
   formattedDate: string;
+  activeTab?: string;
+  selectedTurma?: string;
   totalAlunosAtivos: number;
   totalPresentesHoje: number;
   totalFaltasHoje: number;
   totalAlunosEsperadosHoje: number;
   totalChamadasPendentesBlocoAtual: number;
   turmasComChamadaPendenteHoje: string[];
+  atividadesAgoraResumo?: string[];
+  cardapioHojeResumo?: string;
   currentUser: {
     id?: string;
     name: string;
@@ -990,6 +1005,8 @@ export interface AppStateSummary {
     role: string;
     cargoLabel?: string;
     isAdmin: boolean;
+    allowedTabs?: string[];
+    assignedTurmas?: string[];
   };
 }
 
