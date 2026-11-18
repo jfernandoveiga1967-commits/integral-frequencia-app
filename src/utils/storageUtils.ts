@@ -458,6 +458,16 @@ export function pickMostRecentStudentRecord<T extends Record<string, any>>(
   if (tSecondary > tPrimary) {
     return secondary;
   }
+  if (tPrimary === tSecondary && tPrimary === 0) {
+    const isNonActive = (rec: Record<string, any>) => {
+      const st = String(rec.status || '').trim().toLowerCase();
+      const sm = String(rec.statusMatricula || '').trim().toLowerCase();
+      return st === 'cancelado' || st === 'inativo' || st === 'trancado' || sm === 'cancelado' || sm === 'inativo' || sm === 'trancado';
+    };
+    if (!isNonActive(primary) && isNonActive(secondary)) {
+      return secondary;
+    }
+  }
   return primary;
 }
 

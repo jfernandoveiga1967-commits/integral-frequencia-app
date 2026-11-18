@@ -21,6 +21,7 @@ import {
   limit,
   enableNetwork,
   disableNetwork,
+  arrayUnion,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord, CustomExpenseCategory } from './types';
@@ -47,6 +48,7 @@ import {
   pickMostRecentStudentRecord,
   isJoseRicardoManeghin,
   getStudentDeduplicationKey,
+  PROTECTED_MINI_MATERNAL_2026_IDS,
 } from './utils/storageUtils';
 import {
   normalizeAndDeduplicateUsers,
@@ -259,6 +261,93 @@ export async function testFirestoreConnection(force = false): Promise<boolean> {
  * - Gestão do Evento (Unsubscribe): Retorna uma função unsubscribe() para limpar o escutador na desmontagem (useEffect).
  */
 const reconciledStudentDriftKeys = new Set<string>();
+const purgedZombieDocPaths = new Set<string>();
+const cloudDeletedStudentIds = new Set<string>();
+
+function normalizeTextForMatch(val: unknown): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeTurmaForMatch(val: unknown): string {
+  const norm = normalizeTextForMatch(val);
+  if (norm.includes('mini') && norm.includes('maternal')) {
+    return 'mini maternal azul';
+  }
+  return norm;
+}
+
+async function addCloudDeletedStudentIds(ids: string[]): Promise<void> {
+  if (isFirestoreQuotaExceeded) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const safeIds = Array.from(
+    new Set(
+      (ids || [])
+        .map((id) => String(id || '').trim())
+        .filter((id) => Boolean(id) && !PROTECTED_MINI_MATERNAL_2026_IDS.has(id))
+    )
+  );
+  if (safeIds.length === 0) return;
+  safeIds.forEach((id) => cloudDeletedStudentIds.add(id));
+  try {
+    await setDoc(
+      doc(db, 'settings', 'deleted_student_ids'),
+      {
+        ids: arrayUnion(...safeIds),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Aviso ao sincronizar lista de exclusões na nuvem:', err);
+  }
+}
+
+function purgeZombieDeletedDocsInFirestore(
+  alunosDocs: Map<string, any>,
+  studentsDocs: Map<string, any>,
+  deletedIds: Set<string>
+) {
+  if (isFirestoreQuotaExceeded) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const refsToPurge: Array<{ col: 'alunos' | 'students'; id: string }> = [];
+
+  deletedIds.forEach((id) => {
+    if (!id || PROTECTED_MINI_MATERNAL_2026_IDS.has(id)) return;
+    if (alunosDocs.has(id)) {
+      const path = `alunos/${id}`;
+      if (!purgedZombieDocPaths.has(path)) {
+        purgedZombieDocPaths.add(path);
+        refsToPurge.push({ col: 'alunos', id });
+      }
+    }
+    if (studentsDocs.has(id)) {
+      const path = `students/${id}`;
+      if (!purgedZombieDocPaths.has(path)) {
+        purgedZombieDocPaths.add(path);
+        refsToPurge.push({ col: 'students', id });
+      }
+    }
+  });
+
+  if (refsToPurge.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    refsToPurge.slice(0, 100).forEach(({ col, id }) => {
+      batch.delete(doc(db, col, id));
+    });
+    batch.commit().catch((err) => {
+      handleFirestoreError(err, OperationType.DELETE, 'alunos/purge-zombies');
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, 'alunos/purge-zombies');
+  }
+}
 
 function studentSyncStateDiffers(docA: any, docB: any): boolean {
   if (!docA || !docB) return false;
@@ -373,6 +462,14 @@ export function subscribeAlunos(
     });
 
     const deletedIds = getDeletedStudentIds();
+    cloudDeletedStudentIds.forEach((cid) => {
+      if (!PROTECTED_MINI_MATERNAL_2026_IDS.has(cid)) {
+        deletedIds.add(cid);
+      }
+    });
+
+    purgeZombieDeletedDocsInFirestore(alunosDocs, studentsDocs, deletedIds);
+
     const list: Student[] = [];
 
     combinedMap.forEach((data, id) => {
@@ -411,6 +508,33 @@ export function subscribeAlunos(
       emit(true);
     }
   }, 1500);
+
+  const unsubDeletedIds = onSnapshot(
+    doc(db, 'settings', 'deleted_student_ids'),
+    (docSnap) => {
+      if (!docSnap.exists()) return;
+      const ids = docSnap.data()?.ids;
+      if (Array.isArray(ids)) {
+        let changed = false;
+        ids.forEach((rawId: unknown) => {
+          const cid = String(rawId || '').trim();
+          if (cid && !PROTECTED_MINI_MATERNAL_2026_IDS.has(cid)) {
+            if (!cloudDeletedStudentIds.has(cid)) {
+              cloudDeletedStudentIds.add(cid);
+              markStudentAsDeleted(cid);
+              changed = true;
+            }
+          }
+        });
+        if (changed && barrierReleased) {
+          emit(true);
+        }
+      }
+    },
+    () => {
+      // Falha não-crítica na leitura de exclusões compartilhadas
+    }
+  );
 
   const unsubAlunos = onSnapshot(
     collection(db, 'alunos'),
@@ -458,6 +582,7 @@ export function subscribeAlunos(
 
   return () => {
     clearTimeout(fallbackTimer);
+    unsubDeletedIds();
     unsubAlunos();
     unsubStudents();
   };
@@ -1469,35 +1594,23 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       throw results[1].reason;
     }
 
-    // Propaga edição (modalidades, status/cancelamento, etc.) para eventuais documentos paralelos/duplicados
-    // do mesmo aluno nas coleções 'alunos' e 'students', impedindo ressincronização de dados antigos
+    // Propaga edição (modalidades, status/cancelamento, etc.) para TODOS os eventuais documentos paralelos/duplicados
+    // do mesmo aluno nas coleções 'alunos' e 'students', independente de variação de maiúsculas, acentos ou grafia
     try {
       const targetDedupKey = getStudentDeduplicationKey(normalized);
+      const normTargetName = normalizeTextForMatch(normalized.name);
+      const normTargetTurma = normalizeTurmaForMatch(normalized.turma);
       const isJose = isJoseRicardoManeghin(normalized);
-      const nameVariants = new Set<string>();
-      if (normalized.name) nameVariants.add(normalized.name);
-      if (isJose) {
-        nameVariants.add('José Ricardo Bijora Maneghin');
-        nameVariants.add('José Ricardo Bijora Meneghin');
-        nameVariants.add('Jose Ricardo Bijora Maneghin');
-        nameVariants.add('Jose Ricardo Bijora Meneghin');
-      }
+      const targetAno = normalized.anoLetivo !== undefined ? Number(normalized.anoLetivo) : 2026;
 
-      const duplicateQueries: Promise<any>[] = [
-        getDocs(query(collection(db, 'alunos'), where('id', '==', normalized.id))),
-        getDocs(query(collection(db, 'students'), where('id', '==', normalized.id))),
-      ];
-      nameVariants.forEach((nVar) => {
-        duplicateQueries.push(
-          getDocs(query(collection(db, 'alunos'), where('name', '==', nVar))),
-          getDocs(query(collection(db, 'students'), where('name', '==', nVar)))
-        );
-      });
+      const [alunosAllRes, studentsAllRes] = await Promise.allSettled([
+        getDocs(collection(db, 'alunos')),
+        getDocs(collection(db, 'students')),
+      ]);
 
-      const qResults = await Promise.allSettled(duplicateQueries);
       const shadowUpdates = new Map<string, { ref: any; docId: string }>();
 
-      qResults.forEach((res) => {
+      const inspectSnap = (res: PromiseSettledResult<any>) => {
         if (res.status !== 'fulfilled' || !res.value || typeof res.value.forEach !== 'function') return;
         res.value.forEach((docSnap: any) => {
           const data = docSnap.data();
@@ -1507,25 +1620,36 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
           if (docSnap.id === normalized.id) return;
 
           const docAno = data.anoLetivo !== undefined ? Number(data.anoLetivo) : 2026;
-          const targetAno = normalized.anoLetivo !== undefined ? Number(normalized.anoLetivo) : 2026;
           if (docAno !== targetAno) return;
 
-          const docDedupKey = getStudentDeduplicationKey({ ...data, id: docSnap.id });
+          const rawCandidateName = data.name || data.nomeCompleto || data.nome || '';
+          const docDedupKey = getStudentDeduplicationKey({ ...data, id: docSnap.id, name: rawCandidateName });
           const sameInternalId = data.id === normalized.id;
-          const sameJose = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: data.name });
+          const sameJose = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: rawCandidateName });
+          const sameNormNameAndTurma =
+            Boolean(normTargetName) &&
+            normalizeTextForMatch(rawCandidateName) === normTargetName &&
+            (!normTargetTurma || !data.turma || normalizeTurmaForMatch(data.turma) === normTargetTurma);
 
-          if (sameInternalId || docDedupKey === targetDedupKey || sameJose) {
+          if (sameInternalId || docDedupKey === targetDedupKey || sameJose || sameNormNameAndTurma) {
             shadowUpdates.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
           }
         });
-      });
+      };
+
+      inspectSnap(alunosAllRes);
+      inspectSnap(studentsAllRes);
 
       if (shadowUpdates.size > 0) {
-        const batch = writeBatch(db);
-        shadowUpdates.forEach(({ ref, docId }) => {
-          batch.set(ref, { ...payload, id: docId }, { merge: true });
-        });
-        await withWriteTimeout(batch.commit(), 'sincronizar cópias do aluno');
+        const shadowList = Array.from(shadowUpdates.values());
+        for (let i = 0; i < shadowList.length; i += 200) {
+          const chunk = shadowList.slice(i, i + 200);
+          const batch = writeBatch(db);
+          chunk.forEach(({ ref, docId }) => {
+            batch.set(ref, { ...payload, id: docId }, { merge: true });
+          });
+          await withWriteTimeout(batch.commit(), 'sincronizar cópias do aluno');
+        }
       }
     } catch (syncErr) {
       console.warn('Aviso ao sincronizar eventuais cópias duplicadas do aluno no Firestore:', syncErr);
@@ -1561,11 +1685,11 @@ export async function deleteStudentFromFirestore(
         ]);
         if (snapAlunosDirect.status === 'fulfilled' && snapAlunosDirect.value.exists()) {
           const d = snapAlunosDirect.value.data();
-          if (d?.name) resolvedName = String(d.name).trim();
+          if (d?.name || d?.nome) resolvedName = String(d.name || d.nome).trim();
           if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
         } else if (snapStudentsDirect.status === 'fulfilled' && snapStudentsDirect.value.exists()) {
           const d = snapStudentsDirect.value.data();
-          if (d?.name) resolvedName = String(d.name).trim();
+          if (d?.name || d?.nome) resolvedName = String(d.name || d.nome).trim();
           if (d?.turma && !resolvedTurma) resolvedTurma = String(d.turma).trim();
         }
       } catch (err) {
@@ -1573,59 +1697,51 @@ export async function deleteStudentFromFirestore(
       }
     }
 
-    // 2. Mapeamento de todos os documentos a serem excluídos (evita referências duplicadas)
+    // 2. Mapeamento exaustivo de todos os documentos a serem excluídos (coleções 'alunos' e 'students')
     const docRefsToDelete = new Map<string, any>();
     const deletedIds = new Set<string>();
-    if (cleanId) deletedIds.add(cleanId);
-
-    // Adiciona referências diretas por ID nas duas coleções
     if (cleanId) {
+      deletedIds.add(cleanId);
       docRefsToDelete.set(`alunos/${cleanId}`, doc(db, 'alunos', cleanId));
       docRefsToDelete.set(`students/${cleanId}`, doc(db, 'students', cleanId));
     }
 
-    // 3. Consultas por ID interno (caso o ID do documento seja diferente do campo 'id')
-    const queryPromises: Promise<any>[] = [];
-    if (cleanId) {
-      queryPromises.push(
-        getDocs(query(collection(db, 'alunos'), where('id', '==', cleanId))),
-        getDocs(query(collection(db, 'students'), where('id', '==', cleanId)))
-      );
-    }
+    const normTargetName = normalizeTextForMatch(resolvedName);
+    const normTargetTurma = normalizeTurmaForMatch(resolvedTurma);
+    const isJose = isJoseRicardoManeghin({ id: cleanId, name: resolvedName });
 
-    // 4. Consultas por Nome e Turma (localiza documentos reais e todas as possíveis duplicatas)
-    if (resolvedName) {
-      queryPromises.push(
-        getDocs(query(collection(db, 'alunos'), where('name', '==', resolvedName))),
-        getDocs(query(collection(db, 'students'), where('name', '==', resolvedName)))
-      );
-      // Suporte para registros legados com campo 'nome'
-      queryPromises.push(
-        getDocs(query(collection(db, 'alunos'), where('nome', '==', resolvedName))),
-        getDocs(query(collection(db, 'students'), where('nome', '==', resolvedName)))
-      );
-    }
+    const [alunosAllRes, studentsAllRes] = await Promise.allSettled([
+      getDocs(collection(db, 'alunos')),
+      getDocs(collection(db, 'students')),
+    ]);
 
-    const queryResults = await Promise.allSettled(queryPromises);
-    queryResults.forEach((res) => {
-      if (res.status === 'fulfilled' && res.value && typeof res.value.forEach === 'function') {
-        res.value.forEach((docSnap: any) => {
-          const data = docSnap.data() || {};
-          // Se a turma foi especificada, garante que bate com a turma (ou aceita se o documento não tiver turma definida)
-          if (resolvedTurma && data.turma) {
-            const docTurma = String(data.turma).trim().toLowerCase();
-            const targetTurma = resolvedTurma.toLowerCase();
-            if (docTurma !== targetTurma) {
-              return;
-            }
-          }
-          const colPath = docSnap.ref.parent.id; // 'alunos' ou 'students'
+    const collectDeleteMatches = (res: PromiseSettledResult<any>) => {
+      if (res.status !== 'fulfilled' || !res.value || typeof res.value.forEach !== 'function') return;
+      res.value.forEach((docSnap: any) => {
+        const data = docSnap.data() || {};
+        const docInternalId = data.id ? String(data.id).trim() : '';
+        const rawDocName = data.name || data.nomeCompleto || data.nome || '';
+        const normDocName = normalizeTextForMatch(rawDocName);
+        const normDocTurma = normalizeTurmaForMatch(data.turma);
+
+        const idMatches = Boolean(cleanId) && (docSnap.id === cleanId || docInternalId === cleanId);
+        const joseMatches = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: rawDocName });
+        const nameMatches =
+          Boolean(normTargetName) &&
+          normDocName === normTargetName &&
+          (!normTargetTurma || !normDocTurma || normDocTurma === normTargetTurma);
+
+        if (idMatches || joseMatches || nameMatches) {
+          const colPath = docSnap.ref.parent.id;
           docRefsToDelete.set(`${colPath}/${docSnap.id}`, docSnap.ref);
           deletedIds.add(docSnap.id);
-          if (data.id) deletedIds.add(String(data.id).trim());
-        });
-      }
-    });
+          if (docInternalId) deletedIds.add(docInternalId);
+        }
+      });
+    };
+
+    collectDeleteMatches(alunosAllRes);
+    collectDeleteMatches(studentsAllRes);
 
     // 5. Exclusão em lote (writeBatch) de todos os documentos mapeados
     const refsList = Array.from(docRefsToDelete.values());
@@ -1637,11 +1753,12 @@ export async function deleteStudentFromFirestore(
       await withWriteTimeout(batch.commit(), 'excluir aluno');
     }
 
-    // 6. Atualiza registro de alunos excluídos no storage local para evitar ressincronização
+    // 6. Atualiza registro de alunos excluídos localmente e na nuvem para propagar em tempo real para todos os aparelhos
     deletedIds.forEach((sid) => {
       markStudentAsDeleted(sid);
       removeStudentFromLocalStorage(sid);
     });
+    await addCloudDeletedStudentIds(Array.from(deletedIds));
 
     return {
       deletedIds: Array.from(deletedIds),
@@ -1655,7 +1772,7 @@ export async function deleteStudentFromFirestore(
 
 /**
  * Exclui múltiplos alunos em lote diretamente no Firestore (coleções 'alunos' e 'students')
- * e sincroniza as listas de exclusão locais para evitar re-sincronizações indesejadas de cache.
+ * e sincroniza as listas de exclusão locais e na nuvem para evitar re-sincronizações indesejadas.
  */
 export async function batchDeleteStudentsFromFirestore(
   studentIds: string[]
@@ -1694,11 +1811,12 @@ export async function batchDeleteStudentsFromFirestore(
     }
   }
 
-  // Atualiza marcas de exclusão local e limpa localStorage
+  // Atualiza marcas de exclusão local, limpa localStorage e propaga para outros dispositivos
   uniqueIds.forEach((id) => {
     markStudentAsDeleted(id);
     removeStudentFromLocalStorage(id);
   });
+  await addCloudDeletedStudentIds(uniqueIds);
 
   return totalDeleted;
 }
@@ -4518,9 +4636,10 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
   }
 
   try {
-    const [alunosRes, studentsRes] = await Promise.allSettled([
+    const [alunosRes, studentsRes, deletedRes] = await Promise.allSettled([
       getDocsFromServer(collection(db, 'alunos')),
       getDocsFromServer(collection(db, 'students')),
+      getDocFromServer(doc(db, 'settings', 'deleted_student_ids')),
     ]);
 
     if (alunosRes.status === 'rejected' && studentsRes.status === 'rejected') {
@@ -4529,14 +4648,36 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
 
     clearFirestoreQuotaExceeded();
     const deletedIds = getDeletedStudentIds();
+    cloudDeletedStudentIds.forEach((cid) => {
+      if (!PROTECTED_MINI_MATERNAL_2026_IDS.has(cid)) deletedIds.add(cid);
+    });
+    if (deletedRes.status === 'fulfilled' && deletedRes.value.exists()) {
+      const ids = deletedRes.value.data()?.ids;
+      if (Array.isArray(ids)) {
+        ids.forEach((rawId: unknown) => {
+          const cid = String(rawId || '').trim();
+          if (cid && !PROTECTED_MINI_MATERNAL_2026_IDS.has(cid)) {
+            cloudDeletedStudentIds.add(cid);
+            markStudentAsDeleted(cid);
+            deletedIds.add(cid);
+          }
+        });
+      }
+    }
+
+    const rawAlunosMap = new Map<string, any>();
+    const rawStudentsMap = new Map<string, any>();
     const alunosMap = new Map<string, any>();
     const studentsMap = new Map<string, any>();
 
     if (alunosRes.status === 'fulfilled') {
       alunosRes.value.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
-          alunosMap.set(docSnap.id, { ...data, id: docSnap.id });
+        if (data) {
+          rawAlunosMap.set(docSnap.id, { ...data, id: docSnap.id });
+          if (!isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+            alunosMap.set(docSnap.id, { ...data, id: docSnap.id });
+          }
         }
       });
     }
@@ -4544,11 +4685,16 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
     if (studentsRes.status === 'fulfilled') {
       studentsRes.value.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data && !isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
-          studentsMap.set(docSnap.id, { ...data, id: docSnap.id });
+        if (data) {
+          rawStudentsMap.set(docSnap.id, { ...data, id: docSnap.id });
+          if (!isMockStudent({ id: docSnap.id, name: data.name }) && !deletedIds.has(docSnap.id)) {
+            studentsMap.set(docSnap.id, { ...data, id: docSnap.id });
+          }
         }
       });
     }
+
+    purgeZombieDeletedDocsInFirestore(rawAlunosMap, rawStudentsMap, deletedIds);
 
     const mergedDocsMap = new Map<string, any>();
     studentsMap.forEach((val, id) => mergedDocsMap.set(id, val));
@@ -4564,7 +4710,12 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
     mergedDocsMap.forEach((data, id) => {
       list.push(normalizeStudent({ ...data, id }));
     });
-    return deduplicateStudentsList(list);
+    return deduplicateStudentsList(list, (winner, olderDuplicates) => {
+      const duplicateIds = olderDuplicates.map((d) => d.id).filter(Boolean);
+      if (duplicateIds.length > 0) {
+        scheduleDuplicateReconciliationInFirestore(rawAlunosMap, rawStudentsMap, winner, [winner.id, ...duplicateIds]);
+      }
+    });
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'alunos');
     return loadStudents();

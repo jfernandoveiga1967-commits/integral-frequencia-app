@@ -358,7 +358,7 @@ export default function App() {
           restoredList.forEach((st) => mergedMap.set(st.id, st));
           prev.forEach((cur) => {
             const existing = mergedMap.get(cur.id);
-            mergedMap.set(cur.id, pickMostRecentStudentRecord(cur, existing) || cur);
+            mergedMap.set(cur.id, pickMostRecentStudentRecord(existing, cur) || existing || cur);
           });
           return deduplicateStudentsList(Array.from(mergedMap.values()));
         });

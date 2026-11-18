@@ -4393,7 +4393,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredStudents.map((student) => {
-              const stStatus = student.status || 'ativo';
+              const stStatus = getEffectiveStudentStatus(student);
               const isInactive = stStatus === 'inativo';
               const isCancelled = stStatus === 'cancelado';
 
