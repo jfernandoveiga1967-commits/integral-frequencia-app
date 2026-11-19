@@ -1333,190 +1333,87 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
     targetUser?.dataAdmissao,
   ]);
 
-  // Handle Quick Punch (Registrar Batida)
+  // Handle Quick Punch (Registrar Batida Livre — sem impedimentos)
   const handleQuickPunch = async () => {
-    // 1. Bloqueio Instantâneo no primeiro milissegundo do clique
     if (isRegisteringPunchRef.current) return;
     isRegisteringPunchRef.current = true;
     setIsRegisteringPunch(true);
 
-    if (isMonthClosed) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setPunchFeedback({
-        text: 'O mês está Fechado/Travado. Não é possível registrar novas batidas.',
-        type: 'error',
-      });
-      setTimeout(() => setPunchFeedback(null), 4000);
-      return;
-    }
-
-    if (isUserInactiveOrDismissed(targetUser)) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setPunchFeedback({
-        text: `Não é possível registrar batida de ponto para colaboradores com status Inativo ou Desligado (${targetUser?.name || 'Colaborador'}).`,
-        type: 'error',
-      });
-      setTimeout(() => setPunchFeedback(null), 5000);
-      return;
-    }
-
-    const currentNow = new Date();
-    const todayStr = toISODateString(currentNow);
-    if (!todayStr.startsWith(monthKey)) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setPunchFeedback({
-        text: `Atenção: A data de hoje (${formatDateBR(todayStr)}) não pertence ao mês visualizado (${getMonthNameBR(selectedMonth)}/${selectedYear}). Navegue para o mês atual para bater ponto.`,
-        type: 'info',
-      });
-      setTimeout(() => setPunchFeedback(null), 5000);
-      return;
-    }
-
-    // Always find latest day record from pontoRecords, monthUserRecords or fresh LocalStorage cache
-    const freshLocal = loadPontoRecords();
-    const dayRecord =
-      pontoRecords.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
-      freshLocal.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
-      monthUserRecords.find((r) => r.date === todayStr);
-
-    // 3. Trava Temporal Anti-Duplo Registro (Debounce no Código - 120 segundos / 2 minutos)
-    const lastPunchStorageKey = `ponto_last_punch_${selectedUserId}`;
-    let lastPunchTimestamp = 0;
     try {
-      const stored = localStorage.getItem(lastPunchStorageKey);
-      if (stored) {
-        lastPunchTimestamp = Number(stored) || 0;
-      }
-    } catch (e) {
-      console.warn('Erro ao verificar trava temporal de batida:', e);
-    }
+      const currentNow = new Date();
+      const todayStr = toISODateString(currentNow);
+      const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
 
-    // Também avalia updatedAt do registro do dia de hoje caso o ponto tenha sido registrado há pouco
-    if (dayRecord && dayRecord.date === todayStr && dayRecord.updatedAt) {
-      const recordUpdatedMs = new Date(dayRecord.updatedAt).getTime();
-      if (!isNaN(recordUpdatedMs) && recordUpdatedMs > lastPunchTimestamp) {
-        lastPunchTimestamp = recordUpdatedMs;
-      }
-    }
+      const freshLocal = loadPontoRecords();
+      const dayRecord =
+        pontoRecords.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
+        freshLocal.find((r) => r.userId === selectedUserId && r.date === todayStr) ||
+        monthUserRecords.find((r) => r.date === todayStr);
 
-    const nowEpoch = Date.now();
-    const elapsedSeconds = Math.floor((nowEpoch - lastPunchTimestamp) / 1000);
-
-    if (lastPunchTimestamp > 0 && elapsedSeconds < 120) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setPunchFeedback({
-        text: 'Atenção: Seu ponto já foi registrado há poucos segundos. Aguarde 2 minutos para um novo registro.',
-        type: 'error',
+      const result = await registerPunch({
+        userId: selectedUserId,
+        userName: targetUser?.name || 'Colaborador',
+        dateStr: todayStr,
+        currentTime: currentHoursMinutes,
+        existingRecord: dayRecord,
+        updatedByName: currentUser?.name || targetUser?.name || 'Sistema',
+        auditData: {
+          wifiValidated: true,
+          networkName: 'Registro Livre',
+          geofenceValidated: true,
+          locationName: 'Registro Livre',
+        },
       });
-      setTimeout(() => setPunchFeedback(null), 5000);
-      return;
-    }
 
-    // 4. Validação Obrigatória de Conexão na Rede Wi-Fi Institucional / IP do Colégio Crescer
-    const networkResult = await verifySchoolNetwork();
-    if (!networkResult.isValid) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setWifiModal({
-        isOpen: true,
-        clientIp: networkResult.clientIp,
-        reason: networkResult.reason || 'OUT_OF_NETWORK',
-        message: 'Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto presencial.',
-      });
-      return;
-    }
+      if (!result.success || !result.updatedRecord) {
+        setPunchFeedback({
+          text: result.error || 'Não foi possível registrar a batida.',
+          type: 'info',
+        });
+        setTimeout(() => setPunchFeedback(null), 5000);
+        return;
+      }
 
-    const currentHoursMinutes = `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`;
-
-    const result = await registerPunch({
-      userId: selectedUserId,
-      userName: targetUser?.name || 'Colaborador',
-      dateStr: todayStr,
-      currentTime: currentHoursMinutes,
-      existingRecord: dayRecord,
-      updatedByName: currentUser?.name || 'Sistema',
-      auditData: {
+      const recordWithAudit: PontoRecord = {
+        ...result.updatedRecord,
         wifiValidated: true,
-        networkName: 'Wi-Fi Colégio Crescer',
-        clientIp: networkResult.clientIp,
+        networkName: 'Registro Livre',
         geofenceValidated: true,
-        locationName: 'Sede (Wi-Fi Colégio Crescer)',
-      },
-    });
+        locationName: 'Registro Livre',
+      };
 
-    if (!result.success || !result.updatedRecord) {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
+      try {
+        await onSavePontoRecord(recordWithAudit);
+      } catch (err: any) {
+        console.warn('Aviso ao sincronizar batida de ponto no Firestore:', err);
+      }
+
+      playPontoSuccessSound();
+
+      let slotDisplayName = 'Batida';
+      if (result.slotAssigned === 'entry1' || result.slotNumber === 1) {
+        slotDisplayName = 'Entrada 1';
+      } else if (result.slotAssigned === 'exit1' || result.slotNumber === 2) {
+        slotDisplayName = 'Saída 1';
+      } else if (result.slotAssigned === 'entry2' || result.slotNumber === 3) {
+        slotDisplayName = 'Entrada 2';
+      } else if (result.slotAssigned === 'exit2' || result.slotNumber === 4) {
+        slotDisplayName = 'Saída 2';
+      } else if (result.slotName) {
+        slotDisplayName = result.slotName;
+      }
+
       setPunchFeedback({
-        text: result.error || 'Não foi possível registrar a batida.',
-        type: 'info',
+        text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso!`,
+        type: 'success',
       });
       setTimeout(() => setPunchFeedback(null), 5000);
-      return;
+    } finally {
+      setTimeout(() => {
+        setIsRegisteringPunch(false);
+        isRegisteringPunchRef.current = false;
+      }, 300);
     }
-
-    // Atualiza timestamp para a trava temporal anti-duplo registro
-    try {
-      localStorage.setItem(lastPunchStorageKey, String(nowEpoch));
-    } catch (e) {
-      console.warn('Erro ao salvar timestamp da batida:', e);
-    }
-
-    const recordWithAudit: PontoRecord = {
-      ...result.updatedRecord,
-      wifiValidated: true,
-      networkName: 'Wi-Fi Colégio Crescer',
-      clientIp: networkResult.clientIp,
-      geofenceValidated: true,
-      locationName: 'Sede (Wi-Fi Colégio Crescer)',
-    };
-
-    // Immediately trigger state update and save
-    try {
-      await onSavePontoRecord(recordWithAudit);
-    } catch (err: any) {
-      console.error('Erro ao salvar ponto no servidor:', err);
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-      setPunchFeedback({
-        text: 'Erro ao registrar ponto no servidor. Verifique a conexão.',
-        type: 'error',
-        onRetry: () => handleQuickPunch(),
-      });
-      return;
-    }
-
-    // 2. Feedback Visual e Sonoro de Confirmação
-    playPontoSuccessSound();
-
-    let slotDisplayName = 'Batida';
-    if (result.slotAssigned === 'entry1' || result.slotNumber === 1) {
-      slotDisplayName = 'Entrada 1';
-    } else if (result.slotAssigned === 'exit1' || result.slotNumber === 2) {
-      slotDisplayName = 'Saída 1';
-    } else if (result.slotAssigned === 'entry2' || result.slotNumber === 3) {
-      slotDisplayName = 'Entrada 2';
-    } else if (result.slotAssigned === 'exit2' || result.slotNumber === 4) {
-      slotDisplayName = 'Saída 2';
-    } else if (result.slotName) {
-      slotDisplayName = result.slotName;
-    }
-
-    setPunchFeedback({
-      text: `${slotDisplayName} registrada às ${currentHoursMinutes} com sucesso! (📶 Conexão validada: Wi-Fi Colégio Crescer)`,
-      type: 'success',
-    });
-    setTimeout(() => setPunchFeedback(null), 5000);
-
-    // Libera a trava de interface do botão após intervalo seguro
-    setTimeout(() => {
-      setIsRegisteringPunch(false);
-      isRegisteringPunchRef.current = false;
-    }, 800);
   };
 
   // Check how many overlapped records exist in the current month for the selected user
@@ -2529,27 +2426,21 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
             </div>
           </div>
 
-          {/* Zona Direita (Destaque Principal): Botão do Livro Ponto com formato quadrado/compacto de alto impacto */}
+          {/* Zona Direita (Destaque Principal): Botão do Livro Ponto com acesso livre */}
           <div className="shrink-0 flex items-center justify-end sm:ml-auto">
             <button
               type="button"
               onClick={handleQuickPunch}
-              disabled={isRegisteringPunch || isMonthClosed || isUserInactiveOrDismissed(targetUser)}
+              disabled={isRegisteringPunch}
               className={`aspect-square w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex flex-col items-center justify-center p-2 text-center transition-all cursor-pointer relative group ${
                 isRegisteringPunch
                   ? 'bg-emerald-950 border-2 border-emerald-500/70 text-emerald-300 cursor-not-allowed shadow-inner'
-                  : isMonthClosed || isUserInactiveOrDismissed(targetUser)
-                  ? 'bg-slate-800/90 border-2 border-slate-700 text-slate-500 cursor-not-allowed opacity-70'
                   : 'bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 border-2 border-emerald-200 shadow-xl shadow-emerald-500/40 ring-4 ring-emerald-400/30 active:scale-95 hover:shadow-2xl hover:scale-[1.03]'
               }`}
               title={
                 isRegisteringPunch
-                  ? 'Validando localização GPS e registrando batida...'
-                  : isMonthClosed
-                  ? 'Mês de competência encerrado e consolidado pela coordenação (Batidas bloqueadas)'
-                  : isUserInactiveOrDismissed(targetUser)
-                  ? 'Colaborador com status Inativo ou Desligado (Batidas bloqueadas)'
-                  : `Registrar batida de ponto com validação geográfica (Locais autorizados: ${getUserAllowedLocations(targetUser, getAllWorkLocations(targetUser?.customLocations)).map((l) => l.name).join(' ou ')})`
+                  ? 'Registrando batida...'
+                  : 'Registrar batida de ponto agora'
               }
             >
               {isRegisteringPunch ? (
@@ -2557,13 +2448,6 @@ export const LivroPonto: React.FC<LivroPontoProps> = ({
                   <Loader2 className="w-7 h-7 sm:w-8 sm:h-8 animate-spin text-emerald-300 mb-1" />
                   <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-300 leading-tight">
                     Gravando...
-                  </span>
-                </>
-              ) : isMonthClosed ? (
-                <>
-                  <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-500 mb-1" />
-                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500 leading-tight">
-                    Fechado
                   </span>
                 </>
               ) : (

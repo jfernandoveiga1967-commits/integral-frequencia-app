@@ -80,59 +80,9 @@ export async function getClientPublicIP(): Promise<string | null> {
  * 4. Retorna status aprovado ou orientação de conexão.
  */
 export async function verifySchoolNetwork(): Promise<NetworkValidationResult> {
-  if (typeof window !== 'undefined' && !navigator.onLine) {
-    return {
-      isValid: false,
-      networkName: 'Desconectado',
-      reason: 'OFFLINE',
-      errorMessage: 'Dispositivo sem acesso à internet. Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto.',
-    };
-  }
-
-  // Verifica tipo de conexão se suportado pelo navegador (bloqueio de 4G/5G quando detectado)
-  const navConnection =
-    typeof navigator !== 'undefined'
-      ? (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection
-      : null;
-
-  if (navConnection && navConnection.type === 'cellular') {
-    return {
-      isValid: false,
-      networkName: 'Rede Móvel Celular (4G/5G)',
-      reason: 'CELLULAR_CONNECTION',
-      errorMessage: 'Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto presencial.',
-    };
-  }
-
-  // Validação por IP público via api.ipify.org
-  let clientIp: string | undefined;
-  if (NETWORK_VALIDATION_CONFIG.allowIPValidation) {
-    const ip = await getClientPublicIP();
-    if (ip) {
-      clientIp = ip;
-    }
-  }
-
-  // Se houver lista de IPs autorizados do Colégio Crescer configurada:
-  const targetAllowedIPs = NETWORK_VALIDATION_CONFIG.allowedSchoolIPs;
-  if (targetAllowedIPs.length > 0 && clientIp) {
-    const matchesIp = targetAllowedIPs.includes(clientIp);
-    if (!matchesIp) {
-      return {
-        isValid: false,
-        networkName: 'Rede Externa Não Autorizada',
-        clientIp,
-        reason: 'IP_MISMATCH',
-        errorMessage: 'Conecte-se à rede Wi-Fi do Colégio Crescer para registrar o ponto presencial.',
-      };
-    }
-  }
-
   return {
     isValid: true,
-    networkName: NETWORK_VALIDATION_CONFIG.defaultNetworkName,
-    clientIp,
-    ssid: NETWORK_VALIDATION_CONFIG.allowedWifiSSIDs[0],
+    networkName: 'Registro Livre',
     reason: 'SUCCESS',
   };
 }

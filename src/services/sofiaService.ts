@@ -586,6 +586,8 @@ export async function sendSofiaMessage(params: {
     schedules: context.schedules,
   });
 
+  let quotaDepleted = false;
+
   try {
     const res = await fetchSofiaChatWithRetry({
       message,
@@ -595,6 +597,9 @@ export async function sendSofiaMessage(params: {
 
     if (res.ok) {
       const data = await res.json();
+      if (data?.quotaDepleted) {
+        quotaDepleted = true;
+      }
 
       if (data.hasFunctionCall && data.toolCall) {
         const toolCall: SofiaToolCall = {
@@ -606,7 +611,6 @@ export async function sendSofiaMessage(params: {
           onToolExecuting(toolCall.name);
         }
 
-        // Executa a ferramenta no ambiente da aplicação (com 1 tentativa automática em falha transitória)
         let toolResult: SofiaToolResult;
         try {
           toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
@@ -614,28 +618,29 @@ export async function sendSofiaMessage(params: {
           toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
         }
 
-        // Envia resultado de volta para a Sofia sintetizar em linguagem natural e acolhedora
-        try {
-          const followUpRes = await fetchSofiaChatWithRetry({
-            message,
-            history,
-            toolResult,
-            toolCall,
-            appState,
-          });
+        if (!quotaDepleted) {
+          try {
+            const followUpRes = await fetchSofiaChatWithRetry({
+              message,
+              history,
+              toolResult,
+              toolCall,
+              appState,
+            });
 
-          if (followUpRes.ok) {
-            const followUpData = await followUpRes.json();
-            if (followUpData.success && followUpData.text) {
-              return {
-                text: followUpData.text,
-                toolCall,
-                toolResult,
-              };
+            if (followUpRes.ok) {
+              const followUpData = await followUpRes.json();
+              if (followUpData.success && followUpData.text) {
+                return {
+                  text: followUpData.text,
+                  toolCall,
+                  toolResult,
+                };
+              }
             }
+          } catch {
+            // Usa mensagem natural já preparada pela própria execução se follow-up falhar
           }
-        } catch {
-          // Usa mensagem natural já preparada pela própria execução se follow-up falhar
         }
 
         return {

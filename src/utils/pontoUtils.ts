@@ -1071,7 +1071,6 @@ export function processSequentialPunch({
   // • Batida 3 -> Atribua estritamente a entrada_2 (validando que o horário seja maior que saida_1).
   // • Batida 4 -> Atribua estritamente a saida_2 (validando que o horário seja maior que entrada_2).
   if (!e1) {
-    // Batida 1 -> Atribua estritamente a entrada_1
     slotKey = 'entry1';
     slotName = 'Entrada 1 (Início da Jornada)';
     const effectivePunch = startTol.isWithinTolerance ? start : currentTime;
@@ -1096,15 +1095,6 @@ export function processSequentialPunch({
       updatedBy: updatedByName,
     };
   } else if (!s1) {
-    // Batida 2 -> Atribua estritamente a saida_1 (trava: NUNCA sobrescreve entrada_1)
-    const e1Min = parseTimeToMinutes(e1);
-    if (e1Min !== null && currentMinutes <= e1Min) {
-      return {
-        success: false,
-        error: `O horário da Saída 1 (${currentTime}) deve ser estritamente posterior ao horário de Entrada 1 (${e1}).`,
-      };
-    }
-
     slotKey = 'exit1';
     slotName = 'Saída 1 (Saída Intervalo/Almoço)';
     updatedRecord = {
@@ -1131,15 +1121,6 @@ export function processSequentialPunch({
       updatedBy: updatedByName,
     };
   } else if (!e2) {
-    // Batida 3 -> Atribua estritamente a entrada_2 (trava: NUNCA sobrescreve slots anteriores)
-    const s1Min = parseTimeToMinutes(s1);
-    if (s1Min !== null && currentMinutes <= s1Min) {
-      return {
-        success: false,
-        error: `O horário da Entrada 2 (${currentTime}) deve ser estritamente posterior ao horário de Saída 1 (${s1}).`,
-      };
-    }
-
     slotKey = 'entry2';
     slotName = 'Entrada 2 (Retorno Intervalo/Almoço)';
     updatedRecord = {
@@ -1165,16 +1146,7 @@ export function processSequentialPunch({
       updatedAt: nowIso,
       updatedBy: updatedByName,
     };
-  } else if (!s2) {
-    // Batida 4 -> Atribua estritamente a saida_2 (trava: NUNCA sobrescreve slots anteriores)
-    const e2Min = parseTimeToMinutes(e2);
-    if (e2Min !== null && currentMinutes <= e2Min) {
-      return {
-        success: false,
-        error: `O horário da Saída 2 (${currentTime}) deve ser estritamente posterior ao horário de Entrada 2 (${e2}).`,
-      };
-    }
-
+  } else {
     slotKey = 'exit2';
     slotName = 'Saída 2 (Saída Final da Jornada)';
     const effectivePunch = endTol.isWithinTolerance ? end : currentTime;
@@ -1200,12 +1172,6 @@ export function processSequentialPunch({
       status: 'normal',
       updatedAt: nowIso,
       updatedBy: updatedByName,
-    };
-  } else {
-    // Trava de segurança: Todas as 4 batidas diárias já preenchidas
-    return {
-      success: false,
-      error: `Todas as 4 batidas da jornada diária de hoje já foram preenchidas (E1: ${e1} • S1: ${s1} • E2: ${e2} • S2: ${s2}). Nenhuma batida foi sobrescrita. Para editar qualquer batida, utilize o botão de edição na tabela.`,
     };
   }
 

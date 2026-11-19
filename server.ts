@@ -56,6 +56,7 @@ app.use(
 );
 
 let aiClient: GoogleGenAI | null = null;
+let geminiBillingCooldownUntil = 0;
 
 function getAIClient(): GoogleGenAI | null {
   if (!aiClient) {
@@ -68,6 +69,30 @@ function getAIClient(): GoogleGenAI | null {
     }
   }
   return aiClient;
+}
+
+function isGeminiQuotaOrBillingError(err: any): {
+  isQuotaOrBilling: boolean;
+  isBillingDepleted: boolean;
+  isRateLimit: boolean;
+} {
+  const msg = String(err?.message || err || '');
+  const status = err?.status || err?.code;
+  const isBillingDepleted =
+    status === 402 ||
+    msg.includes('"code":402') ||
+    msg.includes('prepayment credits are depleted') ||
+    msg.includes('billing#prepay');
+  const isRateLimit =
+    status === 429 ||
+    msg.includes('429') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('Quota exceeded');
+  return {
+    isQuotaOrBilling: isBillingDepleted || isRateLimit,
+    isBillingDepleted,
+    isRateLimit,
+  };
 }
 
 // API Health Check
@@ -1316,10 +1341,11 @@ app.post('/api/sofia/chat', async (req, res) => {
     const systemInstruction = buildSofiaChatSystemInstruction(appState);
 
     const ai = getAIClient();
-    if (!ai) {
+    if (!ai || Date.now() < geminiBillingCooldownUntil) {
       return res.json({
         success: false,
         isFallback: true,
+        quotaDepleted: Date.now() < geminiBillingCooldownUntil,
         message: 'Operando no atendimento local do aplicativo.',
       });
     }
@@ -1415,11 +1441,20 @@ app.post('/api/sofia/chat', async (req, res) => {
       text: response.text || 'Tô por aqui! O que você precisa ver ou resolver agora?',
     });
   } catch (error: any) {
-    console.warn('[Sofia Agent API] Erro na rota de chat com Gemini:', error?.message || error);
+    const { isBillingDepleted, isRateLimit } = isGeminiQuotaOrBillingError(error);
+    if (isBillingDepleted) {
+      geminiBillingCooldownUntil = Date.now() + 5 * 60 * 1000;
+      console.info('[Sofia Chat] Créditos de IA indisponíveis no momento; encaminhando para consulta local do aplicativo.');
+    } else if (isRateLimit) {
+      console.info('[Sofia Chat] Limite temporário de requisições atingido; encaminhando para consulta local.');
+    } else {
+      console.info('[Sofia Chat] Usando consulta local do aplicativo devido a falha temporária de comunicação.');
+    }
     return res.json({
       success: false,
       isFallback: true,
-      error: error?.message || 'Falha temporária de comunicação',
+      quotaDepleted: isBillingDepleted,
+      rateLimited: isRateLimit,
     });
   }
 });
@@ -1433,7 +1468,7 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
     }
 
     const ai = getAIClient();
-    if (ai) {
+    if (ai && Date.now() >= geminiBillingCooldownUntil) {
       try {
         const systemInstruction = buildSofiaSystemPrompt(context);
 
@@ -1487,49 +1522,24 @@ app.post('/api/gemini/voice-agent', async (req, res) => {
         }
       } catch (geminiError: any) {
         const errorMsg = geminiError?.message || String(geminiError || '');
-        const isRateLimit =
-          geminiError?.status === 429 ||
-          errorMsg.includes('429') ||
-          errorMsg.includes('RESOURCE_EXHAUSTED') ||
-          errorMsg.includes('Resource has been exhausted') ||
-          errorMsg.includes('quota') ||
-          errorMsg.includes('Quota exceeded');
-
+        const { isBillingDepleted, isRateLimit } = isGeminiQuotaOrBillingError(geminiError);
         const isTimeout = errorMsg.includes('TIMEOUT_EXCEEDED');
 
-        console.warn(`[Sofia Voice Agent] ${isRateLimit ? 'Rate Limit (429)' : isTimeout ? 'Timeout (20s)' : 'Erro'} no Gemini:`, errorMsg);
-
-        if (isRateLimit) {
-          return res.status(429).json({
-            success: false,
-            status: 'RATE_LIMIT_EXCEEDED',
-            code: 'RATE_LIMIT_EXCEEDED',
-            spokenText: 'Tive um probleminha para consultar agora. Quer tentar de novo em um instante?',
-            functionCall: null,
-            isFallback: true,
-            isQuotaOrTimeout: true,
-          });
-        }
-
-        if (isTimeout) {
-          return res.status(504).json({
-            success: false,
-            status: 'TIMEOUT_EXCEEDED',
-            code: 'TIMEOUT_EXCEEDED',
-            spokenText: 'Demorou um pouquinho mais que o normal por aqui. Pode repetir rapidinho?',
-            functionCall: null,
-            isFallback: true,
-            isQuotaOrTimeout: true,
-          });
+        if (isBillingDepleted) {
+          geminiBillingCooldownUntil = Date.now() + 5 * 60 * 1000;
+          console.info('[Sofia Voice] Créditos de IA indisponíveis; utilizando consulta local.');
+        } else {
+          console.info(`[Sofia Voice] ${isRateLimit ? 'Limite temporário' : isTimeout ? 'Tempo excedido' : 'Fallback local'} ativado.`);
         }
 
         return res.json({
           success: true,
           status: 'FALLBACK',
-          spokenText: 'Tive um probleminha de conexão agora, mas continuo por aqui pelo atendimento local.',
+          spokenText: 'Tive um probleminha de conexão com a IA agora, mas continuo por aqui consultando os dados do aplicativo.',
           functionCall: null,
           isFallback: true,
           isQuotaOrTimeout: true,
+          quotaDepleted: isBillingDepleted,
         });
       }
     }
