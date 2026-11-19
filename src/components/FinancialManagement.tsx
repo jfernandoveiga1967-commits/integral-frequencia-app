@@ -1722,61 +1722,6 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       {/* ========================================================================= */}
       {activeSubTab === 'despesas' && (
         <div className="space-y-4 animate-in fade-in duration-150">
-          {/* Painel de Auditoria dos Custos Operacionais Reais (Livro Ponto & Cardápio) */}
-          <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-900 rounded-3xl p-4 sm:p-6 text-white shadow-lg border border-rose-800/60 relative overflow-hidden">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
-              <div className="space-y-1.5 max-w-xl min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                    Custos 100% Reais • Sem Mocks
-                  </span>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Exercício {selectedAnoLetivo}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
-                  Custos Operacionais Reais & DRE
-                </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Custos sincronizados em tempo real a partir das abas oficiais: <strong>Livro Ponto</strong> (Coordenação, Auxiliar ADI, Monitor, Professor Horista, Professor Prestador e Nutricionista), <strong>Relatório Financeiro de Refeições (Almoço)</strong> e suas <strong>Categorias Personalizadas</strong>.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5 bg-slate-950/60 p-2.5 sm:p-3.5 rounded-2xl border border-white/10 backdrop-blur-xs w-full lg:w-auto">
-                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-indigo-300 font-medium block truncate">Folha (Livro Ponto)</span>
-                  <span className="text-xs sm:text-sm font-black text-indigo-300 truncate block">
-                    {formatCurrencyBR(metrics.custoFolhaReal || 0)}
-                  </span>
-                </div>
-                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Refeições (Almoço)</span>
-                  <span className="text-xs sm:text-sm font-black text-emerald-300 truncate block">
-                    {formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}
-                  </span>
-                </div>
-                <div className="p-2 sm:p-2.5 bg-white/5 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-sky-300 font-medium block truncate">Personalizadas</span>
-                  <span className="text-xs sm:text-sm font-black text-sky-300 truncate block">
-                    {formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}
-                  </span>
-                </div>
-                <div className="p-2 sm:p-2.5 bg-rose-950/40 border border-rose-500/30 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-rose-300 font-medium block truncate">Total Custos Reais</span>
-                  <span className="text-xs sm:text-sm font-black text-rose-400 truncate block">
-                    {formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}
-                  </span>
-                </div>
-                <div className="p-2 sm:p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl min-w-0 overflow-hidden">
-                  <span className="text-[10px] sm:text-[11px] text-emerald-300 font-medium block truncate">Resultado Líquido</span>
-                  <span className="text-xs sm:text-sm font-black text-emerald-400 truncate block">
-                    {formatCurrencyBR(metrics.resultadoOperacionalLiquidoReal || 0)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Barra de Filtros de Despesas */}
           <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex flex-col md:flex-row items-center justify-between gap-3">
