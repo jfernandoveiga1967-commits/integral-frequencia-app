@@ -277,7 +277,27 @@ export const Header: React.FC<HeaderProps> = ({
             onWheel={handleWheel}
             className="flex-1 flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden scroll-smooth"
           >
-            {/* 1. Atividades do Momento */}
+            {/* 1. Alunos e Turmas */}
+            {isTabAllowed('alunos', currentUser) && (
+              <button
+                id="tab-alunos"
+                data-active={activeTab === 'alunos' ? 'true' : 'false'}
+                onClick={() => setActiveTab('alunos')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'alunos'
+                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                <span>Alunos e Turmas</span>
+                <span className="ml-1 text-[11px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300 font-semibold">
+                  {totalStudents}
+                </span>
+              </button>
+            )}
+
+            {/* 2. Atividades do Momento */}
             {isTabAllowed('momento', currentUser) && (
               <button
                 data-active={activeTab === 'momento' ? 'true' : 'false'}
@@ -302,156 +322,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* 2. Chamada de Frequência */}
-            {isTabAllowed('frequencia', currentUser) && (
-              <button
-                data-active={activeTab === 'frequencia' ? 'true' : 'false'}
-                onClick={() => setActiveTab('frequencia')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'frequencia'
-                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <ClipboardCheck className="w-4 h-4 shrink-0" />
-                <span>Chamada de Frequência</span>
-              </button>
-            )}
-
-            {/* 3. Semanário / Planejamento Pedagógico */}
-            {isTabAllowed('semanario', currentUser) && (
-              <button
-                data-active={activeTab === 'semanario' ? 'true' : 'false'}
-                onClick={() => setActiveTab('semanario')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'semanario'
-                    ? 'bg-slate-800 text-amber-400 border-amber-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <BookOpen className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Semanário</span>
-              </button>
-            )}
-
-            {/* 4. Livro Ponto */}
-            {isTabAllowed('ponto', currentUser) && (
-              <button
-                data-active={activeTab === 'ponto' ? 'true' : 'false'}
-                onClick={() => setActiveTab('ponto')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'ponto'
-                    ? 'bg-slate-800 text-emerald-400 border-emerald-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Livro Ponto</span>
-              </button>
-            )}
-
-            {/* 5. Cardápio e Culinária */}
-            {isTabAllowed('cardapio', currentUser) && (
-              <button
-                data-active={activeTab === 'cardapio' ? 'true' : 'false'}
-                onClick={() => setActiveTab('cardapio')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'cardapio'
-                    ? 'bg-slate-800 text-teal-400 border-teal-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <Utensils className="w-4 h-4 text-teal-400 shrink-0" />
-                <span>Cardápio</span>
-              </button>
-            )}
-
-            {/* 6. Manual de Orientações e Normas */}
-            {isTabAllowed('manual', currentUser) && (
-              <button
-                data-active={activeTab === 'manual' ? 'true' : 'false'}
-                onClick={() => setActiveTab('manual')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'manual'
-                    ? 'bg-slate-800 text-sky-400 border-sky-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <BookOpen className="w-4 h-4 text-sky-400 shrink-0" />
-                <span>Manual</span>
-              </button>
-            )}
-
-            {/* 7. Alunos e Turmas */}
-            {isTabAllowed('alunos', currentUser) && (
-              <button
-                id="tab-alunos"
-                data-active={activeTab === 'alunos' ? 'true' : 'false'}
-                onClick={() => setActiveTab('alunos')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'alunos'
-                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <Users className="w-4 h-4 shrink-0" />
-                <span>Alunos e Turmas</span>
-                <span className="ml-1 text-[11px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300 font-semibold">
-                  {totalStudents}
-                </span>
-              </button>
-            )}
-
-            {/* 8. Financeiro (Gestão Financeira e Contratos) */}
-            {isTabAllowed('financeiro', currentUser) && (
-              <button
-                id="tab-financeiro"
-                data-active={activeTab === 'financeiro' ? 'true' : 'false'}
-                onClick={() => setActiveTab('financeiro')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'financeiro'
-                    ? 'bg-slate-800 text-emerald-400 border-emerald-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <CreditCard className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Financeiro</span>
-              </button>
-            )}
-
-            {/* 9. Relatórios */}
-            {isTabAllowed('relatorio', currentUser) && (
-              <button
-                data-active={activeTab === 'relatorio' ? 'true' : 'false'}
-                onClick={() => setActiveTab('relatorio')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'relatorio'
-                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4 shrink-0" />
-                <span>Relatórios</span>
-              </button>
-            )}
-
-            {/* 10. Biblioteca de Semanas */}
-            {isTabAllowed('biblioteca', currentUser) && (
-              <button
-                data-active={activeTab === 'biblioteca' ? 'true' : 'false'}
-                onClick={() => setActiveTab('biblioteca')}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
-                  activeTab === 'biblioteca'
-                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
-                }`}
-              >
-                <Library className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span>Biblioteca</span>
-              </button>
-            )}
-
-            {/* 11. Gerenciamento de Usuários */}
+            {/* 3. Usuários */}
             {isTabAllowed('usuarios', currentUser) && (
               <button
                 data-active={activeTab === 'usuarios' ? 'true' : 'false'}
@@ -469,6 +340,135 @@ export const Header: React.FC<HeaderProps> = ({
                     Admin
                   </span>
                 )}
+              </button>
+            )}
+
+            {/* 4. Chamada de Frequência */}
+            {isTabAllowed('frequencia', currentUser) && (
+              <button
+                data-active={activeTab === 'frequencia' ? 'true' : 'false'}
+                onClick={() => setActiveTab('frequencia')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'frequencia'
+                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <ClipboardCheck className="w-4 h-4 shrink-0" />
+                <span>Chamada de Frequência</span>
+              </button>
+            )}
+
+            {/* 5. Semanário */}
+            {isTabAllowed('semanario', currentUser) && (
+              <button
+                data-active={activeTab === 'semanario' ? 'true' : 'false'}
+                onClick={() => setActiveTab('semanario')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'semanario'
+                    ? 'bg-slate-800 text-amber-400 border-amber-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <BookOpen className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Semanário</span>
+              </button>
+            )}
+
+            {/* 6. Livro Ponto */}
+            {isTabAllowed('ponto', currentUser) && (
+              <button
+                data-active={activeTab === 'ponto' ? 'true' : 'false'}
+                onClick={() => setActiveTab('ponto')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'ponto'
+                    ? 'bg-slate-800 text-emerald-400 border-emerald-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Livro Ponto</span>
+              </button>
+            )}
+
+            {/* 7. Relatórios */}
+            {isTabAllowed('relatorio', currentUser) && (
+              <button
+                data-active={activeTab === 'relatorio' ? 'true' : 'false'}
+                onClick={() => setActiveTab('relatorio')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'relatorio'
+                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4 shrink-0" />
+                <span>Relatórios</span>
+              </button>
+            )}
+
+            {/* 8. Financeiro */}
+            {isTabAllowed('financeiro', currentUser) && (
+              <button
+                id="tab-financeiro"
+                data-active={activeTab === 'financeiro' ? 'true' : 'false'}
+                onClick={() => setActiveTab('financeiro')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'financeiro'
+                    ? 'bg-slate-800 text-emerald-400 border-emerald-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <CreditCard className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Financeiro</span>
+              </button>
+            )}
+
+            {/* 9. Cardápio */}
+            {isTabAllowed('cardapio', currentUser) && (
+              <button
+                data-active={activeTab === 'cardapio' ? 'true' : 'false'}
+                onClick={() => setActiveTab('cardapio')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'cardapio'
+                    ? 'bg-slate-800 text-teal-400 border-teal-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <Utensils className="w-4 h-4 text-teal-400 shrink-0" />
+                <span>Cardápio</span>
+              </button>
+            )}
+
+            {/* 10. Manual */}
+            {isTabAllowed('manual', currentUser) && (
+              <button
+                data-active={activeTab === 'manual' ? 'true' : 'false'}
+                onClick={() => setActiveTab('manual')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'manual'
+                    ? 'bg-slate-800 text-sky-400 border-sky-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <BookOpen className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>Manual</span>
+              </button>
+            )}
+
+            {/* 11. Biblioteca */}
+            {isTabAllowed('biblioteca', currentUser) && (
+              <button
+                data-active={activeTab === 'biblioteca' ? 'true' : 'false'}
+                onClick={() => setActiveTab('biblioteca')}
+                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap flex-shrink-0 border-b-2 ${
+                  activeTab === 'biblioteca'
+                    ? 'bg-slate-800 text-indigo-400 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
+                }`}
+              >
+                <Library className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span>Biblioteca</span>
               </button>
             )}
           </div>
