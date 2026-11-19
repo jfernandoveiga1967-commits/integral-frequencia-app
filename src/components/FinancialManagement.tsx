@@ -533,9 +533,19 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     });
   }, [expenses, liveAutoExpenses, selectedAnoLetivo, selectedMonth]);
 
-  // Categorias dinâmicas disponíveis para filtro (sincronizadas presentes + personalizadas)
+  // Categorias dinâmicas disponíveis para filtro (sincronizadas presentes + oficinas parceiras + personalizadas)
   const filterCategoryOptions = useMemo(() => {
     const map = new Map<string, { id: string; label: string; count: number; isAuto: boolean }>();
+
+    (['ACADEMIA_OMEGA', 'REVELA_SOCCER'] as const).forEach((catId) => {
+      const info = getCategoryDisplayInfo(catId, customCategories);
+      map.set(catId, {
+        id: catId,
+        label: info.shortLabel || info.label,
+        count: 0,
+        isAuto: false,
+      });
+    });
 
     customCategories.forEach((c) => {
       map.set(c.id, { id: c.id, label: c.label, count: 0, isAuto: false });
@@ -2310,7 +2320,9 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                           : catRow.origemModulo === 'CARDAPIO_REFEICOES'
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
-                            catRow.origemModulo === 'SEMANARIO_CULINARIA'
+                            catRow.origemModulo === 'SEMANARIO_CULINARIA' ||
+                            catRow.categoria === 'ACADEMIA_OMEGA' ||
+                            catRow.categoria === 'REVELA_SOCCER'
                           ? 'bg-amber-50 text-amber-700 border-amber-200'
                           : 'bg-sky-50 text-sky-700 border-sky-200';
                       const visibleMonths =
@@ -2601,7 +2613,9 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     : catRow.origemModulo === 'CARDAPIO_REFEICOES'
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
-                      catRow.origemModulo === 'SEMANARIO_CULINARIA'
+                      catRow.origemModulo === 'SEMANARIO_CULINARIA' ||
+                      catRow.categoria === 'ACADEMIA_OMEGA' ||
+                      catRow.categoria === 'REVELA_SOCCER'
                     ? 'bg-amber-50 text-amber-700 border-amber-200'
                     : 'bg-sky-50 text-sky-700 border-sky-200';
                 const sourceText =
@@ -2630,6 +2644,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                           : catRow.origemModulo === 'CULINARIA_OFICINAS' ||
                             catRow.origemModulo === 'SEMANARIO_CULINARIA'
                           ? 'Insumos e práticas culinárias sincronizados do Cardápio e Semanário'
+                          : catRow.categoria === 'ACADEMIA_OMEGA' || catRow.categoria === 'REVELA_SOCCER'
+                          ? 'Despesas lançadas manualmente na oficina parceira pela gestão'
                           : 'Despesas lançadas manualmente na categoria personalizada pela gestão'}
                       </span>
                     </div>
