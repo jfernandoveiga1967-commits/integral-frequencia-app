@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA, PLANOS_CONTRATUAIS_2026, PLANOS_CONTRATUAIS_2027, getTabelaPlanosPorAno } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA, PLANOS_CONTRATUAIS_2026, PLANOS_CONTRATUAIS_2027, getTabelaPlanosPorAno, ScheduleBlock, SemanarioPlan } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF, generateTermoSaidaAvulsaPDF } from '../utils/pdfGenerator';
@@ -10,11 +10,11 @@ import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
 import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser, TrendingUp, Filter, GraduationCap } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser, TrendingUp, Filter, GraduationCap, Zap } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
-import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS, getStudentDeduplicationKey } from '../utils/storageUtils';
+import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS, getStudentDeduplicationKey, loadSchedules, loadSemanarioPlans, syncStudentActivitiesFromSchedule, areActivityListsEqual } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
 import {
@@ -39,6 +39,8 @@ interface StudentManagerProps {
   records?: AttendanceRecord[];
   turmas?: string[];
   activitiesList?: ActivityItem[];
+  schedules?: ScheduleBlock[];
+  semanarioPlans?: SemanarioPlan[];
   currentWeek?: WeekInfo;
   currentUser?: UserProfile | null;
   onAddStudent: (student: Omit<Student, 'id'>) => void | Promise<void>;
@@ -56,6 +58,8 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   records = [],
   turmas,
   activitiesList = ACTIVITIES_LIST,
+  schedules,
+  semanarioPlans,
   currentWeek = { weekNumber: 32, year: 2026, startDate: '2026-08-03', endDate: '2026-08-07', label: 'Semana 32 (03/08 - 07/08)' },
   currentUser = null,
   onAddStudent,
@@ -76,6 +80,34 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
   }, [initialStudents]);
   const activeActivities = activitiesList.length > 0 ? activitiesList : ACTIVITIES_LIST;
+  const effectiveSchedules = React.useMemo<ScheduleBlock[]>(() => {
+    return Array.isArray(schedules) && schedules.length > 0 ? schedules : loadSchedules();
+  }, [schedules]);
+  const effectiveSemanarioPlans = React.useMemo<SemanarioPlan[]>(() => {
+    return Array.isArray(semanarioPlans) && semanarioPlans.length > 0 ? semanarioPlans : loadSemanarioPlans();
+  }, [semanarioPlans]);
+
+  const computeSyncedActivities = React.useCallback(
+    (
+      turma: TurmaType | string,
+      dias?: DayOfWeek[] | null,
+      horariosSaida?: Partial<Record<DayOfWeek, string>> | null,
+      preserveReforco: boolean = false
+    ): ActivityType[] => {
+      return syncStudentActivitiesFromSchedule(
+        turma,
+        dias,
+        effectiveSchedules,
+        effectiveSemanarioPlans,
+        horariosSaida,
+        {
+          preserveReforco,
+          activitiesList: activeActivities,
+        }
+      );
+    },
+    [effectiveSchedules, effectiveSemanarioPlans, activeActivities]
+  );
   const userCanManageStudents = canManageStudents(currentUser);
   const userCanManageTurmas = canManageTurmas(currentUser);
 
@@ -171,6 +203,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newTipoSaida, setNewTipoSaida] = useState<'PAIS' | 'TRANSPORTE_ESCOLAR'>('PAIS');
   const [newNomeCondutor, setNewNomeCondutor] = useState<string>('');
   const [newActivities, setNewActivities] = useState<ActivityType[]>(['Rotina']);
+  const [newActivitiesSynced, setNewActivitiesSynced] = useState<boolean>(true);
   const [newHasReforco, setNewHasReforco] = useState(false);
   const [newReforcoStartDate, setNewReforcoStartDate] = useState<string>('');
   const [newReforcoEndDate, setNewReforcoEndDate] = useState<string>('');
@@ -181,6 +214,41 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newDiasFrequencia, setNewDiasFrequencia] = useState<DayOfWeek[]>(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
+
+  const applyNewStudentScheduleSync = React.useCallback(
+    (
+      targetTurma: TurmaType | string,
+      targetDias: DayOfWeek[],
+      targetHorarios: Partial<Record<DayOfWeek, string>>,
+      preserveReforco: boolean
+    ) => {
+      setNewActivities(
+        computeSyncedActivities(targetTurma, targetDias, targetHorarios, preserveReforco)
+      );
+      setNewActivitiesSynced(true);
+    },
+    [computeSyncedActivities]
+  );
+
+  const handleNewTurmaChange = (nextTurma: TurmaType) => {
+    setNewTurma(nextTurma);
+    const activeDays = newTipoContrato === 'avulso' ? newDiasContratados : newDiasFrequencia;
+    applyNewStudentScheduleSync(nextTurma, activeDays, newHorariosSaida, newHasReforco);
+  };
+
+  const handleNewDaysChange = (updatedDays: DayOfWeek[]) => {
+    setNewDiasFrequencia(updatedDays);
+    if (newTipoContrato === 'avulso') {
+      setNewDiasContratados(updatedDays);
+    }
+    applyNewStudentScheduleSync(newTurma, updatedDays, newHorariosSaida, newHasReforco);
+  };
+
+  const handleNewHorariosChange = (updatedHorarios: Partial<Record<DayOfWeek, string>>) => {
+    setNewHorariosSaida(updatedHorarios);
+    const activeDays = newTipoContrato === 'avulso' ? newDiasContratados : newDiasFrequencia;
+    applyNewStudentScheduleSync(newTurma, activeDays, updatedHorarios, newHasReforco);
+  };
 
   // Plano Contratual & Financeiro do Novo Aluno (Mapeamento Dinâmico 2026 vs 2027)
   const [newPlanoContratual, setNewPlanoContratual] = useState<PlanoContratualType>('Integral Semana (18:30h)');
@@ -361,7 +429,36 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   // Edit, Transfer & Delete modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [originalStudentForEdit, setOriginalStudentForEdit] = useState<Student | null>(null);
+  const [editActivitiesSynced, setEditActivitiesSynced] = useState<boolean>(true);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const updateEditingStudentWithScheduleSync = React.useCallback(
+    (updater: (prev: Student) => Student) => {
+      setEditingStudent((prev) => {
+        if (!prev) return null;
+        const next = updater(prev);
+        const activeDias =
+          next.tipoContrato === 'avulso' &&
+          next.diasContratados &&
+          next.diasContratados.length > 0
+            ? next.diasContratados
+            : next.diasFrequencia;
+        const hasReforco = (next.modalidadesEspeciais || next.specialties || []).includes('Reforço');
+        const syncedActs = computeSyncedActivities(
+          next.turma,
+          activeDias,
+          next.horariosSaida,
+          hasReforco
+        );
+        return {
+          ...next,
+          activities: syncedActs,
+        };
+      });
+      setEditActivitiesSynced(true);
+    },
+    [computeSyncedActivities]
+  );
 
   const editTurmasList = React.useMemo(() => {
     const baseList = isCoordenador || editingStudent?.anoLetivo === 2027 ? allSchoolTurmas : allowedTurmas;
@@ -567,6 +664,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 (student.descontoBolsa || 0)
             ),
     };
+    const effectiveEditDias =
+      prepared.tipoContrato === 'avulso' &&
+      prepared.diasContratados &&
+      prepared.diasContratados.length > 0
+        ? prepared.diasContratados
+        : prepared.diasFrequencia;
+    const editHasReforco = (prepared.modalidadesEspeciais || prepared.specialties || []).includes('Reforço');
+    const syncedForPrepared = computeSyncedActivities(
+      prepared.turma,
+      effectiveEditDias,
+      prepared.horariosSaida,
+      editHasReforco
+    );
+    setEditActivitiesSynced(areActivityListsEqual(prepared.activities, syncedForPrepared));
     setOriginalStudentForEdit(prepared);
     setEditingStudent(prepared);
   };
@@ -681,9 +792,24 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           valorMensalidadeFinal: Math.max(0, targetBase - desconto),
         };
       });
+      setEditActivitiesSynced(false);
     } else {
       // Se o usuário alternar de volta para "2026", restaura os dados originais aplicando tabela 2026
       if (originalStudentForEdit) {
+        const origDias =
+          originalStudentForEdit.tipoContrato === 'avulso' &&
+          originalStudentForEdit.diasContratados &&
+          originalStudentForEdit.diasContratados.length > 0
+            ? originalStudentForEdit.diasContratados
+            : originalStudentForEdit.diasFrequencia;
+        const origReforco = (originalStudentForEdit.modalidadesEspeciais || originalStudentForEdit.specialties || []).includes('Reforço');
+        const syncedOrig = computeSyncedActivities(
+          originalStudentForEdit.turma,
+          origDias,
+          originalStudentForEdit.horariosSaida,
+          origReforco
+        );
+        setEditActivitiesSynced(areActivityListsEqual(originalStudentForEdit.activities, syncedOrig));
         setEditingStudent((prev) => ({
           ...originalStudentForEdit,
           name: prev?.name || originalStudentForEdit.name,
@@ -736,13 +862,37 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
     setIsSavingTransfer(true);
     try {
-      // Update active turma for student while preserving all historical attendance records
+      const transferEffectiveDias =
+        transferringStudent.tipoContrato === 'avulso' &&
+        transferringStudent.diasContratados &&
+        transferringStudent.diasContratados.length > 0
+          ? transferringStudent.diasContratados
+          : transferringStudent.diasFrequencia;
+      const transferHasReforco = (
+        transferringStudent.modalidadesEspeciais ||
+        transferringStudent.specialties ||
+        []
+      ).includes('Reforço');
+      const syncedTransferActivities = computeSyncedActivities(
+        targetTransferTurma,
+        transferEffectiveDias,
+        transferringStudent.horariosSaida,
+        transferHasReforco
+      );
+
+      // Update active turma and recalculate compatible activities for enrolled days while preserving history
       await Promise.resolve(
         onUpdateStudent({
           ...transferringStudent,
           turma: targetTransferTurma,
+          activities: syncedTransferActivities,
+          updatedAt: new Date().toISOString(),
         })
       );
+      setToastMsg({
+        text: `Aluno "${transferringStudent.name}" transferido para ${targetTransferTurma} com modalidades sincronizadas (${syncedTransferActivities.join(', ')}).`,
+        type: 'success',
+      });
       setTransferringStudent(null);
     } catch (err: any) {
       console.error('Error transferring student:', err);
@@ -1226,7 +1376,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         })
       );
       setNewName('');
-      setNewActivities(['Rotina']);
+      const resetDays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+      setNewActivities(computeSyncedActivities(newTurma, resetDays, {}, false));
+      setNewActivitiesSynced(true);
       setNewHasReforco(false);
       setNewReforcoStartDate('');
       setNewReforcoEndDate('');
@@ -1679,24 +1831,26 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     const today = toISODateString(new Date());
                     const resetTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
                     const defaultPlano: PlanoContratualType = 'Integral Semana (18:30h)';
+                    const initialTurma: TurmaType =
+                      selectedTurma !== 'TODAS' && (isCoordenador || allowedTurmas.includes(selectedTurma))
+                        ? selectedTurma
+                        : ((allowedTurmas[0] as TurmaType) || newTurma || '1º Ano Azul');
+                    const defaultDays: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
                     setSingleFormError(null);
                     setNewName('');
-                    if (selectedTurma !== 'TODAS' && (isCoordenador || allowedTurmas.includes(selectedTurma))) {
-                      setNewTurma(selectedTurma);
-                    } else if (allowedTurmas.length > 0) {
-                      setNewTurma(allowedTurmas[0] as TurmaType);
-                    }
+                    setNewTurma(initialTurma);
                     setNewTipoContrato('regular');
                     setNewTipoSaida('PAIS');
                     setNewNomeCondutor('');
-                    setNewActivities(['Rotina']);
+                    setNewActivities(computeSyncedActivities(initialTurma, defaultDays, {}, false));
+                    setNewActivitiesSynced(true);
                     setNewHasReforco(false);
                     setNewReforcoStartDate('');
                     setNewReforcoEndDate('');
                     setNewDataInicio(today);
                     setNewDataTermino(today);
-                    setNewDiasContratados(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
-                    setNewDiasFrequencia(['segunda', 'terca', 'quarta', 'quinta', 'sexta']);
+                    setNewDiasContratados(defaultDays);
+                    setNewDiasFrequencia(defaultDays);
                     setNewHorariosSaida({});
                     setNewAnoLetivo(selectedAnoLetivo);
                     setNewPlanoContratual(defaultPlano);
@@ -1796,7 +1950,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </label>
               <select
                 value={newTurma}
-                onChange={(e) => setNewTurma(e.target.value as TurmaType)}
+                onChange={(e) => handleNewTurmaChange(e.target.value as TurmaType)}
                 disabled={!isCoordenador && allowedTurmas.length === 1}
                 className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 ${
                   !isCoordenador && allowedTurmas.length === 1
@@ -2053,7 +2207,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         onClick={() => {
                           const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
                           setNewDiasContratados(days);
-                          setNewDiasFrequencia(days);
+                          handleNewDaysChange(days);
                         }}
                         className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
                       >
@@ -2064,7 +2218,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         onClick={() => {
                           const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
                           setNewDiasContratados(days);
-                          setNewDiasFrequencia(days);
+                          handleNewDaysChange(days);
                         }}
                         className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                       >
@@ -2075,7 +2229,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         onClick={() => {
                           const days: DayOfWeek[] = ['terca', 'quinta'];
                           setNewDiasContratados(days);
-                          setNewDiasFrequencia(days);
+                          handleNewDaysChange(days);
                         }}
                         className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                       >
@@ -2100,7 +2254,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           onClick={() => {
                             const updated = toggleDayInList(newDiasContratados, d.id);
                             setNewDiasContratados(updated);
-                            setNewDiasFrequencia(updated);
+                            handleNewDaysChange(updated);
                           }}
                           className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                             isSelected
@@ -2245,11 +2399,43 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           </div>
 
           <div>
-            <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
-              <label className="block text-xs font-semibold text-slate-700">
-                Atividades Extracurriculares (Apenas com Chamada):
-              </label>
-              <div className="flex items-center space-x-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Atividades Extracurriculares (Apenas com Chamada):
+                </label>
+                {newActivitiesSynced ? (
+                  <span className="inline-flex items-center text-[10.5px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
+                    ⚡ Sincronizado com a grade dos dias matriculados
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center space-x-1 text-[10.5px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    <span>✏️ Ajuste manual aplicado</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={isSavingSingle}
+                  onClick={() =>
+                    applyNewStudentScheduleSync(
+                      newTurma,
+                      newTipoContrato === 'avulso' ? newDiasContratados : newDiasFrequencia,
+                      newHorariosSaida,
+                      newHasReforco
+                    )
+                  }
+                  className={`inline-flex items-center space-x-1 text-[10.5px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                    newActivitiesSynced
+                      ? 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      : 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 shadow-xs'
+                  }`}
+                  title="Restaurar seleção automática de modalidades conforme a grade oficial dos dias matriculados"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Re-sincronizar com a grade</span>
+                </button>
                 <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
                   Inclusas no Plano Contratual
                 </span>
@@ -2267,9 +2453,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     type="button"
                     key={act.id}
                     disabled={isSavingSingle}
-                    onClick={() =>
-                      setNewActivities(toggleActivityInList(newActivities, act.id))
-                    }
+                    onClick={() => {
+                      setNewActivities(toggleActivityInList(newActivities, act.id));
+                      if (act.id !== 'Rotina') {
+                        setNewActivitiesSynced(false);
+                      }
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border flex items-center space-x-1.5 cursor-pointer ${
                       isSelected
                         ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
@@ -2302,7 +2491,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               <input
                 type="checkbox"
                 checked={newHasReforco}
-                onChange={(e) => setNewHasReforco(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setNewHasReforco(checked);
+                  setNewActivities((prev) =>
+                    checked
+                      ? Array.from(new Set([...prev, 'Reforço']))
+                      : prev.filter((a) => a !== 'Reforço')
+                  );
+                }}
                 className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 border-amber-300 cursor-pointer"
               />
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -2350,8 +2547,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   type="button"
                   onClick={() => {
                     const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
-                    setNewDiasFrequencia(days);
-                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                    handleNewDaysChange(days);
                   }}
                   className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 shadow-2xs"
                 >
@@ -2361,8 +2557,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   type="button"
                   onClick={() => {
                     const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
-                    setNewDiasFrequencia(days);
-                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                    handleNewDaysChange(days);
                   }}
                   className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
                 >
@@ -2372,8 +2567,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   type="button"
                   onClick={() => {
                     const days: DayOfWeek[] = ['terca', 'quinta'];
-                    setNewDiasFrequencia(days);
-                    if (newTipoContrato === 'avulso') setNewDiasContratados(days);
+                    handleNewDaysChange(days);
                   }}
                   className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
                 >
@@ -2397,7 +2591,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     newDiasFrequencia.forEach((day) => {
                       updated[day] = presetTime;
                     });
-                    setNewHorariosSaida(updated);
+                    handleNewHorariosChange(updated);
                   }}
                   className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs"
                   title={`Definir saída às ${presetTime} para os dias selecionados`}
@@ -2422,10 +2616,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="button"
                       onClick={() => {
                         const updated = toggleDayInList(newDiasFrequencia, d.id);
-                        setNewDiasFrequencia(updated);
-                        if (newTipoContrato === 'avulso') {
-                          setNewDiasContratados(updated);
-                        }
+                        handleNewDaysChange(updated);
                       }}
                       className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
                         isSelected
@@ -2446,7 +2637,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           type="time"
                           value={newHorariosSaida[d.id] || ''}
                           onChange={(e) =>
-                            setNewHorariosSaida({
+                            handleNewHorariosChange({
                               ...newHorariosSaida,
                               [d.id]: e.target.value,
                             })
@@ -2952,9 +3143,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 </label>
                 <select
                   value={editingStudent.turma || ''}
-                  onChange={(e) =>
-                    setEditingStudent((prev) => prev ? { ...prev, turma: e.target.value as TurmaType } : null)
-                  }
+                  onChange={(e) => {
+                    const nextTurma = e.target.value as TurmaType;
+                    updateEditingStudentWithScheduleSync((prev) => ({
+                      ...prev,
+                      turma: nextTurma,
+                    }));
+                  }}
                   disabled={isSavingEdit || (!isCoordenador && allowedTurmas.length === 1 && editingStudent.anoLetivo !== 2027)}
                   className={`w-full px-3 py-2 text-sm border border-slate-300 rounded-xl font-medium ${
                     !isCoordenador && allowedTurmas.length === 1 && editingStudent.anoLetivo !== 2027
@@ -3386,11 +3581,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                             type="button"
                             onClick={() => {
                               const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
-                              setEditingStudent({
-                                ...editingStudent,
+                              updateEditingStudentWithScheduleSync((prev) => ({
+                                ...prev,
                                 diasContratados: days,
                                 diasFrequencia: days,
-                              });
+                              }));
                             }}
                             className="text-[10px] font-bold text-amber-800 bg-white hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs"
                           >
@@ -3400,11 +3595,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                             type="button"
                             onClick={() => {
                               const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
-                              setEditingStudent({
-                                ...editingStudent,
+                              updateEditingStudentWithScheduleSync((prev) => ({
+                                ...prev,
                                 diasContratados: days,
                                 diasFrequencia: days,
-                              });
+                              }));
                             }}
                             className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                           >
@@ -3414,11 +3609,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                             type="button"
                             onClick={() => {
                               const days: DayOfWeek[] = ['terca', 'quinta'];
-                              setEditingStudent({
-                                ...editingStudent,
+                              updateEditingStudentWithScheduleSync((prev) => ({
+                                ...prev,
                                 diasContratados: days,
                                 diasFrequencia: days,
-                              });
+                              }));
                             }}
                             className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-2xs"
                           >
@@ -3447,11 +3642,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                               disabled={isSavingEdit}
                               onClick={() => {
                                 const updated = toggleDayInList(editingStudent.diasContratados, d.id);
-                                setEditingStudent({
-                                  ...editingStudent,
+                                updateEditingStudentWithScheduleSync((prev) => ({
+                                  ...prev,
                                   diasContratados: updated,
                                   diasFrequencia: updated,
-                                });
+                                }));
                               }}
                               className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                                 isSelected
@@ -3613,11 +3808,36 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               </div>
 
               <div>
-                <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    Atividades Extracurriculares (Apenas com Chamada):
-                  </label>
-                  <div className="flex items-center space-x-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Atividades Extracurriculares (Apenas com Chamada):
+                    </label>
+                    {editActivitiesSynced ? (
+                      <span className="inline-flex items-center text-[10.5px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
+                        ⚡ Sincronizado com a grade dos dias matriculados
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center space-x-1 text-[10.5px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                        <span>✏️ Ajuste manual aplicado</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={isSavingEdit}
+                      onClick={() => updateEditingStudentWithScheduleSync((prev) => prev)}
+                      className={`inline-flex items-center space-x-1 text-[10.5px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                        editActivitiesSynced
+                          ? 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                          : 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 shadow-xs'
+                      }`}
+                      title="Restaurar seleção automática de modalidades conforme a grade oficial dos dias matriculados"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Re-sincronizar com a grade</span>
+                    </button>
                     <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
                       Inclusas no Plano Contratual
                     </span>
@@ -3635,12 +3855,15 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         type="button"
                         key={act.id}
                         disabled={isSavingEdit}
-                        onClick={() =>
+                        onClick={() => {
                           setEditingStudent({
                             ...editingStudent,
                             activities: toggleActivityInList(editingStudent.activities, act.id),
-                          })
-                        }
+                          });
+                          if (act.id !== 'Rotina') {
+                            setEditActivitiesSynced(false);
+                          }
+                        }}
                         className={`p-2 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-all cursor-pointer ${
                           isChecked
                             ? 'bg-indigo-50 text-indigo-900 border-indigo-300 font-bold shadow-2xs'
@@ -3681,8 +3904,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       const next = e.target.checked
                         ? Array.from(new Set([...current, 'Reforço']))
                         : current.filter((m) => m !== 'Reforço');
+                      const nextActivities = e.target.checked
+                        ? Array.from(new Set([...(editingStudent.activities || ['Rotina']), 'Reforço']))
+                        : (editingStudent.activities || ['Rotina']).filter((a) => a !== 'Reforço');
                       setEditingStudent({
                         ...editingStudent,
+                        activities: nextActivities,
                         modalidadesEspeciais: next,
                         specialties: next,
                         reforcoStartDate: e.target.checked ? editingStudent.reforcoStartDate : '',
@@ -3736,11 +3963,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="button"
                       onClick={() => {
                         const days: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
-                        setEditingStudent({
-                          ...editingStudent,
+                        updateEditingStudentWithScheduleSync((prev) => ({
+                          ...prev,
                           diasFrequencia: days,
-                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
-                        });
+                          ...(prev.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        }));
                       }}
                       className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200"
                     >
@@ -3750,11 +3977,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="button"
                       onClick={() => {
                         const days: DayOfWeek[] = ['segunda', 'quarta', 'sexta'];
-                        setEditingStudent({
-                          ...editingStudent,
+                        updateEditingStudentWithScheduleSync((prev) => ({
+                          ...prev,
                           diasFrequencia: days,
-                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
-                        });
+                          ...(prev.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        }));
                       }}
                       className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
                     >
@@ -3764,11 +3991,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="button"
                       onClick={() => {
                         const days: DayOfWeek[] = ['terca', 'quinta'];
-                        setEditingStudent({
-                          ...editingStudent,
+                        updateEditingStudentWithScheduleSync((prev) => ({
+                          ...prev,
                           diasFrequencia: days,
-                          ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
-                        });
+                          ...(prev.tipoContrato === 'avulso' ? { diasContratados: days } : {}),
+                        }));
                       }}
                       className="text-[10px] font-bold text-slate-700 bg-white hover:bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200"
                     >
@@ -3789,18 +4016,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       type="button"
                       disabled={isSavingEdit}
                       onClick={() => {
-                        const currentDays = editingStudent.diasFrequencia && editingStudent.diasFrequencia.length > 0
-                          ? editingStudent.diasFrequencia
-                          : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
-                        const updatedHorarios: Partial<Record<DayOfWeek, string>> = {
-                          ...(editingStudent.horariosSaida || {}),
-                        };
-                        currentDays.forEach((day) => {
-                          updatedHorarios[day] = presetTime;
-                        });
-                        setEditingStudent({
-                          ...editingStudent,
-                          horariosSaida: updatedHorarios,
+                        updateEditingStudentWithScheduleSync((prev) => {
+                          const currentDays =
+                            prev.diasFrequencia && prev.diasFrequencia.length > 0
+                              ? prev.diasFrequencia
+                              : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]);
+                          const updatedHorarios: Partial<Record<DayOfWeek, string>> = {
+                            ...(prev.horariosSaida || {}),
+                          };
+                          currentDays.forEach((day) => {
+                            updatedHorarios[day] = presetTime;
+                          });
+                          return {
+                            ...prev,
+                            horariosSaida: updatedHorarios,
+                          };
                         });
                       }}
                       className="text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs cursor-pointer"
@@ -3832,11 +4062,11 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           disabled={isSavingEdit}
                           onClick={() => {
                             const updated = toggleDayInList(editingStudent.diasFrequencia, d.id);
-                            setEditingStudent({
-                              ...editingStudent,
+                            updateEditingStudentWithScheduleSync((prev) => ({
+                              ...prev,
                               diasFrequencia: updated,
-                              ...(editingStudent.tipoContrato === 'avulso' ? { diasContratados: updated } : {}),
-                            });
+                              ...(prev.tipoContrato === 'avulso' ? { diasContratados: updated } : {}),
+                            }));
                           }}
                           className={`py-1.5 px-1 sm:px-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer w-full ${
                             isSelected
@@ -3860,13 +4090,13 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                               disabled={isSavingEdit}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                setEditingStudent({
-                                  ...editingStudent,
+                                updateEditingStudentWithScheduleSync((prev) => ({
+                                  ...prev,
                                   horariosSaida: {
-                                    ...(editingStudent.horariosSaida || {}),
+                                    ...(prev.horariosSaida || {}),
                                     [d.id]: val,
                                   },
-                                });
+                                }));
                               }}
                               className="w-full text-center text-xs font-bold text-slate-900 bg-transparent outline-none p-0 cursor-pointer"
                               title={`Horário de saída na ${d.label}`}
@@ -4745,19 +4975,29 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      {student.activities.map((act) => {
-                        const actMeta = activityMap.get(act);
-                        return (
-                          <ActivityBadge
-                            key={act}
-                            activity={act}
-                            iconName={actMeta?.icon}
-                            customIconUrl={actMeta?.customIconUrl}
-                            customEquipment={actMeta?.defaultEquipment}
-                            size="sm"
-                          />
-                        );
-                      })}
+                      {(() => {
+                        const baseActs =
+                          Array.isArray(student.activities) && student.activities.length > 0
+                            ? student.activities
+                            : ['Rotina'];
+                        const hasReforcoSpecial =
+                          (student.modalidadesEspeciais || student.specialties || []).includes('Reforço') &&
+                          !baseActs.includes('Reforço');
+                        const displayActs = hasReforcoSpecial ? [...baseActs, 'Reforço'] : baseActs;
+                        return displayActs.map((act) => {
+                          const actMeta = activityMap.get(act);
+                          return (
+                            <ActivityBadge
+                              key={act}
+                              activity={act}
+                              iconName={actMeta?.icon}
+                              customIconUrl={actMeta?.customIconUrl}
+                              customEquipment={actMeta?.defaultEquipment}
+                              size="sm"
+                            />
+                          );
+                        });
+                      })()}
                       {student.inactivationReason && (
                         <span className="text-[11px] text-slate-500 italic bg-white px-2 py-0.5 rounded border border-slate-200">
                           Motivo: {student.inactivationReason}
@@ -4909,6 +5149,49 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   </p>
                 )}
               </div>
+
+              {targetTransferTurma && targetTransferTurma !== transferringStudent.turma && (() => {
+                const transferDays =
+                  transferringStudent.tipoContrato === 'avulso' &&
+                  transferringStudent.diasContratados &&
+                  transferringStudent.diasContratados.length > 0
+                    ? transferringStudent.diasContratados
+                    : transferringStudent.diasFrequencia;
+                const transferReforco = (
+                  transferringStudent.modalidadesEspeciais ||
+                  transferringStudent.specialties ||
+                  []
+                ).includes('Reforço');
+                const previewActivities = computeSyncedActivities(
+                  targetTransferTurma,
+                  transferDays,
+                  transferringStudent.horariosSaida,
+                  transferReforco
+                );
+                return (
+                  <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-950 space-y-2">
+                    <div className="flex items-center space-x-1.5 font-bold text-indigo-900">
+                      <Zap className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>Modalidades recalculadas para {targetTransferTurma}:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pl-5.5">
+                      {previewActivities.map((act) => {
+                        const actMeta = activityMap.get(act);
+                        return (
+                          <ActivityBadge
+                            key={act}
+                            activity={act}
+                            iconName={actMeta?.icon}
+                            customIconUrl={actMeta?.customIconUrl}
+                            customEquipment={actMeta?.defaultEquipment}
+                            size="sm"
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1">
                 <div className="flex items-center space-x-1.5 font-bold text-emerald-900">

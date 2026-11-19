@@ -1345,3 +1345,9 @@ export {
   deleteUserFromFirestore,
   resolveUserFirestoreDocId,
 } from '../firebase';
+
+export {
+  syncStudentActivitiesFromSchedule,
+  mapRawLabelToOfficialModalities,
+  areActivityListsEqual,
+} from './scheduleUtils';

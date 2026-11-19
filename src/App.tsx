@@ -2493,6 +2493,8 @@ export default function App() {
             records={records}
             turmas={turmas}
             activitiesList={activitiesList}
+            schedules={schedules}
+            semanarioPlans={semanarioPlans}
             currentWeek={currentWeek}
             currentUser={currentUser}
             onAddStudent={handleAddStudent}
