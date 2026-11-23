@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   deleteDoc,
@@ -32,6 +33,8 @@ import {
   SemanarioPlan,
   MealReportConfig,
   MealReportGlobalSettings,
+  PlanoContratualType,
+  DayOfWeek,
   getTabelaPlanosPorAno,
 } from '../types';
 import { CookingRecipe } from '../types/cardapio';
@@ -749,6 +752,294 @@ export function calculateValorTotalMensal(
   return Math.round(total * 100) / 100;
 }
 
+const VALID_SCHEDULE_WEEKDAYS: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
+
+function parseExitTimeToMinutes(rawTime?: string | null): number | null {
+  if (!rawTime || typeof rawTime !== 'string') return null;
+  const cleaned = rawTime.trim().toLowerCase();
+  if (!cleaned) return null;
+  const match = cleaned.match(/^(\d{1,2})\s*[:h]\s*(\d{0,2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = match[2] ? Number(match[2]) : 0;
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function getNormalizedScheduleDays(student: Partial<Student>): DayOfWeek[] {
+  const rawList =
+    student.tipoContrato === 'avulso' && Array.isArray(student.diasContratados) && student.diasContratados.length > 0
+      ? student.diasContratados
+      : Array.isArray(student.diasFrequencia) && student.diasFrequencia.length > 0
+      ? student.diasFrequencia
+      : VALID_SCHEDULE_WEEKDAYS;
+
+  const validSet = new Set<DayOfWeek>();
+  rawList.forEach((d) => {
+    if (VALID_SCHEDULE_WEEKDAYS.includes(d)) {
+      validSet.add(d);
+    }
+  });
+
+  const ordered = VALID_SCHEDULE_WEEKDAYS.filter((d) => validSet.has(d));
+  return ordered.length > 0 ? ordered : [...VALID_SCHEDULE_WEEKDAYS];
+}
+
+export interface ResolvedSchedulePlanInfo {
+  planoContratual: PlanoContratualType;
+  valorBase: number;
+  horarioPadrao: string;
+  planoHora: FinancialPlanHour;
+  isPersonalizado: boolean;
+  daysCount: number;
+}
+
+/**
+ * Regra determinística de mapeamento automático Ficha do Aluno -> Plano Contratual Oficial.
+ * Preserva integralmente planos explicitamente marcados como "Personalizado".
+ */
+export function resolveOfficialPlanFromStudentSchedule(
+  student: Partial<Student>,
+  anoLetivoOverride?: number
+): ResolvedSchedulePlanInfo {
+  const anoLetivo = anoLetivoOverride || Number(student.anoLetivo) || 2026;
+  const tabela = getTabelaPlanosPorAno(anoLetivo);
+  const activeDays = getNormalizedScheduleDays(student);
+  const daysCount = activeDays.length;
+
+  if (student.planoContratual === 'Personalizado') {
+    return {
+      planoContratual: 'Personalizado',
+      valorBase: Number(student.valorPlanoBase) || 0,
+      horarioPadrao: student.horarioPermanenciaLimite || tabela['Personalizado']?.horarioPadrao || '18:30h',
+      planoHora: 'CUSTOMIZADO',
+      isPersonalizado: true,
+      daysCount,
+    };
+  }
+
+  if (student.tipoContrato === 'avulso') {
+    const info = tabela['Diária Integral'];
+    return {
+      planoContratual: 'Diária Integral',
+      valorBase: info.valorBase,
+      horarioPadrao: info.horarioPadrao,
+      planoHora: 'PARCIAL_4H',
+      isPersonalizado: false,
+      daysCount,
+    };
+  }
+
+  let planoContratual: PlanoContratualType = 'Integral Semana (18:30h)';
+
+  if (daysCount === 1) {
+    planoContratual = 'Integral Especial - I (1x 18:30h)';
+  } else if (daysCount === 2) {
+    planoContratual = 'Integral Especial - II (2x 18:30h)';
+  } else if (daysCount === 3) {
+    planoContratual = 'Integral Especial - III (3x 18:30h)';
+  } else if (daysCount === 4) {
+    planoContratual = 'Integral Especial - IV (4x 18:30h)';
+  } else {
+    // 5 dias: verifica se TODOS os 5 dias marcados possuem horário de saída <= 14:00
+    const horarios = student.horariosSaida || {};
+    const allMarkedDaysUntil14 = activeDays.every((day) => {
+      const rawExit = horarios[day] || student.horarioSaida;
+      const mins = parseExitTimeToMinutes(rawExit);
+      return mins !== null && mins <= 14 * 60;
+    });
+    planoContratual = allMarkedDaysUntil14
+      ? 'Integral Especial - V (5x 14:00h)'
+      : 'Integral Semana (18:30h)';
+  }
+
+  const info = tabela[planoContratual];
+  return {
+    planoContratual,
+    valorBase: info.valorBase,
+    horarioPadrao: info.horarioPadrao,
+    planoHora: 'INTEGRAL_8H',
+    isPersonalizado: false,
+    daysCount,
+  };
+}
+
+/**
+ * Identifica se o registro ainda está apenas com o plano padrão genérico
+ * ("Integral Semana (18:30h)" com valor de tabela padrão) ou sem plano definido.
+ */
+export function isGenericDefaultOrUnsetPlan(
+  plano?: string | null,
+  baseVal?: number | null,
+  anoLetivo?: number
+): boolean {
+  const trimmed = (plano || '').trim();
+  if (!trimmed) return true;
+  if (trimmed === 'Integral Semana (18:30h)') {
+    if (baseVal === undefined || baseVal === null || Number(baseVal) <= 0) return true;
+    const defaultBase = (Number(anoLetivo) || 2026) === 2027 ? 1250 : 1120;
+    const numBase = Number(baseVal);
+    return numBase === defaultBase || numBase === 1120 || numBase === 1250;
+  }
+  return false;
+}
+
+export interface EffectiveFinancialTerms {
+  planoContratual: PlanoContratualType;
+  planoHora: FinancialPlanHour;
+  horarioPadrao: string;
+  baseVal: number;
+  extras: number;
+  descontoBolsa: number;
+  descontoPercentual: number;
+  finalVal: number;
+  autoCorrectedFromGeneric: boolean;
+}
+
+/**
+ * Consolida os valores financeiros efetivos de um aluno para exibição e faturamento mensal,
+ * corrigindo automaticamente casos presos no plano genérico padrão quando a ficha possui
+ * 1–4 dias, 5x até 14:00h ou contrato Avulso, sem jamais sobrescrever "Personalizado"
+ * ou ajustes manuais explícitos/bolsas.
+ */
+export function resolveEffectiveFinancialTermsForStudent(
+  student: Student,
+  existing?: StudentFinancialProfile,
+  anoLetivoOverride?: number
+): EffectiveFinancialTerms {
+  const anoLetivo = anoLetivoOverride || student.anoLetivo || 2026;
+  const activeTabela = getTabelaPlanosPorAno(anoLetivo);
+  const fallbackBase = anoLetivo === 2027 ? 1250 : 1120;
+  const isAvulso = student.tipoContrato === 'avulso';
+
+  const extras =
+    student.valorModalidadesExtras != null
+      ? Number(student.valorModalidadesExtras) || 0
+      : existing?.valorModalidadesExtras != null
+      ? Number(existing.valorModalidadesExtras) || 0
+      : student.valorOficinas != null
+      ? Number(student.valorOficinas) || 0
+      : student.oficinasExtras != null
+      ? Number(student.oficinasExtras) || 0
+      : student.valorExtras != null
+      ? Number(student.valorExtras) || 0
+      : calculateModalidadesExtrasTotal(student.activities || []);
+
+  const descontoBolsa =
+    student.descontoBolsa != null && Number(student.descontoBolsa) > 0
+      ? Number(student.descontoBolsa) || 0
+      : existing?.descontoBolsa != null && Number(existing.descontoBolsa) > 0
+      ? Number(existing.descontoBolsa) || 0
+      : Number(student.descontoBolsa ?? existing?.descontoBolsa ?? 0) || 0;
+
+  const isExplicitPersonalizado =
+    student.planoContratual === 'Personalizado' || existing?.planoContratual === 'Personalizado';
+
+  let planoContratual: PlanoContratualType;
+  let baseVal: number;
+  let horarioPadrao: string;
+  let planoHora: FinancialPlanHour;
+  let autoCorrectedFromGeneric = false;
+
+  if (isExplicitPersonalizado) {
+    planoContratual = 'Personalizado';
+    planoHora = 'CUSTOMIZADO';
+    horarioPadrao = student.horarioPermanenciaLimite || activeTabela['Personalizado']?.horarioPadrao || '18:30h';
+    baseVal =
+      student.valorPlanoBase != null && student.valorPlanoBase > 0
+        ? Number(student.valorPlanoBase)
+        : existing?.valorMensalidadeBase != null && existing.valorMensalidadeBase > 0
+        ? Number(existing.valorMensalidadeBase)
+        : Number(student.valorPlanoBase ?? existing?.valorMensalidadeBase ?? 0) || 0;
+  } else {
+    const scheduleResolved = resolveOfficialPlanFromStudentSchedule(student, anoLetivo);
+    const studentIsGeneric = isGenericDefaultOrUnsetPlan(student.planoContratual, student.valorPlanoBase, anoLetivo);
+    const profileIsGeneric = !existing || isGenericDefaultOrUnsetPlan(existing.planoContratual, existing.valorMensalidadeBase, anoLetivo);
+
+    // Se a ficha ou perfil ainda está no genérico (ou vazio), mas a grade exige outro plano oficial
+    if (
+      scheduleResolved.planoContratual !== 'Integral Semana (18:30h)' &&
+      ((studentIsGeneric && profileIsGeneric) ||
+        (!studentIsGeneric &&
+          student.planoContratual === scheduleResolved.planoContratual &&
+          profileIsGeneric))
+    ) {
+      planoContratual = scheduleResolved.planoContratual;
+      baseVal = scheduleResolved.valorBase;
+      horarioPadrao = scheduleResolved.horarioPadrao;
+      planoHora = scheduleResolved.planoHora;
+      autoCorrectedFromGeneric = true;
+    } else {
+      planoContratual = (student.planoContratual ||
+        existing?.planoContratual ||
+        scheduleResolved.planoContratual) as PlanoContratualType;
+      const planoInfo = activeTabela[planoContratual as keyof typeof activeTabela];
+      baseVal =
+        student.valorPlanoBase != null && student.valorPlanoBase > 0
+          ? Number(student.valorPlanoBase)
+          : existing?.valorMensalidadeBase != null && existing.valorMensalidadeBase > 0
+          ? Number(existing.valorMensalidadeBase)
+          : planoInfo?.valorBase ?? fallbackBase;
+      horarioPadrao =
+        student.horarioPermanenciaLimite || planoInfo?.horarioPadrao || (isAvulso ? '18:30h' : '18:30h');
+      planoHora =
+        planoContratual === 'Diária Integral'
+          ? 'PARCIAL_4H'
+          : existing?.planoHora || (isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H');
+    }
+  }
+
+  let finalVal: number;
+  if (descontoBolsa > 0) {
+    finalVal = Math.max(0, baseVal + extras - descontoBolsa);
+  } else if (
+    !autoCorrectedFromGeneric &&
+    existing?.descontoPercentual != null &&
+    Number(existing.descontoPercentual) > 0
+  ) {
+    finalVal = calculateValorTotalMensal(baseVal, extras, Number(existing.descontoPercentual));
+  } else if (
+    autoCorrectedFromGeneric &&
+    existing?.descontoPercentual != null &&
+    Number(existing.descontoPercentual) > 0
+  ) {
+    finalVal = calculateValorTotalMensal(baseVal, extras, Number(existing.descontoPercentual));
+  } else if (
+    !autoCorrectedFromGeneric &&
+    extras > 0 &&
+    (student.valorMensalidadeFinal != null && student.valorMensalidadeFinal > 0)
+  ) {
+    finalVal = Number(student.valorMensalidadeFinal);
+  } else if (
+    !autoCorrectedFromGeneric &&
+    extras > 0 &&
+    (existing?.valorTotalMensal != null && existing.valorTotalMensal > 0)
+  ) {
+    finalVal = Number(existing.valorTotalMensal);
+  } else {
+    finalVal = Math.max(0, baseVal + extras - descontoBolsa);
+  }
+  finalVal = Math.round(finalVal * 100) / 100;
+
+  const descontoPercentual =
+    descontoBolsa > 0 && baseVal > 0
+      ? Math.round((descontoBolsa / baseVal) * 100)
+      : Number(existing?.descontoPercentual || 0);
+
+  return {
+    planoContratual,
+    planoHora,
+    horarioPadrao,
+    baseVal,
+    extras,
+    descontoBolsa,
+    descontoPercentual,
+    finalVal,
+    autoCorrectedFromGeneric,
+  };
+}
+
 /**
  * Gera um perfil financeiro padrão para um estudante caso ainda não possua registro no Firestore.
  */
@@ -756,38 +1047,10 @@ export function buildDefaultFinancialProfile(
   student: Student,
   anoLetivo: number = student.anoLetivo || 2026
 ): StudentFinancialProfile {
-  const isAvulso = student.tipoContrato === 'avulso';
-  const plano: FinancialPlanHour = isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H';
-  const tabela = getTabelaPlanosPorAno(anoLetivo);
-  const planoContratual =
-    student.planoContratual || (isAvulso ? 'Diária Integral' : 'Integral Semana (18:30h)');
-  const planoInfo = tabela[planoContratual as keyof typeof tabela];
-  const fallbackBase = anoLetivo === 2027 ? 1250 : 1120;
-
-  const base =
-    student.valorPlanoBase !== undefined && student.valorPlanoBase > 0
-      ? student.valorPlanoBase
-      : planoInfo?.valorBase ?? fallbackBase;
-
-  const extras =
-    student.valorModalidadesExtras !== undefined
-      ? student.valorModalidadesExtras
-      : student.valorOficinas !== undefined
-      ? student.valorOficinas
-      : student.oficinasExtras !== undefined
-      ? student.oficinasExtras
-      : student.valorExtras !== undefined
-      ? student.valorExtras
-      : calculateModalidadesExtrasTotal(student.activities || []);
-
-  const descontoBolsa = Number(student.descontoBolsa) || 0;
-  const total =
-    student.valorMensalidadeFinal !== undefined && student.valorMensalidadeFinal > 0
-      ? student.valorMensalidadeFinal
-      : Math.max(0, base + extras - descontoBolsa);
-
-  const descontoPercentual = base > 0 ? Math.round((descontoBolsa / base) * 100) : 0;
-  const isIsento = descontoBolsa >= base + extras && base + extras > 0;
+  const terms = resolveEffectiveFinancialTermsForStudent(student, undefined, anoLetivo);
+  const isIsento =
+    (terms.descontoBolsa >= terms.baseVal + terms.extras && terms.baseVal + terms.extras > 0) ||
+    terms.descontoPercentual >= 100;
 
   return {
     id: `${anoLetivo}_${student.id}`,
@@ -795,22 +1058,22 @@ export function buildDefaultFinancialProfile(
     studentName: student.name,
     turma: student.turma,
     anoLetivo,
-    planoHora: plano,
-    valorMensalidadeBase: base,
-    valorModalidadesExtras: extras,
-    oficinasExtras: extras,
-    valorOficinas: extras,
-    valorExtras: extras,
-    descontoPercentual,
-    valorTotalMensal: total,
+    planoHora: terms.planoHora,
+    valorMensalidadeBase: terms.baseVal,
+    valorModalidadesExtras: terms.extras,
+    oficinasExtras: terms.extras,
+    valorOficinas: terms.extras,
+    valorExtras: terms.extras,
+    descontoPercentual: terms.descontoPercentual,
+    valorTotalMensal: terms.finalVal,
     diaVencimento: 10,
     statusPagamento: isIsento ? 'ISENTO' : 'EM_DIA',
     mesReferencia: `${anoLetivo}-08`,
     formaPagamentoPadrao: 'Boleto',
-    observacoes: `Plano Contratual: ${planoContratual}`,
+    observacoes: `Plano Contratual: ${terms.planoContratual}`,
     studentStatus: student.status || 'ativo',
-    planoContratual,
-    descontoBolsa,
+    planoContratual: terms.planoContratual,
+    descontoBolsa: terms.descontoBolsa,
     updatedAt: new Date().toISOString(),
     updatedBy: 'Sincronização Contratual Dinâmica',
   };
@@ -2400,3 +2663,406 @@ export function calculateDREMonthlyMatrix(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// SINCRONIZAÇÃO DE PLANOS CONTRATUAIS COM AS FICHAS DOS ALUNOS
+// ---------------------------------------------------------------------------
+
+/**
+ * Propaga imediatamente os dados contratuais da ficha de um aluno (cadastro ou edição)
+ * para o seu respectivo documento em `studentFinancialProfiles` no Firestore e cache local,
+ * preservando metadados financeiros (vencimento, status de pagamento, forma de pagamento, bolsas).
+ */
+export async function syncSingleStudentFinancialProfile(
+  student: Student,
+  updatedBy: string = 'Ficha do Aluno'
+): Promise<StudentFinancialProfile> {
+  const anoLetivo = Number(student.anoLetivo) || 2026;
+  const docId = `${anoLetivo}_${student.id}`;
+
+  const localProfiles = loadLocalFinancialProfiles();
+  let existing = localProfiles.find(
+    (p) => p.id === docId || (p.studentId === student.id && Number(p.anoLetivo) === anoLetivo)
+  );
+
+  if (!existing) {
+    try {
+      const snap = await getDoc(doc(db, FINANCIAL_COLLECTION, docId));
+      if (snap.exists()) {
+        existing = { id: snap.id, ...snap.data() } as StudentFinancialProfile;
+      }
+    } catch {
+      // fallback silencioso ao cache local
+    }
+  }
+
+  const resolvedSchedule = resolveOfficialPlanFromStudentSchedule(student, anoLetivo);
+  const planoContratual = (student.planoContratual || resolvedSchedule.planoContratual) as PlanoContratualType;
+  const isPersonalizado = planoContratual === 'Personalizado';
+  const baseVal = isPersonalizado
+    ? Number(student.valorPlanoBase ?? existing?.valorMensalidadeBase ?? 0) || 0
+    : student.valorPlanoBase != null && student.valorPlanoBase > 0
+    ? Number(student.valorPlanoBase)
+    : resolvedSchedule.valorBase;
+
+  const extras =
+    student.valorModalidadesExtras != null
+      ? Number(student.valorModalidadesExtras) || 0
+      : existing?.valorModalidadesExtras != null
+      ? Number(existing.valorModalidadesExtras) || 0
+      : student.valorOficinas != null
+      ? Number(student.valorOficinas) || 0
+      : student.oficinasExtras != null
+      ? Number(student.oficinasExtras) || 0
+      : student.valorExtras != null
+      ? Number(student.valorExtras) || 0
+      : 0;
+
+  const descontoBolsa =
+    student.descontoBolsa != null
+      ? Number(student.descontoBolsa) || 0
+      : Number(existing?.descontoBolsa) || 0;
+
+  const descontoPercentual =
+    descontoBolsa > 0 && baseVal > 0
+      ? Math.round((descontoBolsa / baseVal) * 100)
+      : Number(existing?.descontoPercentual || 0);
+
+  let totalVal =
+    descontoBolsa > 0
+      ? Math.max(0, baseVal + extras - descontoBolsa)
+      : descontoPercentual > 0
+      ? calculateValorTotalMensal(baseVal, extras, descontoPercentual)
+      : Math.max(0, baseVal + extras);
+  totalVal = Math.round(totalVal * 100) / 100;
+
+  const isIsento = totalVal === 0 && (descontoBolsa > 0 || descontoPercentual >= 100);
+  const statusPagamento = isIsento
+    ? 'ISENTO'
+    : existing?.statusPagamento === 'ISENTO'
+    ? 'EM_DIA'
+    : existing?.statusPagamento || 'EM_DIA';
+
+  const planoHora: FinancialPlanHour =
+    planoContratual === 'Personalizado'
+      ? 'CUSTOMIZADO'
+      : planoContratual === 'Diária Integral' || student.tipoContrato === 'avulso'
+      ? 'PARCIAL_4H'
+      : 'INTEGRAL_8H';
+
+  const nextProfile: StudentFinancialProfile = {
+    ...(existing || {}),
+    id: docId,
+    studentId: student.id,
+    studentName: student.name,
+    turma: student.turma,
+    anoLetivo,
+    planoHora,
+    planoContratual,
+    valorMensalidadeBase: baseVal,
+    valorModalidadesExtras: extras,
+    oficinasExtras: extras,
+    valorOficinas: extras,
+    valorExtras: extras,
+    descontoBolsa,
+    descontoPercentual,
+    valorTotalMensal: totalVal,
+    diaVencimento: existing?.diaVencimento || 10,
+    statusPagamento,
+    mesReferencia: existing?.mesReferencia || `${anoLetivo}-08`,
+    formaPagamentoPadrao: existing?.formaPagamentoPadrao || 'Boleto',
+    observacoes: `Plano Contratual: ${planoContratual}`,
+    studentStatus: student.status || 'ativo',
+    updatedAt: new Date().toISOString(),
+    updatedBy,
+  };
+
+  await saveFinancialProfileToFirestore(nextProfile);
+  return nextProfile;
+}
+
+export interface StudentFinancialSyncDetail {
+  studentId: string;
+  name: string;
+  turma: string;
+  anoLetivo: number;
+  status: string;
+  tipoContrato: string;
+  daysCount: number;
+  fromPlano: string;
+  toPlano: string;
+  fromBase: number;
+  toBase: number;
+  fromTotal: number;
+  toTotal: number;
+  createdFinancialProfile: boolean;
+}
+
+export interface StudentFinancialSyncResult {
+  anoLetivo: number;
+  totalChecked: number;
+  adjustedCount: number;
+  skippedPersonalizado: number;
+  adjustedDetails: StudentFinancialSyncDetail[];
+  updatedStudents: Student[];
+  updatedProfiles: StudentFinancialProfile[];
+}
+
+/**
+ * Revalida todos os alunos do ano letivo especificado conforme Dias de Frequência,
+ * Horários de Saída e Tipo de Contrato da ficha, atualizando em lote no Firestore
+ * (`alunos`, `students` e `studentFinancialProfiles`) apenas os cadastros com divergência.
+ * Nunca sobrescreve contratos explicitamente marcados como "Personalizado".
+ */
+export async function syncStudentsWithFinancial(
+  anoLetivo: number = 2026,
+  providedStudents?: Student[],
+  providedProfiles?: StudentFinancialProfile[],
+  updatedBy: string = 'Sincronização Automática Planos × Fichas'
+): Promise<StudentFinancialSyncResult> {
+  const allStudents =
+    providedStudents && providedStudents.length > 0 ? [...providedStudents] : loadStudents();
+  const yearStudents = allStudents.filter((s) => (Number(s.anoLetivo) || 2026) === Number(anoLetivo));
+
+  let remoteProfiles: StudentFinancialProfile[] = [];
+  if (providedProfiles && providedProfiles.length > 0) {
+    remoteProfiles = providedProfiles.filter((p) => Number(p.anoLetivo) === Number(anoLetivo));
+  } else {
+    remoteProfiles = await loadFinancialProfilesFromFirestore(anoLetivo);
+  }
+
+  const profileMap = new Map<string, StudentFinancialProfile>();
+  remoteProfiles.forEach((p) => {
+    if (p && p.studentId && Number(p.anoLetivo) === Number(anoLetivo)) {
+      profileMap.set(p.studentId, p);
+    }
+  });
+
+  const nowIso = new Date().toISOString();
+  const adjustedDetails: StudentFinancialSyncDetail[] = [];
+  const studentsToPersist: Student[] = [];
+  const profilesToPersist: StudentFinancialProfile[] = [];
+  const updatedStudentMap = new Map<string, Student>();
+  let skippedPersonalizado = 0;
+
+  for (const student of yearStudents) {
+    const existingProfile = profileMap.get(student.id);
+
+    // Nunca sobrescrever alunos com plano explicitamente "Personalizado"
+    if (
+      student.planoContratual === 'Personalizado' ||
+      existingProfile?.planoContratual === 'Personalizado'
+    ) {
+      skippedPersonalizado++;
+      continue;
+    }
+
+    const resolved = resolveOfficialPlanFromStudentSchedule(student, anoLetivo);
+
+    // Preserva bolsas e extras já aplicados (sem inventar taxas para oficinas inclusas)
+    const extras =
+      existingProfile?.valorModalidadesExtras != null
+        ? Number(existingProfile.valorModalidadesExtras) || 0
+        : student.valorModalidadesExtras != null
+        ? Number(student.valorModalidadesExtras) || 0
+        : student.valorOficinas != null
+        ? Number(student.valorOficinas) || 0
+        : student.oficinasExtras != null
+        ? Number(student.oficinasExtras) || 0
+        : student.valorExtras != null
+        ? Number(student.valorExtras) || 0
+        : 0;
+
+    const descontoBolsa =
+      student.descontoBolsa != null && Number(student.descontoBolsa) > 0
+        ? Number(student.descontoBolsa) || 0
+        : Number(existingProfile?.descontoBolsa) || 0;
+
+    const descontoPercentual =
+      descontoBolsa > 0 && resolved.valorBase > 0
+        ? Math.round((descontoBolsa / resolved.valorBase) * 100)
+        : Number(existingProfile?.descontoPercentual || 0);
+
+    let newTotal =
+      descontoBolsa > 0
+        ? Math.max(0, resolved.valorBase + extras - descontoBolsa)
+        : descontoPercentual > 0
+        ? calculateValorTotalMensal(resolved.valorBase, extras, descontoPercentual)
+        : Math.max(0, resolved.valorBase + extras);
+    newTotal = Math.round(newTotal * 100) / 100;
+
+    const curStudentPlano = student.planoContratual || '';
+    const curStudentBase = student.valorPlanoBase ?? null;
+    const curStudentLimit = student.horarioPermanenciaLimite || '';
+    const curStudentFinal = student.valorMensalidadeFinal ?? null;
+
+    const curProfPlano = existingProfile?.planoContratual || '';
+    const curProfBase = existingProfile?.valorMensalidadeBase ?? null;
+    const curProfTotal = existingProfile?.valorTotalMensal ?? null;
+
+    const studentNeedsUpdate =
+      curStudentPlano !== resolved.planoContratual ||
+      curStudentBase !== resolved.valorBase ||
+      curStudentLimit !== resolved.horarioPadrao ||
+      curStudentFinal !== newTotal;
+
+    const profileNeedsUpdate =
+      !existingProfile ||
+      curProfPlano !== resolved.planoContratual ||
+      curProfBase !== resolved.valorBase ||
+      curProfTotal !== newTotal ||
+      existingProfile.studentStatus !== (student.status || 'ativo') ||
+      existingProfile.turma !== student.turma ||
+      existingProfile.studentName !== student.name;
+
+    if (!studentNeedsUpdate && !profileNeedsUpdate) {
+      continue;
+    }
+
+    const fromPlano = curProfPlano || curStudentPlano || '(Não definido)';
+    const fromBase = Number(curProfBase ?? curStudentBase ?? 0);
+    const fromTotal = Number(curProfTotal ?? curStudentFinal ?? 0);
+
+    const updatedStudent: Student = {
+      ...student,
+      planoContratual: resolved.planoContratual,
+      horarioPermanenciaLimite: resolved.horarioPadrao,
+      valorPlanoBase: resolved.valorBase,
+      descontoBolsa,
+      valorModalidadesExtras: extras,
+      oficinasExtras: extras,
+      valorOficinas: extras,
+      valorExtras: extras,
+      valorMensalidadeFinal: newTotal,
+      updatedAt: nowIso,
+    };
+
+    const isIsento = newTotal === 0 && (descontoBolsa > 0 || descontoPercentual >= 100);
+    const nextStatusPagamento = isIsento
+      ? 'ISENTO'
+      : existingProfile?.statusPagamento === 'ISENTO'
+      ? 'EM_DIA'
+      : existingProfile?.statusPagamento || 'EM_DIA';
+
+    const docId = `${anoLetivo}_${student.id}`;
+    const updatedProfile: StudentFinancialProfile = {
+      ...(existingProfile || {}),
+      id: docId,
+      studentId: student.id,
+      studentName: student.name,
+      turma: student.turma,
+      anoLetivo,
+      planoHora: resolved.planoHora,
+      planoContratual: resolved.planoContratual,
+      valorMensalidadeBase: resolved.valorBase,
+      valorModalidadesExtras: extras,
+      oficinasExtras: extras,
+      valorOficinas: extras,
+      valorExtras: extras,
+      descontoBolsa,
+      descontoPercentual,
+      valorTotalMensal: newTotal,
+      diaVencimento: existingProfile?.diaVencimento || 10,
+      statusPagamento: nextStatusPagamento,
+      mesReferencia: existingProfile?.mesReferencia || `${anoLetivo}-08`,
+      formaPagamentoPadrao: existingProfile?.formaPagamentoPadrao || 'Boleto',
+      observacoes: `Plano Contratual: ${resolved.planoContratual}`,
+      studentStatus: student.status || 'ativo',
+      updatedAt: nowIso,
+      updatedBy,
+    };
+
+    studentsToPersist.push(updatedStudent);
+    profilesToPersist.push(updatedProfile);
+    updatedStudentMap.set(updatedStudent.id, updatedStudent);
+    profileMap.set(updatedProfile.studentId, updatedProfile);
+
+    // Só contabiliza no relatório detalhado se houve mudança relevante de plano/valor (ou perfil inexistente/divergente)
+    if (
+      fromPlano !== resolved.planoContratual ||
+      fromBase !== resolved.valorBase ||
+      fromTotal !== newTotal ||
+      !existingProfile ||
+      curStudentPlano !== resolved.planoContratual ||
+      curStudentBase !== resolved.valorBase ||
+      curStudentFinal !== newTotal
+    ) {
+      adjustedDetails.push({
+        studentId: student.id,
+        name: student.name,
+        turma: student.turma,
+        anoLetivo,
+        status: student.status || 'ativo',
+        tipoContrato: student.tipoContrato || 'regular',
+        daysCount: resolved.daysCount,
+        fromPlano,
+        toPlano: resolved.planoContratual,
+        fromBase,
+        toBase: resolved.valorBase,
+        fromTotal,
+        toTotal: newTotal,
+        createdFinancialProfile: !existingProfile,
+      });
+    }
+  }
+
+  // Persistência em lote no Firestore (chunk 100 alunos = máx 300 ops por batch)
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < studentsToPersist.length; i += CHUNK_SIZE) {
+    const studentChunk = studentsToPersist.slice(i, i + CHUNK_SIZE);
+    const profileChunk = profilesToPersist.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+
+    studentChunk.forEach((st) => {
+      const patch = {
+        planoContratual: st.planoContratual,
+        horarioPermanenciaLimite: st.horarioPermanenciaLimite,
+        valorPlanoBase: st.valorPlanoBase,
+        descontoBolsa: st.descontoBolsa ?? 0,
+        valorModalidadesExtras: st.valorModalidadesExtras ?? 0,
+        oficinasExtras: st.oficinasExtras ?? 0,
+        valorOficinas: st.valorOficinas ?? 0,
+        valorExtras: st.valorExtras ?? 0,
+        valorMensalidadeFinal: st.valorMensalidadeFinal,
+        updatedAt: nowIso,
+      };
+      batch.set(doc(db, 'alunos', st.id), patch, { merge: true });
+      batch.set(doc(db, 'students', st.id), patch, { merge: true });
+    });
+
+    profileChunk.forEach((pf) => {
+      const cleanPf = Object.fromEntries(
+        Object.entries(pf).filter(([, v]) => v !== undefined)
+      );
+      batch.set(doc(db, FINANCIAL_COLLECTION, pf.id), cleanPf, { merge: true });
+    });
+
+    await batch.commit();
+  }
+
+  // Atualiza caches locais e dispara evento de sincronização
+  const nextAllStudents = allStudents.map((s) => updatedStudentMap.get(s.id) || s);
+  saveStudents(nextAllStudents);
+
+  const existingLocalProfiles = loadLocalFinancialProfiles();
+  const otherYearsProfiles = existingLocalProfiles.filter(
+    (p) => Number(p.anoLetivo) !== Number(anoLetivo)
+  );
+  const nextYearProfiles = Array.from(profileMap.values());
+  saveLocalFinancialProfiles([...otherYearsProfiles, ...nextYearProfiles]);
+
+  if (studentsToPersist.length > 0) {
+    broadcastSyncEvent('SYNC_STUDENTS', nextAllStudents);
+  }
+
+  return {
+    anoLetivo,
+    totalChecked: yearStudents.length,
+    adjustedCount: adjustedDetails.length,
+    skippedPersonalizado,
+    adjustedDetails,
+    updatedStudents: nextAllStudents,
+    updatedProfiles: nextYearProfiles,
+  };
+}
+

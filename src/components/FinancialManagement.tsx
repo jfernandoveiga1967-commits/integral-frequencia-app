@@ -98,6 +98,8 @@ import {
   calculateDREMonthlyMatrix,
   DREMonthlySummary,
   MONTH_NAMES_DRE,
+  resolveEffectiveFinancialTermsForStudent,
+  syncStudentsWithFinancial,
 } from '../services/financialService';
 import {
   saveStudentToFirestore,
@@ -224,6 +226,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     filename: '',
     title: '',
   });
+
+  const [isSyncingPlans, setIsSyncingPlans] = useState<boolean>(false);
 
   // Notificações Toast
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -382,56 +386,21 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     });
 
     const list: StudentFinancialProfile[] = [];
-    const activeTabela = getTabelaPlanosPorAno(selectedAnoLetivo);
-    const fallbackBase = selectedAnoLetivo === 2027 ? 1250 : 1120;
 
     yearStudents.forEach((student) => {
       const existing = profileMap.get(student.id);
-      const isAvulso = student.tipoContrato === 'avulso';
-      const planoContratual =
-        student.planoContratual ||
-        existing?.planoContratual ||
-        (isAvulso ? 'Diária Integral' : 'Integral Semana (18:30h)');
-      const planoInfo = activeTabela[planoContratual as keyof typeof activeTabela];
+      const terms = resolveEffectiveFinancialTermsForStudent(student, existing, selectedAnoLetivo);
 
-      const baseVal =
-        student.valorPlanoBase != null && student.valorPlanoBase > 0
-          ? student.valorPlanoBase
-          : existing?.valorMensalidadeBase != null && existing.valorMensalidadeBase > 0
-          ? existing.valorMensalidadeBase
-          : planoInfo?.valorBase ?? fallbackBase;
+      const isIsento =
+        (terms.descontoBolsa >= terms.baseVal + terms.extras && terms.baseVal + terms.extras > 0) ||
+        terms.descontoPercentual >= 100 ||
+        (terms.finalVal === 0 && terms.baseVal > 0);
 
-      const extras =
-        student.valorModalidadesExtras != null
-          ? Number(student.valorModalidadesExtras) || 0
-          : existing?.valorModalidadesExtras != null
-          ? Number(existing.valorModalidadesExtras) || 0
-          : student.valorOficinas != null
-          ? Number(student.valorOficinas) || 0
-          : student.oficinasExtras != null
-          ? Number(student.oficinasExtras) || 0
-          : student.valorExtras != null
-          ? Number(student.valorExtras) || 0
-          : calculateModalidadesExtrasTotal(student.activities || []);
-
-      const descontoBolsa =
-        student.descontoBolsa != null
-          ? Number(student.descontoBolsa) || 0
-          : existing?.descontoBolsa != null
-          ? Number(existing.descontoBolsa) || 0
-          : 0;
-
-      const finalVal =
-        extras === 0
-          ? Math.max(0, baseVal - descontoBolsa)
-          : student.valorMensalidadeFinal != null && student.valorMensalidadeFinal > 0
-          ? student.valorMensalidadeFinal
-          : existing?.valorTotalMensal != null && existing.valorTotalMensal > 0
-          ? existing.valorTotalMensal
-          : Math.max(0, baseVal + extras - descontoBolsa);
-
-      const isIsento = descontoBolsa >= (baseVal + extras) && (baseVal + extras) > 0;
-      const statusPagamento = existing?.statusPagamento || (isIsento ? 'ISENTO' : 'EM_DIA');
+      const statusPagamento = isIsento
+        ? 'ISENTO'
+        : existing?.statusPagamento === 'ISENTO'
+        ? 'EM_DIA'
+        : existing?.statusPagamento || 'EM_DIA';
 
       list.push({
         id: existing?.id || `${selectedAnoLetivo}_${student.id}`,
@@ -439,23 +408,26 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         studentName: student.name,
         turma: student.turma,
         anoLetivo: selectedAnoLetivo,
-        planoHora: isAvulso ? 'PARCIAL_4H' : 'INTEGRAL_8H',
-        valorMensalidadeBase: baseVal,
-        valorModalidadesExtras: extras,
-        oficinasExtras: extras,
-        valorOficinas: extras,
-        valorExtras: extras,
-        descontoPercentual: baseVal > 0 ? Math.round((descontoBolsa / baseVal) * 100) : 0,
-        valorTotalMensal: finalVal,
+        planoHora: terms.planoHora,
+        valorMensalidadeBase: terms.baseVal,
+        valorModalidadesExtras: terms.extras,
+        oficinasExtras: terms.extras,
+        valorOficinas: terms.extras,
+        valorExtras: terms.extras,
+        descontoPercentual: terms.descontoPercentual,
+        valorTotalMensal: terms.finalVal,
         diaVencimento: existing?.diaVencimento || 10,
         statusPagamento,
         mesReferencia: existing?.mesReferencia || `${selectedAnoLetivo}-08`,
         dataUltimoPagamento: existing?.dataUltimoPagamento,
         formaPagamentoPadrao: existing?.formaPagamentoPadrao || 'Boleto',
-        observacoes: existing?.observacoes || `Plano Contratual: ${planoContratual}`,
+        observacoes:
+          terms.autoCorrectedFromGeneric
+            ? `Plano Contratual: ${terms.planoContratual} (Ajustado automaticamente pela ficha)`
+            : existing?.observacoes || `Plano Contratual: ${terms.planoContratual}`,
         studentStatus: student.status || 'ativo',
-        planoContratual,
-        descontoBolsa,
+        planoContratual: terms.planoContratual,
+        descontoBolsa: terms.descontoBolsa,
         updatedAt: existing?.updatedAt || new Date().toISOString(),
         updatedBy: existing?.updatedBy || 'Sincronização Contratual Dinâmica',
       });
@@ -625,6 +597,45 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   // -------------------------------------------------------------------------
   // HANDLERS: RECEITAS E CONTRATOS
   // -------------------------------------------------------------------------
+  const handleSyncPlansWithSheets = async () => {
+    if (isSyncingPlans) return;
+    setIsSyncingPlans(true);
+    try {
+      const result = await syncStudentsWithFinancial(
+        selectedAnoLetivo,
+        students,
+        financialProfiles,
+        currentUser?.name || 'Coordenação'
+      );
+
+      setFinancialProfiles((prev) => {
+        const otherYears = prev.filter((p) => Number(p.anoLetivo) !== Number(selectedAnoLetivo));
+        return [...otherYears, ...result.updatedProfiles];
+      });
+
+      if (onUpdateStudents && result.updatedStudents.length > 0) {
+        onUpdateStudents(result.updatedStudents);
+      }
+
+      if (result.adjustedCount > 0) {
+        showToast(
+          `Sincronização concluída (${selectedAnoLetivo}): ${result.adjustedCount} cadastro(s) ajustado(s) conforme as fichas dos alunos.`,
+          'success'
+        );
+      } else {
+        showToast(
+          `Todos os ${result.totalChecked} aluno(s) de ${selectedAnoLetivo} já estão sincronizados com suas fichas.`,
+          'success'
+        );
+      }
+    } catch (err) {
+      console.error('Erro ao sincronizar planos com fichas:', err);
+      showToast('Falha ao sincronizar planos com as fichas no Firestore.', 'error');
+    } finally {
+      setIsSyncingPlans(false);
+    }
+  };
+
   const handleOpenEditContract = (profile: StudentFinancialProfile) => {
     setEditingProfile({ ...profile });
   };
@@ -1541,6 +1552,21 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                     <option value="ISENTO">Isento ({metrics.totalIsentos})</option>
                   </select>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleSyncPlansWithSheets}
+                  disabled={isSyncingPlans}
+                  title="Revalida dias de frequência, horários de saída e tipo de contrato das fichas e ajusta os planos financeiros no Firestore (preserva planos Personalizados)"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-2xl text-xs font-bold border border-indigo-200 bg-indigo-50/80 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 disabled:opacity-60 transition-all cursor-pointer"
+                >
+                  {isSyncingPlans ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                  ) : (
+                    <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                  )}
+                  <span>{isSyncingPlans ? 'Sincronizando...' : '🔄 Sincronizar Planos com Fichas'}</span>
+                </button>
 
                 <span className="text-xs text-slate-400 font-medium ml-auto md:ml-0">
                   {filteredProfiles.length} aluno(s)

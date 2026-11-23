@@ -60,6 +60,7 @@ import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal'
 import { UserProfileModal } from './components/UserProfile';
 import { subscribePendingFeedbacksForUser } from './services/feedbackService';
 import { deleteUser } from './services/userService';
+import { syncSingleStudentFinancialProfile } from './services/financialService';
 import { SofiaAssistant } from './components/SofiaAssistant';
 import { getStoredSofiaAdminAlert, clearStoredSofiaAdminAlert, SOFIA_ADMIN_ALERT_EVENT } from './services/sofiaService';
 import {
@@ -1191,6 +1192,9 @@ export default function App() {
     // Persiste primeiro no Firestore e propaga qualquer erro para a interface (evita perda silenciosa)
     try {
       await saveStudentToFirestore(newStudent);
+      await syncSingleStudentFinancialProfile(newStudent, currentUser?.name || 'Cadastro do Aluno').catch((finErr) =>
+        console.warn('Aviso ao sincronizar perfil financeiro após cadastro:', finErr)
+      );
     } catch (err) {
       console.error('Error adding student to Firestore:', err);
       throw err;
@@ -1251,6 +1255,11 @@ export default function App() {
 
     try {
       await Promise.allSettled(newStudentsList.map((s) => saveStudentToFirestore(s)));
+      await Promise.allSettled(
+        newStudentsList.map((s) =>
+          syncSingleStudentFinancialProfile(s, currentUser?.name || 'Cadastro em Lote')
+        )
+      );
     } catch (err) {
       console.error('Error batch adding students to Firestore:', err);
     }
@@ -1267,6 +1276,9 @@ export default function App() {
     // Persiste primeiro no Firestore e propaga qualquer falha para a UI em vez de silenciar
     try {
       await saveStudentToFirestore(mergedStudent);
+      await syncSingleStudentFinancialProfile(mergedStudent, currentUser?.name || 'Edição do Aluno').catch((finErr) =>
+        console.warn('Aviso ao sincronizar perfil financeiro após edição:', finErr)
+      );
     } catch (err) {
       console.error('Error updating student in Firestore:', err);
       throw err;

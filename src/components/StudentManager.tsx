@@ -17,6 +17,7 @@ import { db, batchDeleteStudentsFromFirestore } from '../firebase';
 import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS, getStudentDeduplicationKey, loadSchedules, loadSemanarioPlans, syncStudentActivitiesFromSchedule, areActivityListsEqual } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
+import { resolveOfficialPlanFromStudentSchedule } from '../services/financialService';
 import {
   E1ExtractedStudent,
   readE1FileAsText,
@@ -215,6 +216,39 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const [newHorariosSaida, setNewHorariosSaida] = useState<Partial<Record<DayOfWeek, string>>>({});
   const [isSavingSingle, setIsSavingSingle] = useState(false);
 
+  // Plano Contratual & Financeiro do Novo Aluno (Mapeamento Dinâmico 2026 vs 2027)
+  const [newPlanoContratual, setNewPlanoContratual] = useState<PlanoContratualType>('Integral Semana (18:30h)');
+  const [newHorarioPermanenciaLimite, setNewHorarioPermanenciaLimite] = useState<string>('18:30h');
+  const [newValorPlanoBase, setNewValorPlanoBase] = useState<number>(() => {
+    return getTabelaPlanosPorAno(2026)['Integral Semana (18:30h)'].valorBase; // R$ 1.120,00
+  });
+  const [newDescontoBolsa, setNewDescontoBolsa] = useState<number>(0);
+
+  const syncNewStudentOfficialPlan = React.useCallback(
+    (params: {
+      tipoContrato: ContractType;
+      diasFrequencia: DayOfWeek[];
+      diasContratados: DayOfWeek[];
+      horariosSaida: Partial<Record<DayOfWeek, string>>;
+      anoLetivo: number;
+      currentPlano: PlanoContratualType;
+    }) => {
+      if (params.currentPlano === 'Personalizado') return;
+      const resolved = resolveOfficialPlanFromStudentSchedule({
+        tipoContrato: params.tipoContrato,
+        diasFrequencia: params.diasFrequencia,
+        diasContratados: params.diasContratados,
+        horariosSaida: params.horariosSaida,
+        anoLetivo: params.anoLetivo,
+        planoContratual: params.currentPlano,
+      });
+      setNewPlanoContratual(resolved.planoContratual);
+      setNewValorPlanoBase(resolved.valorBase);
+      setNewHorarioPermanenciaLimite(resolved.horarioPadrao);
+    },
+    []
+  );
+
   const applyNewStudentScheduleSync = React.useCallback(
     (
       targetTurma: TurmaType | string,
@@ -242,21 +276,29 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       setNewDiasContratados(updatedDays);
     }
     applyNewStudentScheduleSync(newTurma, updatedDays, newHorariosSaida, newHasReforco);
+    syncNewStudentOfficialPlan({
+      tipoContrato: newTipoContrato,
+      diasFrequencia: updatedDays,
+      diasContratados: newTipoContrato === 'avulso' ? updatedDays : newDiasContratados,
+      horariosSaida: newHorariosSaida,
+      anoLetivo: newAnoLetivo,
+      currentPlano: newPlanoContratual,
+    });
   };
 
   const handleNewHorariosChange = (updatedHorarios: Partial<Record<DayOfWeek, string>>) => {
     setNewHorariosSaida(updatedHorarios);
     const activeDays = newTipoContrato === 'avulso' ? newDiasContratados : newDiasFrequencia;
     applyNewStudentScheduleSync(newTurma, activeDays, updatedHorarios, newHasReforco);
+    syncNewStudentOfficialPlan({
+      tipoContrato: newTipoContrato,
+      diasFrequencia: newDiasFrequencia,
+      diasContratados: newDiasContratados,
+      horariosSaida: updatedHorarios,
+      anoLetivo: newAnoLetivo,
+      currentPlano: newPlanoContratual,
+    });
   };
-
-  // Plano Contratual & Financeiro do Novo Aluno (Mapeamento Dinâmico 2026 vs 2027)
-  const [newPlanoContratual, setNewPlanoContratual] = useState<PlanoContratualType>('Integral Semana (18:30h)');
-  const [newHorarioPermanenciaLimite, setNewHorarioPermanenciaLimite] = useState<string>('18:30h');
-  const [newValorPlanoBase, setNewValorPlanoBase] = useState<number>(() => {
-    return getTabelaPlanosPorAno(2026)['Integral Semana (18:30h)'].valorBase; // R$ 1.120,00
-  });
-  const [newDescontoBolsa, setNewDescontoBolsa] = useState<number>(0);
 
   const handleSelectNewPlano = (plano: PlanoContratualType) => {
     setNewPlanoContratual(plano);
@@ -273,12 +315,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const handleChangeNewAnoLetivo = (ano: number) => {
     setNewAnoLetivo(ano);
     if (newPlanoContratual !== 'Personalizado') {
-      const tabela = getTabelaPlanosPorAno(ano);
-      const info = tabela[newPlanoContratual];
-      if (info) {
-        setNewValorPlanoBase(info.valorBase);
-        setNewHorarioPermanenciaLimite(info.horarioPadrao);
-      }
+      const resolved = resolveOfficialPlanFromStudentSchedule({
+        tipoContrato: newTipoContrato,
+        diasFrequencia: newDiasFrequencia,
+        diasContratados: newDiasContratados,
+        horariosSaida: newHorariosSaida,
+        anoLetivo: ano,
+        planoContratual: newPlanoContratual,
+      });
+      setNewPlanoContratual(resolved.planoContratual);
+      setNewValorPlanoBase(resolved.valorBase);
+      setNewHorarioPermanenciaLimite(resolved.horarioPadrao);
     }
   };
 
@@ -450,6 +497,20 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           next.horariosSaida,
           hasReforco
         );
+
+        if (next.planoContratual !== 'Personalizado') {
+          const resolvedPlan = resolveOfficialPlanFromStudentSchedule(next);
+          const desconto = next.descontoBolsa || 0;
+          return {
+            ...next,
+            activities: syncedActs,
+            planoContratual: resolvedPlan.planoContratual,
+            valorPlanoBase: resolvedPlan.valorBase,
+            horarioPermanenciaLimite: resolvedPlan.horarioPadrao,
+            valorMensalidadeFinal: Math.max(0, resolvedPlan.valorBase - desconto),
+          };
+        }
+
         return {
           ...next,
           activities: syncedActs,
@@ -616,6 +677,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     }
     setEditFormError(null);
     const today = toISODateString(new Date());
+    const initialAnoLetivo = student.anoLetivo || selectedAnoLetivo || 2026;
+    const initialSchedulePlan = resolveOfficialPlanFromStudentSchedule(student, initialAnoLetivo);
+    const resolvedPlanoContratual = student.planoContratual || initialSchedulePlan.planoContratual;
+    const resolvedTabela = getTabelaPlanosPorAno(initialAnoLetivo);
+    const resolvedBase =
+      student.valorPlanoBase != null
+        ? student.valorPlanoBase
+        : resolvedPlanoContratual === 'Personalizado'
+        ? 0
+        : resolvedTabela[resolvedPlanoContratual]?.valorBase ?? initialSchedulePlan.valorBase;
+    const resolvedHorario =
+      student.horarioPermanenciaLimite ||
+      resolvedTabela[resolvedPlanoContratual]?.horarioPadrao ||
+      initialSchedulePlan.horarioPadrao;
+
     const prepared: Student = {
       ...student,
       tipoContrato: student.tipoContrato || 'regular',
@@ -632,37 +708,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           ? student.diasFrequencia
           : ['segunda', 'terca', 'quarta', 'quinta', 'sexta'],
       horariosSaida: student.horariosSaida ? { ...student.horariosSaida } : {},
-      anoLetivo: student.anoLetivo || selectedAnoLetivo || 2026,
+      anoLetivo: initialAnoLetivo,
       tipoSaida: student.tipoSaida || 'PAIS',
       nomeCondutor: student.nomeCondutor || '',
-      planoContratual: student.planoContratual || 'Integral Semana (18:30h)',
-      horarioPermanenciaLimite:
-        student.horarioPermanenciaLimite ||
-        (student.planoContratual
-          ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.horarioPadrao
-          : '18:30h') ||
-        '18:30h',
-      valorPlanoBase:
-        student.valorPlanoBase != null
-          ? student.valorPlanoBase
-          : (student.planoContratual
-              ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
-              : getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)['Integral Semana (18:30h)'].valorBase) ??
-            (student.anoLetivo === 2027 ? 1250 : 1120),
+      planoContratual: resolvedPlanoContratual,
+      horarioPermanenciaLimite: resolvedHorario,
+      valorPlanoBase: resolvedBase,
       descontoBolsa: student.descontoBolsa || 0,
       valorMensalidadeFinal:
         student.valorMensalidadeFinal != null
           ? student.valorMensalidadeFinal
-          : Math.max(
-              0,
-              (student.valorPlanoBase != null
-                ? student.valorPlanoBase
-                : (student.planoContratual
-                    ? getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)[student.planoContratual]?.valorBase
-                    : getTabelaPlanosPorAno(student.anoLetivo || selectedAnoLetivo || 2026)['Integral Semana (18:30h)'].valorBase) ??
-                  (student.anoLetivo === 2027 ? 1250 : 1120)) -
-                (student.descontoBolsa || 0)
-            ),
+          : Math.max(0, resolvedBase - (student.descontoBolsa || 0)),
     };
     const effectiveEditDias =
       prepared.tipoContrato === 'avulso' &&
@@ -745,23 +801,30 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
 
   const handleToggleEditAnoLetivo = (targetYear: number) => {
     if (!editingStudent) return;
-    const targetTabela = getTabelaPlanosPorAno(targetYear);
-    const targetPlano = editingStudent.planoContratual || 'Integral Semana (18:30h)';
-    const isPersonalizado = targetPlano === 'Personalizado';
-    const targetBase = isPersonalizado
-      ? (editingStudent.valorPlanoBase || 0)
-      : targetTabela[targetPlano]?.valorBase ?? (targetYear === 2027 ? 1250 : 1120);
-    const targetHorario = isPersonalizado
-      ? (editingStudent.horarioPermanenciaLimite || '18:30h')
-      : targetTabela[targetPlano]?.horarioPadrao ?? '18:30h';
+    const isPersonalizado = editingStudent.planoContratual === 'Personalizado';
     const desconto = editingStudent.descontoBolsa || 0;
 
     if (targetYear === 2027) {
       // a) Promoção Automática de Turma:
-      // Identifica a turma atual (ex: 1º Ano Azul) e seleciona a turma do ano seguinte preservando cor/linha
       const baseTurma = originalStudentForEdit?.turma || editingStudent.turma;
       const allSchoolTurmasList = turmas && turmas.length > 0 ? turmas : TURMAS_LIST;
       const nextTurma = (getNextAcademicTurma(baseTurma, allSchoolTurmasList) || baseTurma) as TurmaType;
+
+      const resolved2027 = isPersonalizado
+        ? {
+            planoContratual: 'Personalizado' as PlanoContratualType,
+            valorBase: editingStudent.valorPlanoBase || 0,
+            horarioPadrao: editingStudent.horarioPermanenciaLimite || '18:30h',
+          }
+        : resolveOfficialPlanFromStudentSchedule(
+            {
+              ...editingStudent,
+              anoLetivo: 2027,
+              tipoContrato: 'regular',
+              horariosSaida: {},
+            },
+            2027
+          );
 
       setEditingStudent((prev) => {
         if (!prev) return prev;
@@ -769,15 +832,12 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           ...prev,
           anoLetivo: 2027,
           turma: nextTurma,
-          // b) Reset de Modalidades Extracurriculares: apenas ['Rotina']
           activities: ['Rotina'],
           modalidadesEspeciais: [],
           specialties: [],
           reforcoStartDate: undefined,
           reforcoEndDate: undefined,
-          // c) Limpeza dos Horários de Saída: zera horários individuais
           horariosSaida: {},
-          // d) Reset de Status e Contrato: Ativo e Regular
           status: 'ativo',
           statusMatricula: 'ativo',
           inactivationDate: undefined,
@@ -786,15 +846,14 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           dataInicioContrato: undefined,
           dataTerminoContrato: undefined,
           diasContratados: undefined,
-          // e) Mapeamento Dinâmico do Plano Contratual para 2027
-          valorPlanoBase: targetBase,
-          horarioPermanenciaLimite: targetHorario,
-          valorMensalidadeFinal: Math.max(0, targetBase - desconto),
+          planoContratual: resolved2027.planoContratual,
+          valorPlanoBase: resolved2027.valorBase,
+          horarioPermanenciaLimite: resolved2027.horarioPadrao,
+          valorMensalidadeFinal: Math.max(0, resolved2027.valorBase - desconto),
         };
       });
       setEditActivitiesSynced(false);
     } else {
-      // Se o usuário alternar de volta para "2026", restaura os dados originais aplicando tabela 2026
       if (originalStudentForEdit) {
         const origDias =
           originalStudentForEdit.tipoContrato === 'avulso' &&
@@ -810,23 +869,51 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           origReforco
         );
         setEditActivitiesSynced(areActivityListsEqual(originalStudentForEdit.activities, syncedOrig));
+        const resolved2026 = isPersonalizado
+          ? {
+              planoContratual: 'Personalizado' as PlanoContratualType,
+              valorBase: editingStudent.valorPlanoBase || 0,
+              horarioPadrao: editingStudent.horarioPermanenciaLimite || '18:30h',
+            }
+          : resolveOfficialPlanFromStudentSchedule(
+              {
+                ...originalStudentForEdit,
+                anoLetivo: 2026,
+              },
+              2026
+            );
         setEditingStudent((prev) => ({
           ...originalStudentForEdit,
           name: prev?.name || originalStudentForEdit.name,
           anoLetivo: 2026,
-          valorPlanoBase: targetBase,
-          horarioPermanenciaLimite: targetHorario,
-          valorMensalidadeFinal: Math.max(0, targetBase - desconto),
+          planoContratual: resolved2026.planoContratual,
+          valorPlanoBase: resolved2026.valorBase,
+          horarioPermanenciaLimite: resolved2026.horarioPadrao,
+          valorMensalidadeFinal: Math.max(0, resolved2026.valorBase - desconto),
         }));
       } else {
+        const resolved2026 = isPersonalizado
+          ? {
+              planoContratual: 'Personalizado' as PlanoContratualType,
+              valorBase: editingStudent.valorPlanoBase || 0,
+              horarioPadrao: editingStudent.horarioPermanenciaLimite || '18:30h',
+            }
+          : resolveOfficialPlanFromStudentSchedule(
+              {
+                ...editingStudent,
+                anoLetivo: 2026,
+              },
+              2026
+            );
         setEditingStudent((prev) =>
           prev
             ? {
                 ...prev,
                 anoLetivo: 2026,
-                valorPlanoBase: targetBase,
-                horarioPermanenciaLimite: targetHorario,
-                valorMensalidadeFinal: Math.max(0, targetBase - desconto),
+                planoContratual: resolved2026.planoContratual,
+                valorPlanoBase: resolved2026.valorBase,
+                horarioPermanenciaLimite: resolved2026.horarioPadrao,
+                valorMensalidadeFinal: Math.max(0, resolved2026.valorBase - desconto),
               }
             : null
         );
@@ -1372,6 +1459,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           horarioPermanenciaLimite: resolvedLimite,
           valorPlanoBase: newValorPlanoBase,
           descontoBolsa: newDescontoBolsa,
+          valorModalidadesExtras: 0,
+          oficinasExtras: 0,
+          valorOficinas: 0,
+          valorExtras: 0,
           valorMensalidadeFinal: newValorMensalidadeFinal,
         })
       );
@@ -1463,7 +1554,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           const studentId = existingMatch?.id || generateDeterministicStudentId(targetYear, cleanMat, cleanName);
 
           // Preserva valores customizados pré-existentes (bolsa, planos, horários, atividades)
-          const baseVal = existingMatch?.valorPlanoBase ?? defaultPlanoInfo.valorBase;
+          const resolvedDias = existingMatch?.diasFrequencia && existingMatch.diasFrequencia.length > 0
+            ? existingMatch.diasFrequencia
+            : (batchDiasFrequencia && batchDiasFrequencia.length > 0
+              ? batchDiasFrequencia
+              : (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]));
+          const resolvedBatchSchedulePlan = resolveOfficialPlanFromStudentSchedule(
+            {
+              anoLetivo: targetYear,
+              tipoContrato: existingMatch?.tipoContrato || 'regular',
+              diasFrequencia: resolvedDias,
+              diasContratados: existingMatch?.diasContratados,
+              horariosSaida: existingMatch?.horariosSaida || {},
+              planoContratual: existingMatch?.planoContratual,
+              valorPlanoBase: existingMatch?.valorPlanoBase,
+              horarioPermanenciaLimite: existingMatch?.horarioPermanenciaLimite,
+            },
+            targetYear
+          );
+          const baseVal = existingMatch?.valorPlanoBase ?? resolvedBatchSchedulePlan.valorBase;
           const descVal = existingMatch?.descontoBolsa ?? 0;
           const finalVal = existingMatch?.valorMensalidadeFinal ?? Math.max(0, baseVal - descVal);
 
@@ -1478,14 +1587,10 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             status: existingMatch?.status || 'ativo',
             statusMatricula: existingMatch?.statusMatricula || 'ativo',
             tipoContrato: existingMatch?.tipoContrato || 'regular',
-            diasFrequencia: existingMatch?.diasFrequencia && existingMatch.diasFrequencia.length > 0
-              ? existingMatch.diasFrequencia
-              : (batchDiasFrequencia && batchDiasFrequencia.length > 0
-                ? batchDiasFrequencia
-                : ['segunda', 'terca', 'quarta', 'quinta', 'sexta']),
+            diasFrequencia: resolvedDias,
             horariosSaida: existingMatch?.horariosSaida || {},
-            planoContratual: existingMatch?.planoContratual || defaultPlanoKey,
-            horarioPermanenciaLimite: existingMatch?.horarioPermanenciaLimite || defaultPlanoInfo.horarioPadrao,
+            planoContratual: existingMatch?.planoContratual || resolvedBatchSchedulePlan.planoContratual,
+            horarioPermanenciaLimite: existingMatch?.horarioPermanenciaLimite || resolvedBatchSchedulePlan.horarioPadrao,
             valorPlanoBase: baseVal,
             descontoBolsa: descVal,
             valorMensalidadeFinal: finalVal,
@@ -2093,7 +2198,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
-                onClick={() => setNewTipoContrato('regular')}
+                onClick={() => {
+                  setNewTipoContrato('regular');
+                  syncNewStudentOfficialPlan({
+                    tipoContrato: 'regular',
+                    diasFrequencia: newDiasFrequencia,
+                    diasContratados: newDiasContratados,
+                    horariosSaida: newHorariosSaida,
+                    anoLetivo: newAnoLetivo,
+                    currentPlano: newPlanoContratual,
+                  });
+                }}
                 className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
                   newTipoContrato === 'regular'
                     ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
@@ -2117,12 +2232,24 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                 type="button"
                 onClick={() => {
                   const today = toISODateString(new Date());
+                  const nextContratados =
+                    newDiasFrequencia && newDiasFrequencia.length > 0
+                      ? newDiasFrequencia
+                      : newDiasContratados;
                   setNewTipoContrato('avulso');
                   if (!newDataInicio || newDataInicio < today) setNewDataInicio(today);
                   if (!newDataTermino || newDataTermino < today) setNewDataTermino(today);
                   if (newDiasFrequencia && newDiasFrequencia.length > 0) {
                     setNewDiasContratados(newDiasFrequencia);
                   }
+                  syncNewStudentOfficialPlan({
+                    tipoContrato: 'avulso',
+                    diasFrequencia: newDiasFrequencia,
+                    diasContratados: nextContratados,
+                    horariosSaida: newHorariosSaida,
+                    anoLetivo: newAnoLetivo,
+                    currentPlano: newPlanoContratual,
+                  });
                 }}
                 className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
                   newTipoContrato === 'avulso'
@@ -3426,12 +3553,25 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   <button
                     type="button"
                     disabled={isSavingEdit}
-                    onClick={() =>
-                      setEditingStudent({
+                    onClick={() => {
+                      const nextStudent: Student = {
                         ...editingStudent,
                         tipoContrato: 'regular',
-                      })
-                    }
+                      };
+                      if (nextStudent.planoContratual !== 'Personalizado') {
+                        const resolvedPlan = resolveOfficialPlanFromStudentSchedule(nextStudent);
+                        const desconto = nextStudent.descontoBolsa || 0;
+                        setEditingStudent({
+                          ...nextStudent,
+                          planoContratual: resolvedPlan.planoContratual,
+                          valorPlanoBase: resolvedPlan.valorBase,
+                          horarioPermanenciaLimite: resolvedPlan.horarioPadrao,
+                          valorMensalidadeFinal: Math.max(0, resolvedPlan.valorBase - desconto),
+                        });
+                      } else {
+                        setEditingStudent(nextStudent);
+                      }
+                    }}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
                       (editingStudent.tipoContrato || 'regular') === 'regular'
                         ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
@@ -3473,7 +3613,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         (editingStudent.status || 'ativo') !== 'ativo' ||
                         (editingStudent.statusMatricula || 'ativo') !== 'ativo';
 
-                      setEditingStudent({
+                      const nextAvulso: Student = {
                         ...editingStudent,
                         tipoContrato: 'avulso',
                         dataInicioContrato: hasValidCurrentDates
@@ -3488,7 +3628,21 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         statusMatricula: wasInactiveOrCancelled ? 'ativo' : (editingStudent.statusMatricula || 'ativo'),
                         inactivationDate: wasInactiveOrCancelled ? '' : editingStudent.inactivationDate,
                         inactivationReason: wasInactiveOrCancelled ? '' : editingStudent.inactivationReason,
-                      });
+                      };
+
+                      if (nextAvulso.planoContratual !== 'Personalizado') {
+                        const resolvedPlan = resolveOfficialPlanFromStudentSchedule(nextAvulso);
+                        const desconto = nextAvulso.descontoBolsa || 0;
+                        setEditingStudent({
+                          ...nextAvulso,
+                          planoContratual: resolvedPlan.planoContratual,
+                          valorPlanoBase: resolvedPlan.valorBase,
+                          horarioPermanenciaLimite: resolvedPlan.horarioPadrao,
+                          valorMensalidadeFinal: Math.max(0, resolvedPlan.valorBase - desconto),
+                        });
+                      } else {
+                        setEditingStudent(nextAvulso);
+                      }
                     }}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex items-start space-x-3 ${
                       editingStudent.tipoContrato === 'avulso'
