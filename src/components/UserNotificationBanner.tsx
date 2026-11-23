@@ -55,9 +55,9 @@ export const UserNotificationBanner: React.FC<UserNotificationBannerProps> = ({
 
   const activeList = propsNotifications !== undefined ? propsNotifications : internalNotifications;
 
-  // Apenas notificações com status == 'UNREAD' (ou !read para compatibilidade)
+  // Apenas notificações com status == 'UNREAD' (ou !read), excluindo alertas técnicos da Sofia (exibidos apenas no chat da Sofia)
   const unreadAlerts = activeList.filter(
-    (n) => n.status === 'UNREAD' || (!n.read && n.status !== 'READ')
+    (n) => n.type !== 'ia_alerta' && (n.status === 'UNREAD' || (!n.read && n.status !== 'READ'))
   );
 
   if (unreadAlerts.length === 0) return null;

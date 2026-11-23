@@ -25,6 +25,7 @@ import {
   Minimize2,
   Loader2,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Student,
@@ -38,12 +39,14 @@ import {
   ActivityItem,
   SofiaChatMessage,
   SofiaAuditLogEntry,
+  SofiaAdminAiAlert,
 } from '../types';
 import { getStoredUser, isAdmin } from '../utils/authUtils';
 import { toISODateString, getDayOfWeekFromDate } from '../utils/dateUtils';
 import {
   sendSofiaMessage,
   buildLiveAppStateSummary,
+  SOFIA_ADMIN_ALERT_EVENT,
 } from '../services/sofiaService';
 import { subscribeSofiaAuditLogs } from '../services/sofiaSecurityService';
 import { SofiaToolExecutionContext } from '../services/sofiaTools';
@@ -73,6 +76,8 @@ export interface SofiaAgentProps {
   onNavigateTab?: (tab: any) => void;
   onSelectTurma?: (turma: any) => void;
   onSelectDate?: (date: string) => void;
+  sofiaAdminAlert?: SofiaAdminAiAlert | null;
+  onDismissSofiaAdminAlert?: () => void;
 }
 
 function getFriendlyToolStatus(toolName: string | null): string {
@@ -135,6 +140,8 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
   onNavigateTab,
   onSelectTurma,
   onSelectDate,
+  sofiaAdminAlert = null,
+  onDismissSofiaAdminAlert,
 }) => {
   const effectiveUser = currentUser || getStoredUser();
 
@@ -156,8 +163,26 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
     fallbackUsed: false,
     lastError: null,
   });
+  const [modalAdminAlert, setModalAdminAlert] = useState<SofiaAdminAiAlert | null>(
+    sofiaAdminAlert?.active ? sofiaAdminAlert : null
+  );
 
   const userIsAdmin = isAdmin(effectiveUser);
+
+  useEffect(() => {
+    setModalAdminAlert(sofiaAdminAlert?.active ? sofiaAdminAlert : null);
+  }, [sofiaAdminAlert]);
+
+  useEffect(() => {
+    const handleAlertEvent = (evt: Event) => {
+      const detail = (evt as CustomEvent<SofiaAdminAiAlert | null>).detail;
+      setModalAdminAlert(detail && detail.active ? detail : null);
+    };
+    window.addEventListener(SOFIA_ADMIN_ALERT_EVENT, handleAlertEvent);
+    return () => {
+      window.removeEventListener(SOFIA_ADMIN_ALERT_EVENT, handleAlertEvent);
+    };
+  }, []);
 
   // Ao perder o perfil de administrador (logout ou troca de usuário), fecha o painel e limpa histórico local/memória
   useEffect(() => {
@@ -169,6 +194,7 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
       setMessages([]);
       setAuditLogs([]);
       setIsListening(false);
+      setModalAdminAlert(null);
       setRuntimeStatus({ model: SOFIA_DEFAULT_MODEL, fallbackUsed: false, lastError: null });
       spokenDepartureAlertsRef.current.clear();
       TextToSpeechManager.stop();
@@ -202,12 +228,27 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
           fallbackUsed: Boolean(data.fallbackUsed),
           lastError: data.lastError || (data.alert?.active ? { code: data.alert.code, message: data.alert.lastError || data.alert.message, model: data.alert.model } : null),
         });
+        setModalAdminAlert(data.alert?.active ? data.alert : null);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [effectiveUser?.id, userIsAdmin, isOpen, showAuditLogPanel]);
+
+  const handleDismissModalAlert = () => {
+    setModalAdminAlert(null);
+    setRuntimeStatus((prev) => ({ ...prev, lastError: null }));
+    if (onDismissSofiaAdminAlert) {
+      onDismissSofiaAdminAlert();
+    } else {
+      fetch('/api/sofia/admin-status', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getSofiaAuthHeaders(),
+      }).catch(() => {});
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -403,6 +444,9 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
           ? { code: response.errorCode, message: response.error, model: response.model }
           : null,
       });
+      if (!response.error) {
+        setModalAdminAlert(null);
+      }
 
       if (!isMuted && response.text) {
         const cleanSpeakText = response.text
@@ -637,6 +681,53 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
               <span>{appState.formattedDate}</span>
             </div>
           </div>
+
+          {/* Aviso de Status da Sofia (exclusivo dentro do chat quando aberta pelo admin) */}
+          {modalAdminAlert?.active && (
+            <div className="bg-amber-50 border-b border-amber-200 px-3.5 py-2.5 flex items-start justify-between gap-2.5 shrink-0">
+              <div className="flex items-start space-x-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                    <span className="font-black uppercase tracking-wide text-amber-900">
+                      Status IA • Código {modalAdminAlert.code}
+                    </span>
+                    <span className="font-mono text-amber-800/80">
+                      {modalAdminAlert.model || runtimeStatus.model}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-bold text-amber-950 leading-snug mt-0.5">
+                    {modalAdminAlert.message}
+                  </p>
+                  {modalAdminAlert.lastError && (
+                    <p className="text-[10px] text-amber-800 mt-0.5 line-clamp-2" title={modalAdminAlert.lastError}>
+                      {modalAdminAlert.lastError}
+                    </p>
+                  )}
+                  {modalAdminAlert.actionUrl && (
+                    <a
+                      href={modalAdminAlert.actionUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center space-x-1 text-[10px] font-bold text-amber-800 hover:text-amber-950 underline mt-1"
+                    >
+                      <span>Abrir ai.studio/projects</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleDismissModalAlert}
+                className="p-1 rounded-lg text-amber-700 hover:bg-amber-200/70 transition-colors cursor-pointer shrink-0"
+                title="Dispensar aviso"
+                aria-label="Dispensar aviso de status da Sofia"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Painel de Auditoria (exclusivo para Coordenação/Admin) */}
           {userIsAdmin && showAuditLogPanel ? (

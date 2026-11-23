@@ -62,7 +62,6 @@ import { subscribePendingFeedbacksForUser } from './services/feedbackService';
 import { deleteUser } from './services/userService';
 import { SofiaAssistant } from './components/SofiaAssistant';
 import { getStoredSofiaAdminAlert, clearStoredSofiaAdminAlert, SOFIA_ADMIN_ALERT_EVENT } from './services/sofiaService';
-import { SOFIA_DEFAULT_MODEL } from './utils/sofiaPromptBuilder';
 import {
   clearServerSession,
   clearSofiaClientMemoryAndStorage,
@@ -2461,65 +2460,12 @@ export default function App() {
         onForceSync={handleForceSync}
         onOpenUserProfile={() => setShowUserProfileModal(true)}
         pendingFeedbacksCount={pendingFeedbacksCount}
-        notifications={userNotifications}
+        notifications={userNotifications.filter((n) => n.type !== 'ia_alerta')}
         onDismissNotification={handleDismissUserNotification}
-        sofiaAdminAlert={isAdmin(currentUser) ? sofiaAdminAlert : null}
-        onDismissSofiaAdminAlert={handleDismissSofiaAdminAlert}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
-        {/* Banner Administrativo da Assistente Sofia (visível apenas para coordenação/admin) */}
-        {isAdmin(currentUser) && sofiaAdminAlert?.active && (
-          <div className="bg-amber-50 border-2 border-amber-300 text-amber-950 rounded-2xl p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start space-x-3.5">
-              <div className="p-2.5 bg-amber-100 rounded-xl shrink-0 mt-0.5 border border-amber-200">
-                <AlertTriangle className="w-6 h-6 text-amber-700" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-md border border-amber-300">
-                    AVISO ADMIN • ASSISTENTE SOFIA
-                  </span>
-                  <span className="text-xs font-semibold text-amber-800">
-                    Código {sofiaAdminAlert.code}
-                  </span>
-                  <span className="text-[11px] font-mono text-amber-800/80">
-                    • Modelo: {sofiaAdminAlert.model || SOFIA_DEFAULT_MODEL}
-                  </span>
-                </div>
-                <h4 className="text-sm sm:text-base font-extrabold text-amber-950 mt-1">
-                  {sofiaAdminAlert.message}
-                </h4>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  {sofiaAdminAlert.lastError
-                    ? `Último erro registrado (${sofiaAdminAlert.code}): ${sofiaAdminAlert.lastError}`
-                    : 'Assistente restrita à administração; nenhuma equipe não administrativa possui acesso.'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 shrink-0 self-start sm:self-auto">
-              {sofiaAdminAlert.actionUrl && (
-                <a
-                  href={sofiaAdminAlert.actionUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-700 hover:bg-amber-800 transition-colors shadow-sm"
-                >
-                  Abrir ai.studio/projects
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={handleDismissSofiaAdminAlert}
-                aria-label="Dispensar aviso da Sofia"
-                className="p-2 rounded-xl text-amber-800 hover:bg-amber-200/70 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Banner de Orientações e Feedbacks Pedagógicos Pendentes de Assinatura */}
         {pendingFeedbacksCount > 0 && (
@@ -2559,7 +2505,7 @@ export default function App() {
         {/* Banner de Notificação e Lembrete Direto no App (user_notifications) */}
         <UserNotificationBanner
           currentUser={currentUser}
-          notifications={userNotifications}
+          notifications={userNotifications.filter((n) => n.type !== 'ia_alerta')}
           onDismissNotification={handleDismissUserNotification}
           onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
         />
@@ -3070,6 +3016,8 @@ export default function App() {
           onNavigateTab={(tab) => setActiveTab(tab)}
           onSelectTurma={(turma) => setSelectedClass(turma)}
           onSelectDate={(date) => setSelectedDate(date)}
+          sofiaAdminAlert={isAdmin(currentUser) ? sofiaAdminAlert : null}
+          onDismissSofiaAdminAlert={handleDismissSofiaAdminAlert}
         />
       )}
     </div>
