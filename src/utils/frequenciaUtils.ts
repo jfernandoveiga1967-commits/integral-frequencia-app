@@ -2,6 +2,33 @@ import { Student, AttendanceRecord, HolidayItem, AttendanceStatus, UserProfile, 
 import { isStudentScheduledForDate, isStudentActiveOnDate, getEffectiveSchoolDays, formatDateBR, getDayOfWeekLabel, getDayOfWeekFromDate, isHolidayOrRecess } from './dateUtils';
 export { isStudentInReforcoVigency, isStudentInReforco } from './semanarioUtils';
 import { calculateDemonstrativoPJ } from '../services/DemonstrativoService';
+import { sortTurmasPedagogical } from './turmaUtils';
+
+export function getTodayISOSaoPaulo(date: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  } catch {
+    return date.toISOString().split('T')[0];
+  }
+}
+
+export function getNowTimeSaoPaulo(date: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+}
 
 /**
  * Status Categorization for Attendance Calculations
@@ -314,7 +341,7 @@ export function getDailyConsolidatedMetrics(
   let pendentes = 0;
   let pendenciasConvertidas = 0;
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getTodayISOSaoPaulo();
   const isPastDate = dateStr < todayStr;
   const isToday = dateStr === todayStr;
   const hasRecordsOnDate = routineRecordMap.size > 0 || anyRecordMap.size > 0;
@@ -659,4 +686,82 @@ export function calculateApuracaoAulasEfetivasPrestador({
     prestadorActivities,
   });
 }
+
+export interface UnifiedSofiaAttendanceMetrics {
+  data: string;
+  turma: string;
+  presentes: number;
+  faltas: number;
+  justificados: number;
+  saidas_antecipadas: number;
+  sem_equipamento: number;
+  esperados: number;
+  total_matriculados: number;
+  alunos_pendentes_qtd: number;
+  turmas_com_chamada_pendente: {
+    quantidade: number;
+    turmas: string[];
+  };
+  atualizado_em: string;
+  consolidated: DailyConsolidatedMetrics;
+}
+
+/**
+ * Fonte Única de Verdade para Cabeçalho do Chat da Sofia, Ferramentas de Frequência e PDF de Frequência.
+ * Utiliza exatamente `getDailyConsolidatedMetrics` para garantir zero divergência entre Header, Sofia e Relatórios.
+ */
+export function getUnifiedSofiaAttendanceMetrics(params: {
+  dateStr?: string;
+  students: Student[];
+  records: AttendanceRecord[];
+  turmaFilter?: string;
+  activeTurmas?: string[];
+}): UnifiedSofiaAttendanceMetrics {
+  const targetDate = params.dateStr || getTodayISOSaoPaulo();
+  const effectiveTurmaFilter =
+    !params.turmaFilter ||
+    params.turmaFilter === 'all' ||
+    params.turmaFilter === 'TODAS' ||
+    params.turmaFilter === 'Todas as Turmas'
+      ? undefined
+      : params.turmaFilter;
+
+  const consolidated = getDailyConsolidatedMetrics(
+    targetDate,
+    params.students || [],
+    params.records || [],
+    effectiveTurmaFilter
+  );
+
+  // Calcula exatamente quais TURMAS ainda possuem chamada de rotina pendente
+  const pendingByTurmaSet = new Set<string>();
+  consolidated.studentDetails.forEach((detail) => {
+    if (detail.category === 'PENDENTE' && detail.student?.turma) {
+      pendingByTurmaSet.add(detail.student.turma);
+    }
+  });
+
+  const turmasPendentes = sortTurmasPedagogical(Array.from(pendingByTurmaSet));
+  const atualizadoEm = `${targetDate} ${getNowTimeSaoPaulo()} (America/Sao_Paulo)`;
+
+  return {
+    data: targetDate,
+    turma: effectiveTurmaFilter || 'TODAS',
+    presentes: consolidated.presentes,
+    faltas: consolidated.faltas,
+    justificados: consolidated.justificados,
+    saidas_antecipadas: consolidated.saidasAntecipadas,
+    sem_equipamento: consolidated.semEquipamento,
+    esperados: consolidated.totalEsperados,
+    total_matriculados: consolidated.totalMatriculados,
+    alunos_pendentes_qtd: consolidated.pendentes,
+    turmas_com_chamada_pendente: {
+      quantidade: turmasPendentes.length,
+      turmas: turmasPendentes,
+    },
+    atualizado_em: atualizadoEm,
+    consolidated,
+  };
+}
+
 

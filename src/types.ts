@@ -806,8 +806,9 @@ export interface UserNotification {
   title: string;
   message: string;
   priority: 'alta' | 'media' | 'baixa';
-  type: 'norma_pendente' | 'aviso_geral' | 'lembrete';
+  type: 'norma_pendente' | 'aviso_geral' | 'lembrete' | 'ia_alerta';
   linkTab?: string;
+  actionUrl?: string;
   normaId?: string;
   normaTitle?: string;
   read: boolean;
@@ -927,16 +928,19 @@ export interface SofiaResponsePayload {
 // Novas tipagens do Agente Autônomo e Resolutivo Sofia (Function Calling)
 // ----------------------------------------------------
 export type SofiaAgentToolName =
+  | 'gerar_pdf_frequencia'
   | 'gerarEspelhoPontoPDF'
   | 'gerarAutorizacaoEntradaSaidaPDF'
   | 'registrarFaltaFrequencia'
   | 'registrarSaidaAntecipada'
+  | 'confirmarSaidaAluno'
   | 'dispararAlertaWhatsApp'
   | 'analisarDesarranjosDoDia'
   | 'obterResumoFrequenciaPorData'
   | 'consultarFrequenciaHoje'
   | 'consultarAlertasSaidaHoje'
   | 'consultarAtividadesMomento'
+  | 'consultarGradeHoraria'
   | 'consultarCardapio'
   | 'consultarManualNormas'
   | 'consultarSemanario'
@@ -955,6 +959,7 @@ export type SofiaAgentToolName =
   | 'cadastrarRefeicaoCardapio';
 
 export interface SofiaToolCall {
+  id?: string;
   name: SofiaAgentToolName;
   args: Record<string, any>;
 }
@@ -962,13 +967,22 @@ export interface SofiaToolCall {
 export interface SofiaToolResult {
   toolName: SofiaAgentToolName;
   success: boolean;
-  message: string;
+  error?: string;
   data?: any;
   downloadUrl?: string;
   filename?: string;
   whatsappUrl?: string;
-  spokenText?: string;
   needsDisambiguation?: boolean;
+}
+
+export interface SofiaToolExecutionStep {
+  rawModelContent?: any;
+  calls: SofiaToolCall[];
+  results: Array<{
+    id?: string;
+    name: SofiaAgentToolName;
+    response: Record<string, any>;
+  }>;
 }
 
 export interface SofiaChatMessage {
@@ -978,22 +992,28 @@ export interface SofiaChatMessage {
   timestamp: string;
   toolCall?: SofiaToolCall;
   toolResult?: SofiaToolResult;
+  toolResults?: SofiaToolResult[];
+  toolTurns?: SofiaToolExecutionStep[];
   toolExecuting?: boolean;
   action?: SofiaActionPayload;
 }
 
 export interface AppStateSummary {
   currentTime: string;
-  currentDate: string; // YYYY-MM-DD
+  currentDate: string; // YYYY-MM-DD (America/Sao_Paulo)
   dayOfWeek: string;
   dayOfWeekFull?: string; // ex: "quarta-feira"
   formattedDate: string;
+  atualizadoEm?: string;
   activeTab?: string;
   selectedTurma?: string;
+  totalMatriculados?: number;
   totalAlunosAtivos: number;
   totalPresentesHoje: number;
   totalFaltasHoje: number;
+  totalJustificadosHoje?: number;
   totalAlunosEsperadosHoje: number;
+  totalAlunosPendentesHoje?: number;
   totalChamadasPendentesBlocoAtual: number;
   turmasComChamadaPendenteHoje: string[];
   atividadesAgoraResumo?: string[];
@@ -1019,5 +1039,43 @@ export interface BlockConfirmation {
   confirmedAt: string; // ISO string
   confirmedBy?: string; // Nome ou ID do monitor responsável
   confirmadoNoBloco: boolean;
+}
+
+export interface SofiaAdminAiAlert {
+  active: boolean;
+  code: number;
+  kind: 'billing_depleted' | 'rate_limited' | 'model_not_found' | 'service_error';
+  message: string;
+  actionUrl?: string;
+  detectedAt: string;
+  model?: string;
+  lastError?: string;
+}
+
+export type SofiaSecurityProfile =
+  | 'coordenador'
+  | 'nao_admin'
+  | 'desconhecido';
+
+export type SofiaToolPermissionRule = 'allow' | 'deny';
+
+export type SofiaAuditOutcome =
+  | 'sucesso'
+  | 'negado'
+  | 'erro'
+  | 'aguardando_confirmacao';
+
+export interface SofiaAuditLogEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  userProfile: SofiaSecurityProfile | string;
+  toolName: SofiaAgentToolName;
+  argsSummary: Record<string, any>;
+  timestamp: string;
+  formattedDateTime: string;
+  outcome: SofiaAuditOutcome;
+  detail?: string;
 }
 

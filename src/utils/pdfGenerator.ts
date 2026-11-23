@@ -1972,7 +1972,8 @@ export function drawSingleTimecardPage(
   const daysCount = monthDaysGrid.length;
   const verticalPadding = daysCount <= 28 ? 1.65 : (daysCount <= 29 ? 1.60 : 1.55);
 
-  autoTable(doc, {
+  const runAutoTable: any = (autoTable as any)?.default || autoTable;
+  runAutoTable(doc, {
     startY: startY,
     head: tableHead,
     body: tableData,
@@ -2082,7 +2083,8 @@ export function drawSingleTimecardPage(
 }
 
 export function generateLivroPontoPDFReport(options: GenerateLivroPontoPDFOptions): PDFGenerationResult {
-  const doc = new jsPDF({
+  const JsPDFCtor: any = (jsPDF as any)?.jsPDF || (jsPDF as any)?.default || jsPDF;
+  const doc = new JsPDFCtor({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
@@ -4378,7 +4380,9 @@ export function generateNominalListPDF({
   processedItems,
   anoLetivo,
 }: GenerateNominalListPDFOptions): PDFGenerationResult {
-  const doc = new jsPDF({
+  const JsPDFCtor: any = (jsPDF as any)?.jsPDF || (jsPDF as any)?.default || jsPDF;
+  const runAutoTable: any = (autoTable as any)?.default || autoTable;
+  const doc = new JsPDFCtor({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
@@ -4726,7 +4730,7 @@ export function generateNominalListPDF({
       return [num, studentName, tipoContrato, studentTurma, statusText, detalheStr, modalidadesStr];
     });
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: tableStartY,
       head: [['Nº', 'NOME DO ALUNO', 'TIPO', 'TURMA', 'STATUS FREQUÊNCIA', 'DETALHE', 'MODALIDADES']],
       body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
@@ -4831,7 +4835,7 @@ export function generateNominalListPDF({
       return [num, studentName, studentTurma, logisticaStr, freqDaysStr, exitTime, modalidadesStr];
     });
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: 37,
       head: [['Nº', 'NOME DO ALUNO', 'TURMA', 'LOGÍSTICA SAÍDA', 'DIAS FREQUÊNCIA', 'SAÍDA', 'MODALIDADES']],
       body: tableRows.length > 0 ? tableRows : [['—', 'Nenhum aluno encontrado para os filtros selecionados.', '—', '—', '—', '—', '—']],
@@ -7294,6 +7298,235 @@ export function generateTermoSaidaAvulsaPDF(
 
   return { doc, blob, blobUrl, dataUri, dataUrl, filename, download };
 }
+
+export interface GenerateSofiaFrequenciaPDFOptions {
+  date: string;
+  turma?: string;
+  tipo?: 'presentes' | 'faltas' | 'todos';
+  students: Student[];
+  records: AttendanceRecord[];
+  unifiedMetrics?: import('./frequenciaUtils').UnifiedSofiaAttendanceMetrics;
+  currentUserName?: string;
+  saveImmediately?: boolean;
+}
+
+/**
+ * Gera PDF oficial de Frequência do dia (Presentes, Faltas ou Todos),
+ * agrupado por turma e usando os mesmos números consolidados do cabeçalho e da Sofia.
+ */
+export function generateSofiaFrequenciaPDFReport({
+  date,
+  turma,
+  tipo = 'todos',
+  students,
+  records,
+  unifiedMetrics,
+  currentUserName,
+  saveImmediately = true,
+}: GenerateSofiaFrequenciaPDFOptions): PDFGenerationResult & { totalAlunos: number } {
+  const JsPDFCtor: any = (jsPDF as any)?.jsPDF || (jsPDF as any)?.default || jsPDF;
+  const doc = new JsPDFCtor({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const effectiveMetrics = unifiedMetrics;
+  const details = effectiveMetrics ? effectiveMetrics.consolidated.studentDetails : [];
+
+  const filteredDetails = details.filter((d) => {
+    if (tipo === 'presentes') return d.category === 'PRESENTE';
+    if (tipo === 'faltas') return d.category === 'FALTA' || d.category === 'JUSTIFICADO';
+    return true;
+  });
+
+  const tipoLabel =
+    tipo === 'presentes'
+      ? 'Apenas Presentes'
+      : tipo === 'faltas'
+      ? 'Apenas Faltas / Ausências'
+      : 'Todos os Alunos Esperados';
+
+  const turmaLabel = turma && turma !== 'TODAS' && turma !== 'all' ? turma : 'Todas as Turmas';
+  const dateFormatted = formatDate(date);
+
+  drawOfficialHeader(
+    doc,
+    `Relatório de Frequência — ${tipoLabel}`,
+    `Colégio Crescer • Programa do Integral • ${dateFormatted}`,
+    [
+      `Data: ${dateFormatted}`,
+      `Turma: ${turmaLabel}`,
+      `Filtro: ${tipoLabel}`,
+      `Listados: ${filteredDetails.length}`,
+      ...(currentUserName ? [`Emissor: ${currentUserName}`] : []),
+    ],
+    'portrait'
+  );
+
+  let startY = 36;
+  const totalPres = effectiveMetrics?.presentes ?? filteredDetails.filter((d) => d.category === 'PRESENTE').length;
+  const totalFaltas = effectiveMetrics?.faltas ?? filteredDetails.filter((d) => d.category === 'FALTA').length;
+  const totalEsp = effectiveMetrics?.esperados ?? filteredDetails.length;
+  const turmasPendCount = effectiveMetrics?.turmas_com_chamada_pendente.quantidade ?? 0;
+
+  drawMetricBoxes(doc, 14, startY, 43, 13.5, 3.3, [
+    { label: 'Esperados', value: totalEsp, color: [15, 23, 42] },
+    { label: 'Presentes', value: totalPres, color: [22, 163, 74] },
+    { label: 'Faltas', value: totalFaltas, color: [220, 38, 38] },
+    { label: 'Turmas Pendentes', value: turmasPendCount, color: [217, 119, 6] },
+  ]);
+
+  startY += 18;
+
+  // Agrupar por turma (ordem pedagógica) e ordenar alfabeticamente os alunos
+  const grouped = new Map<string, typeof filteredDetails>();
+  filteredDetails.forEach((d) => {
+    const tName = d.student?.turma || 'Sem Turma';
+    if (!grouped.has(tName)) grouped.set(tName, []);
+    grouped.get(tName)!.push(d);
+  });
+
+  const sortedTurmas = sortTurmasPedagogical(Array.from(grouped.keys()));
+  const tableBody: any[] = [];
+
+  sortedTurmas.forEach((tName) => {
+    const list = (grouped.get(tName) || []).slice().sort((a, b) =>
+      (a.student.name || '').localeCompare(b.student.name || '', 'pt-BR')
+    );
+
+    tableBody.push([
+      {
+        content: `${tName} (${list.length} ${list.length === 1 ? 'aluno' : 'alunos'})`,
+        colSpan: 5,
+        styles: {
+          fillColor: [226, 232, 240],
+          textColor: [15, 23, 42],
+          fontStyle: 'bold',
+          fontSize: 8.5,
+          halign: 'left',
+        },
+      },
+    ]);
+
+    list.forEach((item, idx) => {
+      const rec = item.record;
+      let statusLabel = 'Pendente';
+      if (item.category === 'PRESENTE') {
+        if (rec?.status === 'saida_antecipada') {
+          statusLabel = rec.exitTime ? `Presente (Saída ${rec.exitTime})` : 'Saída Antecipada';
+        } else if (rec?.status === 'sem_equipamento') {
+          statusLabel = 'Presente (Sem Equip.)';
+        } else {
+          statusLabel = 'Presente';
+        }
+      } else if (item.category === 'FALTA') {
+        statusLabel = 'Falta';
+      } else if (item.category === 'JUSTIFICADO') {
+        statusLabel = 'Justificado / Atestado';
+      }
+
+      const tipoContrato = item.student.tipoContrato === 'avulso' ? 'Avulso' : 'Regular';
+      const obs = rec?.equipmentMissingDetails
+        ? `Sem material: ${rec.equipmentMissingDetails}`
+        : rec?.observation || '-';
+
+      tableBody.push([
+        String(idx + 1).padStart(2, '0'),
+        item.student.name,
+        tipoContrato,
+        statusLabel,
+        obs,
+      ]);
+    });
+  });
+
+  const runAutoTable: any = (autoTable as any)?.default || autoTable;
+  runAutoTable(doc, {
+    startY,
+    head: [['Nº', 'Nome do Aluno', 'Contrato', 'Situação', 'Observações']],
+    body:
+      tableBody.length > 0
+        ? tableBody
+        : [['-', 'Nenhum aluno encontrado para o filtro selecionado', '-', '-', '-']],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+    },
+    bodyStyles: {
+      fontSize: 7.5,
+      textColor: [51, 65, 85],
+      cellPadding: 2.2,
+    },
+    columnStyles: {
+      0: { cellWidth: 11, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 62, fontStyle: 'bold' },
+      2: { cellWidth: 20, halign: 'center' },
+      3: { cellWidth: 38, halign: 'center', fontStyle: 'bold' },
+      4: { cellWidth: 'auto' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 3 && typeof data.cell.raw === 'string') {
+        const txt = data.cell.raw;
+        if (txt.startsWith('Presente')) data.cell.styles.textColor = [22, 163, 74];
+        else if (txt === 'Falta') data.cell.styles.textColor = [220, 38, 38];
+        else if (txt.includes('Justificado')) data.cell.styles.textColor = [37, 99, 235];
+        else if (txt === 'Pendente') data.cell.styles.textColor = [217, 119, 6];
+      }
+    },
+    margin: { top: 36, left: 14, right: 14, bottom: 18 },
+  });
+
+  applyPageNumbersAndFooters(doc, 'portrait');
+
+  const safeTurma = turmaLabel.replace(/[^a-zA-Z0-9À-ÿ]+/g, '_').replace(/^_|_$/g, '');
+  const filename = `Frequencia_${tipo}_${safeTurma}_${dateFormatted.replace(/\//g, '-')}.pdf`;
+
+  const dataUri = doc.output('datauristring');
+  const dataUrl = dataUri;
+  let blob: any = null;
+  try {
+    blob = doc.output('blob');
+  } catch {
+    blob = null;
+  }
+  let blobUrl = '';
+  if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    try {
+      blobUrl = URL.createObjectURL(blob);
+    } catch {
+      blobUrl = '';
+    }
+  }
+  const download = () => {
+    if (typeof document !== 'undefined') {
+      doc.save(filename);
+    }
+  };
+
+  if (saveImmediately && typeof document !== 'undefined') {
+    try {
+      doc.save(filename);
+    } catch (e) {
+      console.warn('Não foi possível disparar download automático do PDF:', e);
+    }
+  }
+
+  return {
+    doc,
+    blob,
+    blobUrl,
+    dataUri,
+    dataUrl,
+    filename,
+    download,
+    totalAlunos: filteredDetails.length,
+  };
+}
+
 
 
 

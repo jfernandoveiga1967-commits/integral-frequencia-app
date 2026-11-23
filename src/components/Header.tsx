@@ -17,8 +17,12 @@ import {
   CreditCard,
   ChevronLeft,
   ChevronRight,
+  Bell,
+  AlertTriangle,
+  ExternalLink,
+  Check,
 } from 'lucide-react';
-import { UserProfile, TabType } from '../types';
+import { UserProfile, TabType, UserNotification, SofiaAdminAiAlert } from '../types';
 import { ConnectionState } from '../services/syncService';
 import { LOGO_CRESCER_BASE64 } from '../utils/appLogoData';
 import { isCoordenador, isTabAllowed } from '../utils/authUtils';
@@ -50,6 +54,10 @@ interface HeaderProps {
   onForceSync?: () => void;
   onOpenUserProfile?: () => void;
   pendingFeedbacksCount?: number;
+  notifications?: UserNotification[];
+  onDismissNotification?: (id: string) => Promise<void> | void;
+  sofiaAdminAlert?: SofiaAdminAiAlert | null;
+  onDismissSofiaAdminAlert?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -71,6 +79,10 @@ export const Header: React.FC<HeaderProps> = ({
   onForceSync,
   onOpenUserProfile,
   pendingFeedbacksCount = 0,
+  notifications = [],
+  onDismissNotification,
+  sofiaAdminAlert = null,
+  onDismissSofiaAdminAlert,
 }) => {
   // Network and synchronization states
   const isOnline = connectionState?.isOnline ?? true;
@@ -82,6 +94,31 @@ export const Header: React.FC<HeaderProps> = ({
   const [isAudioReady, setIsAudioReady] = useState<boolean>(() => isAudioContextReady());
   const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
   const [showToastAudioStatus, setShowToastAudioStatus] = useState<string | null>(null);
+  const [showNotifDropdown, setShowNotifDropdown] = useState<boolean>(false);
+  const notifDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  const unreadNotifications = notifications.filter(
+    (n) => n.status === 'UNREAD' || (!n.read && n.status !== 'READ')
+  );
+  const totalBellAlertsCount = unreadNotifications.length + (sofiaAdminAlert?.active ? 1 : 0);
+
+  useEffect(() => {
+    if (!showNotifDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
+        setShowNotifDropdown(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowNotifDropdown(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showNotifDropdown]);
 
   useEffect(() => {
     const handleAudioStateChange = (e: Event) => {
@@ -236,9 +273,135 @@ export const Header: React.FC<HeaderProps> = ({
             isSyncing={isSyncing}
           />
 
-          {/* Quick Actions (Sair / Logout) */}
+          {/* Quick Actions (Sino de Notificações + Sair / Logout) */}
           {currentUser && onLogout && (
             <div className="flex items-center space-x-2 shrink-0 self-end md:self-auto">
+              {/* Sino de Notificações Internas */}
+              <div className="relative" ref={notifDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowNotifDropdown((prev) => !prev)}
+                  title="Notificações do sistema"
+                  aria-label="Notificações do sistema"
+                  className={`relative p-2 rounded-xl border transition-colors cursor-pointer ${
+                    totalBellAlertsCount > 0
+                      ? 'bg-amber-500/20 border-amber-400/50 text-amber-300 hover:bg-amber-500/30'
+                      : 'bg-slate-800/90 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <Bell className="w-4 h-4" />
+                  {totalBellAlertsCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center shadow ring-2 ring-slate-900">
+                      {totalBellAlertsCount > 9 ? '9+' : totalBellAlertsCount}
+                    </span>
+                  )}
+                </button>
+
+                {showNotifDropdown && (
+                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800">
+                      <div className="flex items-center space-x-2">
+                        <Bell className="w-4 h-4 text-amber-400" />
+                        <span className="text-xs font-black tracking-wide uppercase">
+                          Notificações ({totalBellAlertsCount})
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowNotifDropdown(false)}
+                        className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+                        aria-label="Fechar notificações"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                      {sofiaAdminAlert?.active && (
+                        <div className="p-3.5 bg-amber-50/90 border-l-4 border-amber-500 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center space-x-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span className="text-[11px] font-black text-amber-900 uppercase">
+                                Alerta IA • Código {sofiaAdminAlert.code}
+                              </span>
+                            </div>
+                            {onDismissSofiaAdminAlert && (
+                              <button
+                                type="button"
+                                onClick={onDismissSofiaAdminAlert}
+                                className="text-[11px] font-bold text-amber-800 hover:text-amber-950 px-2 py-0.5 rounded bg-amber-200/70 hover:bg-amber-200 cursor-pointer"
+                              >
+                                Dispensar
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-xs font-bold text-amber-950 leading-snug">
+                            {sofiaAdminAlert.message}
+                          </p>
+                          {sofiaAdminAlert.actionUrl && (
+                            <a
+                              href={sofiaAdminAlert.actionUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center space-x-1 text-[11px] font-bold text-indigo-700 hover:underline"
+                            >
+                              <span>Abrir ai.studio/projects</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      )}
+
+                      {unreadNotifications.map((notif) => (
+                        <div key={notif.id} className="p-3.5 hover:bg-slate-50 transition-colors space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-900 leading-snug">
+                              {notif.title}
+                            </span>
+                            {onDismissNotification && (
+                              <button
+                                type="button"
+                                onClick={() => onDismissNotification(notif.id)}
+                                className="inline-flex items-center space-x-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg shrink-0 cursor-pointer"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Lida</span>
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            {notif.message}
+                          </p>
+                          <div className="flex items-center justify-between pt-0.5">
+                            <span className="text-[10px] text-slate-400">
+                              {notif.createdBy || 'Sistema'}
+                            </span>
+                            {notif.actionUrl && (
+                              <a
+                                href={notif.actionUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center space-x-1 text-[10px] font-bold text-indigo-700 hover:underline"
+                              >
+                                <span>Abrir</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {totalBellAlertsCount === 0 && (
+                        <div className="p-6 text-center text-xs text-slate-500">
+                          Nenhuma notificação pendente no momento.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={onLogout}

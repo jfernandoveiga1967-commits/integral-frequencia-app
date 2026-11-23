@@ -18,6 +18,7 @@ import {
   getNotificationPermission,
 } from '../utils/notificationUtils';
 import { fetchUserByEmail } from '../firebase';
+import { establishServerSession } from '../services/authSessionService';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -115,6 +116,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
         } catch (e) {
           console.warn('Erro ao atualizar cache local do usuário logado:', e);
         }
+        await establishServerSession(emailTrimmed, passwordTrimmed);
         await completeLogin(candidateUser);
         return;
       }
@@ -125,6 +127,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSaveUser, u
       );
 
       if (matchedLocal) {
+        await establishServerSession(emailTrimmed, passwordTrimmed);
         await completeLogin(matchedLocal);
         return;
       }

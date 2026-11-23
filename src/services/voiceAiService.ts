@@ -11,6 +11,7 @@ import { NORMAS_DATA } from '../data/normasData';
 import { DEFAULT_SEPTEMBER_2026_MENU } from '../data/defaultCardapioData';
 import { formatDateBR, getDayOfWeekFromDate, toISODateString } from '../utils/dateUtils';
 import { isAdmin, getStoredUser, ADMIN_EMAIL } from '../utils/authUtils';
+import { getSofiaAuthHeaders } from './authSessionService';
 
 export type VoiceAgentState = 'Aguardando' | 'Ouvindo...' | 'Processando...' | 'Falando...';
 
@@ -568,7 +569,11 @@ export async function processVoiceAgentQuery(
 
     const res = await fetch('/api/gemini/voice-agent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getSofiaAuthHeaders(),
+      },
       signal: controller.signal,
       body: JSON.stringify({
         prompt: rawPrompt,

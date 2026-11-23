@@ -125,6 +125,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /sofia_audit_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /sofia_ai_alerts/{alertId} {
+      allow read, write: if true;
+    }
+
     match /test/{docId} {
       allow read, write: if true;
     }

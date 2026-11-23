@@ -1,9 +1,30 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, FunctionCallingConfigMode, Content } from '@google/genai';
 import dotenv from 'dotenv';
+import { initializeApp, getApps } from 'firebase/app';
+import {
+  getFirestore,
+  initializeFirestore,
+  memoryLocalCache,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  limit,
+} from 'firebase/firestore';
+import firebaseConfig from './firebase-applet-config.json';
+import {
+  isAdmin,
+  isPurgedUser,
+  PRESET_USERS,
+  verifyUserCredentials,
+} from './src/utils/authUtils';
 import { getSalutationForName } from './src/utils/genderUtils';
 import {
   buildDynamicPedagogicalFeedback,
@@ -31,7 +52,11 @@ import {
   buildSofiaSystemPrompt,
   buildSofiaChatSystemInstruction,
   SOFIA_DEFAULT_MODEL,
+  SOFIA_FALLBACK_MODEL,
+  SOFIA_DEFAULT_TEMPERATURE,
 } from './src/utils/sofiaPromptBuilder';
+import { SOFIA_FUNCTION_DECLARATIONS } from './src/services/sofiaToolDeclarations';
+import type { SofiaAdminAiAlert } from './src/types';
 
 dotenv.config();
 
@@ -71,33 +96,441 @@ function getAIClient(): GoogleGenAI | null {
   return aiClient;
 }
 
-function isGeminiQuotaOrBillingError(err: any): {
+const SOFIA_ADMIN_ALERT_FILE = path.join(process.cwd(), '.sofia-admin-alert.json');
+
+function readSofiaAdminAlertFromDisk(): SofiaAdminAiAlert | null {
+  try {
+    if (!fs.existsSync(SOFIA_ADMIN_ALERT_FILE)) return null;
+    const raw = fs.readFileSync(SOFIA_ADMIN_ALERT_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return parsed?.active ? (parsed as SofiaAdminAiAlert) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSofiaAdminAlertToDisk(alert: SofiaAdminAiAlert | null): void {
+  try {
+    if (!alert || !alert.active) {
+      if (fs.existsSync(SOFIA_ADMIN_ALERT_FILE)) {
+        fs.unlinkSync(SOFIA_ADMIN_ALERT_FILE);
+      }
+      return;
+    }
+    fs.writeFileSync(SOFIA_ADMIN_ALERT_FILE, JSON.stringify(alert, null, 2), 'utf-8');
+  } catch {
+    // silencioso
+  }
+}
+
+interface SofiaRuntimeErrorInfo {
+  code: number;
+  message: string;
+  model: string;
+  detectedAt: string;
+}
+
+let currentSofiaAdminAlert: SofiaAdminAiAlert | null = readSofiaAdminAlertFromDisk();
+let currentSofiaLastModelUsed: string = SOFIA_DEFAULT_MODEL;
+let currentSofiaLastFallbackUsed: boolean = false;
+let currentSofiaLastError: SofiaRuntimeErrorInfo | null = currentSofiaAdminAlert
+  ? {
+      code: currentSofiaAdminAlert.code,
+      message: currentSofiaAdminAlert.lastError || currentSofiaAdminAlert.message,
+      model: currentSofiaAdminAlert.model || SOFIA_DEFAULT_MODEL,
+      detectedAt: currentSofiaAdminAlert.detectedAt,
+    }
+  : null;
+
+function classifyGeminiError(
+  err: any,
+  modelName: string = SOFIA_DEFAULT_MODEL
+): {
+  statusCode: number;
   isQuotaOrBilling: boolean;
   isBillingDepleted: boolean;
   isRateLimit: boolean;
+  isModelNotFound: boolean;
+  isServiceUnavailable: boolean;
+  adminAlert: SofiaAdminAiAlert | null;
 } {
   const msg = String(err?.message || err || '');
-  const status = err?.status || err?.code;
+  const rawStatus = Number(err?.status || err?.code || 0);
+  const lower = msg.toLowerCase();
+
   const isBillingDepleted =
-    status === 402 ||
+    rawStatus === 402 ||
     msg.includes('"code":402') ||
-    msg.includes('prepayment credits are depleted') ||
-    msg.includes('billing#prepay');
+    lower.includes('prepayment credits are depleted') ||
+    lower.includes('billing#prepay');
+
+  const isModelNotFound =
+    !isBillingDepleted &&
+    (rawStatus === 404 ||
+      msg.includes('"code":404') ||
+      (msg.includes('NOT_FOUND') && lower.includes('model')) ||
+      lower.includes('is not found for api version'));
+
+  const isServiceUnavailable =
+    !isBillingDepleted &&
+    !isModelNotFound &&
+    (rawStatus === 503 ||
+      msg.includes('"code":503') ||
+      msg.includes('UNAVAILABLE') ||
+      lower.includes('service unavailable') ||
+      lower.includes('overloaded'));
+
   const isRateLimit =
-    status === 429 ||
-    msg.includes('429') ||
-    msg.includes('RESOURCE_EXHAUSTED') ||
-    msg.includes('Quota exceeded');
+    !isBillingDepleted &&
+    !isModelNotFound &&
+    !isServiceUnavailable &&
+    (rawStatus === 429 ||
+      msg.includes('"code":429') ||
+      lower.includes('quota exceeded') ||
+      lower.includes('rate limit') ||
+      msg.includes('RESOURCE_EXHAUSTED'));
+
+  const nowISO = new Date().toISOString();
+  let adminAlert: SofiaAdminAiAlert | null = null;
+  let statusCode = rawStatus >= 400 && rawStatus < 600 ? rawStatus : 500;
+  const compactErr = msg.slice(0, 260);
+
+  if (isBillingDepleted) {
+    statusCode = 402;
+    adminAlert = {
+      active: true,
+      code: 402,
+      kind: 'billing_depleted',
+      message: 'Créditos da IA esgotados — recarregue em ai.studio/projects',
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: modelName,
+      lastError: compactErr,
+    };
+  } else if (isRateLimit) {
+    statusCode = 429;
+    adminAlert = {
+      active: true,
+      code: 429,
+      kind: 'rate_limited',
+      message: 'Limite temporário da IA atingido — verifique a cota em ai.studio/projects',
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: modelName,
+      lastError: compactErr,
+    };
+  } else if (isModelNotFound) {
+    statusCode = 404;
+    adminAlert = {
+      active: true,
+      code: 404,
+      kind: 'model_not_found',
+      message: `Modelo de IA (${modelName}) indisponível no projeto — verifique em ai.studio/projects`,
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: modelName,
+      lastError: compactErr,
+    };
+  } else if (isServiceUnavailable) {
+    statusCode = 503;
+    adminAlert = {
+      active: true,
+      code: 503,
+      kind: 'service_error',
+      message: `Serviço de IA (${modelName}) temporariamente indisponível — tente novamente em instantes`,
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: modelName,
+      lastError: compactErr,
+    };
+  }
+
   return {
+    statusCode,
     isQuotaOrBilling: isBillingDepleted || isRateLimit,
     isBillingDepleted,
     isRateLimit,
+    isModelNotFound,
+    isServiceUnavailable,
+    adminAlert,
   };
+}
+
+// Compatibilidade para a rota de voz existente
+function isGeminiQuotaOrBillingError(err: any) {
+  return classifyGeminiError(err, SOFIA_DEFAULT_MODEL);
 }
 
 // API Health Check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// ============================================================================
+// AUTENTICAÇÃO E SESSÃO NO SERVIDOR (NÃO CONFIA EM ROLE/ISADMIN DO CLIENTE)
+// ============================================================================
+const SESSION_COOKIE_NAME = 'crescer_session';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_SIGNING_SECRET =
+  process.env.SESSION_SECRET && process.env.SESSION_SECRET.trim().length >= 16
+    ? process.env.SESSION_SECRET.trim()
+    : crypto.randomBytes(32).toString('hex');
+
+interface VerifiedSessionPayload {
+  sub: string;
+  email: string;
+  isAdmin: boolean;
+  iat: number;
+  exp: number;
+}
+
+let serverFirestoreDb: ReturnType<typeof getFirestore> | null = null;
+function getServerFirestoreDb() {
+  if (serverFirestoreDb) return serverFirestoreDb;
+  const appName = 'server-auth-lookup';
+  const existing = getApps().find((a) => a.name === appName);
+  const serverApp = existing || initializeApp(firebaseConfig, appName);
+  serverFirestoreDb = existing
+    ? getFirestore(serverApp, firebaseConfig.firestoreDatabaseId)
+    : initializeFirestore(
+        serverApp,
+        {
+          localCache: memoryLocalCache(),
+          experimentalAutoDetectLongPolling: true,
+        },
+        firebaseConfig.firestoreDatabaseId
+      );
+  return serverFirestoreDb;
+}
+
+function signServerSessionToken(payload: VerifiedSessionPayload): string {
+  const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', SESSION_SIGNING_SECRET)
+    .update(encodedPayload)
+    .digest('base64url');
+  return `${encodedPayload}.${sig}`;
+}
+
+function verifyServerSessionToken(token?: string | null): VerifiedSessionPayload | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.trim().split('.');
+  if (parts.length !== 2) return null;
+  const [encodedPayload, providedSig] = parts;
+  if (!encodedPayload || !providedSig) return null;
+
+  const expectedSig = crypto
+    .createHmac('sha256', SESSION_SIGNING_SECRET)
+    .update(encodedPayload)
+    .digest('base64url');
+
+  const providedBuf = Buffer.from(providedSig, 'utf-8');
+  const expectedBuf = Buffer.from(expectedSig, 'utf-8');
+  if (providedBuf.length !== expectedBuf.length) return null;
+  if (!crypto.timingSafeEqual(providedBuf, expectedBuf)) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf-8')) as VerifiedSessionPayload;
+    if (!parsed || typeof parsed.sub !== 'string' || typeof parsed.exp !== 'number') return null;
+    if (Date.now() > parsed.exp) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!cookieHeader) return result;
+  cookieHeader.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx <= 0) return;
+    const key = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    try {
+      result[key] = decodeURIComponent(val);
+    } catch {
+      result[key] = val;
+    }
+  });
+  return result;
+}
+
+async function findAuthoritativeUserByEmail(emailInput: string): Promise<any | null> {
+  const cleanEmail = (emailInput || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  const isMasterAlias =
+    cleanEmail === 'fernando.veiga@crescercampinas.com.br' ||
+    cleanEmail === 'jfernandoveiga1967@gmail.com' ||
+    cleanEmail === 'coordenacao@crescer.edu.br';
+
+  const lookupPromise = (async () => {
+    try {
+      const db = getServerFirestoreDb();
+      if (isMasterAlias) {
+        const coordSnap = await getDoc(doc(db, 'users', 'usr_coord_1'));
+        if (coordSnap.exists()) {
+          return { id: coordSnap.id, ...coordSnap.data() };
+        }
+      }
+      for (const colName of ['users', 'usuarios']) {
+        const snap = await getDocs(
+          query(collection(db, colName), where('email', '==', cleanEmail), limit(1))
+        );
+        if (!snap.empty) {
+          const d = snap.docs[0];
+          return { id: d.id, ...d.data() };
+        }
+      }
+    } catch {
+      // Fallback silencioso para PRESET_USERS
+    }
+    return null;
+  })();
+
+  const timeoutPromise = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), 4000);
+  });
+
+  const fromFirestore = await Promise.race([lookupPromise, timeoutPromise]);
+  if (fromFirestore) return fromFirestore;
+
+  const fromPreset = PRESET_USERS.find((u) => {
+    const pEmail = (u.email || '').trim().toLowerCase();
+    if (isMasterAlias && u.id === 'usr_coord_1') return true;
+    return pEmail === cleanEmail;
+  });
+  return fromPreset || null;
+}
+
+function isSameOriginCookieRequest(req: express.Request): boolean {
+  if (req.headers['x-requested-with']) return true;
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  try {
+    const originHost = new URL(String(origin)).host.toLowerCase();
+    const expectedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+    return Boolean(expectedHost && originHost === expectedHost);
+  } catch {
+    return false;
+  }
+}
+
+function requireAdminSession(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : null;
+
+  let session = verifyServerSessionToken(bearerToken);
+  if (!session) {
+    const cookies = parseCookies(req.headers.cookie);
+    const cookieToken = cookies[SESSION_COOKIE_NAME];
+    if (cookieToken) {
+      const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
+      if (!isMutating || isSameOriginCookieRequest(req)) {
+        session = verifyServerSessionToken(cookieToken);
+      }
+    }
+  }
+
+  if (!session || session.isAdmin !== true) {
+    return res.status(403).end();
+  }
+
+  (req as any).verifiedAdminSession = session;
+  return next();
+}
+
+app.post('/api/auth/session', async (req, res) => {
+  try {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password.trim() : '';
+    if (!email || !password) {
+      return res.status(401).json({ success: false });
+    }
+
+    const authoritativeUser = await findAuthoritativeUserByEmail(email);
+    if (!authoritativeUser || isPurgedUser(authoritativeUser)) {
+      return res.status(401).json({ success: false });
+    }
+
+    const status = String(authoritativeUser.status || 'ATIVO').toUpperCase();
+    if (status === 'DESLIGADO' || status === 'INATIVO') {
+      return res.status(403).end();
+    }
+
+    if (!verifyUserCredentials(authoritativeUser, email, password)) {
+      return res.status(401).json({ success: false });
+    }
+
+    const adminAuthorized = isAdmin(authoritativeUser);
+    const now = Date.now();
+    const payload: VerifiedSessionPayload = {
+      sub: String(authoritativeUser.id || authoritativeUser.uid || email.toLowerCase()),
+      email: String(authoritativeUser.email || email).trim().toLowerCase(),
+      isAdmin: adminAuthorized,
+      iat: now,
+      exp: now + SESSION_TTL_MS,
+    };
+
+    const token = signServerSessionToken(payload);
+    res.cookie(SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      partitioned: true,
+      path: '/',
+      maxAge: SESSION_TTL_MS,
+    });
+
+    return res.json({
+      success: true,
+      token,
+      isAdmin: adminAuthorized,
+    });
+  } catch {
+    return res.status(500).json({ success: false });
+  }
+});
+
+app.post('/api/auth/logout', (_req, res) => {
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    partitioned: true,
+    path: '/',
+  });
+  return res.json({ success: true });
+});
+
+// Middleware obrigatório para TODAS as rotas /api/sofia/* (inclusive admin-status e chat)
+app.use('/api/sofia', requireAdminSession);
+
+// Status administrativo da Sofia (cota/créditos/modelo/último erro para banner/painel admin)
+app.get('/api/sofia/admin-status', (req, res) => {
+  res.json({
+    success: true,
+    model: currentSofiaLastModelUsed || SOFIA_DEFAULT_MODEL,
+    defaultModel: SOFIA_DEFAULT_MODEL,
+    fallbackModel: SOFIA_FALLBACK_MODEL,
+    fallbackUsed: currentSofiaLastFallbackUsed,
+    lastError: currentSofiaLastError,
+    alert: currentSofiaAdminAlert,
+  });
+});
+
+app.delete('/api/sofia/admin-status', (req, res) => {
+  currentSofiaAdminAlert = null;
+  currentSofiaLastError = null;
+  writeSofiaAdminAlertToDisk(null);
+  res.json({ success: true });
 });
 
 // API Route: Apuração do Demonstrativo PJ Sincronizado com a Grade Horária
@@ -970,497 +1403,317 @@ Responda estritamente em formato JSON:
   }
 });
 
-// Catálogo de declarações de funções oficiais da Sofia para o Gemini
-const SOFIA_SERVER_TOOL_DECLARATIONS = [
-  {
-    name: 'gerarEspelhoPontoPDF',
-    description: 'Gera o Espelho de Ponto oficial em PDF de um colaborador para determinado mês e ano.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        colaboradorId: { type: 'STRING', description: 'Nome completo ou e-mail do colaborador' },
-        mesAno: { type: 'STRING', description: 'Mês e ano no formato MM/AAAA ou YYYY-MM (ex: 09/2026)' },
-      },
-      required: ['colaboradorId', 'mesAno'],
-    },
-  },
-  {
-    name: 'gerarAutorizacaoEntradaSaidaPDF',
-    description: 'Gera documento oficial do Colégio Crescer de autorização de entrada (atraso) ou saída antecipada de um aluno em PDF.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'Nome completo ou ID do aluno' },
-        motivo: { type: 'STRING', description: 'Motivo: "atraso" ou "saida_antecipada"' },
-        horario: { type: 'STRING', description: 'Horário do registro (ex: "14:15")' },
-        justificativa: { type: 'STRING', description: 'Justificativa ou observação apresentada' },
-      },
-      required: ['alunoId', 'motivo', 'horario'],
-    },
-  },
-  {
-    name: 'registrarFaltaFrequencia',
-    description: 'Registra a falta de um aluno na chamada da escola com justificativa opcional.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'Nome completo ou ID do aluno' },
-        data: { type: 'STRING', description: 'Data da falta no formato YYYY-MM-DD' },
-        justificativa: { type: 'STRING', description: 'Justificativa ou motivo da falta' },
-      },
-      required: ['alunoId', 'data'],
-    },
-  },
-  {
-    name: 'dispararAlertaWhatsApp',
-    description: 'Prepara e envia um alerta institucional via WhatsApp para um responsável ou para a coordenação.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        destinatario: { type: 'STRING', description: 'Telefone, nome ou "coordenacao"' },
-        mensagem: { type: 'STRING', description: 'Texto da mensagem do alerta' },
-      },
-      required: ['destinatario', 'mensagem'],
-    },
-  },
-  {
-    name: 'analisarDesarranjosDoDia',
-    description: 'Diagnostica turmas com chamada pendente no bloco atual, ausências inesperadas e inconsistências de ponto.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        foco: { type: 'STRING', description: 'Foco da análise ("geral", "frequencia", "ponto")' },
-      },
-    },
-  },
-  {
-    name: 'obterResumoFrequenciaPorData',
-    description: 'Consulta o histórico de frequência de alunos e relatório de faltas e presenças para uma data específica passada ou informada (ex: ontem, anteontem, dia 28 ou data YYYY-MM-DD / DD/MM/YYYY). Retorna o total de alunos faltantes, lista de faltas por turma e aluno, e o total de presenças consolidadas.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        data: { type: 'STRING', description: 'Data da consulta no formato YYYY-MM-DD ou DD/MM/YYYY (ex: ontem calculado ou data solicitada)' },
-      },
-      required: ['data'],
-    },
-  },
-  {
-    name: 'consultarAtividadesMomento',
-    description:
-      'Consulta o que cada turma (ou uma turma específica) está fazendo agora ou em um horário simulado na grade horária do Integral: atividade, local, monitora/ADI, horário de término e turmas sem atividade.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turma: {
-          type: 'STRING',
-          description: 'Nome opcional da turma (ex: "Maternal Azul", "Infantil 2", "1º Ano Azul").',
-        },
-        horarioSimulado: {
-          type: 'STRING',
-          description: 'Horário opcional no formato HH:mm para simular (ex: "15:30").',
-        },
-        data: {
-          type: 'STRING',
-          description: 'Data opcional YYYY-MM-DD. Padrão: hoje.',
-        },
-      },
-    },
-  },
-  {
-    name: 'registrarSaidaAntecipada',
-    description:
-      'Registra rapidamente o aviso/horário de saída antecipada de um aluno hoje (ex: "O Pedro vai sair às 16h"). Detecta automaticamente se há mais de um aluno com o mesmo nome.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'Nome ou identificador do aluno.' },
-        turma: { type: 'STRING', description: 'Nome da turma se informado.' },
-        horario: { type: 'STRING', description: 'Horário previsto da saída (ex: "16:00", "15:30").' },
-        justificativa: { type: 'STRING', description: 'Motivo ou quem vem buscar, se informado.' },
-      },
-      required: ['alunoId', 'horario'],
-    },
-  },
-  {
-    name: 'consultarCardapio',
-    description:
-      'Consulta o cardápio de hoje, de outra data ou da semana e verifica alunos com alergias ou restrições alimentares.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        data: { type: 'STRING', description: 'Data opcional ("hoje", "amanha", YYYY-MM-DD ou DD/MM/YYYY).' },
-        turma: { type: 'STRING', description: 'Turma opcional para checar restrições alimentares.' },
-      },
-    },
-  },
-  {
-    name: 'consultarSemanario',
-    description:
-      'Consulta o planejamento semanal (Semanário) de uma turma ou dia específico.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turma: { type: 'STRING', description: 'Turma opcional para filtrar o planejamento.' },
-        data: { type: 'STRING', description: 'Data opcional (YYYY-MM-DD ou dia da semana). Padrão: hoje.' },
-      },
-    },
-  },
-  {
-    name: 'consultarManualNormas',
-    description:
-      'Pesquisa regras, condutas, protocolos de emergência, uso de celular, saídas, alergias ou orientações no Manual Oficial do Colégio Crescer.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        termoOuTema: { type: 'STRING', description: 'Palavra-chave, assunto ou dúvida sobre regra do colégio.' },
-      },
-      required: ['termoOuTema'],
-    },
-  },
-  {
-    name: 'consultarAlunosOuTurma',
-    description:
-      'Busca alunos por nome aproximado ou lista os alunos de uma turma, com horário de saída, contrato e transporte.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        busca: { type: 'STRING', description: 'Nome parcial ou completo do aluno.' },
-        turma: { type: 'STRING', description: 'Turma opcional para filtrar.' },
-      },
-    },
-  },
-  {
-    name: 'consultarQuadroAtribuicoes',
-    description:
-      'Consulta quem são as monitoras titulares, assistentes, ADIs, horários e salas base no Quadro de Atribuições.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turma: { type: 'STRING', description: 'Turma opcional para filtrar.' },
-        colaborador: { type: 'STRING', description: 'Nome da monitora/ADI opcional para saber qual turma atende.' },
-      },
-    },
-  },
-  {
-    name: 'consultarLivroPonto',
-    description:
-      'Consulta os registros do Livro Ponto de um colaborador ou do dia.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        colaborador: { type: 'STRING', description: 'Nome opcional do colaborador.' },
-        data: { type: 'STRING', description: 'Data opcional YYYY-MM-DD. Padrão: hoje.' },
-      },
-    },
-  },
-  {
-    name: 'navegarModulo',
-    description:
-      'Abre uma aba/tela do aplicativo para o usuário.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        modulo: {
-          type: 'STRING',
-          description: 'Aba de destino: momento, frequencia, semanario, ponto, cardapio, alunos, financeiro, relatorio, manual.',
-          enum: ['momento', 'frequencia', 'semanario', 'ponto', 'cardapio', 'alunos', 'financeiro', 'relatorio', 'manual'],
-        },
-      },
-      required: ['modulo'],
-    },
-  },
-  {
-    name: 'consultarFrequenciaHoje',
-    description: 'Consulta as estatísticas ao vivo de frequência de hoje (presenças, faltas, saídas antecipadas e pendências de chamada), podendo filtrar por turma e listar nomes.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turma: { type: 'STRING', description: 'Nome da turma opcional para filtro (ex: "Maternal", "1º Ano Azul", "Mini Maternal")' },
-        listarNomes: { type: 'BOOLEAN', description: 'Se verdadeiro, inclui os nomes dos alunos faltantes, presentes ou pendentes.' },
-      },
-    },
-  },
-  {
-    name: 'consultarAlertasSaidaHoje',
-    description: 'Consulta os alertas e relatórios de saídas de hoje: alunos de transporte escolar (van), saídas antecipadas agendadas e alunos já liberados pela portaria.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        tipo: { type: 'STRING', description: 'Foco da consulta: "van", "antecipada" ou "geral"' },
-        turma: { type: 'STRING', description: 'Nome da turma opcional para filtro' },
-        detalhesVan: { type: 'BOOLEAN', description: 'Se verdadeiro, lista os nomes de cada aluno e condutor de van' },
-      },
-    },
-  },
-  {
-    name: 'gerarTermoSaidaAvulsa',
-    description: 'Registra a liberação antecipada de um aluno na portaria e gera o Termo de Saída Avulsa oficial em PDF pronto para impressão.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'Nome do aluno (com busca aproximada)' },
-        nomeRetirante: { type: 'STRING', description: 'Nome completo da pessoa retirando' },
-        documentoRetirante: { type: 'STRING', description: 'RG ou CPF do retirante' },
-        parentesco: { type: 'STRING', description: 'Grau de parentesco ou vínculo' },
-        motivoSaida: { type: 'STRING', description: 'Motivo da liberação' },
-        horarioSaida: { type: 'STRING', description: 'Horário do registro' },
-      },
-      required: ['alunoId', 'nomeRetirante'],
-    },
-  },
-  {
-    name: 'alterarAnoLetivoAluno',
-    description: 'Realiza a rematrícula ou troca de ano letivo do aluno (ex: 2026 ou 2027).',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'Nome ou ID do aluno' },
-        novoAnoLetivo: { type: 'INTEGER', description: 'Novo ano letivo (2026 ou 2027)' },
-      },
-      required: ['alunoId', 'novoAnoLetivo'],
-    },
-  },
-  {
-    name: 'consultarResumoFinanceiro',
-    description: 'Retorna a receita confirmada, despesas operacionais e taxa de adimplência do exercício contábil.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        anoLetivo: { type: 'INTEGER', description: 'Ano letivo contábil (2026 ou 2027)' },
-      },
-    },
-  },
-  {
-    name: 'cadastrarAluno',
-    description: 'Cadastra um novo aluno no sistema escolar com matrícula, turma, responsável e telefone.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        nome: { type: 'STRING', description: 'Nome completo do aluno' },
-        turmaId: { type: 'STRING', description: 'Identificador ou nome da turma (ex: "1º Ano Azul", "Maternal")' },
-        responsavel: { type: 'STRING', description: 'Nome do responsável legal pelo aluno' },
-        telefone: { type: 'STRING', description: 'Telefone ou WhatsApp de contato do responsável' },
-        horarioEntradaSaida: { type: 'STRING', description: 'Horário contratual de entrada e saída (ex: "11:40 - 17:40" ou "17:30")' },
-      },
-      required: ['nome', 'turmaId', 'responsavel', 'telefone'],
-    },
-  },
-  {
-    name: 'editarAluno',
-    description: 'Atualiza os dados cadastrais de um aluno existente no sistema.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        alunoId: { type: 'STRING', description: 'ID ou nome completo do aluno a ser editado' },
-        dadosAtualizados: {
-          type: 'OBJECT',
-          description: 'Campos atualizados do aluno (nome, turma, status, horarioSaida, notes, etc.)',
-        },
-      },
-      required: ['alunoId', 'dadosAtualizados'],
-    },
-  },
-  {
-    name: 'cadastrarUsuario',
-    description: 'Registra um novo usuário ou colaborador institucional no sistema do Colégio Crescer com perfil e cargo.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        nome: { type: 'STRING', description: 'Nome completo do colaborador' },
-        email: { type: 'STRING', description: 'E-mail institucional ou pessoal do colaborador' },
-        funcao: { type: 'STRING', description: 'Função desempenhada no Integral' },
-        cargo: { type: 'STRING', description: 'Cargo oficial' },
-        perfil: {
-          type: 'STRING',
-          description: 'Perfil de acesso institucional: "ADMIN", "MONITOR" ou "ADI"',
-          enum: ['ADMIN', 'MONITOR', 'ADI'],
-        },
-      },
-      required: ['nome', 'email', 'funcao', 'cargo', 'perfil'],
-    },
-  },
-  {
-    name: 'gerarListaChamadaPDF',
-    description: 'Gera o PDF oficial da lista de chamada nominal de uma turma específica para download imediato.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turmaId: { type: 'STRING', description: 'Nome da turma (ex: "1º Ano Azul", "Mini Maternal", "5º Ano")' },
-      },
-      required: ['turmaId'],
-    },
-  },
-  {
-    name: 'lancarFrequenciaTurma',
-    description: 'Realiza a chamada completa em lote de uma turma em determinada data, marcando presença ou falta de cada aluno.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        turmaId: { type: 'STRING', description: 'Nome ou identificador da turma' },
-        data: { type: 'STRING', description: 'Data da chamada no formato YYYY-MM-DD' },
-        chamadas: {
-          type: 'ARRAY',
-          description: 'Lista de registros contendo alunoId e booleano presente (true/false)',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              alunoId: { type: 'STRING', description: 'ID ou nome do aluno' },
-              presente: { type: 'BOOLEAN', description: 'true para presença, false para falta' },
-              observation: { type: 'STRING', description: 'Observação opcional' },
-            },
-            required: ['alunoId', 'presente'],
-          },
-        },
-      },
-      required: ['turmaId', 'data', 'chamadas'],
-    },
-  },
-  {
-    name: 'cadastrarRefeicaoCardapio',
-    description: 'Cadastra ou atualiza uma refeição (Almoço ou Lanche) no cardápio de uma data específica.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        data: { type: 'STRING', description: 'Data da refeição no formato YYYY-MM-DD ou DD/MM/YYYY' },
-        tipo: {
-          type: 'STRING',
-          description: 'Tipo da refeição: "Almoço" ou "Lanche"',
-          enum: ['Almoço', 'Lanche'],
-        },
-        descricao: { type: 'STRING', description: 'Descrição detalhada do prato ou lanche' },
-      },
-      required: ['data', 'tipo', 'descricao'],
-    },
-  },
-];
+// Normaliza histórico de mensagens do app (últimos 20 turnos) para Content[] do Gemini, preservando turnos de ferramentas
+function buildGeminiContentsFromHistory(
+  history: any[],
+  currentMessage: string,
+  pendingToolTurns: any[] = []
+): Content[] {
+  const contents: Content[] = [];
+  const recentHistory = Array.isArray(history)
+    ? history.filter((h) => h && h.id !== 'welcome').slice(-20)
+    : [];
 
-// API Route: Agente Autônomo e Resolutivo Sofia (Chat com Function Calling e RAG Local)
-app.post('/api/sofia/chat', async (req, res) => {
-  try {
-    const { message, history = [], appState, toolResult, toolCall } = req.body;
-    const systemInstruction = buildSofiaChatSystemInstruction(appState);
-
-    const ai = getAIClient();
-    if (!ai || Date.now() < geminiBillingCooldownUntil) {
-      return res.json({
-        success: false,
-        isFallback: true,
-        quotaDepleted: Date.now() < geminiBillingCooldownUntil,
-        message: 'Operando no atendimento local do aplicativo.',
-      });
+  for (const h of recentHistory) {
+    if (h.sender === 'user') {
+      if (typeof h.text === 'string' && h.text.trim()) {
+        contents.push({
+          role: 'user',
+          parts: [{ text: h.text }],
+        });
+      }
+      continue;
     }
 
-    // Se estiver reportando o resultado de uma ferramenta já executada
-    if (toolResult && toolCall) {
-      const followUpContents: any[] = [];
-      if (Array.isArray(history)) {
-        history.slice(-4).forEach((h: any) => {
-          if (h?.text && h?.sender) {
-            followUpContents.push({
-              role: h.sender === 'user' ? 'user' : 'model',
-              parts: [{ text: h.text }],
+    if (h.sender === 'sofia') {
+      if (Array.isArray(h.toolTurns) && h.toolTurns.length > 0) {
+        for (const step of h.toolTurns) {
+          if (step?.rawModelContent && Array.isArray(step.rawModelContent.parts) && step.rawModelContent.parts.length > 0) {
+            contents.push(step.rawModelContent);
+          } else if (Array.isArray(step?.calls) && step.calls.length > 0) {
+            contents.push({
+              role: 'model',
+              parts: step.calls.map((c: any) => ({
+                functionCall: {
+                  ...(c.id ? { id: c.id } : {}),
+                  name: c.name,
+                  args: c.args || {},
+                },
+              })),
             });
           }
+
+          if (Array.isArray(step?.results) && step.results.length > 0) {
+            contents.push({
+              role: 'user',
+              parts: step.results.map((r: any) => ({
+                functionResponse: {
+                  ...(r.id ? { id: r.id } : {}),
+                  name: r.name,
+                  response: { result: r.response },
+                },
+              })),
+            });
+          }
+        }
+      }
+
+      if (typeof h.text === 'string' && h.text.trim()) {
+        contents.push({
+          role: 'model',
+          parts: [{ text: h.text }],
         });
       }
-      if (message) {
-        followUpContents.push({
+    }
+  }
+
+  // Gemini exige que o histórico comece no papel 'user'
+  while (contents.length > 0 && contents[0].role !== 'user') {
+    contents.shift();
+  }
+
+  if (typeof currentMessage === 'string' && currentMessage.trim()) {
+    contents.push({
+      role: 'user',
+      parts: [{ text: currentMessage }],
+    });
+  }
+
+  // Turnos ativos de execução de ferramentas do pedido atual (até 4 chamadas em sequência)
+  if (Array.isArray(pendingToolTurns) && pendingToolTurns.length > 0) {
+    for (const step of pendingToolTurns) {
+      if (step?.rawModelContent && Array.isArray(step.rawModelContent.parts) && step.rawModelContent.parts.length > 0) {
+        contents.push(step.rawModelContent);
+      } else if (Array.isArray(step?.calls) && step.calls.length > 0) {
+        contents.push({
+          role: 'model',
+          parts: step.calls.map((c: any) => ({
+            functionCall: {
+              ...(c.id ? { id: c.id } : {}),
+              name: c.name,
+              args: c.args || {},
+            },
+          })),
+        });
+      }
+
+      if (Array.isArray(step?.results) && step.results.length > 0) {
+        contents.push({
           role: 'user',
-          parts: [{ text: message }],
+          parts: step.results.map((r: any) => ({
+            functionResponse: {
+              ...(r.id ? { id: r.id } : {}),
+              name: r.name,
+              response: { result: r.response },
+            },
+          })),
         });
       }
-      followUpContents.push({
-        role: 'user',
-        parts: [
-          {
-            text: `[Contexto interno da consulta "${toolCall.name}"]\n${JSON.stringify(toolResult)}\n\nResponda agora diretamente para a pessoa como a Sofia, em português natural do Brasil (1 a 3 frases curtas por padrão, salvo se ela pediu detalhes/lista/texto): dê a resposta logo na primeira frase, sem repetir a pergunta, sem mencionar termos técnicos, sem inventar dados e, se fizer sentido, feche com uma sugestão rápida ou alerta útil em 1 linha.`,
+    }
+  }
+
+  return contents;
+}
+
+// API Route: Agente Autônomo e Resolutivo Sofia (Function Calling real em modo AUTO + functionResponse)
+app.post('/api/sofia/chat', async (req, res) => {
+  try {
+    const {
+      message,
+      history = [],
+      pendingToolTurns = [],
+      appState,
+      antiRepetitionNote,
+      forceFinalAnswer = false,
+    } = req.body;
+
+    const verifiedSession = (req as any).verifiedAdminSession as VerifiedSessionPayload;
+    const verifiedAppState = appState
+      ? {
+          ...appState,
+          currentUser: {
+            ...(appState.currentUser || {}),
+            email: verifiedSession.email,
+            isAdmin: true,
+            role: 'coordenador',
           },
-        ],
-      });
+        }
+      : appState;
 
-      const response = await ai.models.generateContent({
-        model: SOFIA_DEFAULT_MODEL,
-        contents: followUpContents,
-        config: {
-          systemInstruction,
-        },
-      });
+    let systemInstruction = buildSofiaChatSystemInstruction(verifiedAppState);
+    if (antiRepetitionNote && typeof antiRepetitionNote === 'string') {
+      systemInstruction += `\n\n[INSTRUÇÃO CRÍTICA DE CONTINUIDADE]: ${antiRepetitionNote}`;
+    }
 
-      return res.json({
-        success: true,
-        text: response.text || toolResult.message,
+    const ai = getAIClient();
+    if (!ai) {
+      console.error('[Sofia Chat API] GEMINI_API_KEY ausente ou cliente Gemini não inicializado.');
+      return res.status(503).json({
+        success: false,
+        errorCode: 'AI_NOT_CONFIGURED',
+        error: 'Serviço de IA não configurado no servidor.',
       });
     }
 
-    // Monta o histórico de conversa
-    const contentsPayload: any[] = [];
-    if (Array.isArray(history)) {
-      history.slice(-8).forEach((h: any) => {
-        if (h?.text && h?.sender) {
-          contentsPayload.push({
-            role: h.sender === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text }],
+    const contentsPayload = buildGeminiContentsFromHistory(history, message, pendingToolTurns);
+    const functionCallingMode = forceFinalAnswer
+      ? FunctionCallingConfigMode.NONE
+      : FunctionCallingConfigMode.AUTO;
+
+    const baseConfig: any = {
+      systemInstruction,
+      temperature: SOFIA_DEFAULT_TEMPERATURE,
+      tools: [{ functionDeclarations: SOFIA_FUNCTION_DECLARATIONS as any }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: functionCallingMode,
+        },
+      },
+    };
+
+    const callGeminiWithModel = async (modelName: string) => {
+      try {
+        return await ai.models.generateContent({
+          model: modelName,
+          contents: contentsPayload,
+          config: baseConfig,
+        });
+      } catch (err: any) {
+        const msg = String(err?.message || err || '').toLowerCase();
+        if (msg.includes('temperature') && (msg.includes('400') || msg.includes('invalid') || msg.includes('unsupported'))) {
+          console.warn(`[Sofia Chat API] Modelo ${modelName} rejeitou temperature; repetindo chamada sem temperature.`);
+          const { temperature: _removed, ...fallbackConfig } = baseConfig;
+          return await ai.models.generateContent({
+            model: modelName,
+            contents: contentsPayload,
+            config: fallbackConfig,
           });
         }
-      });
+        throw err;
+      }
+    };
+
+    let response: any;
+    let usedModel: string = SOFIA_DEFAULT_MODEL;
+    let usedFallback = false;
+
+    try {
+      response = await callGeminiWithModel(SOFIA_DEFAULT_MODEL);
+    } catch (primaryErr: any) {
+      const classifiedPrimary = classifyGeminiError(primaryErr, SOFIA_DEFAULT_MODEL);
+      const shouldTryFallback =
+        !classifiedPrimary.isBillingDepleted &&
+        (classifiedPrimary.statusCode === 404 ||
+          classifiedPrimary.statusCode === 503 ||
+          classifiedPrimary.statusCode === 429) &&
+        Boolean(SOFIA_FALLBACK_MODEL) &&
+        String(SOFIA_FALLBACK_MODEL) !== String(SOFIA_DEFAULT_MODEL);
+
+      if (!shouldTryFallback) {
+        (primaryErr as any).__failedModel = SOFIA_DEFAULT_MODEL;
+        (primaryErr as any).__fallbackAttempted = false;
+        throw primaryErr;
+      }
+
+      console.warn(
+        `[Sofia Chat API] Modelo principal (${SOFIA_DEFAULT_MODEL}) falhou com ${classifiedPrimary.statusCode}; tentando fallback único (${SOFIA_FALLBACK_MODEL}).`
+      );
+      usedModel = SOFIA_FALLBACK_MODEL;
+      usedFallback = true;
+
+      try {
+        response = await callGeminiWithModel(SOFIA_FALLBACK_MODEL);
+      } catch (fallbackErr: any) {
+        (fallbackErr as any).__failedModel = SOFIA_FALLBACK_MODEL;
+        (fallbackErr as any).__fallbackAttempted = true;
+        throw fallbackErr;
+      }
     }
 
-    if (message) {
-      contentsPayload.push({
-        role: 'user',
-        parts: [{ text: message }],
-      });
+    currentSofiaLastModelUsed = usedModel;
+    currentSofiaLastFallbackUsed = usedFallback;
+    currentSofiaLastError = null;
+
+    if (currentSofiaAdminAlert) {
+      currentSofiaAdminAlert = null;
+      writeSofiaAdminAlertToDisk(null);
     }
 
-    const response = await ai.models.generateContent({
-      model: SOFIA_DEFAULT_MODEL,
-      contents: contentsPayload,
-      config: {
-        systemInstruction,
-        tools: [{ functionDeclarations: SOFIA_SERVER_TOOL_DECLARATIONS as any }],
-      },
-    });
+    console.info(
+      `[Sofia Chat API] Pedido respondido pelo modelo: ${usedModel} (fallback=${usedFallback ? 'sim' : 'nao'}, modo=${forceFinalAnswer ? 'NONE' : 'AUTO'})`
+    );
 
-    // Se o modelo invocou uma ferramenta
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      const call = response.functionCalls[0];
+    if (!forceFinalAnswer && response.functionCalls && response.functionCalls.length > 0) {
+      const toolCalls = response.functionCalls.map((call: any) => ({
+        id: call.id,
+        name: call.name,
+        args: call.args || {},
+      }));
+      const rawModelContent = response.candidates?.[0]?.content || {
+        role: 'model',
+        parts: toolCalls.map((call: any) => ({
+          functionCall: {
+            ...(call.id ? { id: call.id } : {}),
+            name: call.name,
+            args: call.args || {},
+          },
+        })),
+      };
+
       return res.json({
         success: true,
+        model: usedModel,
+        fallbackUsed: usedFallback,
         hasFunctionCall: true,
-        toolCall: {
-          name: call.name,
-          args: call.args || {},
-        },
-        text: response.text || '',
+        toolCalls,
+        rawModelContent,
       });
     }
 
     return res.json({
       success: true,
+      model: usedModel,
+      fallbackUsed: usedFallback,
       hasFunctionCall: false,
-      text: response.text || 'Tô por aqui! O que você precisa ver ou resolver agora?',
+      text: (response.text || '').trim(),
     });
   } catch (error: any) {
-    const { isBillingDepleted, isRateLimit } = isGeminiQuotaOrBillingError(error);
-    if (isBillingDepleted) {
-      geminiBillingCooldownUntil = Date.now() + 5 * 60 * 1000;
-      console.info('[Sofia Chat] Créditos de IA indisponíveis no momento; encaminhando para consulta local do aplicativo.');
-    } else if (isRateLimit) {
-      console.info('[Sofia Chat] Limite temporário de requisições atingido; encaminhando para consulta local.');
-    } else {
-      console.info('[Sofia Chat] Usando consulta local do aplicativo devido a falha temporária de comunicação.');
+    const failedModel = error?.__failedModel || SOFIA_DEFAULT_MODEL;
+    const fallbackAttempted = Boolean(error?.__fallbackAttempted);
+    console.error(`[Sofia Chat API] Erro ao processar conversa (modelo=${failedModel}, fallbackAttempted=${fallbackAttempted}):`, error);
+    const classified = classifyGeminiError(error, failedModel);
+    const errorMessage = error?.message || 'Erro interno ao processar conversa com a Sofia.';
+
+    currentSofiaLastModelUsed = failedModel;
+    currentSofiaLastFallbackUsed = fallbackAttempted;
+    currentSofiaLastError = {
+      code: classified.statusCode,
+      message: errorMessage.slice(0, 260),
+      model: failedModel,
+      detectedAt: new Date().toISOString(),
+    };
+
+    if (classified.adminAlert) {
+      currentSofiaAdminAlert = classified.adminAlert;
+      writeSofiaAdminAlertToDisk(classified.adminAlert);
     }
-    return res.json({
+
+    return res.status(classified.statusCode).json({
       success: false,
-      isFallback: true,
-      quotaDepleted: isBillingDepleted,
-      rateLimited: isRateLimit,
+      model: failedModel,
+      fallbackAttempted,
+      quotaDepleted: classified.isBillingDepleted,
+      rateLimited: classified.isRateLimit,
+      modelNotFound: classified.isModelNotFound,
+      serviceUnavailable: classified.isServiceUnavailable,
+      adminAlert: classified.adminAlert,
+      error: errorMessage,
     });
   }
 });
 
-// API Route: Agente de Voz Sofia — Assistente da Equipe do Integral
-app.post('/api/gemini/voice-agent', async (req, res) => {
+// API Route: Agente de Voz Sofia — Restrito exclusivamente à Administração
+app.post('/api/gemini/voice-agent', requireAdminSession, async (req, res) => {
   try {
     const { prompt, context } = req.body;
     if (!prompt || typeof prompt !== 'string') {

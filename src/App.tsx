@@ -1,7 +1,7 @@
 // Programa do Integral - Colégio Crescer: Aplicação Principal
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ShieldCheck, GraduationCap, UserCheck, ArrowRight, ChevronDown, ChevronUp, AlertTriangle, X, Search, CheckCircle, Calendar, UserX, Lock, ShieldAlert, Bell, Clock, HeartHandshake } from 'lucide-react';
-import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings, UserNotification } from './types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, WeekInfo, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, DayOfWeek, SemanarioPlan, TurmaAtribuicao, DepartureAlertSettings, UserNotification, SofiaAdminAiAlert } from './types';
 import { INITIAL_HOLIDAYS, ACTIVITIES_LIST, INITIAL_STUDENTS, TURMAS_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from './data/initialData';
 import {
   loadStudents,
@@ -60,7 +60,19 @@ import { PedagogicalFeedbackModal } from './components/PedagogicalFeedbackModal'
 import { UserProfileModal } from './components/UserProfile';
 import { subscribePendingFeedbacksForUser } from './services/feedbackService';
 import { deleteUser } from './services/userService';
-import { SofiaAssistant, VoiceWidget } from './components/SofiaAssistant';
+import { SofiaAssistant } from './components/SofiaAssistant';
+import { getStoredSofiaAdminAlert, clearStoredSofiaAdminAlert, SOFIA_ADMIN_ALERT_EVENT } from './services/sofiaService';
+import { SOFIA_DEFAULT_MODEL } from './utils/sofiaPromptBuilder';
+import {
+  clearServerSession,
+  clearSofiaClientMemoryAndStorage,
+  getSofiaAuthHeaders,
+} from './services/authSessionService';
+import {
+  USER_NOTIFICATIONS_UPDATED_EVENT,
+  resolvePersistentSofiaAdminAlert,
+  subscribeSofiaPersistentAdminAlert,
+} from './services/sofiaSecurityService';
 import { useWebPushNotifications } from './hooks/useWebPushNotifications';
 import {
   DepartureAlertItem,
@@ -190,6 +202,65 @@ export default function App() {
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [pendingFeedbacksCount, setPendingFeedbacksCount] = useState<number>(0);
 
+  // Alerta administrativo exclusivo para coordenação/admin sobre status/créditos da IA Sofia
+  const [sofiaAdminAlert, setSofiaAdminAlert] = useState<SofiaAdminAiAlert | null>(() => getStoredSofiaAdminAlert());
+
+  useEffect(() => {
+    if (!currentUser || !isAdmin(currentUser)) {
+      clearSofiaClientMemoryAndStorage();
+      setSofiaAdminAlert(null);
+      return;
+    }
+
+    let cancelled = false;
+    const syncAlertFromServer = async () => {
+      try {
+        const res = await fetch('/api/sofia/admin-status', {
+          credentials: 'include',
+          headers: getSofiaAuthHeaders(),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.alert?.active) {
+          setSofiaAdminAlert(data.alert);
+        } else {
+          const localAlert = getStoredSofiaAdminAlert();
+          setSofiaAdminAlert(localAlert?.active ? localAlert : null);
+        }
+      } catch {
+        // Silencioso para não poluir UI; fallback no storage local
+        if (!cancelled) {
+          const localAlert = getStoredSofiaAdminAlert();
+          setSofiaAdminAlert(localAlert?.active ? localAlert : null);
+        }
+      }
+    };
+
+    syncAlertFromServer();
+
+    const unsubFirestoreAlert = subscribeSofiaPersistentAdminAlert((remoteAlert) => {
+      if (cancelled) return;
+      if (remoteAlert?.active) {
+        setSofiaAdminAlert(remoteAlert);
+      } else {
+        setSofiaAdminAlert(null);
+      }
+    });
+
+    const handleSofiaAlertEvent = (evt: Event) => {
+      const detail = (evt as CustomEvent<SofiaAdminAiAlert | null>).detail;
+      setSofiaAdminAlert(detail && detail.active ? detail : null);
+    };
+
+    window.addEventListener(SOFIA_ADMIN_ALERT_EVENT, handleSofiaAlertEvent);
+    return () => {
+      cancelled = true;
+      unsubFirestoreAlert();
+      window.removeEventListener(SOFIA_ADMIN_ALERT_EVENT, handleSofiaAlertEvent);
+    };
+  }, [currentUser]);
+
   // Escuta contagem de feedbacks pendentes da colaboradora em tempo real
   useEffect(() => {
     if (!currentUser) {
@@ -293,6 +364,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    void clearServerSession();
     setCurrentUser(null);
     saveStoredUser(null);
     setActiveTab('momento');
@@ -977,15 +1049,49 @@ export default function App() {
     const unsubNotifications = subscribeUserNotifications(
       userUid,
       (list) => {
-        setUserNotifications(list);
+        try {
+          const cachedRaw = localStorage.getItem(`crescer_notifs_${userUid}`);
+          const cachedList: UserNotification[] = cachedRaw ? JSON.parse(cachedRaw) : [];
+          const mergedById = new Map<string, UserNotification>();
+          [...list, ...cachedList].forEach((n) => {
+            if (!n || !n.id) return;
+            const isUnread = n.status === 'UNREAD' || (!n.read && n.status !== 'READ');
+            if (isUnread && !mergedById.has(n.id)) {
+              mergedById.set(n.id, n);
+            }
+          });
+          setUserNotifications(
+            Array.from(mergedById.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            )
+          );
+        } catch {
+          setUserNotifications(list);
+        }
       },
       (err) => {
         console.warn('Erro ao escutar notificações em tempo real no App.tsx:', err);
       }
     );
 
+    const handleLocalNotifsUpdated = (evt: Event) => {
+      const detail = (evt as CustomEvent<{ userId?: string; notification?: UserNotification }>).detail;
+      if (detail?.userId && detail.userId !== userUid && detail.userId !== currentUser?.id && detail.userId !== currentUser?.uid) {
+        return;
+      }
+      if (detail?.notification) {
+        setUserNotifications((prev) => {
+          const exists = prev.some((n) => n.id === detail.notification!.id);
+          return exists ? prev : [detail.notification!, ...prev];
+        });
+      }
+    };
+
+    window.addEventListener(USER_NOTIFICATIONS_UPDATED_EVENT, handleLocalNotifsUpdated);
+
     return () => {
       unsubNotifications();
+      window.removeEventListener(USER_NOTIFICATIONS_UPDATED_EVENT, handleLocalNotifsUpdated);
     };
   }, [currentUser?.uid, currentUser?.id]);
 
@@ -2296,6 +2402,33 @@ export default function App() {
     }
   };
 
+  const handleDismissSofiaAdminAlert = () => {
+    clearStoredSofiaAdminAlert();
+    setSofiaAdminAlert(null);
+    void resolvePersistentSofiaAdminAlert();
+    fetch('/api/sofia/admin-status', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: getSofiaAuthHeaders(),
+    }).catch(() => {});
+  };
+
+  const handleDismissUserNotification = async (notifId: string) => {
+    setUserNotifications((prev) => prev.filter((n) => n.id !== notifId));
+    const userUid = currentUser?.uid || currentUser?.id;
+    if (userUid) {
+      try {
+        const key = `crescer_notifs_${userUid}`;
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed: UserNotification[] = JSON.parse(raw);
+          localStorage.setItem(key, JSON.stringify(parsed.filter((n) => n.id !== notifId)));
+        }
+      } catch {}
+    }
+    await markUserNotificationAsRead(notifId);
+  };
+
   // If user is not logged in, render the Login Screen with all registered users
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} onSaveUser={handleSaveUser} usersList={users} />;
@@ -2328,10 +2461,66 @@ export default function App() {
         onForceSync={handleForceSync}
         onOpenUserProfile={() => setShowUserProfileModal(true)}
         pendingFeedbacksCount={pendingFeedbacksCount}
+        notifications={userNotifications}
+        onDismissNotification={handleDismissUserNotification}
+        sofiaAdminAlert={isAdmin(currentUser) ? sofiaAdminAlert : null}
+        onDismissSofiaAdminAlert={handleDismissSofiaAdminAlert}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
+        {/* Banner Administrativo da Assistente Sofia (visível apenas para coordenação/admin) */}
+        {isAdmin(currentUser) && sofiaAdminAlert?.active && (
+          <div className="bg-amber-50 border-2 border-amber-300 text-amber-950 rounded-2xl p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start space-x-3.5">
+              <div className="p-2.5 bg-amber-100 rounded-xl shrink-0 mt-0.5 border border-amber-200">
+                <AlertTriangle className="w-6 h-6 text-amber-700" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-md border border-amber-300">
+                    AVISO ADMIN • ASSISTENTE SOFIA
+                  </span>
+                  <span className="text-xs font-semibold text-amber-800">
+                    Código {sofiaAdminAlert.code}
+                  </span>
+                  <span className="text-[11px] font-mono text-amber-800/80">
+                    • Modelo: {sofiaAdminAlert.model || SOFIA_DEFAULT_MODEL}
+                  </span>
+                </div>
+                <h4 className="text-sm sm:text-base font-extrabold text-amber-950 mt-1">
+                  {sofiaAdminAlert.message}
+                </h4>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  {sofiaAdminAlert.lastError
+                    ? `Último erro registrado (${sofiaAdminAlert.code}): ${sofiaAdminAlert.lastError}`
+                    : 'Assistente restrita à administração; nenhuma equipe não administrativa possui acesso.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 shrink-0 self-start sm:self-auto">
+              {sofiaAdminAlert.actionUrl && (
+                <a
+                  href={sofiaAdminAlert.actionUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-700 hover:bg-amber-800 transition-colors shadow-sm"
+                >
+                  Abrir ai.studio/projects
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={handleDismissSofiaAdminAlert}
+                aria-label="Dispensar aviso da Sofia"
+                className="p-2 rounded-xl text-amber-800 hover:bg-amber-200/70 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Banner de Orientações e Feedbacks Pedagógicos Pendentes de Assinatura */}
         {pendingFeedbacksCount > 0 && (
           <div className="bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-rose-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
@@ -2371,10 +2560,7 @@ export default function App() {
         <UserNotificationBanner
           currentUser={currentUser}
           notifications={userNotifications}
-          onDismissNotification={async (notifId) => {
-            setUserNotifications((prev) => prev.filter((n) => n.id !== notifId));
-            await markUserNotificationAsRead(notifId);
-          }}
+          onDismissNotification={handleDismissUserNotification}
           onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
         />
 
@@ -2863,8 +3049,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Assistente Sofia — Disponível para toda a equipe do Integral com guarda de privacidade por perfil */}
-      {currentUser && (
+      {/* Assistente Sofia — Exclusiva para Administrador */}
+      {currentUser && isAdmin(currentUser) && (
         <SofiaAssistant
           students={students}
           records={records}

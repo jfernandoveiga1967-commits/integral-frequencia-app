@@ -345,6 +345,41 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "date", "status", "presentes", "totalEsperados", "updatedAt"]
+    },
+    "SofiaAuditLog": {
+      "title": "SofiaAuditLog",
+      "description": "Audit log for Sofia write tool executions and denied attempts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "userRole": { "type": "string", "maxLength": 64 },
+        "userProfile": { "type": "string", "maxLength": 32 },
+        "toolName": { "type": "string", "maxLength": 64 },
+        "argsSummary": { "type": "object" },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "formattedDateTime": { "type": "string", "maxLength": 64 },
+        "outcome": { "type": "string", "enum": ["sucesso", "negado", "erro", "aguardando_confirmacao"] },
+        "detail": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "userId", "userName", "toolName", "timestamp", "outcome"]
+    },
+    "SofiaAiAlert": {
+      "title": "SofiaAiAlert",
+      "description": "Persistent AI failure alert record (402/429/404) for coordination visibility",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "code": { "type": "number" },
+        "kind": { "type": "string", "maxLength": 64 },
+        "message": { "type": "string", "maxLength": 500 },
+        "actionUrl": { "type": "string", "maxLength": 256 },
+        "detectedAt": { "type": "string", "maxLength": 64 },
+        "resolvedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "active"]
     }
   },
   "firestore": {
@@ -423,6 +458,14 @@
     "/feedbacks_pedagogicos/{feedbackId}": {
       "schema": "FeedbackPedagogico",
       "description": "Collection of pedagogical feedbacks, IA messages, checklist items and monitor digital signatures"
+    },
+    "/sofia_audit_logs/{logId}": {
+      "schema": "SofiaAuditLog",
+      "description": "Audit log records for Sofia AI assistant write actions and permission denials"
+    },
+    "/sofia_ai_alerts/{alertId}": {
+      "schema": "SofiaAiAlert",
+      "description": "Persistent AI quota/availability alert records (402/429/404)"
     }
   }
 }

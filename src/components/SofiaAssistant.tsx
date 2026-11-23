@@ -7,6 +7,7 @@
 import React from 'react';
 import { SofiaAgent, SofiaAgentProps } from './SofiaAgent';
 import { SofiaActionPayload } from '../types';
+import { isAdmin, getStoredUser } from '../utils/authUtils';
 
 export interface SofiaAssistantMessage {
   id: string;
@@ -21,6 +22,10 @@ export type SofiaAssistantProps = SofiaAgentProps & {
 };
 
 export const SofiaAssistant: React.FC<SofiaAssistantProps> = (props) => {
+  const effectiveUser = props.currentUser || getStoredUser();
+  if (!effectiveUser || !isAdmin(effectiveUser)) {
+    return null;
+  }
   return <SofiaAgent {...props} />;
 };
 

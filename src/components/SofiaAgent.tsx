@@ -24,6 +24,7 @@ import {
   Maximize2,
   Minimize2,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   Student,
@@ -36,16 +37,19 @@ import {
   HolidayItem,
   ActivityItem,
   SofiaChatMessage,
+  SofiaAuditLogEntry,
 } from '../types';
-import { getStoredUser } from '../utils/authUtils';
+import { getStoredUser, isAdmin } from '../utils/authUtils';
 import { toISODateString, getDayOfWeekFromDate } from '../utils/dateUtils';
 import {
   sendSofiaMessage,
   buildLiveAppStateSummary,
 } from '../services/sofiaService';
+import { subscribeSofiaAuditLogs } from '../services/sofiaSecurityService';
 import { SofiaToolExecutionContext } from '../services/sofiaTools';
-import { formatHourPTBR } from '../utils/sofiaPromptBuilder';
+import { formatHourPTBR, SOFIA_DEFAULT_MODEL } from '../utils/sofiaPromptBuilder';
 import { TextToSpeechManager } from '../services/voiceAiService';
+import { clearSofiaClientMemoryAndStorage, getSofiaAuthHeaders } from '../services/authSessionService';
 
 export interface SofiaAgentProps {
   students: Student[];
@@ -74,17 +78,22 @@ export interface SofiaAgentProps {
 function getFriendlyToolStatus(toolName: string | null): string {
   switch (toolName) {
     case 'consultarAtividadesMomento':
-      return 'Vendo o que tá rolando agora...';
+    case 'consultarGradeHoraria':
+      return 'Vendo a grade e o que tá rolando agora...';
     case 'consultarFrequenciaHoje':
     case 'obterResumoFrequenciaPorData':
     case 'lancarFrequenciaTurma':
     case 'registrarFaltaFrequencia':
       return 'Conferindo a chamada...';
+    case 'gerar_pdf_frequencia':
+    case 'gerarListaChamadaPDF':
+      return 'Gerando o PDF da chamada...';
     case 'registrarSaidaAntecipada':
+    case 'confirmarSaidaAluno':
     case 'consultarAlertasSaidaHoje':
     case 'gerarTermoSaidaAvulsa':
     case 'gerarAutorizacaoEntradaSaidaPDF':
-      return 'Checando os horários de saída...';
+      return 'Checando e atualizando as saídas...';
     case 'consultarCardapio':
     case 'cadastrarRefeicaoCardapio':
       return 'Olhando o cardápio...';
@@ -136,6 +145,69 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
   const [executingToolName, setExecutingToolName] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [showAuditLogPanel, setShowAuditLogPanel] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<SofiaAuditLogEntry[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<{
+    model: string;
+    fallbackUsed?: boolean;
+    lastError?: { code?: number; message: string; model?: string } | null;
+  }>({
+    model: SOFIA_DEFAULT_MODEL,
+    fallbackUsed: false,
+    lastError: null,
+  });
+
+  const userIsAdmin = isAdmin(effectiveUser);
+
+  // Ao perder o perfil de administrador (logout ou troca de usuário), fecha o painel e limpa histórico local/memória
+  useEffect(() => {
+    if (!effectiveUser || !userIsAdmin) {
+      setIsOpen(false);
+      setIsExpanded(false);
+      setShowAuditLogPanel(false);
+      setInputText('');
+      setMessages([]);
+      setAuditLogs([]);
+      setIsListening(false);
+      setRuntimeStatus({ model: SOFIA_DEFAULT_MODEL, fallbackUsed: false, lastError: null });
+      spokenDepartureAlertsRef.current.clear();
+      TextToSpeechManager.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      clearSofiaClientMemoryAndStorage();
+      return;
+    }
+
+    return subscribeSofiaAuditLogs((logs) => {
+      setAuditLogs(logs);
+    });
+  }, [userIsAdmin, effectiveUser?.id]);
+
+  useEffect(() => {
+    if (!effectiveUser || !userIsAdmin || (!isOpen && !showAuditLogPanel)) return;
+    let cancelled = false;
+    fetch('/api/sofia/admin-status', {
+      credentials: 'include',
+      headers: getSofiaAuthHeaders(),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setRuntimeStatus({
+          model: data.model || SOFIA_DEFAULT_MODEL,
+          fallbackUsed: Boolean(data.fallbackUsed),
+          lastError: data.lastError || (data.alert?.active ? { code: data.alert.code, message: data.alert.lastError || data.alert.message, model: data.alert.model } : null),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUser?.id, userIsAdmin, isOpen, showAuditLogPanel]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -204,8 +276,9 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
   // Conjunto de alertas proativos de saída antecipada já emitidos para evitar repetições
   const spokenDepartureAlertsRef = useRef<Set<string>>(new Set());
 
-  // Motor de Alertas Proativos em Segundo Plano
+  // Motor de Alertas Proativos em Segundo Plano (exclusivo para administrador)
   useEffect(() => {
+    if (!effectiveUser || !userIsAdmin) return;
     const checkUpcomingDepartures = () => {
       const now = new Date();
       const nowHours = now.getHours();
@@ -281,7 +354,7 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
     checkUpcomingDepartures();
     const intervalTimer = setInterval(checkUpcomingDepartures, 30000);
     return () => clearInterval(intervalTimer);
-  }, [students, records, isMuted]);
+  }, [students, records, isMuted, userIsAdmin, effectiveUser?.id]);
 
   // Envio de Mensagem
   const handleSendMessage = async (customPrompt?: string) => {
@@ -317,13 +390,22 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         toolCall: response.toolCall,
         toolResult: response.toolResult,
+        toolResults: response.toolResults,
+        toolTurns: response.toolTurns,
       };
 
       setMessages((prev) => [...prev, sofiaMessage]);
 
-      if (!isMuted && (response.toolResult?.spokenText || response.text)) {
-        const textToSpeak = response.toolResult?.spokenText || response.text;
-        const cleanSpeakText = textToSpeak
+      setRuntimeStatus({
+        model: response.model || SOFIA_DEFAULT_MODEL,
+        fallbackUsed: Boolean(response.fallbackUsed),
+        lastError: response.error
+          ? { code: response.errorCode, message: response.error, model: response.model }
+          : null,
+      });
+
+      if (!isMuted && response.text) {
+        const cleanSpeakText = response.text
           .replace(/http[^\s]+/g, '')
           .replace(/[#*`_]/g, '')
           .replace(/\n•/g, ', ')
@@ -332,7 +414,8 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
           .slice(0, 320);
         TextToSpeechManager.speak(cleanSpeakText);
       }
-    } catch {
+    } catch (err) {
+      console.error('[SofiaAgent] Erro ao enviar mensagem:', err);
       setMessages((prev) => [
         ...prev,
         {
@@ -419,14 +502,14 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
     setIsOpen(true);
   };
 
-  // Disponível para toda a equipe autenticada do Integral (monitoras, professoras, coordenação, direção, nutrição)
-  if (!effectiveUser) return null;
+  // Exclusivo para Administrador: nenhum vestígio para demais perfis
+  if (!effectiveUser || !userIsAdmin) return null;
 
   const quickSuggestions = [
-    'O que tá rolando agora?',
+    'Resumo e pendências de hoje',
     'Tem chamada pendente?',
-    'Cardápio de hoje',
-    'Saídas de van hoje',
+    'Pendências do Livro Ponto',
+    'Saídas antecipadas e vans hoje',
   ];
 
   return (
@@ -481,6 +564,27 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
             </div>
 
             <div className="flex items-center space-x-1.5">
+              {userIsAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowAuditLogPanel((prev) => !prev)}
+                  className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-colors cursor-pointer ${
+                    showAuditLogPanel
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'bg-white/10 text-amber-200 hover:bg-white/20'
+                  }`}
+                  title="Log de auditoria de ações da Sofia (visível para Coordenação)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Auditoria</span>
+                  {auditLogs.length > 0 && (
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${showAuditLogPanel ? 'bg-slate-900 text-amber-300' : 'bg-amber-500/30 text-amber-200'}`}>
+                      {auditLogs.length > 99 ? '99+' : auditLogs.length}
+                    </span>
+                  )}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -534,6 +638,98 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
             </div>
           </div>
 
+          {/* Painel de Auditoria (exclusivo para Coordenação/Admin) */}
+          {userIsAdmin && showAuditLogPanel ? (
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5 bg-slate-50">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200 gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                    Log de Auditoria da Sofia (Ações de Escrita e Bloqueios)
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Registro completo de quem pediu, ferramenta, data/hora e resultado.
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-slate-500 font-mono">
+                    <span>
+                      Modelo em uso: <strong className="text-slate-700">{runtimeStatus.model}</strong>
+                      {runtimeStatus.fallbackUsed ? ' (fallback)' : ''}
+                    </span>
+                    {runtimeStatus.lastError && (
+                      <span className="text-rose-700 truncate max-w-[320px]" title={runtimeStatus.lastError.message}>
+                        Último erro{runtimeStatus.lastError.code ? ` (${runtimeStatus.lastError.code})` : ''}: {runtimeStatus.lastError.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAuditLogPanel(false)}
+                  className="text-[11px] font-bold text-indigo-700 hover:underline cursor-pointer shrink-0"
+                >
+                  Voltar ao chat
+                </button>
+              </div>
+
+              {auditLogs.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-500">
+                  Nenhuma ação de escrita ou bloqueio registrada até o momento.
+                </div>
+              ) : (
+                auditLogs.map((entry) => {
+                  const badgeClass =
+                    entry.outcome === 'sucesso'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      : entry.outcome === 'aguardando_confirmacao'
+                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                      : entry.outcome === 'negado'
+                      ? 'bg-rose-100 text-rose-800 border-rose-200'
+                      : 'bg-red-100 text-red-800 border-red-200';
+                  const outcomeLabel =
+                    entry.outcome === 'sucesso'
+                      ? 'Sucesso'
+                      : entry.outcome === 'aguardando_confirmacao'
+                      ? 'Aguardando confirmação'
+                      : entry.outcome === 'negado'
+                      ? 'Negado'
+                      : 'Erro';
+
+                  return (
+                    <div
+                      key={entry.id}
+                      className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-1.5 text-[11px]"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-slate-900">
+                          {entry.toolName}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md border font-bold text-[10px] ${badgeClass}`}>
+                          {outcomeLabel}
+                        </span>
+                      </div>
+                      <div className="text-slate-600 flex items-center justify-between gap-2 flex-wrap">
+                        <span>
+                          <strong>{entry.userName}</strong> ({entry.userProfile})
+                        </span>
+                        <span className="text-slate-400 font-mono">
+                          {entry.formattedDateTime}
+                        </span>
+                      </div>
+                      {entry.detail && (
+                        <p className="text-slate-600 leading-snug">{entry.detail}</p>
+                      )}
+                      {entry.argsSummary && Object.keys(entry.argsSummary).length > 0 && (
+                        <pre className="bg-slate-100 text-slate-700 rounded-lg p-2 text-[10px] overflow-x-auto font-mono">
+                          {JSON.stringify(entry.argsSummary)}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <>
+
           {/* Área de Mensagens */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/70">
             {messages.map((msg) => {
@@ -560,69 +756,114 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
                   >
                     {msg.text}
 
-                    {msg.toolResult && (msg.toolResult.downloadUrl || msg.toolResult.whatsappUrl || (msg.toolResult.success && ['registrarFaltaFrequencia', 'registrarSaidaAntecipada', 'lancarFrequenciaTurma', 'cadastrarAluno', 'editarAluno', 'cadastrarUsuario', 'cadastrarRefeicaoCardapio', 'alterarAnoLetivoAluno'].includes(msg.toolResult.toolName))) && (
-                      <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col space-y-2">
-                        {msg.toolResult.success && ['registrarFaltaFrequencia', 'registrarSaidaAntecipada', 'lancarFrequenciaTurma', 'cadastrarAluno', 'editarAluno', 'cadastrarUsuario', 'cadastrarRefeicaoCardapio', 'alterarAnoLetivoAluno'].includes(msg.toolResult.toolName) && (
-                          <div className="flex items-center space-x-2 text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1.5 rounded-xl border border-emerald-200">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>Pronto, salvo por aqui!</span>
-                          </div>
-                        )}
+                    {(() => {
+                      const actionResults = (
+                        msg.toolResults && msg.toolResults.length > 0
+                          ? msg.toolResults
+                          : msg.toolResult
+                          ? [msg.toolResult]
+                          : []
+                      ).filter((tr) =>
+                        tr &&
+                        (tr.downloadUrl ||
+                          tr.whatsappUrl ||
+                          (tr.success &&
+                            !tr.data?.requer_confirmacao &&
+                            [
+                              'registrarFaltaFrequencia',
+                              'registrarSaidaAntecipada',
+                              'confirmarSaidaAluno',
+                              'lancarFrequenciaTurma',
+                              'cadastrarAluno',
+                              'editarAluno',
+                              'cadastrarUsuario',
+                              'cadastrarRefeicaoCardapio',
+                              'alterarAnoLetivoAluno',
+                            ].includes(tr.toolName)))
+                      );
 
-                        {msg.toolResult.downloadUrl && (
-                          <div className="bg-slate-900 text-white p-3 rounded-2xl flex items-center justify-between shadow-md">
-                            <div className="flex items-center space-x-2.5 overflow-hidden">
-                              <FileText className="w-5 h-5 text-teal-300 shrink-0" />
-                              <div className="truncate">
-                                <span className="block font-bold text-teal-200 text-[11px] truncate">
-                                  {msg.toolResult.filename || 'Documento em PDF'}
-                                </span>
-                                <span className="text-[10px] text-slate-300">
-                                  Pronto para abrir ou imprimir
-                                </span>
-                              </div>
-                            </div>
+                      if (actionResults.length === 0) return null;
 
-                            <a
-                              href={msg.toolResult.downloadUrl}
-                              download={msg.toolResult.filename || 'documento_sofia.pdf'}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-3 py-1.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white text-[11px] font-bold rounded-xl shadow transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
-                            >
-                              <FileDown className="w-3.5 h-3.5" />
-                              <span>Baixar PDF</span>
-                            </a>
-                          </div>
-                        )}
+                      return (
+                        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col space-y-2">
+                          {actionResults.map((tr, idx) => (
+                            <React.Fragment key={`${msg.id}_tr_${idx}`}>
+                              {tr.success &&
+                                !tr.data?.requer_confirmacao &&
+                                [
+                                  'registrarFaltaFrequencia',
+                                  'registrarSaidaAntecipada',
+                                  'confirmarSaidaAluno',
+                                  'lancarFrequenciaTurma',
+                                  'cadastrarAluno',
+                                  'editarAluno',
+                                  'cadastrarUsuario',
+                                  'cadastrarRefeicaoCardapio',
+                                  'alterarAnoLetivoAluno',
+                                ].includes(tr.toolName) && (
+                                  <div className="flex items-center space-x-2 text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1.5 rounded-xl border border-emerald-200">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                    <span>Pronto, salvo por aqui!</span>
+                                  </div>
+                                )}
 
-                        {msg.toolResult.whatsappUrl && (
-                          <div className="bg-emerald-950 text-white p-3 rounded-2xl flex items-center justify-between shadow-md">
-                            <div className="flex items-center space-x-2.5 overflow-hidden">
-                              <MessageSquare className="w-5 h-5 text-emerald-400 shrink-0" />
-                              <div className="truncate">
-                                <span className="block font-bold text-emerald-200 text-[11px] truncate">
-                                  Mensagem pronta pro WhatsApp
-                                </span>
-                                <span className="text-[10px] text-emerald-300/80">
-                                  Só clicar para enviar
-                                </span>
-                              </div>
-                            </div>
+                              {tr.downloadUrl && (
+                                <div className="bg-slate-900 text-white p-3 rounded-2xl flex items-center justify-between shadow-md">
+                                  <div className="flex items-center space-x-2.5 overflow-hidden">
+                                    <FileText className="w-5 h-5 text-teal-300 shrink-0" />
+                                    <div className="truncate">
+                                      <span className="block font-bold text-teal-200 text-[11px] truncate">
+                                        {tr.filename || 'Documento em PDF'}
+                                      </span>
+                                      <span className="text-[10px] text-slate-300">
+                                        Pronto para abrir ou imprimir
+                                      </span>
+                                    </div>
+                                  </div>
 
-                            <a
-                              href={msg.toolResult.whatsappUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-xl shadow transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                              <span>Abrir WhatsApp</span>
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                                  <a
+                                    href={tr.downloadUrl}
+                                    download={tr.filename || 'documento_sofia.pdf'}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white text-[11px] font-bold rounded-xl shadow transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                                  >
+                                    <FileDown className="w-3.5 h-3.5" />
+                                    <span>Baixar PDF</span>
+                                  </a>
+                                </div>
+                              )}
+
+                              {tr.whatsappUrl && (
+                                <div className="bg-emerald-950 text-white p-3 rounded-2xl flex items-center justify-between shadow-md">
+                                  <div className="flex items-center space-x-2.5 overflow-hidden">
+                                    <MessageSquare className="w-5 h-5 text-emerald-400 shrink-0" />
+                                    <div className="truncate">
+                                      <span className="block font-bold text-emerald-200 text-[11px] truncate">
+                                        Mensagem pronta pro WhatsApp
+                                      </span>
+                                      <span className="text-[10px] text-emerald-300/80">
+                                        Só clicar para enviar
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <a
+                                    href={tr.whatsappUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-xl shadow transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    <span>Abrir WhatsApp</span>
+                                  </a>
+                                </div>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -698,6 +939,8 @@ export const SofiaAgent: React.FC<SofiaAgentProps> = ({
               </button>
             </form>
           </div>
+          </>
+          )}
         </div>
       )}
     </>

@@ -1,7 +1,8 @@
 /**
  * sofiaService.ts
  * Orquestrador da Assistente Sofia (Colégio Crescer).
- * Envia contexto ao vivo da escola, executa ações no sistema e mantém fallback local natural.
+ * Envia contexto ao vivo em America/Sao_Paulo, executa Function Calling real em modo AUTO
+ * com até 4 chamadas sequenciais por pedido, functionResponse estruturado e trava anti-repetição.
  */
 
 import {
@@ -14,25 +15,53 @@ import {
   SofiaChatMessage,
   SofiaToolCall,
   SofiaToolResult,
+  SofiaToolExecutionStep,
+  SofiaAgentToolName,
+  SofiaAdminAiAlert,
 } from '../types';
 import {
   formatDateBR,
   getDayOfWeekFromDate,
-  isStudentActiveOnDate,
-  isStudentScheduledForDate,
   toISODateString,
 } from '../utils/dateUtils';
+import {
+  getUnifiedSofiaAttendanceMetrics,
+  getTodayISOSaoPaulo,
+  getNowTimeSaoPaulo,
+} from '../utils/frequenciaUtils';
 import { getCurrentActivityForTurma, extractSlotLimits } from '../utils/timeUtils';
 import { loadMonthlyMenu } from '../utils/cardapioStorage';
 import { isAdmin } from '../utils/authUtils';
-import { formatHourPTBR, getDayOfWeekFullPTBR, SOFIA_CORE_TRAINING_PROMPT } from '../utils/sofiaPromptBuilder';
+import {
+  formatHourPTBR,
+  getDayOfWeekFullPTBR,
+  SOFIA_CORE_TRAINING_PROMPT,
+  SOFIA_DEFAULT_MODEL,
+} from '../utils/sofiaPromptBuilder';
 import {
   executeSofiaTool,
   SofiaToolExecutionContext,
-  findTurmaFuzzy,
 } from './sofiaTools';
+import {
+  SOFIA_ADMIN_ALERT_EVENT,
+  getStoredSofiaAdminAlert,
+  saveSofiaAdminAlert,
+  clearStoredSofiaAdminAlert,
+  persistSofiaAdminAlertToDbAndNotify,
+  resolvePersistentSofiaAdminAlert,
+} from './sofiaSecurityService';
+import { getSofiaAuthHeaders } from './authSessionService';
+
+export {
+  SOFIA_ADMIN_ALERT_EVENT,
+  getStoredSofiaAdminAlert,
+  saveSofiaAdminAlert,
+  clearStoredSofiaAdminAlert,
+};
 
 export const SOFIA_SYSTEM_INSTRUCTION = SOFIA_CORE_TRAINING_PROMPT;
+
+const MAX_TOOL_STEPS = 4;
 
 /**
  * Extrai data e contexto temporal de consultas em linguagem natural (ex: "ontem", "anteontem", "dia 28")
@@ -96,11 +125,12 @@ export function extractDateFromTemporalQuery(
     }
   }
 
-  return { targetDate: toISODateString(ref), isHistorical: false, label: 'hoje' };
+  return { targetDate: getTodayISOSaoPaulo(ref), isHistorical: false, label: 'hoje' };
 }
 
 /**
- * Constrói o resumo do estado global em tempo real da escola
+ * Constrói o resumo do estado global em tempo real da escola usando a mesma Fonte Única de Verdade
+ * das ferramentas e do painel de frequência (America/Sao_Paulo).
  */
 export function buildLiveAppStateSummary(params: {
   students: Student[];
@@ -114,34 +144,23 @@ export function buildLiveAppStateSummary(params: {
   schedules?: ScheduleBlock[];
 }): AppStateSummary {
   const now = new Date();
-  const dateStr = params.selectedDate || toISODateString(now);
+  const dateStr = getTodayISOSaoPaulo(now);
+  const currentTime = getNowTimeSaoPaulo(now);
   const dayOfWeek = getDayOfWeekFromDate(dateStr);
   const dayOfWeekFull = getDayOfWeekFullPTBR(dateStr);
   const formattedDate = formatDateBR(dateStr);
-  const currentTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  const activeStudents = (params.students || []).filter((s) =>
-    isStudentActiveOnDate(s, dateStr)
-  );
-  const expectedStudents = activeStudents.filter((s) =>
-    isStudentScheduledForDate(s, dateStr)
-  );
-
-  const todayRecords = (params.records || []).filter((r) => r.date === dateStr);
-  const presentes = todayRecords.filter(
-    (r) => r.status === 'presente' || r.status === 'sem_equipamento' || r.status === 'saida_antecipada'
-  ).length;
-  const faltas = todayRecords.filter((r) => r.status === 'falta').length;
-
-  const turmasList = params.activeTurmas && params.activeTurmas.length > 0
-    ? params.activeTurmas
-    : ['Mini Maternal Azul', 'Maternal Azul', '1º Ano Azul', '1º Ano Laranja', '2º Ano Azul', '3º Ano', '4º Ano', '5º Ano'];
-
-  const turmasComLancamento = new Set(todayRecords.map((r) => r.turma));
-  const turmasPendentes = turmasList.filter((t) => {
-    const hasExpected = expectedStudents.some((s) => s.turma === t);
-    return hasExpected && !turmasComLancamento.has(t);
+  const metrics = getUnifiedSofiaAttendanceMetrics({
+    dateStr,
+    students: params.students || [],
+    records: params.records || [],
+    activeTurmas: params.activeTurmas,
   });
+
+  const turmasList =
+    params.activeTurmas && params.activeTurmas.length > 0
+      ? params.activeTurmas
+      : ['Mini Maternal Azul', 'Maternal Azul', '1º Ano Azul', '1º Ano Laranja', '2º Ano Azul', '3º Ano', '4º Ano', '5º Ano'];
 
   // Panorama curto das atividades agora
   const atividadesAgoraResumo: string[] = [];
@@ -185,14 +204,18 @@ export function buildLiveAppStateSummary(params: {
     dayOfWeek,
     dayOfWeekFull,
     formattedDate,
+    atualizadoEm: metrics.atualizado_em,
     activeTab: params.activeTab,
     selectedTurma: params.selectedTurma,
-    totalAlunosAtivos: activeStudents.length,
-    totalPresentesHoje: presentes,
-    totalFaltasHoje: faltas,
-    totalAlunosEsperadosHoje: expectedStudents.length,
-    totalChamadasPendentesBlocoAtual: turmasPendentes.length,
-    turmasComChamadaPendenteHoje: turmasPendentes,
+    totalMatriculados: metrics.total_matriculados,
+    totalAlunosAtivos: metrics.esperados,
+    totalPresentesHoje: metrics.presentes,
+    totalFaltasHoje: metrics.faltas,
+    totalJustificadosHoje: metrics.justificados,
+    totalAlunosEsperadosHoje: metrics.esperados,
+    totalAlunosPendentesHoje: metrics.alunos_pendentes_qtd,
+    totalChamadasPendentesBlocoAtual: metrics.turmas_com_chamada_pendente.quantidade,
+    turmasComChamadaPendenteHoje: metrics.turmas_com_chamada_pendente.turmas,
     atividadesAgoraResumo: atividadesAgoraResumo.slice(0, 12),
     cardapioHojeResumo: cardapioHojeResumo || undefined,
     currentUser: {
@@ -208,457 +231,510 @@ export function buildLiveAppStateSummary(params: {
   };
 }
 
-function cleanText(text: string): string {
-  return text
+function sanitizeHistoryForTransport(history: SofiaChatMessage[]): any[] {
+  return (history || [])
+    .filter((h) => h && h.id !== 'welcome')
+    .slice(-20)
+    .map((h) => ({
+      id: h.id,
+      sender: h.sender,
+      text: h.text,
+      timestamp: h.timestamp,
+      toolTurns: h.toolTurns,
+    }));
+}
+
+function normalizeForRepetition(text: string): string {
+  return String(text || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
- * Tenta detectar qual turma foi citada na mensagem atual ou no histórico recente.
+ * Classificação explícita: ferramentas SOMENTE LEITURA (idempotentes, podem repetir 1x em falha transitória)
+ * vs. ferramentas de ESCRITA / EFEITO COLATERAL (NUNCA repetem automaticamente).
  */
-function detectTurmaFromQueryOrHistory(
-  userQuery: string,
-  history: SofiaChatMessage[],
-  context: SofiaToolExecutionContext
-): string | undefined {
-  const turmas = context.activeTurmas && context.activeTurmas.length > 0
-    ? context.activeTurmas
-    : Array.from(new Set((context.students || []).map((s) => s.turma).filter(Boolean)));
+export const READ_ONLY_SOFIA_TOOLS = new Set<SofiaAgentToolName>([
+  'consultarFrequenciaHoje',
+  'obterResumoFrequenciaPorData',
+  'consultarAtividadesMomento',
+  'consultarGradeHoraria',
+  'consultarLivroPonto',
+  'analisarDesarranjosDoDia',
+  'consultarAlertasSaidaHoje',
+  'consultarCardapio',
+  'consultarSemanario',
+  'consultarManualNormas',
+  'consultarAlunosOuTurma',
+  'consultarQuadroAtribuicoes',
+  'consultarResumoFinanceiro',
+  'gerar_pdf_frequencia',
+  'gerarListaChamadaPDF',
+  'gerarEspelhoPontoPDF',
+  'gerarAutorizacaoEntradaSaidaPDF',
+]);
 
-  const direct = findTurmaFuzzy(turmas, userQuery);
-  if (direct) return direct;
+export const WRITE_SOFIA_TOOLS = new Set<SofiaAgentToolName>([
+  'confirmarSaidaAluno',
+  'registrarSaidaAntecipada',
+  'registrarFaltaFrequencia',
+  'lancarFrequenciaTurma',
+  'cadastrarAluno',
+  'editarAluno',
+  'alterarAnoLetivoAluno',
+  'cadastrarUsuario',
+  'cadastrarRefeicaoCardapio',
+  'dispararAlertaWhatsApp',
+  'gerarTermoSaidaAvulsa',
+  'navegarModulo',
+]);
 
-  for (let i = history.length - 1; i >= Math.max(0, history.length - 4); i--) {
-    const hText = history[i]?.text || '';
-    const fromHist = findTurmaFuzzy(turmas, hText);
-    if (fromHist) return fromHist;
-  }
-
-  return context.selectedTurma;
+export function isReadOnlySofiaTool(toolName: SofiaAgentToolName): boolean {
+  return READ_ONLY_SOFIA_TOOLS.has(toolName);
 }
 
-/**
- * Motor local heurístico de intenções alinhado ao treinamento da Sofia
- */
-async function resolveLocalSofiaIntent(
-  userQuery: string,
-  history: SofiaChatMessage[],
-  context: SofiaToolExecutionContext
-): Promise<{ text: string; toolCall?: SofiaToolCall; toolResult?: SofiaToolResult }> {
-  const q = cleanText(userQuery);
-  const currentDate = context.selectedDate || toISODateString(new Date());
-  const contextualTurma = detectTurmaFromQueryOrHistory(userQuery, history, context);
-
-  // 1. Saída antecipada rápida ("O Pedro vai sair 16h", "o João do infantil 1 vai sair mais cedo")
-  const timeExtract = userQuery.match(/\b(\d{1,2})[:hH](\d{2})?\b/);
-  const isEarlyDeparture =
-    (q.includes('vai sair') || q.includes('sair mais cedo') || q.includes('saida antecipada')) &&
-    !q.includes('quem') &&
-    !q.includes('quais') &&
-    !q.includes('quantos') &&
-    !q.includes('termo') &&
-    !q.includes('pdf');
-
-  if (isEarlyDeparture) {
-    const horario = timeExtract
-      ? `${timeExtract[1].padStart(2, '0')}:${(timeExtract[2] || '00').padStart(2, '0')}`
-      : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    // Tenta localizar nome citado na frase
-    let candidateName = '';
-    for (const s of context.students || []) {
-      const sClean = cleanText(s.name);
-      const first = sClean.split(' ')[0];
-      if (sClean && q.includes(sClean)) {
-        candidateName = s.name;
-        break;
-      }
-      if (first.length >= 3 && new RegExp(`\\b${first}\\b`, 'i').test(q)) {
-        candidateName = first;
-        break;
-      }
-    }
-    if (!candidateName) {
-      const m = userQuery.match(/(?:o|a|aluno|aluna)\s+([A-Za-zÀ-ú]{3,}(?:\s+[A-Za-zÀ-ú]{2,})?)/i);
-      if (m) candidateName = m[1].trim();
-    }
-
-    const toolCall: SofiaToolCall = {
-      name: 'registrarSaidaAntecipada',
-      args: {
-        alunoId: candidateName || '',
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery),
-        horario,
-      },
+function formatToolResultForModel(
+  toolResult: SofiaToolResult,
+  isWriteTool = false
+): Record<string, any> {
+  if (toolResult.success) {
+    const payload =
+      toolResult.data && typeof toolResult.data === 'object' && !Array.isArray(toolResult.data)
+        ? toolResult.data
+        : { resultado: toolResult.data };
+    return {
+      ok: true,
+      ...payload,
+      ...(toolResult.filename ? { arquivo_gerado: toolResult.filename } : {}),
+      ...(toolResult.needsDisambiguation ? { precisa_desambiguacao: true } : {}),
     };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
   }
 
-  // 2. Termo de Saída Avulsa / Liberação de Balcão
-  if (
-    q.includes('termo de saida') ||
-    q.includes('termo de liberacao') ||
-    q.includes('saida avulsa') ||
-    q.includes('retirado por') ||
-    q.includes('retirada por')
-  ) {
-    let studentName = '';
-    for (const s of context.students || []) {
-      if (q.includes(cleanText(s.name))) {
-        studentName = s.name;
-        break;
-      }
-      const parts = cleanText(s.name).split(' ');
-      if (parts.length >= 2 && q.includes(parts[0]) && q.includes(parts[1])) {
-        studentName = s.name;
-        break;
-      }
-    }
+  const isPermissionDenied = toolResult.data?.motivo === 'sem_permissao';
 
-    const matchRetirante = userQuery.match(/retirad[oa]\s+por\s+([A-Za-zÀ-ú\s]+?)(?:(?:com\s+)?(?:rg|cpf|doc)|parentesco|as|às|\.|$)/i);
-    const nomeRetirante = matchRetirante ? matchRetirante[1].trim() : 'Responsável Autorizado';
-    const matchDoc = userQuery.match(/(?:rg|cpf|doc(?:umento)?)\s*[:=]?\s*([0-9A-Za-z\.\-\/\s]+?)(?:parentesco|as|às|\.|$)/i);
-    const docDigits = matchDoc ? matchDoc[1].trim() : 'Informado na portaria';
-    const horarioMatch = userQuery.match(/(\d{1,2}[:hH]\d{2})/);
-    const horarioSaida = horarioMatch
-      ? horarioMatch[1].replace(/[hH]/, ':')
-      : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    const toolCall: SofiaToolCall = {
-      name: 'gerarTermoSaidaAvulsa',
-      args: {
-        alunoId: studentName || userQuery,
-        nomeRetirante,
-        documentoRetirante: docDigits,
-        horarioSaida,
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 3. Atividades do Momento ("maternal azul tá na natação?", "o que tá acontecendo agora?", "quem está na piscina?")
-  if (
-    q.includes('agora') ||
-    q.includes('momento') ||
-    q.includes('fazendo') ||
-    q.includes('natacao') ||
-    q.includes('piscina') ||
-    q.includes('bale') ||
-    q.includes('judo') ||
-    q.includes('futebol') ||
-    q.includes('ginastica') ||
-    q.includes('flauta') ||
-    q.includes('sem atividade') ||
-    q.includes('simular') ||
-    (q.includes('ta na') || q.includes('esta na') || q.includes('ta em'))
-  ) {
-    const turmaHit = findTurmaFuzzy(context.activeTurmas || [], userQuery);
-    const simTime = (q.includes('simular') || q.includes('as ')) && timeExtract
-      ? `${timeExtract[1].padStart(2, '0')}:${(timeExtract[2] || '00').padStart(2, '0')}`
-      : undefined;
-
-    const toolCall: SofiaToolCall = {
-      name: 'consultarAtividadesMomento',
-      args: {
-        turma: turmaHit,
-        horarioSimulado: simTime,
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 4. Cardápio / Almoço / Lanche / Alergia
-  if (
-    q.includes('cardapio') ||
-    q.includes('almoco') ||
-    q.includes('lanche') ||
-    q.includes('comida') ||
-    q.includes('refeicao') ||
-    q.includes('sobremesa') ||
-    q.includes('alergi')
-  ) {
-    const dataArg = q.includes('amanha') ? 'amanha' : currentDate;
-    const toolCall: SofiaToolCall = {
-      name: 'consultarCardapio',
-      args: {
-        data: dataArg,
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery),
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 5. Semanário
-  if (q.includes('semanario') || q.includes('planejamento')) {
-    const toolCall: SofiaToolCall = {
-      name: 'consultarSemanario',
-      args: {
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery),
-        data: currentDate,
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 6. Quadro de Atribuições ("quem é a monitora", "atribuições", "adi do maternal")
-  if (
-    q.includes('atribuic') ||
-    q.includes('monitora') ||
-    q.includes('adi') ||
-    q.includes('responsavel pela turma') ||
-    q.includes('quem cuida')
-  ) {
-    const toolCall: SofiaToolCall = {
-      name: 'consultarQuadroAtribuicoes',
-      args: {
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery),
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 7. Espelho de Ponto PDF ou Consulta do Livro Ponto
-  if (q.includes('espelho') || q.includes('folha de ponto') || (q.includes('ponto') && q.includes('pdf'))) {
-    const mesAnoMatch = userQuery.match(/(\d{1,2})[\/\-](\d{4})/);
-    const now = new Date();
-    const mesAno = mesAnoMatch
-      ? `${mesAnoMatch[1].padStart(2, '0')}/${mesAnoMatch[2]}`
-      : `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
-    const targetColab = context.currentUser?.name || '';
-
-    const toolCall: SofiaToolCall = {
-      name: 'gerarEspelhoPontoPDF',
-      args: { colaboradorId: targetColab, mesAno },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  if (q.includes('livro ponto') || q.includes('bater ponto') || q.includes('batida') || q.includes('ponto')) {
-    if (q.includes('nao to entendendo') || q.includes('como') || q.includes('ajuda') || q.includes('lanca')) {
-      return {
-        text: 'Calma, é rapidinho! Quer que eu abra o Livro Ponto para você ou já te mostre os registros de hoje? Se quiser lançar, me diz o nome e o horário.',
-      };
-    }
-    const toolCall: SofiaToolCall = {
-      name: 'consultarLivroPonto',
-      args: { data: currentDate },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 8. Pendências de chamada / Diagnóstico rápido
-  if (q.includes('pendente') || q.includes('pendencia') || q.includes('falta fazer chamada') || q.includes('tudo em dia')) {
-    const toolCall: SofiaToolCall = { name: 'analisarDesarranjosDoDia', args: {} };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 9. Consultas de Saída (Van, Saídas Antecipadas)
-  if (q.includes('van') || q.includes('transporte') || q.includes('liberado') || q.includes('saida antecipada')) {
-    const tipo: 'van' | 'antecipada' | 'geral' = q.includes('van') || q.includes('transporte')
-      ? 'van'
-      : q.includes('antecipada')
-      ? 'antecipada'
-      : 'geral';
-    const toolCall: SofiaToolCall = {
-      name: 'consultarAlertasSaidaHoje',
-      args: { tipo, detalhesVan: true },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 10. Frequência histórica vs Frequência de hoje
-  const temporal = extractDateFromTemporalQuery(userQuery, currentDate);
-  const isAttendanceQuery =
-    q.includes('falta') ||
-    q.includes('faltou') ||
-    q.includes('faltaram') ||
-    q.includes('presente') ||
-    q.includes('presenca') ||
-    q.includes('frequencia') ||
-    q.includes('chamada') ||
-    q.includes('vieram') ||
-    q.includes('ausente');
-
-  if (temporal.isHistorical && isAttendanceQuery) {
-    const toolCall: SofiaToolCall = {
-      name: 'obterResumoFrequenciaPorData',
-      args: { data: temporal.targetDate },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  if (isAttendanceQuery || q.includes('lista de hoje') || q.includes('resumo')) {
-    const toolCall: SofiaToolCall = {
-      name: 'consultarFrequenciaHoje',
-      args: {
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery) || (q.includes('turma') ? contextualTurma : undefined),
-        listarNomes: q.includes('quem') || q.includes('nomes') || q.includes('faltou'),
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 11. Manual / Normas
-  if (q.includes('norma') || q.includes('regra') || q.includes('manual') || q.includes('celular') || q.includes('acidente')) {
-    const toolCall: SofiaToolCall = {
-      name: 'consultarManualNormas',
-      args: { termoOuTema: userQuery },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // 12. Busca de aluno / turma
-  if (q.includes('aluno') || q.includes('turma') || q.includes('quantos') || findTurmaFuzzy(context.activeTurmas || [], userQuery)) {
-    const toolCall: SofiaToolCall = {
-      name: 'consultarAlunosOuTurma',
-      args: {
-        turma: findTurmaFuzzy(context.activeTurmas || [], userQuery),
-      },
-    };
-    const toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-    return { text: toolResult.message, toolCall, toolResult };
-  }
-
-  // Resposta padrão humana e acolhedora
   return {
-    text: 'Oi! Posso ver quem está em atividade agora, consultar a chamada ou faltas, registrar saída antecipada, checar o cardápio ou tirar dúvida do Manual. O que você precisa resolver?',
+    ok: false,
+    erro: toolResult.error || 'Não foi possível concluir esta consulta ou ação.',
+    ...(isWriteTool && !isPermissionDenied
+      ? {
+          acao_nao_repetida_automaticamente: true,
+          instrucao:
+            'Explique com naturalidade o motivo de não ter sido possível concluir e pergunte ao usuário se ele deseja tentar novamente.',
+        }
+      : {}),
+    ...(toolResult.data && typeof toolResult.data === 'object' ? toolResult.data : {}),
   };
 }
 
-async function fetchSofiaChatWithRetry(body: Record<string, any>): Promise<Response> {
+function buildFallbackAdminAlert(
+  status: number,
+  model?: string,
+  lastError?: string
+): SofiaAdminAiAlert | null {
+  const nowISO = new Date().toISOString();
+  const activeModel = model || SOFIA_DEFAULT_MODEL;
+  if (status === 402) {
+    return {
+      active: true,
+      code: 402,
+      kind: 'billing_depleted',
+      message: 'Créditos da IA esgotados — recarregue em ai.studio/projects',
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: activeModel,
+      lastError,
+    };
+  }
+  if (status === 429) {
+    return {
+      active: true,
+      code: 429,
+      kind: 'rate_limited',
+      message: 'Limite temporário da IA atingido — verifique a cota em ai.studio/projects',
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: activeModel,
+      lastError,
+    };
+  }
+  if (status === 404) {
+    return {
+      active: true,
+      code: 404,
+      kind: 'model_not_found',
+      message: `Modelo de IA (${activeModel}) indisponível no projeto — verifique em ai.studio/projects`,
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: activeModel,
+      lastError,
+    };
+  }
+  if (status === 503) {
+    return {
+      active: true,
+      code: 503,
+      kind: 'service_error',
+      message: `Serviço de IA (${activeModel}) temporariamente indisponível — tente novamente em instantes`,
+      actionUrl: 'https://ai.studio/projects',
+      detectedAt: nowISO,
+      model: activeModel,
+      lastError,
+    };
+  }
+  return null;
+}
+
+async function postSofiaChatWithRetry(
+  body: Record<string, any>,
+  apiBaseUrl = '',
+  users?: UserProfile[],
+  extraHeaders?: Record<string, string>
+): Promise<any> {
   let lastError: any = null;
+  const endpoint = `${apiBaseUrl}/api/sofia/chat`;
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch('/api/sofia/chat', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getSofiaAuthHeaders(),
+          ...(extraHeaders || {}),
+        },
         body: JSON.stringify(body),
       });
-      if (res.ok) return res;
-      if (res.status >= 500 && attempt === 0) continue;
-      return res;
-    } catch (err) {
+
+      const parsed = await res.json().catch(() => null);
+      if (res.ok && parsed?.success) {
+        void resolvePersistentSofiaAdminAlert();
+        return parsed;
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        const authErr = new Error('Acesso restrito ao administrador.');
+        (authErr as any).status = res.status;
+        throw authErr;
+      }
+
+      const errMsg = parsed?.error || `HTTP ${res.status}`;
+      const error = new Error(errMsg);
+      (error as any).status = res.status;
+      (error as any).model = parsed?.model || SOFIA_DEFAULT_MODEL;
+      (error as any).fallbackAttempted = Boolean(parsed?.fallbackAttempted);
+      (error as any).quotaDepleted = Boolean(parsed?.quotaDepleted) || res.status === 402;
+      (error as any).rateLimited = Boolean(parsed?.rateLimited) || res.status === 429;
+      (error as any).modelNotFound = Boolean(parsed?.modelNotFound) || res.status === 404;
+
+      const adminAlert: SofiaAdminAiAlert | null =
+        parsed?.adminAlert || buildFallbackAdminAlert(res.status, parsed?.model, errMsg);
+      if (adminAlert) {
+        (error as any).adminAlert = adminAlert;
+        void persistSofiaAdminAlertToDbAndNotify(adminAlert, users);
+      }
+      lastError = error;
+
+      // Erros definitivos de cota/crédito/limite/modelo (402, 429, 404) não devem ser repetidos em loop
+      if (res.status === 402 || res.status === 429 || res.status === 404) {
+        throw error;
+      }
+
+      // Retry automático (1x) apenas para falha transitória 5xx
+      if (res.status >= 500 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 450));
+        continue;
+      }
+      throw error;
+    } catch (err: any) {
       lastError = err;
+      const isNonRetryableStatus =
+        err?.status === 401 ||
+        err?.status === 403 ||
+        err?.status === 402 ||
+        err?.status === 429 ||
+        err?.status === 404 ||
+        err?.quotaDepleted ||
+        err?.rateLimited ||
+        err?.modelNotFound;
+
+      if (attempt === 0 && !isNonRetryableStatus) {
+        await new Promise((r) => setTimeout(r, 450));
+        continue;
+      }
+      throw err;
     }
   }
-  throw lastError || new Error('Falha de comunicação');
+
+  throw lastError || new Error('Falha de comunicação com o servidor da Sofia');
 }
 
 /**
- * Função Principal de Envio e Resolução Conversacional com a Sofia
+ * Política de execução de ferramentas:
+ * - Ferramentas de LEITURA: permitem até 1 retry automático em erro transitório.
+ * - Ferramentas de ESCRITA: executam estritamente 1 única vez (NUNCA repetem automaticamente);
+ *   em caso de erro, devolve `{ success: false, error }` para ir no functionResponse ao modelo.
+ */
+async function executeToolWithPolicy(
+  call: SofiaToolCall,
+  context: SofiaToolExecutionContext
+): Promise<SofiaToolResult> {
+  const canRetry = isReadOnlySofiaTool(call.name);
+  const maxAttempts = canRetry ? 2 : 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await executeSofiaTool(call.name, call.args || {}, context);
+    } catch (err: any) {
+      console.error(
+        `[Sofia Tool] Falha ao executar ${canRetry ? 'leitura' : 'escrita'} "${call.name}" (tentativa ${attempt + 1}/${maxAttempts}):`,
+        err
+      );
+      if (attempt + 1 >= maxAttempts) {
+        return {
+          toolName: call.name,
+          success: false,
+          error:
+            err?.message ||
+            (canRetry
+              ? 'Erro ao consultar os dados desta ferramenta.'
+              : 'Não foi possível concluir o registro agora.'),
+        };
+      }
+    }
+  }
+
+  return {
+    toolName: call.name,
+    success: false,
+    error: 'Não foi possível executar esta ação agora.',
+  };
+}
+
+/**
+ * Função Principal de Envio e Resolução Conversacional com a Sofia.
+ * Ciclo completo: Modelo (AUTO) -> Executa Ferramenta(s) -> Devolve functionResponse ao Modelo -> Modelo escreve resposta final.
  */
 export async function sendSofiaMessage(params: {
   message: string;
   history: SofiaChatMessage[];
   context: SofiaToolExecutionContext;
   onToolExecuting?: (toolName: string) => void;
+  apiBaseUrl?: string;
+  authHeaders?: Record<string, string>;
 }): Promise<{
   text: string;
+  model?: string;
+  fallbackUsed?: boolean;
   toolCall?: SofiaToolCall;
   toolResult?: SofiaToolResult;
+  toolResults?: SofiaToolResult[];
+  toolTurns?: SofiaToolExecutionStep[];
+  error?: string;
+  errorCode?: number;
 }> {
-  const { message, history, context, onToolExecuting } = params;
-  const appState = context.appState || buildLiveAppStateSummary({
-    students: context.students,
-    records: context.records,
-    pontoRecords: context.pontoRecords,
-    currentUser: context.currentUser,
-    selectedDate: context.selectedDate,
-    activeTab: context.activeTab,
-    selectedTurma: context.selectedTurma,
-    activeTurmas: context.activeTurmas,
-    schedules: context.schedules,
-  });
+  const { message, history, context, onToolExecuting, apiBaseUrl = '', authHeaders } = params;
 
-  let quotaDepleted = false;
-
-  try {
-    const res = await fetchSofiaChatWithRetry({
-      message,
-      history,
-      appState,
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.quotaDepleted) {
-        quotaDepleted = true;
-      }
-
-      if (data.hasFunctionCall && data.toolCall) {
-        const toolCall: SofiaToolCall = {
-          name: data.toolCall.name,
-          args: data.toolCall.args || {},
-        };
-
-        if (onToolExecuting) {
-          onToolExecuting(toolCall.name);
-        }
-
-        let toolResult: SofiaToolResult;
-        try {
-          toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-        } catch {
-          toolResult = await executeSofiaTool(toolCall.name, toolCall.args, context);
-        }
-
-        if (!quotaDepleted) {
-          try {
-            const followUpRes = await fetchSofiaChatWithRetry({
-              message,
-              history,
-              toolResult,
-              toolCall,
-              appState,
-            });
-
-            if (followUpRes.ok) {
-              const followUpData = await followUpRes.json();
-              if (followUpData.success && followUpData.text) {
-                return {
-                  text: followUpData.text,
-                  toolCall,
-                  toolResult,
-                };
-              }
-            }
-          } catch {
-            // Usa mensagem natural já preparada pela própria execução se follow-up falhar
-          }
-        }
-
-        return {
-          text: toolResult.message,
-          toolCall,
-          toolResult,
-        };
-      }
-
-      if (data.success && data.text) {
-        return {
-          text: data.text,
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('[Sofia Service] Alternando para processamento local:', err);
+  if (!context.currentUser || !isAdmin(context.currentUser)) {
+    return {
+      text: 'Recurso exclusivo para administradores.',
+      error: 'sem_permissao',
+    };
   }
 
-  return await resolveLocalSofiaIntent(message, history, context);
+  const appState =
+    context.appState ||
+    buildLiveAppStateSummary({
+      students: context.students,
+      records: context.records,
+      pontoRecords: context.pontoRecords,
+      currentUser: context.currentUser,
+      selectedDate: context.selectedDate,
+      activeTab: context.activeTab,
+      selectedTurma: context.selectedTurma,
+      activeTurmas: context.activeTurmas,
+      schedules: context.schedules,
+    });
+
+  const serializedHistory = sanitizeHistoryForTransport(history);
+  const pendingToolTurns: SofiaToolExecutionStep[] = [];
+  const executedToolResults: SofiaToolResult[] = [];
+  const scopedContext: SofiaToolExecutionContext = {
+    ...context,
+    executedDownloadKeys: context.executedDownloadKeys || new Set<string>(),
+  };
+  let firstToolCall: SofiaToolCall | undefined;
+  let lastModelUsed: string = SOFIA_DEFAULT_MODEL;
+  let anyFallbackUsed = false;
+
+  try {
+    let modelText = '';
+
+    for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+      const data = await postSofiaChatWithRetry(
+        {
+          message,
+          history: serializedHistory,
+          pendingToolTurns,
+          appState,
+        },
+        apiBaseUrl,
+        scopedContext.users,
+        authHeaders
+      );
+
+      if (data?.model) lastModelUsed = String(data.model);
+      if (data?.fallbackUsed) anyFallbackUsed = true;
+
+      if (data.hasFunctionCall && Array.isArray(data.toolCalls) && data.toolCalls.length > 0) {
+        const stepCalls: SofiaToolCall[] = [];
+        const stepResults: SofiaToolExecutionStep['results'] = [];
+
+        for (const rawCall of data.toolCalls) {
+          const call: SofiaToolCall = {
+            id: rawCall.id,
+            name: rawCall.name,
+            args: rawCall.args || {},
+          };
+          if (!firstToolCall) firstToolCall = call;
+          stepCalls.push(call);
+
+          if (onToolExecuting) {
+            onToolExecuting(call.name);
+          }
+
+          const toolResult = await executeToolWithPolicy(call, scopedContext);
+          executedToolResults.push(toolResult);
+
+          stepResults.push({
+            id: call.id,
+            name: call.name,
+            response: formatToolResultForModel(toolResult, !isReadOnlySofiaTool(call.name)),
+          });
+        }
+
+        pendingToolTurns.push({
+          rawModelContent: data.rawModelContent,
+          calls: stepCalls,
+          results: stepResults,
+        });
+
+        continue;
+      }
+
+      modelText = String(data.text || '').trim();
+      break;
+    }
+
+    // Se atingiu o limite de 4 passos chamando ferramentas e ainda não tem texto final, força a resposta final com base nos functionResponse coletados
+    if (!modelText && pendingToolTurns.length > 0) {
+      const wrapUpData = await postSofiaChatWithRetry(
+        {
+          message,
+          history: serializedHistory,
+          pendingToolTurns,
+          appState,
+          forceFinalAnswer: true,
+        },
+        apiBaseUrl,
+        scopedContext.users,
+        authHeaders
+      );
+      if (wrapUpData?.model) lastModelUsed = String(wrapUpData.model);
+      if (wrapUpData?.fallbackUsed) anyFallbackUsed = true;
+      modelText = String(wrapUpData.text || '').trim();
+    }
+
+    // Trava anti-repetição: se a nova resposta for idêntica à resposta anterior da Sofia, refaz a chamada pedindo foco explícito no último pedido
+    const prevSofiaMsg = [...(history || [])]
+      .reverse()
+      .find((h) => h && h.sender === 'sofia' && h.id !== 'welcome' && h.text?.trim());
+
+    if (
+      prevSofiaMsg &&
+      modelText &&
+      normalizeForRepetition(modelText) === normalizeForRepetition(prevSofiaMsg.text)
+    ) {
+      try {
+        const retryAntiRepetition = await postSofiaChatWithRetry(
+          {
+            message,
+            history: serializedHistory,
+            pendingToolTurns,
+            appState,
+            forceFinalAnswer: true,
+            antiRepetitionNote: `Sua resposta anterior no chat foi exatamente: "${prevSofiaMsg.text}". Agora o usuário enviou um NOVO pedido ("${message}"). NÃO repita o texto anterior; responda especificamente a este último pedido com os dados encontrados.`,
+          },
+          apiBaseUrl,
+          scopedContext.users,
+          authHeaders
+        );
+        if (retryAntiRepetition?.model) lastModelUsed = String(retryAntiRepetition.model);
+        if (retryAntiRepetition?.fallbackUsed) anyFallbackUsed = true;
+        if (retryAntiRepetition?.text?.trim()) {
+          modelText = String(retryAntiRepetition.text).trim();
+        }
+      } catch (antiRepErr) {
+        console.error('[Sofia Service] Falha no retry anti-repetição:', antiRepErr);
+      }
+    }
+
+    if (!modelText) {
+      modelText = 'Conferi os dados aqui, mas não ficou claro o que você precisa agora. Pode me dizer de outro jeito?';
+    }
+
+    const lastResult = executedToolResults.length > 0
+      ? executedToolResults[executedToolResults.length - 1]
+      : undefined;
+
+    return {
+      text: modelText,
+      model: lastModelUsed,
+      fallbackUsed: anyFallbackUsed,
+      toolCall: firstToolCall,
+      toolResult: lastResult,
+      toolResults: executedToolResults,
+      toolTurns: pendingToolTurns,
+    };
+  } catch (err: any) {
+    console.error('[Sofia Service] Erro ao processar conversa com a Sofia:', err);
+    if (err?.status === 401 || err?.status === 403) {
+      return {
+        text: 'Sua sessão administrativa precisa ser confirmada novamente. Saia e entre de novo com seu e-mail e senha para usar a Sofia.',
+        model: err?.model || lastModelUsed,
+        toolCall: firstToolCall,
+        toolResult: executedToolResults[executedToolResults.length - 1],
+        toolResults: executedToolResults,
+        toolTurns: pendingToolTurns,
+        error: 'sessao_nao_autorizada',
+        errorCode: err?.status,
+      };
+    }
+
+    const isAdminNotifiedError =
+      err?.status === 402 ||
+      err?.status === 429 ||
+      err?.status === 404 ||
+      err?.status === 503 ||
+      Boolean(err?.quotaDepleted) ||
+      Boolean(err?.rateLimited) ||
+      Boolean(err?.modelNotFound);
+
+    return {
+      text: isAdminNotifiedError
+        ? 'Estou com uma instabilidade aqui e não consigo responder agora. Já avisei a administração. Tente de novo em alguns minutos.'
+        : 'Estou com uma instabilidade aqui agora e não consegui concluir. Pode tentar de novo em alguns instantes?',
+      model: err?.model || lastModelUsed,
+      fallbackUsed: Boolean(err?.fallbackAttempted) || anyFallbackUsed,
+      toolCall: firstToolCall,
+      toolResult: executedToolResults[executedToolResults.length - 1],
+      toolResults: executedToolResults,
+      toolTurns: pendingToolTurns,
+      error: err?.message || 'Erro de comunicação',
+      errorCode: typeof err?.status === 'number' ? err.status : undefined,
+    };
+  }
 }

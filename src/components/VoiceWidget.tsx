@@ -26,6 +26,7 @@ import {
 } from '../services/voiceAiService';
 import { Student, AttendanceRecord, ScheduleBlock, UserProfile } from '../types';
 import { isAdmin, getStoredUser } from '../utils/authUtils';
+import { clearSofiaClientMemoryAndStorage } from '../services/authSessionService';
 
 interface VoiceMessage {
   id: string;
@@ -133,6 +134,18 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    if (!effectiveUser || !isUserAdmin) {
+      setIsOpen(false);
+      setMessages([]);
+      setTranscript('');
+      currentTranscriptRef.current = '';
+      stopListening();
+      TextToSpeechManager.stop();
+      clearSofiaClientMemoryAndStorage();
+    }
+  }, [isUserAdmin, effectiveUser?.id]);
 
   useEffect(() => {
     if (isOpen) {
@@ -478,7 +491,7 @@ export const VoiceWidget: React.FC<VoiceWidgetProps> = ({
   };
 
   // Proteção de visibilidade: exclusivo para Administrador
-  if (!isUserAdmin) {
+  if (!effectiveUser || !isUserAdmin) {
     return null;
   }
 
