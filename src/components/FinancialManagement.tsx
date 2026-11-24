@@ -1267,13 +1267,13 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       )}
 
       {/* Header Principal da Aba Financeira */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-slate-900 text-white rounded-3xl p-6 border border-slate-800 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center space-x-3.5">
-          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-indigo-600 shadow-2xs">
+          <div className="p-3 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl text-indigo-300 shadow-2xs">
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+            <h2 className="text-xl font-extrabold text-white tracking-tight">
               Gestão Financeira
             </h2>
           </div>
@@ -1282,19 +1282,19 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         {/* Seletor de Exercício / Ano Letivo, Filtro de Meses & Ações Rápidas */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Seletor 2026 / 2027 */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200">
+          <div className="flex items-center p-1 bg-slate-950/80 rounded-2xl border border-slate-800">
             <button
               type="button"
               onClick={() => setSelectedAnoLetivo(2026)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedAnoLetivo === 2026
-                  ? 'bg-white text-indigo-600 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white'
               }`}
             >
               <span>Ano Letivo 2026</span>
               <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
-                selectedAnoLetivo === 2026 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'
+                selectedAnoLetivo === 2026 ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-300'
               }`}>
                 {countStudents2026}
               </span>
@@ -1305,12 +1305,12 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedAnoLetivo === 2027
                   ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-300 hover:text-white'
               }`}
             >
               <span>Ano Letivo 2027</span>
               <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
-                selectedAnoLetivo === 2027 ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                selectedAnoLetivo === 2027 ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-300'
               }`}>
                 {countStudents2027}
               </span>
@@ -1318,9 +1318,9 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           </div>
 
           {/* Seletor / Filtro de Meses (Visão Mensal x Consolidado Anual) */}
-          <div className="flex items-center space-x-1.5 bg-slate-100 border border-slate-200 px-3 py-2 rounded-2xl">
-            <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-            <label htmlFor="header-month-filter" className="text-slate-500 text-xs font-semibold shrink-0">
+          <div className="flex items-center space-x-1.5 bg-slate-800/90 border border-slate-700 px-3 py-2 rounded-2xl">
+            <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <label htmlFor="header-month-filter" className="text-slate-300 text-xs font-semibold shrink-0">
               Mês:
             </label>
             <select
@@ -1333,11 +1333,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   setIsolateMonthColumn(false);
                 }
               }}
-              className="bg-transparent text-xs font-bold text-slate-900 outline-none cursor-pointer pr-1"
+              className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer pr-1"
             >
-              <option value="ALL">Todos os Meses (Anual)</option>
+              <option value="ALL" className="bg-slate-900 text-white">Todos os Meses (Anual)</option>
               {MONTH_NAMES_DRE.map((m, idx) => (
-                <option key={idx + 1} value={idx + 1}>
+                <option key={idx + 1} value={idx + 1} className="bg-slate-900 text-white">
                   {m.full}
                 </option>
               ))}
@@ -1348,7 +1348,7 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
           <button
             type="button"
             onClick={handleGeneratePDF}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+            className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
             title="Exportar demonstrativo financeiro consolidado de receitas e despesas em PDF"
           >
             <FileText className="w-4 h-4 text-amber-400" />

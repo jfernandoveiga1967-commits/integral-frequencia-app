@@ -10,7 +10,7 @@ import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, Calendar, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, Calendar, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked, ClipboardCheck } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
 import { useConfirmedAction } from '../hooks/useConfirmedAction';
@@ -1149,6 +1149,31 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Cabeçalho Institucional da Aba Chamada de Frequência */}
+      <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden no-print">
+        <div className="flex items-center space-x-3">
+          <div className="p-2.5 bg-indigo-500/20 border border-indigo-400/30 rounded-xl text-indigo-300 shrink-0">
+            <ClipboardCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-tight">
+              Chamada de Frequência
+            </h2>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Registro diário de presença por atividade e turma · {formatDateBR(selectedDate)}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+          <span className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200">
+            {selectedActivity}
+          </span>
+          <span className="px-3 py-1.5 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-200">
+            {selectedTurma === 'TODAS' ? `Todas as Turmas (${turmasList.length})` : selectedTurma}
+          </span>
+        </div>
+      </div>
+
       {!userCanMarkAttendance && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-amber-900 text-xs font-bold flex items-center space-x-2.5 shadow-xs">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />

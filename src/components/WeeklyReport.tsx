@@ -785,12 +785,14 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
         </div>
       </div>
 
-      {/* Top Header & Period Filter Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 print:hidden no-print">
-        {/* Header line + Title */}
+      {/* Top Header */}
+      <div className="bg-slate-900 text-white border border-slate-800 rounded-3xl p-6 shadow-md print:hidden no-print">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 bg-indigo-500/20 border border-indigo-400/30 rounded-xl text-indigo-300 shrink-0">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <h2 className="text-xl font-extrabold text-white tracking-tight">
               Painel de Desempenho e Frequência
             </h2>
           </div>
@@ -799,55 +801,55 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => handleOpenStudentModal()}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-blue-200 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Gerar PDF do Histórico Individual do Aluno"
             >
-              <UserCheck className="w-4 h-4 text-blue-600" />
+              <UserCheck className="w-4 h-4 text-blue-300" />
               <span>PDF Aluno</span>
             </button>
 
             <button
               onClick={() => handleOpenTurmaModal()}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-indigo-200 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Gerar PDF da Matriz Consolidada da Turma"
             >
-              <Users className="w-4 h-4 text-indigo-600" />
+              <Users className="w-4 h-4 text-indigo-300" />
               <span>PDF Turma</span>
             </button>
 
             <button
               onClick={() => handleOpenModalityModal()}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-violet-200 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Gerar PDF para Professores Especialistas de Oficinas"
             >
-              <Award className="w-4 h-4 text-violet-600" />
+              <Award className="w-4 h-4 text-violet-300" />
               <span>PDF Oficina</span>
             </button>
 
             <button
               onClick={() => handleOpenNumericModal()}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-200 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Gerar Relatório Numérico Consolidado de Frequência em PDF"
             >
-              <BarChart3 className="w-4 h-4 text-emerald-600" />
+              <BarChart3 className="w-4 h-4 text-emerald-300" />
               <span>PDF Numérico</span>
             </button>
 
             <button
               onClick={() => setShowNominalReportModal(true)}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-emerald-500/20"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Abrir Relação Nominal de Presença e Faltas (Presentes vs. Faltosos)"
             >
-              <BookMarked className="w-4 h-4 text-emerald-600" />
+              <BookMarked className="w-4 h-4 text-emerald-100" />
               <span>Relação Nominal</span>
             </button>
 
             <button
               onClick={() => setShowMealReportModal(true)}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-amber-400/30"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Abrir Relatório Financeiro de Refeições (Almoço) com Edição Diária e Exportação em Excel"
             >
-              <Utensils className="w-4 h-4 text-amber-600" />
+              <Utensils className="w-4 h-4 text-amber-300" />
               <span>Refeições (Almoço)</span>
             </button>
 
@@ -856,25 +858,25 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
                 const el = document.getElementById('demonstrativo-aulas-efetivas');
                 if (el) el.scrollIntoView({ behavior: 'smooth' });
               }}
-              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5 ring-1 ring-emerald-500/20"
+              className="px-3.5 py-2 rounded-2xl text-xs font-bold text-teal-200 bg-teal-500/20 hover:bg-teal-500/30 border border-teal-400/40 shadow-2xs transition-all cursor-pointer flex items-center space-x-1.5"
               title="Ir para o Demonstrativo de Aulas Efetivas e Medição de Serviços (Professores PJ)"
             >
-              <Award className="w-4 h-4 text-emerald-600" />
+              <Award className="w-4 h-4 text-teal-300" />
               <span>Aulas Efetivas (PJ)</span>
             </button>
 
             <button
               onClick={handleExportCSV}
-              className="px-3 py-2 rounded-2xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer flex items-center space-x-1"
+              className="px-3 py-2 rounded-2xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all cursor-pointer flex items-center space-x-1"
               title="Exportar dados brutos em planilha CSV"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
               <span>CSV</span>
             </button>
 
             <button
               onClick={handlePrint}
-              className="px-3 py-2 rounded-2xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all cursor-pointer flex items-center space-x-1"
+              className="px-3 py-2 rounded-2xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 shadow-sm transition-all cursor-pointer flex items-center space-x-1"
               title="Imprimir visualização atual"
             >
               <Printer className="w-4 h-4" />
@@ -882,9 +884,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({
             </button>
           </div>
         </div>
+      </div>
 
+      {/* Period Filter Toolbar */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4 print:hidden no-print">
         {/* Date Filter & Presets Row */}
-        <div className="pt-4 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Presets buttons */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
