@@ -122,10 +122,11 @@ function drawOfficialHeader(
   title: string,
   subtitle: string,
   filterDetails: string[],
-  orientation: 'portrait' | 'landscape' = 'portrait'
+  orientation: 'portrait' | 'landscape' = 'portrait',
+  customMarginX: number = 14
 ) {
   const pageWidth = orientation === 'landscape' ? 297 : 210;
-  const rightMarginX = pageWidth - 14;
+  const rightMarginX = pageWidth - customMarginX;
 
   // Header Banner Background (Height 32mm)
   doc.setFillColor(15, 23, 42); // slate-900
@@ -141,11 +142,12 @@ function drawOfficialHeader(
   if (logoData) {
     try {
       // White rounded background card for optimal clarity and crisp contrast of the official logo
+      const logoCardX = customMarginX <= 8 ? 8 : 12;
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(12, 5, 38, 22, 2, 2, 'F');
+      doc.roundedRect(logoCardX, 5, 38, 22, 2, 2, 'F');
 
       // Draw official school logo image
-      doc.addImage(logoData, 'PNG', 13.5, 6.7, LOGO_WIDTH_MM, LOGO_HEIGHT_MM);
+      doc.addImage(logoData, 'PNG', logoCardX + 1.5, 6.7, LOGO_WIDTH_MM, LOGO_HEIGHT_MM);
       logoDrawn = true;
     } catch (e) {
       console.warn('Could not add logo image to PDF:', e);
@@ -153,7 +155,7 @@ function drawOfficialHeader(
     }
   }
 
-  const textStartX = logoDrawn ? 54 : 14;
+  const textStartX = logoDrawn ? (customMarginX <= 8 ? 50 : 54) : customMarginX;
   const availableWidth = rightMarginX - textStartX;
 
   // Tier 1 (Y = 9.5mm): Organization Brand on Left, Emission Timestamp on Right
@@ -6665,92 +6667,133 @@ export function generateDREMonthlyReportPDF({
   profilesCount = 0,
   saveImmediately = false,
 }: GenerateDREMonthlyReportOptions): PDFGenerationResult {
-  const doc = new jsPDF({
+  const JsPDFCtor: any = (jsPDF as any)?.jsPDF || (jsPDF as any)?.default || jsPDF;
+  const runAutoTable: any = (autoTable as any)?.default || autoTable;
+  const doc = new JsPDFCtor({
     orientation: 'landscape',
     unit: 'mm',
     format: 'a4',
   });
 
-  const leftX = 14;
-  const contentWidth = 269;
+  const MARGIN_LEFT = 8;
+  const MARGIN_RIGHT = 8;
+  const MARGIN_TOP = 12;
+  const MARGIN_BOTTOM = 12;
+  const PAGE_WIDTH = 297;
+  const leftX = MARGIN_LEFT;
+  const contentWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT; // 281mm (100% da largura útil)
 
   const targetMonth =
     selectedMonth !== 'ALL' ? monthlyDRE.months.find((m) => m.monthIndex === selectedMonth) : null;
 
-  // Cabeçalho Oficial com timbre
-  drawOfficialHeader(
-    doc,
-    targetMonth
-      ? `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO — ${targetMonth.monthFullName.toUpperCase()} / ${schoolYear}`
-      : `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE MENSAL) — ${schoolYear}`,
-    targetMonth
-      ? `Colégio Crescer • Demonstrativo Analítico da Competência de ${targetMonth.monthFullName} de ${schoolYear}`
-      : 'Colégio Crescer • Demonstrativo Mês a Mês (Jan a Dez) e Fechamento Anual',
-    [
-      `Ano Letivo: ${schoolYear}`,
-      targetMonth ? `Competência: ${targetMonth.monthFullName}` : `Regime: Competência Mensal Contratual`,
-      `Base Ativa: ${profilesCount > 0 ? `${profilesCount} Contratos` : 'Base Integrada'}`,
-      `Integração: Livro Ponto + Cardápio + Personalizadas`,
-    ],
-    'landscape'
-  );
+  // Formatação monetária com espaço inseparável (\u00A0) após "R$" para impedir quebra de linha entre "R$" e o valor
+  const formatDRECurrency = (value: number, forceNegative = false): string => {
+    const num = Number(value) || 0;
+    const absFormatted = formatCurrencyBR(Math.abs(num)).replace(/^R\$\s*/, 'R$\u00A0');
+    if (forceNegative || num < 0) {
+      return `-${absFormatted}`;
+    }
+    return absFormatted;
+  };
+
+  const fitText = (text: string, maxWidth: number, fontSize: number, style: 'normal' | 'bold' = 'normal') => {
+    doc.setFont('helvetica', style);
+    doc.setFontSize(fontSize);
+    if (doc.getTextWidth(text) <= maxWidth) return text;
+    let trimmed = text;
+    while (trimmed.length > 4 && doc.getTextWidth(trimmed + '...') > maxWidth) {
+      trimmed = trimmed.slice(0, -1);
+    }
+    return trimmed + '...';
+  };
+
+  const drawHeaderForDRE = () => {
+    drawOfficialHeader(
+      doc,
+      targetMonth
+        ? `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE) — ${targetMonth.monthFullName.toUpperCase()} / ${schoolYear}`
+        : `DEMONSTRAÇÃO DO RESULTADO DO EXERCÍCIO (DRE OPERACIONAL) — ${schoolYear}`,
+      targetMonth
+        ? `Colégio Crescer • Demonstrativo Analítico da Competência de ${targetMonth.monthFullName} de ${schoolYear}`
+        : 'Colégio Crescer • Matriz Semestral (Jan–Dez), Consolidado Anual e Estrutura Analítica',
+      [
+        `Ano Letivo: ${schoolYear}`,
+        targetMonth ? `Competência: ${targetMonth.monthFullName}` : `Regime: Competência Mensal Contratual`,
+        `Base Ativa: ${profilesCount > 0 ? `${profilesCount} Contratos` : 'Base Integrada'}`,
+        `Integração: Livro Ponto + Cardápio + Personalizadas`,
+      ],
+      'landscape',
+      MARGIN_LEFT
+    );
+  };
+
+  const drawSectionBanner = (y: number, title: string) => {
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(leftX, y, contentWidth, 7.2, 1.2, 1.2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, leftX + 4, y + 4.9);
+  };
+
+  // Cabeçalho Oficial Página 1
+  drawHeaderForDRE();
 
   let startY = 36;
 
-  // 4 Cards de Indicadores do DRE
-  const cardWidth = (contentWidth - 9) / 4;
-  const cardHeight = 17;
+  // 4 Cards Executivos de Indicadores do DRE (100% dos 281mm)
+  const cardGap = 4;
+  const cardWidth = (contentWidth - cardGap * 3) / 4; // 67.25mm cada
+  const cardHeight = 20.5;
 
   // Card 1: Receita Contratual Líquida
   const card1Value = targetMonth ? targetMonth.receitaLiquida : monthlyDRE.totalAnual.receitaLiquida;
   const card1Title = targetMonth ? `RECEITA LÍQUIDA (${targetMonth.monthName.toUpperCase()})` : 'RECEITA LÍQUIDA ANUAL (ROL)';
   const card1Sub = targetMonth
-    ? `Bruto: ${formatCurrencyBR(targetMonth.receitaBruta)} | Bolsas: -${formatCurrencyBR(targetMonth.descontoBolsas)}`
-    : `Mensal: ${formatCurrencyBR(metrics.receitaPrevistaMensal)} | 12 meses`;
+    ? `Bruto: ${formatDRECurrency(targetMonth.receitaBruta)} | Bolsas: ${formatDRECurrency(targetMonth.descontoBolsas, true)}`
+    : `Mensal: ${formatDRECurrency(metrics.receitaPrevistaMensal)} • 12 meses`;
 
   doc.setFillColor(240, 253, 244);
   doc.setDrawColor(187, 247, 208);
   doc.roundedRect(leftX, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.8);
+  doc.setFontSize(8.0);
   doc.setTextColor(21, 128, 61);
-  doc.text(card1Title, leftX + 4, startY + 4.8);
-  doc.setFontSize(10);
-  doc.setTextColor(21, 128, 61);
-  doc.text(formatCurrencyBR(card1Value), leftX + 4, startY + 10.5);
+  doc.text(card1Title, leftX + 4, startY + 5.4);
+  doc.setFontSize(12);
+  doc.text(formatDRECurrency(card1Value), leftX + 4, startY + 12.2);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.0);
+  doc.setFontSize(7.2);
   doc.setTextColor(71, 85, 105);
-  doc.text(card1Sub, leftX + 4, startY + 15);
+  doc.text(fitText(card1Sub, cardWidth - 8, 7.2), leftX + 4, startY + 17.5);
 
   // Card 2: Custos Operacionais Reais
-  const card2X = leftX + cardWidth + 3;
+  const card2X = leftX + cardWidth + cardGap;
   const card2Value = targetMonth ? targetMonth.custosOperacionais : monthlyDRE.totalAnual.custosOperacionais;
   const card2Title = targetMonth ? `CUSTOS (${targetMonth.monthName.toUpperCase()})` : 'CUSTOS OPERACIONAIS ANUAIS';
   const card2OtherCosts = targetMonth
     ? (targetMonth.custoCulinaria || 0) + (targetMonth.custoOutrasCategorias || 0)
     : (monthlyDRE.totalAnual.custoCulinaria || 0) + (monthlyDRE.totalAnual.custoOutrasCategorias || 0);
   const card2Sub = targetMonth
-    ? `Folha: ${formatCurrencyBR(targetMonth.custoFolha)} | Alim: ${formatCurrencyBR(targetMonth.custoAlimentacao)} | Outros: ${formatCurrencyBR(card2OtherCosts)}`
-    : `Folha: ${formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)} | Alim: ${formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)} | Outros: ${formatCurrencyBR(card2OtherCosts)}`;
+    ? `Folha: ${formatDRECurrency(targetMonth.custoFolha)} | Alim: ${formatDRECurrency(targetMonth.custoAlimentacao)} | Out: ${formatDRECurrency(card2OtherCosts)}`
+    : `Folha: ${formatDRECurrency(monthlyDRE.totalAnual.custoFolha)} | Outros: ${formatDRECurrency(monthlyDRE.totalAnual.custoAlimentacao + card2OtherCosts)}`;
 
   doc.setFillColor(254, 242, 242);
   doc.setDrawColor(254, 202, 202);
   doc.roundedRect(card2X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.8);
+  doc.setFontSize(8.0);
   doc.setTextColor(185, 28, 28);
-  doc.text(card2Title, card2X + 4, startY + 4.8);
-  doc.setFontSize(10);
-  doc.setTextColor(185, 28, 28);
-  doc.text(formatCurrencyBR(card2Value), card2X + 4, startY + 10.5);
+  doc.text(card2Title, card2X + 4, startY + 5.4);
+  doc.setFontSize(12);
+  doc.text(formatDRECurrency(card2Value, true), card2X + 4, startY + 12.2);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
+  doc.setFontSize(7.2);
   doc.setTextColor(153, 27, 27);
-  doc.text(card2Sub, card2X + 4, startY + 15);
+  doc.text(fitText(card2Sub, cardWidth - 8, 7.2), card2X + 4, startY + 17.5);
 
   // Card 3: Resultado Operacional Líquido
-  const card3X = card2X + cardWidth + 3;
+  const card3X = card2X + cardWidth + cardGap;
   const card3Value = targetMonth ? targetMonth.resultadoLiquido : monthlyDRE.totalAnual.resultadoLiquido;
   const card3Margem = targetMonth ? targetMonth.margemPercentual : monthlyDRE.totalAnual.margemPercentual;
   const card3Title = targetMonth ? `RESULTADO (${targetMonth.monthName.toUpperCase()})` : 'RESULTADO LÍQUIDO ANUAL';
@@ -6760,239 +6803,651 @@ export function generateDREMonthlyReportPDF({
   doc.setDrawColor(isPos ? 199 : 254, isPos ? 210 : 205, isPos ? 254 : 211);
   doc.roundedRect(card3X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.8);
+  doc.setFontSize(8.0);
   doc.setTextColor(isPos ? 67 : 190, isPos ? 56 : 18, isPos ? 202 : 60);
-  doc.text(card3Title, card3X + 4, startY + 4.8);
-  doc.setFontSize(10);
+  doc.text(card3Title, card3X + 4, startY + 5.4);
+  doc.setFontSize(12);
   doc.setTextColor(isPos ? 49 : 190, isPos ? 46 : 18, isPos ? 129 : 60);
-  doc.text(formatCurrencyBR(card3Value), card3X + 4, startY + 10.5);
+  doc.text(formatDRECurrency(card3Value), card3X + 4, startY + 12.2);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.0);
+  doc.setFontSize(7.5);
   doc.setTextColor(isPos ? 22 : 220, isPos ? 101 : 38, isPos ? 52 : 38);
   doc.text(
-    isPos
-      ? `Superávit (${card3Margem}% Margem)`
-      : `Déficit (${card3Margem}% Margem)`,
+    isPos ? `Superávit (${card3Margem}% Margem)` : `Déficit (${card3Margem}% Margem)`,
     card3X + 4,
-    startY + 15
+    startY + 17.5
   );
 
   // Card 4: Ticket Médio & Base
-  const card4X = card3X + cardWidth + 3;
+  const card4X = card3X + cardWidth + cardGap;
   doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
+  doc.setDrawColor(203, 213, 225);
   doc.roundedRect(card4X, startY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.8);
+  doc.setFontSize(8.0);
   doc.setTextColor(71, 85, 105);
-  doc.text('TICKET MÉDIO MENSAL', card4X + 4, startY + 4.8);
-  doc.setFontSize(10);
+  doc.text('TICKET MÉDIO MENSAL', card4X + 4, startY + 5.4);
+  doc.setFontSize(12);
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrencyBR(metrics.ticketMedioPorAluno), card4X + 4, startY + 10.5);
+  doc.text(formatDRECurrency(metrics.ticketMedioPorAluno), card4X + 4, startY + 12.2);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.0);
-  doc.setTextColor(71, 85, 105);
-  doc.text(`${metrics.totalAlunosPagantes} pagantes (${metrics.totalIsentos} isentos)`, card4X + 4, startY + 15);
-
-  startY += cardHeight + 4;
-
-  // Banner da Seção da Tabela
-  doc.setFillColor(15, 23, 42);
-  doc.roundedRect(leftX, startY, contentWidth, 5.5, 1, 1, 'F');
-  doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('MATRIZ MÊS A MÊS DO DRE (JANEIRO A DEZEMBRO) — EXERCÍCIO ' + schoolYear, leftX + 4, startY + 3.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    fitText(`${metrics.totalAlunosPagantes} pagantes (${metrics.totalIsentos} isentos)`, cardWidth - 8, 7.5),
+    card4X + 4,
+    startY + 17.5
+  );
 
-  startY += 7;
+  startY += cardHeight + 5;
 
-  // Montagem da tabela mensal (14 colunas: Linha Contábil, Jan, Fev, Mar, Abr, Mai, Jun, Jul, Ago, Set, Out, Nov, Dez, Total Anual)
-  const headRow = [
-    'Linha Contábil / Indicador',
-    'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
-    'Total Anual'
-  ];
+  // Auxiliar para sumarizar um semestre
+  const sem1Months = monthlyDRE.months.slice(0, 6);
+  const sem2Months = monthlyDRE.months.slice(6, 12);
 
-  const row1 = [
-    '1. Receita Operacional Bruta',
-    ...monthlyDRE.months.map(m => formatCurrencyBR(m.receitaBruta)),
-    formatCurrencyBR(monthlyDRE.totalAnual.receitaBruta)
-  ];
+  const sumField = (slice: typeof monthlyDRE.months, field: keyof (typeof monthlyDRE.months)[number]) =>
+    slice.reduce((acc, m) => acc + (Number(m[field]) || 0), 0);
 
-  const row2 = [
-    '2. (-) Deduções e Bolsas de Estudo',
-    ...monthlyDRE.months.map(m => `-${formatCurrencyBR(m.descontoBolsas)}`),
-    `-${formatCurrencyBR(monthlyDRE.totalAnual.descontoBolsas)}`
-  ];
+  const sem1ReceitaBruta = sumField(sem1Months, 'receitaBruta');
+  const sem1Descontos = sumField(sem1Months, 'descontoBolsas');
+  const sem1ReceitaLiquida = sumField(sem1Months, 'receitaLiquida');
+  const sem1Custos = sumField(sem1Months, 'custosOperacionais');
+  const sem1Resultado = sumField(sem1Months, 'resultadoLiquido');
+  const sem1Margem = sem1ReceitaLiquida > 0 ? Math.round((sem1Resultado / sem1ReceitaLiquida) * 1000) / 10 : 0;
 
-  const row3 = [
-    '3. (=) Receita Operacional Líquida (ROL)',
-    ...monthlyDRE.months.map(m => formatCurrencyBR(m.receitaLiquida)),
-    formatCurrencyBR(monthlyDRE.totalAnual.receitaLiquida)
-  ];
+  const sem2ReceitaLiquida = sumField(sem2Months, 'receitaLiquida');
+  const sem2Custos = sumField(sem2Months, 'custosOperacionais');
+  const sem2Resultado = sumField(sem2Months, 'resultadoLiquido');
+  const sem2Margem = sem2ReceitaLiquida > 0 ? Math.round((sem2Resultado / sem2ReceitaLiquida) * 1000) / 10 : 0;
 
-  const dynamicCategoryRows =
-    monthlyDRE.categoryRows && monthlyDRE.categoryRows.length > 0
-      ? monthlyDRE.categoryRows.map((catRow, catIdx) => {
-          const originTag = catRow.origemAbaLabel
-            ? ` (${catRow.origemAbaLabel})`
-            : catRow.isAutoGenerated
-            ? ' (Auto)'
-            : ' (Personalizada)';
-          return [
-            `4.${catIdx + 1} (-) ${catRow.label}${originTag}`,
-            ...catRow.monthlyValues.map((v) => `-${formatCurrencyBR(v)}`),
-            `-${formatCurrencyBR(catRow.totalAnual)}`,
+  const renderSemesterMatrixTable = (
+    monthsSlice: typeof monthlyDRE.months,
+    monthStartOffset: number,
+    summaryLabel: string,
+    isAnnualSummary: boolean,
+    tableStartY: number
+  ) => {
+    const headRow = [
+      'Linha Contábil / Indicador',
+      ...monthsSlice.map((m) => m.monthName),
+      summaryLabel,
+    ];
+
+    const sumCatSlice = (monthlyValues: number[]) =>
+      monthlyValues
+        .slice(monthStartOffset, monthStartOffset + monthsSlice.length)
+        .reduce((acc, v) => acc + (Number(v) || 0), 0);
+
+    const summaryBruta = isAnnualSummary ? monthlyDRE.totalAnual.receitaBruta : sem1ReceitaBruta;
+    const summaryDesconto = isAnnualSummary ? monthlyDRE.totalAnual.descontoBolsas : sem1Descontos;
+    const summaryROL = isAnnualSummary ? monthlyDRE.totalAnual.receitaLiquida : sem1ReceitaLiquida;
+    const summaryCustos = isAnnualSummary ? monthlyDRE.totalAnual.custosOperacionais : sem1Custos;
+    const summaryResultado = isAnnualSummary ? monthlyDRE.totalAnual.resultadoLiquido : sem1Resultado;
+    const summaryMargem = isAnnualSummary ? monthlyDRE.totalAnual.margemPercentual : sem1Margem;
+
+    const row1 = [
+      '1. Receita Operacional Bruta',
+      ...monthsSlice.map((m) => formatDRECurrency(m.receitaBruta)),
+      formatDRECurrency(summaryBruta),
+    ];
+
+    const row2 = [
+      '2. (-) Deduções e Bolsas de Estudo',
+      ...monthsSlice.map((m) => formatDRECurrency(m.descontoBolsas, true)),
+      formatDRECurrency(summaryDesconto, true),
+    ];
+
+    const row3 = [
+      '3. (=) Receita Operacional Líquida (ROL)',
+      ...monthsSlice.map((m) => formatDRECurrency(m.receitaLiquida)),
+      formatDRECurrency(summaryROL),
+    ];
+
+    const dynamicCategoryRows =
+      monthlyDRE.categoryRows && monthlyDRE.categoryRows.length > 0
+        ? monthlyDRE.categoryRows.map((catRow, catIdx) => {
+            const originTag = catRow.origemAbaLabel
+              ? ` (${catRow.origemAbaLabel})`
+              : catRow.isAutoGenerated
+              ? ' (Auto)'
+              : ' (Personalizada)';
+            const sliceVals = monthsSlice.map((m) => catRow.monthlyValues[m.monthIndex - 1] ?? 0);
+            const sumVal = isAnnualSummary ? catRow.totalAnual : sumCatSlice(catRow.monthlyValues);
+            return [
+              `4.${catIdx + 1} (-) ${catRow.label}${originTag}`,
+              ...sliceVals.map((v) => formatDRECurrency(v, true)),
+              formatDRECurrency(sumVal, true),
+            ];
+          })
+        : [
+            [
+              '4.1 (-) Folha de Pagamento & Equipe (Livro Ponto)',
+              ...monthsSlice.map((m) => formatDRECurrency(m.custoFolha, true)),
+              formatDRECurrency(
+                isAnnualSummary ? monthlyDRE.totalAnual.custoFolha : sumField(monthsSlice, 'custoFolha'),
+                true
+              ),
+            ],
+            [
+              '4.2 (-) Alimentação Escolar & Insumos (Cardápio)',
+              ...monthsSlice.map((m) => formatDRECurrency(m.custoAlimentacao, true)),
+              formatDRECurrency(
+                isAnnualSummary ? monthlyDRE.totalAnual.custoAlimentacao : sumField(monthsSlice, 'custoAlimentacao'),
+                true
+              ),
+            ],
           ];
-        })
-      : [
-          [
-            '4.1 (-) Folha de Pagamento & Equipe (Livro Ponto)',
-            ...monthlyDRE.months.map((m) => `-${formatCurrencyBR(m.custoFolha)}`),
-            `-${formatCurrencyBR(monthlyDRE.totalAnual.custoFolha)}`,
-          ],
-          [
-            '4.2 (-) Alimentação Escolar & Insumos (Cardápio)',
-            ...monthlyDRE.months.map((m) => `-${formatCurrencyBR(m.custoAlimentacao)}`),
-            `-${formatCurrencyBR(monthlyDRE.totalAnual.custoAlimentacao)}`,
-          ],
-        ];
 
-  const rowTotalCustos = [
-    '4. (=) Total Custos Operacionais Reais',
-    ...monthlyDRE.months.map((m) => `-${formatCurrencyBR(m.custosOperacionais)}`),
-    `-${formatCurrencyBR(monthlyDRE.totalAnual.custosOperacionais)}`,
-  ];
+    const rowTotalCustos = [
+      '4. (=) Total Custos Operacionais Reais',
+      ...monthsSlice.map((m) => formatDRECurrency(m.custosOperacionais, true)),
+      formatDRECurrency(summaryCustos, true),
+    ];
 
-  const rowResultado = [
-    '5. (=) Resultado Operacional Líquido',
-    ...monthlyDRE.months.map((m) => formatCurrencyBR(m.resultadoLiquido)),
-    formatCurrencyBR(monthlyDRE.totalAnual.resultadoLiquido),
-  ];
+    const rowResultado = [
+      '5. (=) Resultado Operacional Líquido',
+      ...monthsSlice.map((m) => formatDRECurrency(m.resultadoLiquido)),
+      formatDRECurrency(summaryResultado),
+    ];
 
-  const rowMargem = [
-    '6. Margem Operacional Líquida (%)',
-    ...monthlyDRE.months.map((m) => `${m.margemPercentual}%`),
-    `${monthlyDRE.totalAnual.margemPercentual}%`,
-  ];
+    const rowMargem = [
+      '6. Margem Operacional Líquida (%)',
+      ...monthsSlice.map((m) => `${m.margemPercentual}%`),
+      `${summaryMargem}%`,
+    ];
 
-  const tableBody = [row1, row2, row3, ...dynamicCategoryRows, rowTotalCustos, rowResultado, rowMargem];
-  const totalCostsRowIdx = 3 + dynamicCategoryRows.length;
-  const netResultRowIdx = totalCostsRowIdx + 1;
-  const marginRowIdx = netResultRowIdx + 1;
+    const tableBody = [row1, row2, row3, ...dynamicCategoryRows, rowTotalCustos, rowResultado, rowMargem];
+    const totalCostsRowIdx = 3 + dynamicCategoryRows.length;
+    const netResultRowIdx = totalCostsRowIdx + 1;
+    const marginRowIdx = netResultRowIdx + 1;
 
-  autoTable(doc, {
+    const selectedColIndex =
+      selectedMonth !== 'ALL'
+        ? monthsSlice.findIndex((m) => m.monthIndex === Number(selectedMonth)) + 1
+        : -1;
+
+    runAutoTable(doc, {
+      startY: tableStartY,
+      margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
+      tableWidth: contentWidth,
+      head: [headRow],
+      body: tableBody,
+      theme: 'grid',
+      styles: {
+        fontSize: 8.8,
+        cellPadding: { top: 2.8, right: 2.5, bottom: 2.8, left: 2.5 },
+        valign: 'middle',
+        lineColor: [203, 213, 225],
+        lineWidth: 0.25,
+        textColor: [30, 41, 59],
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9.5,
+        halign: 'right',
+        cellPadding: { top: 3.0, right: 2.5, bottom: 3.0, left: 2.5 },
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 71, halign: 'left', fontStyle: 'bold', overflow: 'linebreak' },
+        1: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        2: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        3: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        4: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        5: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        6: { cellWidth: 29, halign: 'right', overflow: 'visible' },
+        7: { cellWidth: 36, halign: 'right', fontStyle: 'bold', overflow: 'visible' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'head') {
+          if (data.column.index === 0) {
+            data.cell.styles.halign = 'left';
+          }
+          if (selectedColIndex > 0 && data.column.index === selectedColIndex) {
+            data.cell.styles.fillColor = [79, 70, 229];
+            data.cell.styles.textColor = [255, 255, 255];
+          }
+          if (data.column.index === 7) {
+            data.cell.styles.fillColor = isAnnualSummary ? [6, 78, 59] : [30, 41, 59];
+          }
+        }
+
+        if (data.section === 'body') {
+          const rowIndex = data.row.index;
+
+          if (data.column.index === 7) {
+            data.cell.styles.fillColor = [241, 245, 249];
+          }
+
+          if (rowIndex === 0) {
+            // 1. Receita Operacional Bruta
+            data.cell.styles.fillColor = [240, 253, 244];
+            data.cell.styles.textColor = [21, 128, 61];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontSize = 9.5;
+          } else if (rowIndex === 1) {
+            data.cell.styles.textColor = [109, 40, 217];
+          } else if (rowIndex === 2) {
+            // 3. Receita Operacional Líquida (ROL)
+            data.cell.styles.fillColor = [220, 252, 231];
+            data.cell.styles.textColor = [20, 83, 45];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontSize = 9.5;
+          } else if (rowIndex > 2 && rowIndex < totalCostsRowIdx) {
+            if (data.column.index > 0) {
+              data.cell.styles.textColor = [185, 28, 28];
+            }
+          } else if (rowIndex === totalCostsRowIdx) {
+            // 4. Total Custos Operacionais Reais
+            data.cell.styles.fillColor = [254, 242, 242];
+            data.cell.styles.textColor = [185, 28, 28];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontSize = 9.5;
+          } else if (rowIndex === netResultRowIdx) {
+            // 5. Resultado Operacional Líquido
+            const isRowPos = summaryResultado >= 0;
+            const rawCellText = String(data.cell.raw || '');
+            const isCellNeg = data.column.index > 0 && rawCellText.startsWith('-');
+            data.cell.styles.fillColor = isRowPos ? [224, 231, 255] : [255, 228, 230];
+            data.cell.styles.textColor = isCellNeg ? [190, 18, 60] : isRowPos ? [49, 46, 129] : [190, 18, 60];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontSize = 10.0;
+          } else if (rowIndex === marginRowIdx) {
+            data.cell.styles.fillColor = [241, 245, 249];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontSize = 8.8;
+          }
+
+          if (selectedColIndex > 0 && data.column.index === selectedColIndex) {
+            data.cell.styles.fontStyle = 'bold';
+            if (rowIndex !== 0 && rowIndex !== 2 && rowIndex !== totalCostsRowIdx && rowIndex !== netResultRowIdx) {
+              data.cell.styles.fillColor = [238, 242, 255];
+            }
+          }
+        }
+      },
+    });
+  };
+
+  // TABELA 1 (Página 1): 1º Semestre (Jan–Jun + Subtotal 1º Sem.)
+  drawSectionBanner(
     startY,
-    head: [headRow],
-    body: tableBody,
+    `1. MATRIZ MENSAL DO DRE — 1º SEMESTRE (JANEIRO A JUNHO + SUBTOTAL) — EXERCÍCIO ${schoolYear}`
+  );
+  renderSemesterMatrixTable(sem1Months, 0, 'Subtotal 1º Sem.', false, startY + 9);
+
+  // PÁGINA 2: 2º Semestre (Jul–Dez + Total Anual) + Síntese Comparativa Semestral
+  doc.addPage('a4', 'landscape');
+  drawHeaderForDRE();
+
+  let sem2StartY = 36;
+  drawSectionBanner(
+    sem2StartY,
+    `2. MATRIZ MENSAL DO DRE — 2º SEMESTRE (JULHO A DEZEMBRO + TOTAL ANUAL) — EXERCÍCIO ${schoolYear}`
+  );
+  renderSemesterMatrixTable(sem2Months, 6, 'Total Anual', true, sem2StartY + 9);
+
+  const afterSem2Y = (doc as any).lastAutoTable?.finalY || 140;
+  if (afterSem2Y + 34 < 194) {
+    const compY = afterSem2Y + 8;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('RESUMO COMPARATIVO SEMESTRAL E CONSOLIDADO DO EXERCÍCIO', leftX, compY);
+
+    const compBoxGap = 5;
+    const compBoxW = (contentWidth - compBoxGap * 2) / 3; // 90.33mm cada
+    const compBoxH = 24;
+    const compStartY = compY + 3;
+
+    const semBoxes = [
+      {
+        title: '1º SEMESTRE (JAN – JUN)',
+        rol: sem1ReceitaLiquida,
+        custos: sem1Custos,
+        res: sem1Resultado,
+        margem: sem1Margem,
+        bg: [248, 250, 252] as [number, number, number],
+        border: [203, 213, 225] as [number, number, number],
+      },
+      {
+        title: '2º SEMESTRE (JUL – DEZ)',
+        rol: sem2ReceitaLiquida,
+        custos: sem2Custos,
+        res: sem2Resultado,
+        margem: sem2Margem,
+        bg: [248, 250, 252] as [number, number, number],
+        border: [203, 213, 225] as [number, number, number],
+      },
+      {
+        title: `CONSOLIDADO ANUAL (${schoolYear})`,
+        rol: monthlyDRE.totalAnual.receitaLiquida,
+        custos: monthlyDRE.totalAnual.custosOperacionais,
+        res: monthlyDRE.totalAnual.resultadoLiquido,
+        margem: monthlyDRE.totalAnual.margemPercentual,
+        bg: monthlyDRE.totalAnual.resultadoLiquido >= 0 ? ([238, 242, 255] as [number, number, number]) : ([255, 241, 242] as [number, number, number]),
+        border: monthlyDRE.totalAnual.resultadoLiquido >= 0 ? ([165, 180, 252] as [number, number, number]) : ([254, 205, 211] as [number, number, number]),
+      },
+    ];
+
+    semBoxes.forEach((b, idx) => {
+      const bx = leftX + idx * (compBoxW + compBoxGap);
+      doc.setFillColor(...b.bg);
+      doc.setDrawColor(...b.border);
+      doc.roundedRect(bx, compStartY, compBoxW, compBoxH, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(b.title, bx + 4, compStartY + 5.5);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(21, 128, 61);
+      doc.text(`Receita Líquida (ROL): ${formatDRECurrency(b.rol)}`, bx + 4, compStartY + 11.2);
+
+      doc.setTextColor(185, 28, 28);
+      doc.text(`Custos Operacionais: ${formatDRECurrency(b.custos, true)}`, bx + 4, compStartY + 16.0);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.2);
+      doc.setTextColor(b.res >= 0 ? 49 : 190, b.res >= 0 ? 46 : 18, b.res >= 0 ? 129 : 60);
+      doc.text(`Resultado: ${formatDRECurrency(b.res)} (${b.margem}%)`, bx + 4, compStartY + 21.2);
+    });
+  }
+
+  // PÁGINA 3: Estrutura Contábil e Analítica de Resultados + Notas Explicativas + Assinaturas
+  doc.addPage('a4', 'landscape');
+  drawHeaderForDRE();
+
+  const analiticaStartY = 36;
+  const activeScopeTitle = targetMonth
+    ? `COMPETÊNCIA ${targetMonth.monthFullName.toUpperCase()} / ${schoolYear}`
+    : `CONSOLIDADO MENSAL E ANUAL — EXERCÍCIO ${schoolYear}`;
+
+  drawSectionBanner(
+    analiticaStartY,
+    `3. ESTRUTURA CONTÁBIL E ANALÍTICA DE RESULTADOS — ${activeScopeTitle}`
+  );
+
+  const calcPctRol = (val: number, rol: number) =>
+    rol > 0 ? `${Math.round((val / rol) * 1000) / 10}%` : '-';
+
+  const baseBrutaMensal = targetMonth ? targetMonth.receitaBruta : metrics.faturamentoBrutoReal;
+  const baseDescontoMensal = targetMonth ? targetMonth.descontoBolsas : metrics.totalDescontoBolsas;
+  const baseRolMensal = targetMonth ? targetMonth.receitaLiquida : metrics.receitaPrevistaMensal;
+  const baseCustosMensal = targetMonth
+    ? targetMonth.custosOperacionais
+    : metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes;
+  const baseResultadoMensal = targetMonth
+    ? targetMonth.resultadoLiquido
+    : metrics.resultadoOperacionalLiquidoReal ?? metrics.saldoLiquidoOperacional;
+  const baseMargem = targetMonth ? targetMonth.margemPercentual : metrics.margemOperacionalLiquida ?? 0;
+
+  const getOriginDescription = (catRow: (typeof monthlyDRE.categoryRows)[number]) => {
+    if (catRow.origemModulo === 'FOLHA_PONTO') {
+      return 'Folha de colaboradores ativos do Livro Ponto agrupada por cargo/função';
+    }
+    if (catRow.origemModulo === 'CARDAPIO_REFEICOES') {
+      return 'Refeições sincronizadas com o Relatório Financeiro de Refeições';
+    }
+    if (catRow.origemModulo === 'CULINARIA_OFICINAS' || catRow.origemModulo === 'SEMANARIO_CULINARIA') {
+      return 'Insumos e práticas culinárias sincronizados do Cardápio e Semanário';
+    }
+    if (catRow.categoria === 'ACADEMIA_OMEGA' || catRow.categoria === 'REVELA_SOCCER') {
+      return 'Despesas lançadas na oficina parceira pela gestão';
+    }
+    return catRow.origemAbaLabel || (catRow.isAutoGenerated ? 'Sincronização Automática' : 'Categoria Personalizada');
+  };
+
+  type AnaliticaRowMeta = 'bruta' | 'sub' | 'deducao' | 'rol' | 'custos' | 'resultado';
+  const analiticaRowTypes: AnaliticaRowMeta[] = [];
+  const analiticaBody: string[][] = [];
+
+  const pushAnaliticaRow = (
+    type: AnaliticaRowMeta,
+    conta: string,
+    origem: string,
+    valMensalOrTarget: string,
+    valAnual: string,
+    pctRol: string
+  ) => {
+    analiticaRowTypes.push(type);
+    if (targetMonth) {
+      analiticaBody.push([conta, origem, valMensalOrTarget, pctRol]);
+    } else {
+      analiticaBody.push([conta, origem, valMensalOrTarget, valAnual, pctRol]);
+    }
+  };
+
+  pushAnaliticaRow(
+    'bruta',
+    '1. RECEITA OPERACIONAL BRUTA',
+    `Contratos Ativos (${profilesCount} alunos)`,
+    formatDRECurrency(baseBrutaMensal),
+    formatDRECurrency(monthlyDRE.totalAnual.receitaBruta),
+    calcPctRol(baseBrutaMensal, baseRolMensal)
+  );
+  pushAnaliticaRow(
+    'sub',
+    `   (+) Faturamento Bruto dos Contratos (${profilesCount} alunos cadastrados)`,
+    'Mensalidades Contratuais + Oficinas Extras',
+    formatDRECurrency(baseBrutaMensal),
+    formatDRECurrency(monthlyDRE.totalAnual.receitaBruta),
+    calcPctRol(baseBrutaMensal, baseRolMensal)
+  );
+  pushAnaliticaRow(
+    'deducao',
+    '2. (-) DEDUÇÕES DA RECEITA BRUTA',
+    `Bolsas e Descontos (${metrics.totalIsentos} isentos)`,
+    formatDRECurrency(baseDescontoMensal, true),
+    formatDRECurrency(monthlyDRE.totalAnual.descontoBolsas, true),
+    `-${calcPctRol(baseDescontoMensal, baseRolMensal)}`
+  );
+  pushAnaliticaRow(
+    'rol',
+    '3. (=) RECEITA OPERACIONAL LÍQUIDA (ROL)',
+    'Receita Efetiva Contratual Após Bolsas',
+    formatDRECurrency(baseRolMensal),
+    formatDRECurrency(monthlyDRE.totalAnual.receitaLiquida),
+    baseRolMensal > 0 ? '100%' : '-'
+  );
+  pushAnaliticaRow(
+    'custos',
+    '4. (-) CUSTOS OPERACIONAIS REAIS',
+    'Abas Integradas + Categorias Personalizadas',
+    formatDRECurrency(baseCustosMensal, true),
+    formatDRECurrency(monthlyDRE.totalAnual.custosOperacionais, true),
+    `-${calcPctRol(baseCustosMensal, baseRolMensal)}`
+  );
+
+  if (monthlyDRE.categoryRows && monthlyDRE.categoryRows.length > 0) {
+    monthlyDRE.categoryRows.forEach((catRow, catIdx) => {
+      const mVal = targetMonth
+        ? catRow.monthlyValues[targetMonth.monthIndex - 1] ?? 0
+        : catRow.monthlyValues[0] ?? 0;
+      pushAnaliticaRow(
+        'sub',
+        `   4.${catIdx + 1} (-) ${catRow.label}`,
+        getOriginDescription(catRow),
+        formatDRECurrency(mVal, true),
+        formatDRECurrency(catRow.totalAnual, true),
+        `-${calcPctRol(mVal, baseRolMensal)}`
+      );
+    });
+  } else {
+    const fVal = targetMonth ? targetMonth.custoFolha : metrics.custoFolhaReal || 0;
+    const aVal = targetMonth ? targetMonth.custoAlimentacao : metrics.custoAlimentacaoReal || 0;
+    pushAnaliticaRow(
+      'sub',
+      '   4.1 (-) Folha de Pagamento & Equipe',
+      'Livro Ponto agrupado por cargo/função',
+      formatDRECurrency(fVal, true),
+      formatDRECurrency(monthlyDRE.totalAnual.custoFolha, true),
+      `-${calcPctRol(fVal, baseRolMensal)}`
+    );
+    pushAnaliticaRow(
+      'sub',
+      '   4.2 (-) Alimentação Escolar & Insumos',
+      'Relatório Financeiro de Refeições (Cardápio)',
+      formatDRECurrency(aVal, true),
+      formatDRECurrency(monthlyDRE.totalAnual.custoAlimentacao, true),
+      `-${calcPctRol(aVal, baseRolMensal)}`
+    );
+  }
+
+  pushAnaliticaRow(
+    'resultado',
+    `5. (=) RESULTADO OPERACIONAL LÍQUIDO REAL (${baseResultadoMensal >= 0 ? 'SUPERÁVIT' : 'DÉFICIT'})`,
+    'ROL (-) Total de Custos Operacionais Reais',
+    formatDRECurrency(baseResultadoMensal),
+    formatDRECurrency(monthlyDRE.totalAnual.resultadoLiquido),
+    `${baseMargem}%`
+  );
+
+  const analiticaHead = targetMonth
+    ? [['Conta Contábil / Estrutura Analítica', 'Origem / Base de Apuração', `Competência (${targetMonth.monthFullName})`, '% s/ ROL']]
+    : [['Conta Contábil / Estrutura Analítica', 'Origem / Base de Apuração', 'Base Mensal', 'Acumulado Anual', '% s/ ROL']];
+
+  const analiticaColumnStyles: Record<number, any> = targetMonth
+    ? {
+        0: { cellWidth: 122, halign: 'left', overflow: 'linebreak' },
+        1: { cellWidth: 85, halign: 'left', overflow: 'linebreak' },
+        2: { cellWidth: 46, halign: 'right', fontStyle: 'bold', overflow: 'visible' },
+        3: { cellWidth: 28, halign: 'right', overflow: 'visible' },
+      }
+    : {
+        0: { cellWidth: 108, halign: 'left', overflow: 'linebreak' },
+        1: { cellWidth: 71, halign: 'left', overflow: 'linebreak' },
+        2: { cellWidth: 37, halign: 'right', overflow: 'visible' },
+        3: { cellWidth: 41, halign: 'right', fontStyle: 'bold', overflow: 'visible' },
+        4: { cellWidth: 24, halign: 'right', overflow: 'visible' },
+      };
+
+  runAutoTable(doc, {
+    startY: analiticaStartY + 9,
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: MARGIN_TOP, bottom: MARGIN_BOTTOM },
+    tableWidth: contentWidth,
+    head: analiticaHead,
+    body: analiticaBody,
     theme: 'grid',
     styles: {
-      fontSize: 6.1,
-      cellPadding: 1.6,
+      fontSize: 9.0,
+      cellPadding: { top: 3.0, right: 3.0, bottom: 3.0, left: 3.0 },
       valign: 'middle',
+      lineColor: [203, 213, 225],
+      lineWidth: 0.25,
+      textColor: [30, 41, 59],
     },
     headStyles: {
-      fillColor: [30, 41, 59],
+      fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 6.4,
-      halign: 'center',
+      fontSize: 9.5,
+      halign: 'right',
+      cellPadding: { top: 3.2, right: 3.0, bottom: 3.2, left: 3.0 },
     },
-    columnStyles: {
-      0: { cellWidth: 55, fontStyle: 'bold' },
-      1: { cellWidth: 16.4, halign: 'right' },
-      2: { cellWidth: 16.4, halign: 'right' },
-      3: { cellWidth: 16.4, halign: 'right' },
-      4: { cellWidth: 16.4, halign: 'right' },
-      5: { cellWidth: 16.4, halign: 'right' },
-      6: { cellWidth: 16.4, halign: 'right' },
-      7: { cellWidth: 16.4, halign: 'right' },
-      8: { cellWidth: 16.4, halign: 'right' },
-      9: { cellWidth: 16.4, halign: 'right' },
-      10: { cellWidth: 16.4, halign: 'right' },
-      11: { cellWidth: 16.4, halign: 'right' },
-      12: { cellWidth: 16.4, halign: 'right' },
-      13: { cellWidth: 18.2, halign: 'right', fontStyle: 'bold' },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
     },
+    columnStyles: analiticaColumnStyles,
     didParseCell: (data) => {
-      if (selectedMonth !== 'ALL' && data.column.index === Number(selectedMonth)) {
-        if (data.section === 'head') {
-          data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = 'bold';
-        }
+      if (data.section === 'head' && data.column.index <= 1) {
+        data.cell.styles.halign = 'left';
       }
+
       if (data.section === 'body') {
-        const rowIndex = data.row.index;
-        if (rowIndex === 2) {
+        const rowType = analiticaRowTypes[data.row.index];
+        if (rowType === 'bruta') {
           data.cell.styles.fillColor = [240, 253, 244];
           data.cell.styles.textColor = [21, 128, 61];
           data.cell.styles.fontStyle = 'bold';
-        } else if (rowIndex === totalCostsRowIdx) {
+          data.cell.styles.fontSize = 9.8;
+        } else if (rowType === 'deducao') {
+          data.cell.styles.fillColor = [245, 243, 255];
+          data.cell.styles.textColor = [109, 40, 217];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9.5;
+        } else if (rowType === 'rol') {
+          data.cell.styles.fillColor = [220, 252, 231];
+          data.cell.styles.textColor = [20, 83, 45];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 10.0;
+        } else if (rowType === 'custos') {
           data.cell.styles.fillColor = [254, 242, 242];
           data.cell.styles.textColor = [185, 28, 28];
           data.cell.styles.fontStyle = 'bold';
-        } else if (rowIndex === netResultRowIdx) {
-          const isRowPos = monthlyDRE.totalAnual.resultadoLiquido >= 0;
-          data.cell.styles.fillColor = isRowPos ? [238, 242, 255] : [255, 241, 242];
-          data.cell.styles.textColor = isRowPos ? [49, 46, 129] : [190, 18, 60];
+          data.cell.styles.fontSize = 9.8;
+        } else if (rowType === 'resultado') {
+          const isNetPos = baseResultadoMensal >= 0;
+          data.cell.styles.fillColor = isNetPos ? [224, 231, 255] : [255, 228, 230];
+          data.cell.styles.textColor = isNetPos ? [49, 46, 129] : [190, 18, 60];
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fontSize = 6.5;
-        } else if (rowIndex === marginRowIdx) {
-          data.cell.styles.fillColor = [248, 250, 252];
+          data.cell.styles.fontSize = 10.5;
+        } else if (data.column.index === 0) {
           data.cell.styles.fontStyle = 'bold';
-        }
-
-        if (selectedMonth !== 'ALL' && data.column.index === Number(selectedMonth)) {
-          data.cell.styles.fontStyle = 'bold';
-          if (rowIndex !== 2 && rowIndex !== totalCostsRowIdx && rowIndex !== netResultRowIdx) {
-            data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
-          }
+          data.cell.styles.textColor = [51, 65, 85];
+        } else if (data.column.index === 1) {
+          data.cell.styles.textColor = [100, 116, 139];
+          data.cell.styles.fontSize = 8.5;
         }
       }
     },
   });
 
-  const afterTableY = (doc as any).lastAutoTable?.finalY || 140;
+  // Bloco de Notas Explicativas & Assinaturas
+  let afterAnaliticaY = (doc as any).lastAutoTable?.finalY || 140;
+  const note1 = `1. Receita apurada a partir dos contratos vigentes no exercício (${formatDRECurrency(metrics.receitaPrevistaMensal)}/mês e ${formatDRECurrency(monthlyDRE.totalAnual.receitaLiquida)}/ano).`;
+  const note2 = `2. Custos integrados em tempo real: Folha Ponto (${formatDRECurrency(metrics.custoFolhaReal || 0)}), Refeições Cardápio (${formatDRECurrency(metrics.custoAlimentacaoReal || 0)}) e Outras Categorias/Personalizadas (${formatDRECurrency((metrics.custoCulinariaReal || 0) + (metrics.custoOutrasCategoriasReal || 0))}). Total mensal: ${formatDRECurrency(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}.`;
 
-  // Bloco de Notas Explicativas
-  const notesY = afterTableY + 6;
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(leftX, notesY, contentWidth, 14, 1.5, 1.5, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.0);
-  doc.setTextColor(30, 41, 59);
-  doc.text('NOTAS EXPLICATIVAS DO DRE OPERACIONAL:', leftX + 4, notesY + 4.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.2);
-  doc.setTextColor(71, 85, 105);
-  doc.text(
-    `1. Receita apurada a partir dos contratos vigentes no exercício (${formatCurrencyBR(metrics.receitaPrevistaMensal)}/mês e ${formatCurrencyBR(monthlyDRE.totalAnual.receitaLiquida)}/ano).`,
-    leftX + 4,
-    notesY + 8
-  );
-  doc.text(
-    `2. Custos integrados em tempo real: Folha Ponto (${formatCurrencyBR(metrics.custoFolhaReal || 0)}), Refeições Cardápio (${formatCurrencyBR(metrics.custoAlimentacaoReal || 0)}) e Categorias Personalizadas (${formatCurrencyBR(metrics.custoOutrasCategoriasReal || 0)}). Total mensal: ${formatCurrencyBR(metrics.totalCustosOperacionaisReais ?? metrics.totalDespesasMes)}.`,
-    leftX + 4,
-    notesY + 11.5
-  );
+  doc.setFontSize(8.5);
+  const note1Lines = doc.splitTextToSize(note1, contentWidth - 8);
+  const note2Lines = doc.splitTextToSize(note2, contentWidth - 8);
+  const notesHeight = 8 + (note1Lines.length + note2Lines.length) * 4.0 + 3;
 
-  // Assinaturas
-  const sigY = notesY + 24;
-  if (sigY < 195) {
-    doc.setDrawColor(203, 213, 225);
-    doc.line(leftX + 25, sigY, leftX + 115, sigY);
-    doc.line(leftX + 154, sigY, leftX + 244, sigY);
-
-    doc.setFontSize(7.0);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Coordenação Geral do Programa Integral', leftX + 70, sigY + 4, { align: 'center' });
-    doc.text('Diretoria Financeira & Controladoria Escolar', leftX + 199, sigY + 4, { align: 'center' });
+  if (afterAnaliticaY + notesHeight + 26 > 196) {
+    doc.addPage('a4', 'landscape');
+    drawHeaderForDRE();
+    afterAnaliticaY = 32;
   }
 
-  applyPageNumbersAndFooters(doc, 'landscape');
+  const notesY = afterAnaliticaY + 6;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(leftX, notesY, contentWidth, notesHeight, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.0);
+  doc.setTextColor(15, 23, 42);
+  doc.text('NOTAS EXPLICATIVAS DO DRE OPERACIONAL:', leftX + 4, notesY + 5.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  let noteCursorY = notesY + 10.5;
+  doc.text(note1Lines, leftX + 4, noteCursorY);
+  noteCursorY += note1Lines.length * 4.0 + 1;
+  doc.text(note2Lines, leftX + 4, noteCursorY);
+
+  // Assinaturas centralizadas nos 281mm úteis
+  const sigY = notesY + notesHeight + 14;
+  if (sigY < 194) {
+    doc.setDrawColor(148, 163, 184);
+    doc.line(leftX + 20, sigY, leftX + 120, sigY);
+    doc.line(leftX + 161, sigY, leftX + 261, sigY);
+
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text('Coordenação Geral do Programa Integral', leftX + 70, sigY + 4.5, { align: 'center' });
+    doc.text('Diretoria Financeira & Controladoria Escolar', leftX + 211, sigY + 4.5, { align: 'center' });
+  }
+
+  applyPageNumbersAndFooters(doc, 'landscape', MARGIN_LEFT);
 
   const filename = `DRE_Mensal_Consolidado_${schoolYear}.pdf`;
   const blob = doc.output('blob');

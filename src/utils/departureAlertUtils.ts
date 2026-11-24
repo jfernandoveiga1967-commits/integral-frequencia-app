@@ -5,6 +5,7 @@ import {
   normalizeDayOfWeek,
   isStudentActiveOnDate,
   isStudentScheduledForDate,
+  getStudentDepartureTimeForDate,
 } from './dateUtils';
 import { isCoordenador } from './authUtils';
 import { isRoutineActivity } from './frequenciaUtils';
@@ -325,8 +326,10 @@ export function evaluateDepartureAlerts(params: {
       continue;
     }
 
-    // E. Obter horário customizado de saída do aluno para o dia (Fonte a: cadastro; Fonte b: chamada)
-    let studentDeparture = getStudentDepartureForDay(student, dayOfWeek);
+    // E. Obter horário customizado de saída do aluno para o dia (Fonte a: Dia Extra / cadastro; Fonte b: chamada)
+    let studentDeparture =
+      normalizeTimeHHMM(getStudentDepartureTimeForDate(student, selectedDate)) ||
+      getStudentDepartureForDay(student, dayOfWeek);
     const saidaRec = records.find(
       (r) => r.date === selectedDate && r.studentId === student.id && r.status === 'saida_antecipada'
     );
@@ -474,8 +477,10 @@ export function getPendingEarlyDeparturesForTurma(params: {
       return;
     }
 
-    // Fonte a: Horário de saída agendado na ficha do aluno
-    const profileDeparture = getStudentDepartureForDay(student, dayOfWeek);
+    // Fonte a: Horário de saída agendado na ficha do aluno (ou Dia Extra Avulso na data)
+    const profileDeparture =
+      normalizeTimeHHMM(getStudentDepartureTimeForDate(student, selectedDate)) ||
+      getStudentDepartureForDay(student, dayOfWeek);
     let isProfileEarly = false;
     if (profileDeparture) {
       const depMin = timeToMinutes(profileDeparture);

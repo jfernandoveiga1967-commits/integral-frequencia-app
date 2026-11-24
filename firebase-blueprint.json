@@ -42,6 +42,10 @@
         },
         "inactivationDate": { "type": "string", "maxLength": 32 },
         "inactivationReason": { "type": "string", "maxLength": 500 },
+        "diasExtrasAvulsos": {
+          "type": "array",
+          "description": "Punctual single-day extra attendances booked without altering fixed weekly schedule or monthly plan"
+        },
         "notes": { "type": "string", "maxLength": 1000 }
       },
       "required": ["id", "name", "turma", "activities"]
@@ -380,6 +384,33 @@
         "resolvedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "active"]
+    },
+    "ExtraDayRecord": {
+      "title": "ExtraDayRecord",
+      "description": "Punctual single-day extra attendance (Dia Extra Avulso) booked for partial-week regular students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "turma": { "type": "string", "maxLength": 64 },
+        "anoLetivo": { "type": "number" },
+        "monthKey": { "type": "string", "maxLength": 7 },
+        "date": { "type": "string", "maxLength": 10 },
+        "horarioSaida": { "type": "string", "maxLength": 10 },
+        "valorDiaria": { "type": "number" },
+        "observacao": { "type": "string", "maxLength": 500 },
+        "planoMensalAtual": { "type": "string", "maxLength": 128 },
+        "statusPagamento": { "type": "string", "enum": ["PENDENTE", "EM_DIA"] },
+        "formaPagamento": { "type": "string", "maxLength": 64 },
+        "dataPagamento": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["ativo", "cancelado"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "studentId", "studentName", "turma", "anoLetivo", "monthKey", "date", "horarioSaida", "valorDiaria", "statusPagamento", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -466,6 +497,10 @@
     "/sofia_ai_alerts/{alertId}": {
       "schema": "SofiaAiAlert",
       "description": "Persistent AI quota/availability alert records (402/429/404)"
+    },
+    "/extraDays/{extraDayId}": {
+      "schema": "ExtraDayRecord",
+      "description": "Collection of punctual Dia Extra Avulso bookings and single-day financial charges"
     }
   }
 }

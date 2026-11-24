@@ -13,6 +13,7 @@ import {
 import {
   db,
   saveCustomExpenseCategoriesToFirestore,
+  saveStudentToFirestore,
 } from '../firebase';
 import {
   Student,
@@ -35,6 +36,7 @@ import {
   MealReportGlobalSettings,
   PlanoContratualType,
   DayOfWeek,
+  ExtraDayRecord,
   getTabelaPlanosPorAno,
 } from '../types';
 import { CookingRecipe } from '../types/cardapio';
@@ -62,11 +64,14 @@ import {
   calculateFolhaProfessorHorista,
 } from './FolhaService';
 import { broadcastSyncEvent } from './syncService';
+import { getDayOfWeekFromDate, isStudentScheduledForDay } from '../utils/dateUtils';
 
 const FINANCIAL_COLLECTION = 'studentFinancialProfiles';
 const EXPENSES_COLLECTION = 'financialExpenses';
+const EXTRA_DAYS_COLLECTION = 'extraDays';
 const LOCAL_STORAGE_KEY = 'colegio_crescer_financial_profiles_v1';
 const LOCAL_EXPENSES_STORAGE_KEY = 'colegio_crescer_financial_expenses_v1';
+const LOCAL_EXTRA_DAYS_STORAGE_KEY = 'colegio_crescer_extra_days_v1';
 export const LOCAL_CUSTOM_CATEGORIES_KEY = 'colegio_crescer_custom_expense_categories_v1';
 
 // Tabela Padrão de Preços das Modalidades Extracurriculares
@@ -2248,13 +2253,338 @@ export function subscribeFinancialExpenses(
 }
 
 // ---------------------------------------------------------------------------
+// DIAS EXTRAS AVULSOS (DIÁRIAS PONTUAIS SEM ALTERAÇÃO DO PLANO MENSAL)
+// ---------------------------------------------------------------------------
+
+export function loadLocalExtraDays(anoLetivo?: number): ExtraDayRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_EXTRA_DAYS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const valid = parsed.filter((item) => item && item.id && item.studentId && item.date) as ExtraDayRecord[];
+    return anoLetivo !== undefined
+      ? valid.filter((item) => Number(item.anoLetivo) === Number(anoLetivo))
+      : valid;
+  } catch (err) {
+    console.warn('Erro ao ler storage local de dias extras avulsos:', err);
+    return [];
+  }
+}
+
+export function saveLocalExtraDays(records: ExtraDayRecord[]): void {
+  try {
+    localStorage.setItem(LOCAL_EXTRA_DAYS_STORAGE_KEY, JSON.stringify(records || []));
+  } catch (err) {
+    console.warn('Erro ao salvar storage local de dias extras avulsos:', err);
+  }
+}
+
+export function subscribeExtraDays(
+  anoLetivo: number,
+  onUpdate: (records: ExtraDayRecord[]) => void
+): () => void {
+  const initialLocal = loadLocalExtraDays(anoLetivo);
+  onUpdate(initialLocal);
+
+  try {
+    const colRef = collection(db, EXTRA_DAYS_COLLECTION);
+    const q = query(colRef, where('anoLetivo', '==', anoLetivo));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const remoteList: ExtraDayRecord[] = [];
+        snapshot.forEach((d) => {
+          remoteList.push({ id: d.id, ...d.data() } as ExtraDayRecord);
+        });
+
+        const allLocal = loadLocalExtraDays();
+        const otherYears = allLocal.filter((r) => Number(r.anoLetivo) !== Number(anoLetivo));
+        const sortedRemote = remoteList.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        saveLocalExtraDays([...otherYears, ...sortedRemote]);
+        onUpdate(sortedRemote);
+      },
+      (error) => {
+        console.warn('Erro no listener de dias extras avulsos:', error);
+        onUpdate(loadLocalExtraDays(anoLetivo));
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de dias extras avulsos:', err);
+    onUpdate(loadLocalExtraDays(anoLetivo));
+    return () => {};
+  }
+}
+
+export async function loadExtraDaysFromFirestore(anoLetivo?: number): Promise<ExtraDayRecord[]> {
+  try {
+    const colRef = collection(db, EXTRA_DAYS_COLLECTION);
+    const q = anoLetivo !== undefined ? query(colRef, where('anoLetivo', '==', anoLetivo)) : colRef;
+    const snap = await getDocs(q);
+    const list: ExtraDayRecord[] = [];
+    snap.forEach((d) => {
+      list.push({ id: d.id, ...d.data() } as ExtraDayRecord);
+    });
+    const allLocal = loadLocalExtraDays();
+    if (anoLetivo !== undefined) {
+      const otherYears = allLocal.filter((r) => Number(r.anoLetivo) !== Number(anoLetivo));
+      saveLocalExtraDays([...otherYears, ...list]);
+    } else {
+      saveLocalExtraDays(list);
+    }
+    return list;
+  } catch (err) {
+    console.warn('Erro ao carregar dias extras avulsos do Firestore:', err);
+    return loadLocalExtraDays(anoLetivo);
+  }
+}
+
+export interface RegisterExtraDayParams {
+  student: Student;
+  date: string;
+  horarioSaida: string;
+  valorDiaria: number;
+  observacao?: string;
+  createdBy?: string;
+}
+
+/**
+ * Registra um Dia Extra Avulso pontual para aluno ativo de contrato Regular com < 5 dias:
+ * - Inclui o aluno pontualmente na chamada e atividades do momento apenas na data especificada;
+ * - Lança 1 Diária Avulsa no módulo Financeiro;
+ * - JAMAIS altera diasFrequencia, planoContratual, valorPlanoBase ou valorMensalidadeFinal do aluno.
+ */
+export async function registerExtraDayAvulso({
+  student,
+  date,
+  horarioSaida,
+  valorDiaria,
+  observacao,
+  createdBy,
+}: RegisterExtraDayParams): Promise<{ record: ExtraDayRecord; updatedStudent: Student }> {
+  if (!student || !student.id) {
+    throw new Error('Aluno inválido para registro de Dia Extra Avulso.');
+  }
+  if ((student.status || 'ativo') !== 'ativo') {
+    throw new Error('Apenas alunos com matrícula ativa podem contratar Dia Extra Avulso.');
+  }
+  if (student.tipoContrato === 'avulso') {
+    throw new Error('O Dia Extra Avulso é exclusivo para alunos de contrato Regular com menos de 5 dias na semana.');
+  }
+  if (!Array.isArray(student.diasFrequencia) || student.diasFrequencia.length === 0 || student.diasFrequencia.length >= 5) {
+    throw new Error('Este aluno já possui frequência integral de 5 dias na semana.');
+  }
+
+  const trimmedDate = (date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmedDate)) {
+    throw new Error('Informe uma data válida no formato YYYY-MM-DD.');
+  }
+
+  const dayOfWeek = getDayOfWeekFromDate(trimmedDate);
+  if (!dayOfWeek) {
+    throw new Error('Não é possível agendar Dia Extra Avulso aos sábados ou domingos.');
+  }
+  if (isStudentScheduledForDay(student, dayOfWeek)) {
+    throw new Error('O aluno já frequenta regularmente neste dia da semana pela grade contratada.');
+  }
+
+  const existingActiveOnStudent = (student.diasExtrasAvulsos || []).find(
+    (entry) => entry && entry.date === trimmedDate && entry.status !== 'cancelado'
+  );
+  const existingLocal = loadLocalExtraDays().find(
+    (entry) => entry && entry.studentId === student.id && entry.date === trimmedDate && entry.status !== 'cancelado'
+  );
+  if (existingActiveOnStudent || existingLocal) {
+    throw new Error('Já existe um Dia Extra Avulso ativo lançado para este aluno nesta data.');
+  }
+
+  const numericValue = Math.round(Math.max(0, Number(valorDiaria) || 0) * 100) / 100;
+  if (numericValue <= 0) {
+    throw new Error('Informe um valor válido maior que zero para a Diária Avulsa.');
+  }
+
+  const cleanTime = (horarioSaida || '18:30').trim() || '18:30';
+  const anoLetivo = Number(student.anoLetivo) || Number(trimmedDate.slice(0, 4)) || 2026;
+  const monthKey = trimmedDate.slice(0, 7);
+  const nowIso = new Date().toISOString();
+  const recordId = `extra_${student.id}_${trimmedDate}_${Date.now().toString(36)}`;
+  const resolvedPlan =
+    student.planoContratual || resolveOfficialPlanFromStudentSchedule(student, anoLetivo).planoContratual;
+
+  const record: ExtraDayRecord = {
+    id: recordId,
+    studentId: student.id,
+    studentName: student.name,
+    turma: student.turma,
+    anoLetivo,
+    monthKey,
+    date: trimmedDate,
+    horarioSaida: cleanTime,
+    valorDiaria: numericValue,
+    ...(observacao && observacao.trim() ? { observacao: observacao.trim() } : {}),
+    planoMensalAtual: resolvedPlan,
+    statusPagamento: 'PENDENTE',
+    status: 'ativo',
+    createdAt: nowIso,
+    createdBy: createdBy || 'Coordenação',
+    updatedAt: nowIso,
+    updatedBy: createdBy || 'Coordenação',
+  };
+
+  // 1. Persiste na coleção financeira/operacional `extraDays`
+  const cleanRecord = Object.fromEntries(
+    Object.entries(record).filter(([, v]) => v !== undefined)
+  ) as ExtraDayRecord;
+
+  await setDoc(doc(db, EXTRA_DAYS_COLLECTION, recordId), cleanRecord, { merge: true }).catch((err) => {
+    console.warn('Aviso ao gravar extraDay no Firestore (mantido em cache local):', err);
+  });
+
+  const currentLocalExtras = loadLocalExtraDays().filter((r) => r.id !== recordId);
+  saveLocalExtraDays([cleanRecord, ...currentLocalExtras]);
+
+  // 2. Anexa apenas em `student.diasExtrasAvulsos` sem tocar em diasFrequencia, horariosSaida ou planoContratual
+  const prevExtras = Array.isArray(student.diasExtrasAvulsos) ? student.diasExtrasAvulsos : [];
+  const nextExtras = [
+    ...prevExtras.filter((e) => e && e.id !== recordId),
+    cleanRecord,
+  ];
+
+  const updatedStudent: Student = {
+    ...student,
+    diasExtrasAvulsos: nextExtras,
+    updatedAt: nowIso,
+  };
+
+  await saveStudentToFirestore(updatedStudent).catch((err) => {
+    console.warn('Aviso ao salvar diasExtrasAvulsos no cadastro do aluno:', err);
+  });
+
+  const allLocalStudents = loadStudents();
+  const nextStudentsList = allLocalStudents.some((s) => s.id === updatedStudent.id)
+    ? allLocalStudents.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+    : [...allLocalStudents, updatedStudent];
+  saveStudents(nextStudentsList);
+
+  broadcastSyncEvent('SYNC_EXTRA_DAYS', { anoLetivo, record: cleanRecord });
+  broadcastSyncEvent('SYNC_STUDENTS', nextStudentsList);
+
+  return { record: cleanRecord, updatedStudent };
+}
+
+export async function updateExtraDayPaymentStatus(
+  record: ExtraDayRecord,
+  statusPagamento: 'PENDENTE' | 'EM_DIA',
+  updatedBy: string = 'Coordenação',
+  formaPagamento?: string
+): Promise<ExtraDayRecord> {
+  const nowIso = new Date().toISOString();
+  const todayStr = nowIso.split('T')[0];
+
+  const updated: ExtraDayRecord = {
+    ...record,
+    statusPagamento,
+    ...(statusPagamento === 'EM_DIA'
+      ? {
+          dataPagamento: record.dataPagamento || todayStr,
+          formaPagamento: formaPagamento || record.formaPagamento || 'PIX / Balcão',
+        }
+      : {
+          dataPagamento: undefined,
+        }),
+    updatedAt: nowIso,
+    updatedBy,
+  };
+
+  const cleanUpdated = Object.fromEntries(
+    Object.entries(updated).filter(([, v]) => v !== undefined)
+  ) as ExtraDayRecord;
+
+  await setDoc(doc(db, EXTRA_DAYS_COLLECTION, record.id), cleanUpdated, { merge: true }).catch((err) => {
+    console.warn('Aviso ao atualizar status de pagamento do Dia Extra:', err);
+  });
+
+  const localExtras = loadLocalExtraDays();
+  const nextLocalExtras = localExtras.some((r) => r.id === record.id)
+    ? localExtras.map((r) => (r.id === record.id ? cleanUpdated : r))
+    : [cleanUpdated, ...localExtras];
+  saveLocalExtraDays(nextLocalExtras);
+
+  // Espelha status atualizado no array diasExtrasAvulsos do aluno
+  const allStudents = loadStudents();
+  const targetStudent = allStudents.find((s) => s.id === record.studentId);
+  if (targetStudent && Array.isArray(targetStudent.diasExtrasAvulsos)) {
+    const updatedStudent: Student = {
+      ...targetStudent,
+      diasExtrasAvulsos: targetStudent.diasExtrasAvulsos.map((e) =>
+        e.id === record.id ? cleanUpdated : e
+      ),
+      updatedAt: nowIso,
+    };
+    await saveStudentToFirestore(updatedStudent).catch(() => {});
+    const nextStudents = allStudents.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
+    saveStudents(nextStudents);
+    broadcastSyncEvent('SYNC_STUDENTS', nextStudents);
+  }
+
+  broadcastSyncEvent('SYNC_EXTRA_DAYS', { anoLetivo: record.anoLetivo, record: cleanUpdated });
+  return cleanUpdated;
+}
+
+export async function cancelExtraDayAvulso(
+  record: ExtraDayRecord,
+  updatedBy: string = 'Coordenação'
+): Promise<{ updatedRecord: ExtraDayRecord; updatedStudent: Student | null }> {
+  const nowIso = new Date().toISOString();
+  const cancelled: ExtraDayRecord = {
+    ...record,
+    status: 'cancelado',
+    updatedAt: nowIso,
+    updatedBy,
+  };
+
+  await setDoc(doc(db, EXTRA_DAYS_COLLECTION, record.id), cancelled, { merge: true }).catch((err) => {
+    console.warn('Aviso ao cancelar Dia Extra no Firestore:', err);
+  });
+
+  const localExtras = loadLocalExtraDays();
+  const nextLocalExtras = localExtras.map((r) => (r.id === record.id ? cancelled : r));
+  saveLocalExtraDays(nextLocalExtras);
+
+  let updatedStudent: Student | null = null;
+  const allStudents = loadStudents();
+  const targetStudent = allStudents.find((s) => s.id === record.studentId);
+  if (targetStudent) {
+    const nextExtras = (targetStudent.diasExtrasAvulsos || []).map((e) =>
+      e.id === record.id ? cancelled : e
+    );
+    updatedStudent = {
+      ...targetStudent,
+      diasExtrasAvulsos: nextExtras,
+      updatedAt: nowIso,
+    };
+    await saveStudentToFirestore(updatedStudent).catch(() => {});
+    const nextStudents = allStudents.map((s) => (s.id === updatedStudent!.id ? updatedStudent! : s));
+    saveStudents(nextStudents);
+    broadcastSyncEvent('SYNC_STUDENTS', nextStudents);
+  }
+
+  broadcastSyncEvent('SYNC_EXTRA_DAYS', { anoLetivo: record.anoLetivo, record: cancelled });
+  return { updatedRecord: cancelled, updatedStudent };
+}
+
+// ---------------------------------------------------------------------------
 // CONSOLIDAÇÃO DE FLUXO DE CAIXA E INDICADORES (DINÂMICO POR CATEGORIA)
 // ---------------------------------------------------------------------------
 
 export function calculateFinancialMetrics(
   profiles: StudentFinancialProfile[],
   expenses: FinancialExpense[] = [],
-  customCategories: CustomExpenseCategory[] = []
+  customCategories: CustomExpenseCategory[] = [],
+  extraDays: ExtraDayRecord[] = []
 ): FinancialMetricSummary {
   let receitaPrevistaMensal = 0;
   let receitaConfirmada = 0;
@@ -2308,9 +2638,29 @@ export function calculateFinancialMetrics(
     }
   });
 
+  // Soma Diárias Avulsas / Dias Extras Avulsos pontuais (sem alterar planos fixos ou contagem de mensalistas)
+  const activeExtraDays = (extraDays || []).filter(
+    (d) => d && d.status !== 'cancelado' && Number(d.valorDiaria) > 0
+  );
+  let receitaDiariasAvulsas = 0;
+  let receitaDiariasAvulsasConfirmadas = 0;
+  activeExtraDays.forEach((d) => {
+    const val = Number(d.valorDiaria) || 0;
+    receitaDiariasAvulsas += val;
+    if (d.statusPagamento === 'EM_DIA') {
+      receitaDiariasAvulsasConfirmadas += val;
+    }
+  });
+  receitaDiariasAvulsas = Math.round(receitaDiariasAvulsas * 100) / 100;
+  receitaDiariasAvulsasConfirmadas = Math.round(receitaDiariasAvulsasConfirmadas * 100) / 100;
+
+  faturamentoBrutoReal += receitaDiariasAvulsas;
+  receitaPrevistaMensal += receitaDiariasAvulsas;
+  receitaConfirmada += receitaDiariasAvulsasConfirmadas;
+
   const ticketMedioPorAluno =
     totalAlunosPagantes > 0
-      ? Math.round((receitaPrevistaMensal / totalAlunosPagantes) * 100) / 100
+      ? Math.round(((receitaPrevistaMensal - receitaDiariasAvulsas) / totalAlunosPagantes) * 100) / 100
       : 0;
 
   const baseAdimplencia = receitaConfirmada + totalEmAtraso;
@@ -2467,6 +2817,9 @@ export function calculateFinancialMetrics(
     totalCustosOperacionaisReais,
     resultadoOperacionalLiquidoReal,
     margemOperacionalLiquida,
+    receitaDiariasAvulsas,
+    receitaDiariasAvulsasConfirmadas,
+    totalDiariasAvulsas: activeExtraDays.length,
   };
 }
 
@@ -2588,11 +2941,18 @@ export const MONTH_NAMES_DRE: Array<{ short: string; full: string }> = [
  */
 export function calculateDREMonthlyMatrix(
   metrics: FinancialMetricSummary,
-  anoLetivo: number = 2026
+  anoLetivo: number = 2026,
+  yearExtraDays?: ExtraDayRecord[]
 ): DREMonthlySummary {
-  const recBruta = Number(metrics.faturamentoBrutoReal) || 0;
+  const hasExplicitYearExtras = Array.isArray(yearExtraDays);
+  const currentPeriodExtraRevenue = Number(metrics.receitaDiariasAvulsas) || 0;
+  const baseRecBruta = hasExplicitYearExtras
+    ? Math.max(0, (Number(metrics.faturamentoBrutoReal) || 0) - currentPeriodExtraRevenue)
+    : Number(metrics.faturamentoBrutoReal) || 0;
   const descBolsas = Number(metrics.totalDescontoBolsas) || 0;
-  const recLiquida = Number(metrics.receitaPrevistaMensal) || 0;
+  const baseRecLiquida = hasExplicitYearExtras
+    ? Math.max(0, (Number(metrics.receitaPrevistaMensal) || 0) - currentPeriodExtraRevenue)
+    : Number(metrics.receitaPrevistaMensal) || 0;
   const folha = Number(metrics.custoFolhaReal) || 0;
   const alimentacao = Number(metrics.custoAlimentacaoReal) || 0;
   const culinaria = Number(metrics.custoCulinariaReal) || 0;
@@ -2601,24 +2961,44 @@ export function calculateDREMonthlyMatrix(
     metrics.totalCustosOperacionaisReais !== undefined
       ? Number(metrics.totalCustosOperacionaisReais)
       : Math.round((folha + alimentacao + culinaria + outras) * 100) / 100;
-  const resLiquido = Math.round((recLiquida - custosTotais) * 100) / 100;
-  const margem = recLiquida > 0 ? Math.round((resLiquido / recLiquida) * 1000) / 10 : 0;
 
-  const months: DREMonthlyColumn[] = MONTH_NAMES_DRE.map((m, idx) => ({
-    monthIndex: idx + 1,
-    monthName: m.short,
-    monthFullName: m.full,
-    receitaBruta: Math.round(recBruta * 100) / 100,
-    descontoBolsas: Math.round(descBolsas * 100) / 100,
-    receitaLiquida: Math.round(recLiquida * 100) / 100,
-    custoFolha: Math.round(folha * 100) / 100,
-    custoAlimentacao: Math.round(alimentacao * 100) / 100,
-    custoCulinaria: Math.round(culinaria * 100) / 100,
-    custoOutrasCategorias: Math.round(outras * 100) / 100,
-    custosOperacionais: Math.round(custosTotais * 100) / 100,
-    resultadoLiquido: Math.round(resLiquido * 100) / 100,
-    margemPercentual: margem,
-  }));
+  const extraByMonth = new Map<number, number>();
+  if (hasExplicitYearExtras) {
+    yearExtraDays!.forEach((d) => {
+      if (!d || d.status === 'cancelado') return;
+      if (Number(d.anoLetivo) !== Number(anoLetivo)) return;
+      const monthStr = (d.monthKey || d.date || '').slice(5, 7);
+      const mIdx = Number(monthStr);
+      if (mIdx >= 1 && mIdx <= 12) {
+        extraByMonth.set(mIdx, (extraByMonth.get(mIdx) || 0) + (Number(d.valorDiaria) || 0));
+      }
+    });
+  }
+
+  const months: DREMonthlyColumn[] = MONTH_NAMES_DRE.map((m, idx) => {
+    const mNumber = idx + 1;
+    const monthExtra = hasExplicitYearExtras ? extraByMonth.get(mNumber) || 0 : 0;
+    const recBruta = Math.round((baseRecBruta + monthExtra) * 100) / 100;
+    const recLiquida = Math.round((baseRecLiquida + monthExtra) * 100) / 100;
+    const resLiquido = Math.round((recLiquida - custosTotais) * 100) / 100;
+    const margem = recLiquida > 0 ? Math.round((resLiquido / recLiquida) * 1000) / 10 : 0;
+
+    return {
+      monthIndex: mNumber,
+      monthName: m.short,
+      monthFullName: m.full,
+      receitaBruta: recBruta,
+      descontoBolsas: Math.round(descBolsas * 100) / 100,
+      receitaLiquida: recLiquida,
+      custoFolha: Math.round(folha * 100) / 100,
+      custoAlimentacao: Math.round(alimentacao * 100) / 100,
+      custoCulinaria: Math.round(culinaria * 100) / 100,
+      custoOutrasCategorias: Math.round(outras * 100) / 100,
+      custosOperacionais: Math.round(custosTotais * 100) / 100,
+      resultadoLiquido: resLiquido,
+      margemPercentual: margem,
+    };
+  });
 
   const categoryRows: DRECategoryMonthlyRow[] = (metrics.custosPorCategoria || []).map((cat) => ({
     categoria: cat.categoria,
@@ -2631,15 +3011,21 @@ export function calculateDREMonthlyMatrix(
     totalAnual: Math.round(cat.valor * 12 * 100) / 100,
   }));
 
-  const totalAnualReceitaBruta = Math.round(recBruta * 12 * 100) / 100;
+  const totalAnualReceitaBruta = Math.round(
+    months.reduce((acc, col) => acc + col.receitaBruta, 0) * 100
+  ) / 100;
   const totalAnualDescontoBolsas = Math.round(descBolsas * 12 * 100) / 100;
-  const totalAnualReceitaLiquida = Math.round(recLiquida * 12 * 100) / 100;
+  const totalAnualReceitaLiquida = Math.round(
+    months.reduce((acc, col) => acc + col.receitaLiquida, 0) * 100
+  ) / 100;
   const totalAnualCustoFolha = Math.round(folha * 12 * 100) / 100;
   const totalAnualCustoAlimentacao = Math.round(alimentacao * 12 * 100) / 100;
   const totalAnualCustoCulinaria = Math.round(culinaria * 12 * 100) / 100;
   const totalAnualCustoOutras = Math.round(outras * 12 * 100) / 100;
   const totalAnualCustosOperacionais = Math.round(custosTotais * 12 * 100) / 100;
-  const totalAnualResultadoLiquido = Math.round(resLiquido * 12 * 100) / 100;
+  const totalAnualResultadoLiquido = Math.round(
+    (totalAnualReceitaLiquida - totalAnualCustosOperacionais) * 100
+  ) / 100;
   const totalAnualMargem =
     totalAnualReceitaLiquida > 0
       ? Math.round((totalAnualResultadoLiquido / totalAnualReceitaLiquida) * 1000) / 10

@@ -107,6 +107,9 @@ import {
   isStudentScheduledForDay,
   isStudentScheduledForDate,
   isStudentActiveOnDate,
+  isStudentExtraDayOnDate,
+  getActiveExtraDayForDate,
+  formatHorarioSaida,
 } from '../utils/dateUtils';
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
 import { isRoutineActivity } from '../utils/frequenciaUtils';
@@ -1657,6 +1660,41 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                     isConfirmingId={confirmingCheckoutStudentId}
                   />
 
+                  {/* Aviso discreto de Dia Extra Avulso na turma nesta data */}
+                  {(() => {
+                    const extraDayStudentsToday = (Array.isArray(yearStudents) ? yearStudents : []).filter(
+                      (s) =>
+                        s &&
+                        (s.turma || '').trim() === turmaName.trim() &&
+                        isStudentActiveOnDate(s, selectedDate) &&
+                        isStudentExtraDayOnDate(s, selectedDate)
+                    );
+                    if (extraDayStudentsToday.length === 0) return null;
+                    return (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-[10.5px] text-amber-950 flex flex-wrap items-center gap-1.5 shadow-2xs">
+                        <span className="font-black text-amber-800 uppercase tracking-wide">
+                          ✨ Dia Extra Avulso hoje:
+                        </span>
+                        {extraDayStudentsToday.map((st) => {
+                          const extraInfo = getActiveExtraDayForDate(st, selectedDate);
+                          return (
+                            <span
+                              key={st.id}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-amber-300 font-bold text-amber-950 text-[10px]"
+                            >
+                              <span>{st.name}</span>
+                              {extraInfo?.horarioSaida && (
+                                <span className="text-[9.5px] font-semibold text-amber-700">
+                                  (Saída {formatHorarioSaida(extraInfo.horarioSaida)})
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   {isClassActive && activeBlock ? (
                     <div className="space-y-2.5">
                       {/* Activity Name & Icon */}
@@ -2501,6 +2539,14 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                             {isReforcoStudent && (
                               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white shadow-xs animate-pulse">
                                 <span>⚡ ENVIAR PARA O REFORÇO</span>
+                              </span>
+                            )}
+                            {isStudentExtraDayOnDate(student, selectedDate) && (
+                              <span
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs"
+                                title={`Dia Extra Avulso em ${formatDateBR(selectedDate)}`}
+                              >
+                                <span>✨ Dia Extra Avulso</span>
                               </span>
                             )}
                           </div>

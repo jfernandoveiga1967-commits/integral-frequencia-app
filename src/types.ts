@@ -205,7 +205,32 @@ export interface Student {
   oficinasExtras?: number; // Alias de compatibilidade
   valorOficinas?: number; // Alias de compatibilidade
   valorExtras?: number; // Alias de compatibilidade
+  diasExtrasAvulsos?: ExtraDayRecord[]; // Dias Extras Avulsos pontuais (não alteram o plano mensal nem a grade fixa)
   updatedAt?: string; // Data/hora da última atualização
+}
+
+export type ExtraDayStatus = 'ativo' | 'cancelado';
+
+export interface ExtraDayRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  turma: TurmaType | string;
+  anoLetivo: number;
+  monthKey: string; // 'YYYY-MM'
+  date: string; // 'YYYY-MM-DD'
+  horarioSaida: string; // ex: '18:30'
+  valorDiaria: number;
+  observacao?: string;
+  planoMensalAtual?: string;
+  statusPagamento: 'PENDENTE' | 'EM_DIA';
+  formaPagamento?: string;
+  dataPagamento?: string;
+  status: ExtraDayStatus;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface AttendanceRecord {
@@ -368,6 +393,10 @@ export interface FinancialMetricSummary {
   totalCustosOperacionaisReais?: number; // Soma de todos os custos operacionais (sincronizados + manuais)
   resultadoOperacionalLiquidoReal?: number; // Receita Líquida dos Alunos - Total Custos Operacionais
   margemOperacionalLiquida?: number; // % sobre a Receita Líquida
+  // Diárias Avulsas / Dias Extras Avulsos pontuais
+  receitaDiariasAvulsas?: number;
+  receitaDiariasAvulsasConfirmadas?: number;
+  totalDiariasAvulsas?: number;
 }
 
 export type ExpenseCategory = string;

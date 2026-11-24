@@ -21,6 +21,7 @@ import {
   SemanarioPlan,
   MealReportConfig,
   MealReportGlobalSettings,
+  ExtraDayRecord,
   getTabelaPlanosPorAno,
 } from '../types';
 import { CookingRecipe } from '../types/cardapio';
@@ -100,6 +101,10 @@ import {
   MONTH_NAMES_DRE,
   resolveEffectiveFinancialTermsForStudent,
   syncStudentsWithFinancial,
+  subscribeExtraDays,
+  loadLocalExtraDays,
+  updateExtraDayPaymentStatus,
+  cancelExtraDayAvulso,
 } from '../services/financialService';
 import {
   saveStudentToFirestore,
@@ -172,10 +177,12 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   const [renamingCategoryLabel, setRenamingCategoryLabel] = useState<string>('');
   const [categoryManagerOpen, setCategoryManagerOpen] = useState<boolean>(false);
 
-  // Dados em tempo real dos módulos Cardápio / Refeições / Culinária
+  // Dados em tempo real dos módulos Cardápio / Refeições / Culinária e Dias Extras Avulsos
   const [mealReports, setMealReports] = useState<MealReportConfig[]>([]);
   const [mealGlobalSettings, setMealGlobalSettings] = useState<MealReportGlobalSettings | null>(null);
   const [cookingRecipes, setCookingRecipes] = useState<CookingRecipe[]>([]);
+  const [extraDays, setExtraDays] = useState<ExtraDayRecord[]>(() => loadLocalExtraDays());
+  const [updatingExtraDayId, setUpdatingExtraDayId] = useState<string | null>(null);
   const [externalSyncTick, setExternalSyncTick] = useState<number>(0);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -259,10 +266,14 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
         msg.type === 'SYNC_STUDENTS' ||
         msg.type === 'SYNC_USERS' ||
         msg.type === 'SYNC_FINANCIAL_CATEGORIES' ||
-        msg.type === 'SYNC_FINANCIAL_EXPENSES'
+        msg.type === 'SYNC_FINANCIAL_EXPENSES' ||
+        msg.type === 'SYNC_EXTRA_DAYS'
       ) {
         if (msg.type === 'SYNC_FINANCIAL_CATEGORIES' && (msg.payload as any)?.categories) {
           setCustomCategories((msg.payload as any).categories);
+        }
+        if (msg.type === 'SYNC_EXTRA_DAYS') {
+          setExtraDays(loadLocalExtraDays());
         }
         setExternalSyncTick((t) => t + 1);
       }
@@ -299,11 +310,16 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       setCookingRecipes(recipes);
     });
 
+    const unsubExtraDays = subscribeExtraDays(selectedAnoLetivo, (remoteExtras) => {
+      setExtraDays(remoteExtras);
+    });
+
     return () => {
       unsubProfiles();
       unsubExpenses();
       unsubMealReports();
       unsubRecipes();
+      unsubExtraDays();
     };
   }, [selectedAnoLetivo]);
 
@@ -545,10 +561,45 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
     });
   }, [currentExpenses, customCategories]);
 
-  // 4. Métricas Gerais Consolidadas (Receitas, Despesas por Categoria e Saldo Líquido Operacional)
+  // Dias Extras Avulsos ativos do ano e do período selecionado
+  const activeYearExtraDays = useMemo<ExtraDayRecord[]>(() => {
+    return (extraDays || [])
+      .filter((d) => d && d.status !== 'cancelado' && Number(d.anoLetivo) === Number(selectedAnoLetivo))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [extraDays, selectedAnoLetivo]);
+
+  const periodExtraDays = useMemo<ExtraDayRecord[]>(() => {
+    if (selectedMonth === 'ALL') return activeYearExtraDays;
+    const monthKey = `${selectedAnoLetivo}-${String(selectedMonth).padStart(2, '0')}`;
+    return activeYearExtraDays.filter((d) => (d.monthKey || (d.date || '').slice(0, 7)) === monthKey);
+  }, [activeYearExtraDays, selectedMonth, selectedAnoLetivo]);
+
+  const filteredExtraDays = useMemo<ExtraDayRecord[]>(() => {
+    return periodExtraDays.filter((d) => {
+      if (searchTerm.trim().length > 0) {
+        const term = searchTerm.toLowerCase();
+        const matchesName = (d.studentName || '').toLowerCase().includes(term);
+        const matchesTurma = (d.turma || '').toLowerCase().includes(term);
+        const matchesObs = (d.observacao || '').toLowerCase().includes(term);
+        if (!matchesName && !matchesTurma && !matchesObs) return false;
+      }
+      if (selectedTurma !== 'TODAS' && d.turma !== selectedTurma) {
+        return false;
+      }
+      if (selectedStatus === 'EM_DIA' && d.statusPagamento !== 'EM_DIA') {
+        return false;
+      }
+      if (selectedStatus === 'PENDENTE' && d.statusPagamento !== 'PENDENTE') {
+        return false;
+      }
+      return true;
+    });
+  }, [periodExtraDays, searchTerm, selectedTurma, selectedStatus]);
+
+  // 4. Métricas Gerais Consolidadas (Receitas, Diárias Avulsas, Despesas por Categoria e Saldo Líquido Operacional)
   const metrics = useMemo<FinancialMetricSummary>(() => {
-    return calculateFinancialMetrics(resolvedProfiles, currentExpenses, customCategories);
-  }, [resolvedProfiles, currentExpenses, customCategories]);
+    return calculateFinancialMetrics(resolvedProfiles, currentExpenses, customCategories, periodExtraDays);
+  }, [resolvedProfiles, currentExpenses, customCategories, periodExtraDays]);
 
   // 5. Lista Filtrada de Receitas (Alunos)
   const filteredProfiles = useMemo<StudentFinancialProfile[]>(() => {
@@ -778,6 +829,55 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
       showToast('Falha ao registrar baixa no sistema.', 'error');
     } finally {
       setIsSavingPayment(false);
+    }
+  };
+
+  // Handlers de Pagamento e Cancelamento para Diárias Avulsas / Dias Extras
+  const handleToggleExtraDayPayment = async (record: ExtraDayRecord) => {
+    setUpdatingExtraDayId(record.id);
+    try {
+      const nextStatus = record.statusPagamento === 'EM_DIA' ? 'PENDENTE' : 'EM_DIA';
+      const updated = await updateExtraDayPaymentStatus(
+        record,
+        nextStatus,
+        currentUser?.name || 'Coordenação'
+      );
+      setExtraDays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      showToast(
+        nextStatus === 'EM_DIA'
+          ? `Diária avulsa de ${record.studentName} (${formatDateBR(record.date)}) marcada como Paga!`
+          : `Diária avulsa de ${record.studentName} (${formatDateBR(record.date)}) reaberta como Pendente.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Erro ao atualizar pagamento da diária avulsa:', err);
+      showToast('Falha ao atualizar situação da diária avulsa.', 'error');
+    } finally {
+      setUpdatingExtraDayId(null);
+    }
+  };
+
+  const handleCancelExtraDay = async (record: ExtraDayRecord) => {
+    setUpdatingExtraDayId(record.id);
+    try {
+      const { updatedRecord, updatedStudent } = await cancelExtraDayAvulso(
+        record,
+        currentUser?.name || 'Coordenação'
+      );
+      setExtraDays((prev) => prev.map((item) => (item.id === updatedRecord.id ? updatedRecord : item)));
+      if (updatedStudent && onUpdateStudents) {
+        const nextAll = loadStudents().map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
+        onUpdateStudents(nextAll);
+      }
+      showToast(
+        `Dia Extra Avulso de ${record.studentName} (${formatDateBR(record.date)}) cancelado sem alterar o plano mensal.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Erro ao cancelar Dia Extra Avulso:', err);
+      showToast('Falha ao cancelar Dia Extra Avulso.', 'error');
+    } finally {
+      setUpdatingExtraDayId(null);
     }
   };
 
@@ -1067,8 +1167,8 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
   // MATRIZ MÊS A MÊS DO DRE (JANEIRO A DEZEMBRO + TOTAL ANUAL)
   // -------------------------------------------------------------------------
   const monthlyDRE = useMemo(() => {
-    return calculateDREMonthlyMatrix(metrics, selectedAnoLetivo);
-  }, [metrics, selectedAnoLetivo]);
+    return calculateDREMonthlyMatrix(metrics, selectedAnoLetivo, activeYearExtraDays);
+  }, [metrics, selectedAnoLetivo, activeYearExtraDays]);
 
   // Apuração ativa do DRE conforme a competência selecionada ('ALL' ou 1..12)
   const activeDREData = useMemo(() => {
@@ -1286,6 +1386,11 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
                   ? `Competência: ${activeDREData.label}`
                   : 'Prevista (Soma dos Planos Ativos)'}
               </span>
+              {(metrics.receitaDiariasAvulsas || 0) > 0 && (
+                <span className="inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                  + Diárias Avulsas: {formatCurrencyBR(metrics.receitaDiariasAvulsas || 0)} ({metrics.totalDiariasAvulsas || 0})
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-2.5 pt-2 border-t border-emerald-100/70 flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] text-slate-500">
@@ -1750,6 +1855,122 @@ export const FinancialManagement: React.FC<FinancialManagementProps> = ({
               </table>
             </div>
           </div>
+
+          {/* Seção Dedicada: Diárias Avulsas / Dias Extras Avulsos Lançados */}
+          {(activeYearExtraDays.length > 0 || periodExtraDays.length > 0) && (
+            <div className="bg-white rounded-3xl border border-amber-200/90 shadow-xs overflow-hidden">
+              <div className="px-5 py-3.5 bg-gradient-to-r from-amber-50 via-orange-50/60 to-white border-b border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-amber-950 flex flex-wrap items-center gap-2">
+                      <span>Diárias Avulsas — Dias Extras ({filteredExtraDays.length})</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        Total no período: {formatCurrencyBR(filteredExtraDays.reduce((acc, d) => acc + (Number(d.valorDiaria) || 0), 0))}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-amber-800/90 font-medium">
+                      Lançamentos pontuais vinculados a alunos regulares (&lt; 5 dias/semana). Não alteram a matrícula fixa nem o plano mensal recorrente.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-amber-950/90 text-amber-50 font-bold uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-4">Estudante</th>
+                      <th className="py-2.5 px-3">Turma</th>
+                      <th className="py-2.5 px-3 text-center">Data do Dia Extra</th>
+                      <th className="py-2.5 px-3 text-center">Saída Prevista</th>
+                      <th className="py-2.5 px-3">Plano Mensal Fixo (Preservado)</th>
+                      <th className="py-2.5 px-3">Observação</th>
+                      <th className="py-2.5 px-3 text-right">Valor Diária</th>
+                      <th className="py-2.5 px-3 text-center">Situação</th>
+                      <th className="py-2.5 px-4 text-center">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-100/70">
+                    {filteredExtraDays.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-6 text-center text-slate-500 text-xs">
+                          Nenhuma diária avulsa localizada para o mês/filtros selecionados ({activeYearExtraDays.length} no exercício {selectedAnoLetivo}).
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredExtraDays.map((extra) => (
+                        <tr key={extra.id} className="hover:bg-amber-50/40 transition-colors">
+                          <td className="py-2.5 px-4 font-bold text-slate-900">
+                            {extra.studentName}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-700 whitespace-nowrap">
+                            {extra.turma}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-amber-900 whitespace-nowrap">
+                            {formatDateBR(extra.date)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-semibold text-slate-700 whitespace-nowrap">
+                            {extra.horarioSaida || '18:30'}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] text-slate-600">
+                            {extra.planoMensalAtual || 'Regular'}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] text-slate-600 max-w-[220px] truncate" title={extra.observacao || ''}>
+                            {extra.observacao || '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-extrabold text-slate-900 whitespace-nowrap">
+                            {formatCurrencyBR(extra.valorDiaria)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            {extra.statusPagamento === 'EM_DIA' ? (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                <span>Pago / Em Dia</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg text-[10.5px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                <span>Pendente</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center space-x-1.5">
+                              <button
+                                type="button"
+                                disabled={updatingExtraDayId === extra.id}
+                                onClick={() => handleToggleExtraDayPayment(extra)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer disabled:opacity-50 ${
+                                  extra.statusPagamento === 'EM_DIA'
+                                    ? 'bg-slate-100 text-slate-700 hover:bg-amber-50 hover:text-amber-800 border-slate-200'
+                                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'
+                                }`}
+                                title={extra.statusPagamento === 'EM_DIA' ? 'Reabrir como Pendente' : 'Confirmar recebimento da diária avulsa'}
+                              >
+                                {extra.statusPagamento === 'EM_DIA' ? 'Reabrir' : 'Dar Baixa'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={updatingExtraDayId === extra.id}
+                                onClick={() => handleCancelExtraDay(extra)}
+                                className="px-2 py-1 rounded-lg text-[11px] font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer disabled:opacity-50"
+                                title="Cancelar Dia Extra Avulso (remove da chamada e do faturamento sem alterar o plano mensal)"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

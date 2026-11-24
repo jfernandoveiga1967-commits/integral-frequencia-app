@@ -219,6 +219,7 @@ export interface StudentAttendanceItemProps {
   currentWeek: WeekInfo;
   currentUser?: UserProfile | null;
   isReforcoStudent: boolean;
+  isExtraDayToday?: boolean;
   departureTimeToday?: string;
   activitiesToDisplay: ActivityType[];
   recordSignature: string;
@@ -246,6 +247,7 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
     isCoordenador,
     currentWeek,
     isReforcoStudent,
+    isExtraDayToday,
     departureTimeToday,
     activitiesToDisplay,
     recordsForStudent,
@@ -333,6 +335,14 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
                     <span>⚡ Avulso</span>
                   </span>
                 )}
+                {isExtraDayToday && (
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs flex items-center space-x-1"
+                    title={`Dia Extra Avulso registrado especificamente para ${formatDateBR(selectedDate)}`}
+                  >
+                    <span>✨ Dia Extra Avulso</span>
+                  </span>
+                )}
                 {student.diasFrequencia && student.diasFrequencia.length < 5 && (
                   <span
                     className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
@@ -404,6 +414,7 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
     if (prev.selectedDate !== next.selectedDate) return false;
     if (prev.selectedActivity !== next.selectedActivity) return false;
     if (prev.isReforcoStudent !== next.isReforcoStudent) return false;
+    if (prev.isExtraDayToday !== next.isExtraDayToday) return false;
     if (prev.departureTimeToday !== next.departureTimeToday) return false;
     if (prev.isCoordenador !== next.isCoordenador) return false;
     if (prev.currentUser?.id !== next.currentUser?.id) return false;

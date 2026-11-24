@@ -1,4 +1,4 @@
-import { WeekInfo, HolidayItem, DayOfWeek, Student, ContractType } from '../types';
+import { WeekInfo, HolidayItem, DayOfWeek, Student, ContractType, ExtraDayRecord } from '../types';
 
 export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
@@ -109,6 +109,55 @@ export function isStudentScheduledForDay(
   return student.diasFrequencia.some((d) => normalizeDayOfWeek(d) === targetDay);
 }
 
+/**
+ * Retorna o registro de Dia Extra Avulso ativo para o aluno na data informada (YYYY-MM-DD),
+ * caso exista (exclusivo para alunos de contrato regular em dias avulsos fora da grade fixa).
+ */
+export function getActiveExtraDayForDate(
+  student:
+    | (Partial<Student> & {
+        tipoContrato?: ContractType;
+        diasExtrasAvulsos?: ExtraDayRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): ExtraDayRecord | null {
+  if (!student || student.tipoContrato === 'avulso') return null;
+  if (!Array.isArray(student.diasExtrasAvulsos) || student.diasExtrasAvulsos.length === 0) {
+    return null;
+  }
+  const dateStr = typeof date === 'string' ? date : toISODateString(date);
+  if (!dateStr) return null;
+  const found = student.diasExtrasAvulsos.find(
+    (entry) => entry && entry.date === dateStr && entry.status !== 'cancelado'
+  );
+  return found || null;
+}
+
+/**
+ * Indica se o aluno está frequentando a escola na data especificada por meio de um
+ * Dia Extra Avulso pontual (isto é, possui Dia Extra Avulso ativo na data e esse dia
+ * da semana não faz parte da sua grade fixa semanal).
+ */
+export function isStudentExtraDayOnDate(
+  student:
+    | (Partial<Student> & {
+        diasFrequencia?: (DayOfWeek | string)[];
+        tipoContrato?: ContractType;
+        diasExtrasAvulsos?: ExtraDayRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): boolean {
+  const extra = getActiveExtraDayForDate(student, date);
+  if (!extra) return false;
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  if (!dayOfWeek) return true;
+  return !isStudentScheduledForDay(student, dayOfWeek);
+}
+
 export function isStudentScheduledForDate(
   student:
     | (Partial<Student> & {
@@ -117,6 +166,7 @@ export function isStudentScheduledForDate(
         dataInicioContrato?: string;
         dataTerminoContrato?: string;
         diasContratados?: DayOfWeek[];
+        diasExtrasAvulsos?: ExtraDayRecord[];
       })
     | null
     | undefined,
@@ -145,7 +195,12 @@ export function isStudentScheduledForDate(
   }
 
   const dayOfWeek = getDayOfWeekFromDate(date);
-  return isStudentScheduledForDay(student, dayOfWeek);
+  if (isStudentScheduledForDay(student, dayOfWeek)) {
+    return true;
+  }
+
+  // Inclusão pontual: aluno regular com < 5 dias que contratou um Dia Extra Avulso nesta data exata
+  return Boolean(getActiveExtraDayForDate(student, dateStr));
 }
 
 /**
@@ -178,10 +233,14 @@ export function getStudentDepartureTimeForDay(
  * Gets student departure time configured for a specific date (YYYY-MM-DD or Date object)
  */
 export function getStudentDepartureTimeForDate(
-  student: Student | { horariosSaida?: Partial<Record<DayOfWeek, string>> } | null | undefined,
+  student: Student | { horariosSaida?: Partial<Record<DayOfWeek, string>>; diasExtrasAvulsos?: ExtraDayRecord[] } | null | undefined,
   date: Date | string
 ): string | undefined {
   if (!student) return undefined;
+  const extraDay = getActiveExtraDayForDate(student, date);
+  if (extraDay?.horarioSaida) {
+    return extraDay.horarioSaida;
+  }
   const dayOfWeek = getDayOfWeekFromDate(date);
   return getStudentDepartureTimeForDay(student, dayOfWeek);
 }

@@ -17,7 +17,7 @@ import { db, batchDeleteStudentsFromFirestore } from '../firebase';
 import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2026_IDS, getStudentDeduplicationKey, loadSchedules, loadSemanarioPlans, syncStudentActivitiesFromSchedule, areActivityListsEqual } from '../utils/storageUtils';
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
-import { resolveOfficialPlanFromStudentSchedule } from '../services/financialService';
+import { resolveOfficialPlanFromStudentSchedule, registerExtraDayAvulso, cancelExtraDayAvulso } from '../services/financialService';
 import {
   E1ExtractedStudent,
   readE1FileAsText,
@@ -633,6 +633,84 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
   const handleOpenTermoSaidaAvulsa = (targetStudent: Student) => {
     setStudentForSaidaAvulsa(targetStudent);
     setSaidaAvulsaModalOpen(true);
+  };
+
+  // Estado para Registro de Dia Extra Avulso (alunos regulares com < 5 dias na semana)
+  const [extraDayModalStudent, setExtraDayModalStudent] = useState<Student | null>(null);
+  const [extraDayDate, setExtraDayDate] = useState<string>(() => toISODateString(new Date()));
+  const [extraDayExitTime, setExtraDayExitTime] = useState<string>('18:30');
+  const [extraDayValor, setExtraDayValor] = useState<string>('110');
+  const [extraDayObs, setExtraDayObs] = useState<string>('');
+  const [extraDayError, setExtraDayError] = useState<string | null>(null);
+  const [isSavingExtraDay, setIsSavingExtraDay] = useState<boolean>(false);
+  const [extraDayFeedback, setExtraDayFeedback] = useState<string | null>(null);
+
+  const handleOpenExtraDayModal = (targetStudent: Student) => {
+    const targetYear = targetStudent.anoLetivo || selectedAnoLetivo || 2026;
+    const tabela = getTabelaPlanosPorAno(targetYear);
+    const defaultDailyRate = tabela['Diária Integral']?.valorBase ?? 110;
+    setExtraDayModalStudent(targetStudent);
+    setExtraDayDate(toISODateString(new Date()));
+    setExtraDayExitTime('18:30');
+    setExtraDayValor(String(defaultDailyRate));
+    setExtraDayObs('');
+    setExtraDayError(null);
+  };
+
+  const handleConfirmExtraDay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!extraDayModalStudent || isSavingExtraDay) return;
+
+    setExtraDayError(null);
+    setIsSavingExtraDay(true);
+    try {
+      const { record, updatedStudent } = await registerExtraDayAvulso({
+        student: extraDayModalStudent,
+        date: extraDayDate,
+        horarioSaida: extraDayExitTime,
+        valorDiaria: Number(String(extraDayValor).replace(',', '.')),
+        observacao: extraDayObs,
+        createdBy: currentUser?.name || 'Coordenação',
+      });
+
+      setStudents((prev) =>
+        prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+      );
+      await Promise.resolve(onUpdateStudent(updatedStudent));
+
+      const formattedDay = formatDateBR(record.date);
+      setExtraDayModalStudent(null);
+      setExtraDayFeedback(
+        `Dia Extra Avulso confirmado para ${updatedStudent.name} em ${formattedDay} (Saída ${formatHorarioSaida(record.horarioSaida)}) • Diária de ${formatCurrencyBR(record.valorDiaria)} lançada no Financeiro.`
+      );
+      setTimeout(() => setExtraDayFeedback(null), 6000);
+    } catch (err: any) {
+      setExtraDayError(err?.message || 'Não foi possível registrar o Dia Extra Avulso.');
+    } finally {
+      setIsSavingExtraDay(false);
+    }
+  };
+
+  const handleQuickCancelExtraDay = async (targetStudent: Student, extraRecord: NonNullable<Student['diasExtrasAvulsos']>[number]) => {
+    try {
+      const { updatedStudent } = await cancelExtraDayAvulso(
+        extraRecord,
+        currentUser?.name || 'Coordenação'
+      );
+      if (updatedStudent) {
+        setStudents((prev) =>
+          prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+        );
+        await Promise.resolve(onUpdateStudent(updatedStudent));
+      }
+      setExtraDayFeedback(
+        `Dia Extra Avulso de ${targetStudent.name} (${formatDateBR(extraRecord.date)}) cancelado sem alterar o plano mensal.`
+      );
+      setTimeout(() => setExtraDayFeedback(null), 5000);
+    } catch (err: any) {
+      setExtraDayFeedback(err?.message || 'Não foi possível cancelar o Dia Extra Avulso.');
+      setTimeout(() => setExtraDayFeedback(null), 5000);
+    }
   };
 
   // Estado do Módulo de Relações Nominais Cadastrais
@@ -4917,6 +4995,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       </div>
 
       {/* Roster Table */}
+      {extraDayFeedback && (
+        <div className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>{extraDayFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExtraDayFeedback(null)}
+            className="text-amber-700 hover:text-amber-950 p-1 rounded-lg cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -5064,6 +5158,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                         <span>{formatDiasFrequencia(student.diasFrequencia)}</span>
                       </span>
 
+                      {/* Badges de Dias Extras Avulsos ativos */}
+                      {(student.diasExtrasAvulsos || [])
+                        .filter((ex) => ex && ex.status !== 'cancelado')
+                        .map((ex) => (
+                          <span
+                            key={ex.id}
+                            className="text-[10.5px] font-bold px-2 py-0.5 rounded-md border bg-orange-50 text-orange-900 border-orange-300 flex items-center space-x-1 shadow-2xs"
+                            title={`Dia Extra Avulso • Saída ${ex.horarioSaida} • ${formatCurrencyBR(ex.valorDiaria)}${ex.observacao ? ` • ${ex.observacao}` : ''}`}
+                          >
+                            <Sparkles className="w-3 h-3 text-orange-600 shrink-0" />
+                            <span>
+                              Dia Extra: {formatDateBR(ex.date)} ({formatHorarioSaida(ex.horarioSaida)})
+                            </span>
+                            {userCanManageStudents && (
+                              <button
+                                type="button"
+                                onClick={() => handleQuickCancelExtraDay(student, ex)}
+                                className="ml-1 text-orange-700 hover:text-rose-700 cursor-pointer"
+                                title="Cancelar este Dia Extra Avulso"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </span>
+                        ))}
+
                       {/* Departure Times Badges */}
                       {student.horariosSaida && Object.keys(student.horariosSaida).length > 0 && (() => {
                         const entries = (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[])
@@ -5209,6 +5329,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       <Car className="w-3.5 h-3.5 text-amber-600" />
                       <span>🚗 Termo de Saída Avulsa</span>
                     </button>
+
+                    {stStatus === 'ativo' &&
+                      (student.tipoContrato || 'regular') !== 'avulso' &&
+                      Array.isArray(student.diasFrequencia) &&
+                      student.diasFrequencia.length > 0 &&
+                      student.diasFrequencia.length < 5 && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenExtraDayModal(student)}
+                          className="p-2 rounded-lg text-orange-950 bg-orange-50 hover:bg-orange-100 border border-orange-300 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
+                          title="Registrar Dia Extra Avulso pontual sem alterar o plano mensal ou grade fixa"
+                        >
+                          <CalendarDays className="w-3.5 h-3.5 text-orange-600" />
+                          <span>+ Dia Extra Avulso</span>
+                        </button>
+                      )}
 
                     {userCanManageStudents && (
                       <>
@@ -5904,6 +6040,177 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: Registrar Dia Extra Avulso */}
+      {extraDayModalStudent && (() => {
+        const studentYear = extraDayModalStudent.anoLetivo || selectedAnoLetivo || 2026;
+        const resolvedCurrentPlan =
+          extraDayModalStudent.planoContratual ||
+          resolveOfficialPlanFromStudentSchedule(extraDayModalStudent, studentYear).planoContratual;
+        const resolvedMonthlyValue =
+          extraDayModalStudent.valorMensalidadeFinal ??
+          resolveOfficialPlanFromStudentSchedule(extraDayModalStudent, studentYear).valorBase;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-amber-200 w-full max-w-md max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center space-x-2.5 text-amber-800">
+                  <div className="p-2.5 bg-amber-100 rounded-xl border border-amber-200">
+                    <CalendarDays className="w-5 h-5 text-amber-700" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-base">
+                      Registrar Dia Extra Avulso
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Lançamento pontual sem alterar a grade fixa nem o plano mensal
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setExtraDayModalStudent(null)}
+                  disabled={isSavingExtraDay}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Identificação do Aluno, Turma e Plano Mensal Atual (Somente Leitura) */}
+              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-extrabold text-slate-900 text-sm truncate">
+                    {extraDayModalStudent.name}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-bold text-indigo-700 text-[11px] shrink-0">
+                    {extraDayModalStudent.turma}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    Grade fixa: <strong className="text-slate-800">{formatDiasFrequencia(extraDayModalStudent.diasFrequencia)}</strong>
+                  </span>
+                </div>
+                <div className="pt-1 border-t border-amber-200/70 text-[11px] text-amber-950 flex items-center justify-between gap-2">
+                  <span>
+                    Plano mensal atual: <strong>{resolvedCurrentPlan}</strong>
+                  </span>
+                  <span className="font-extrabold text-emerald-800 shrink-0">
+                    {formatCurrencyBR(resolvedMonthlyValue)}/mês
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleConfirmExtraDay} className="space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Data do Dia Extra *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={extraDayDate}
+                      onChange={(e) => {
+                        setExtraDayDate(e.target.value);
+                        setExtraDayError(null);
+                      }}
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Horário Previsto de Saída *
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={extraDayExitTime}
+                      onChange={(e) => setExtraDayExitTime(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Valor da Diária Avulsa (R$) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    required
+                    value={extraDayValor}
+                    onChange={(e) => setExtraDayValor(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-extrabold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                  />
+                  <p className="text-[10.5px] text-slate-500 mt-1">
+                    Valor padrão da Diária Integral ({studentYear}):{' '}
+                    <strong>{formatCurrencyBR(getTabelaPlanosPorAno(studentYear)['Diária Integral']?.valorBase ?? 110)}</strong>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Observação opcional
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={extraDayObs}
+                    onChange={(e) => setExtraDayObs(e.target.value)}
+                    placeholder="Ex: Solicitado pelos pais via WhatsApp"
+                    className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white resize-none"
+                  />
+                </div>
+
+                {extraDayError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-3 py-2 text-xs font-semibold flex items-start space-x-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{extraDayError}</span>
+                  </div>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] text-slate-600">
+                  Ao confirmar, o aluno entra na <strong>Chamada de Frequência</strong> e em{' '}
+                  <strong>Atividades do Momento</strong> apenas nesta data, e{' '}
+                  <strong>1 Diária Avulsa</strong> é lançada no Financeiro sem alterar seu plano mensal.
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setExtraDayModalStudent(null)}
+                    disabled={isSavingExtraDay}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingExtraDay}
+                    className="px-4 py-2 text-xs font-extrabold text-white bg-amber-600 hover:bg-amber-700 rounded-xl cursor-pointer shadow-md shadow-amber-600/20 flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {isSavingExtraDay ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Registrando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Confirmar Dia Extra Avulso</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

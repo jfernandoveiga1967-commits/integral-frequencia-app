@@ -5,7 +5,7 @@ import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, isStudentExtraDayOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
 import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -1893,6 +1893,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             ) : (
               displayedStudents.map((student) => {
                 const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
+                const isExtraDayToday = isStudentExtraDayOnDate(student, selectedDate);
 
                 // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
                 const studentAllActs = [
@@ -1942,6 +1943,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                     currentWeek={currentWeek}
                     currentUser={currentUser}
                     isReforcoStudent={isReforcoStudent}
+                    isExtraDayToday={isExtraDayToday}
                     departureTimeToday={departureTimeToday}
                     activitiesToDisplay={activitiesToDisplay}
                     recordSignature={recordSignature}
