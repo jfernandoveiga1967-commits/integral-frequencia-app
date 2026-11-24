@@ -206,6 +206,7 @@ export interface Student {
   valorOficinas?: number; // Alias de compatibilidade
   valorExtras?: number; // Alias de compatibilidade
   diasExtrasAvulsos?: ExtraDayRecord[]; // Dias Extras Avulsos pontuais (não alteram o plano mensal nem a grade fixa)
+  trocasDias?: DaySwapRecord[]; // Trocas / permutas pontuais de dia (sem cobrança adicional e sem alterar a grade fixa)
   updatedAt?: string; // Data/hora da última atualização
 }
 
@@ -227,6 +228,25 @@ export interface ExtraDayRecord {
   formaPagamento?: string;
   dataPagamento?: string;
   status: ExtraDayStatus;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type DaySwapStatus = 'ativo' | 'cancelado';
+
+export interface DaySwapRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  turma: TurmaType | string;
+  anoLetivo: number;
+  dataOrigem: string; // 'YYYY-MM-DD' (dia contratado que o aluno não virá)
+  dataDestino: string; // 'YYYY-MM-DD' (dia fora da grade em que o aluno virá no lugar)
+  horarioSaida: string; // ex: '18:30'
+  observacao?: string;
+  status: DaySwapStatus;
   createdAt: string;
   createdBy?: string;
   updatedAt?: string;

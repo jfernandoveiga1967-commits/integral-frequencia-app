@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, ContractType, UserProfile, ExtraDayRecord } from '../types';
+import { Student, AttendanceRecord, ActivityType, TurmaType, AttendanceStatus, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, SemanarioPlan, DayOfWeek, StudentStatus, ContractType, UserProfile, ExtraDayRecord, DaySwapRecord } from '../types';
 import { INITIAL_STUDENTS, TURMAS_LIST, ACTIVITIES_LIST, INITIAL_HOLIDAYS, REMOVED_CATEGORY_NAMES } from '../data/initialData';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, toISODateString } from './dateUtils';
 import { normalizeAttendanceStatus } from './frequenciaUtils';
@@ -259,6 +259,35 @@ function sanitizeExtraDaysArray(rawList: any): ExtraDayRecord[] | undefined {
   return Array.from(map.values());
 }
 
+function sanitizeDaySwapsArray(rawList: any): DaySwapRecord[] | undefined {
+  if (!Array.isArray(rawList)) return undefined;
+  const map = new Map<string, DaySwapRecord>();
+  rawList.forEach((item: any) => {
+    if (!item || typeof item !== 'object') return;
+    const id = String(item.id || '').trim();
+    const dataOrigem = String(item.dataOrigem || '').trim();
+    const dataDestino = String(item.dataDestino || '').trim();
+    if (!id || !dataOrigem || !dataDestino) return;
+    map.set(id, {
+      id,
+      studentId: String(item.studentId || '').trim(),
+      studentName: String(item.studentName || '').trim(),
+      turma: String(item.turma || '').trim(),
+      anoLetivo: Number(item.anoLetivo) || 2026,
+      dataOrigem,
+      dataDestino,
+      horarioSaida: String(item.horarioSaida || '18:30').trim(),
+      observacao: item.observacao != null ? String(item.observacao) : undefined,
+      status: item.status === 'cancelado' ? 'cancelado' : 'ativo',
+      createdAt: String(item.createdAt || new Date().toISOString()),
+      createdBy: item.createdBy != null ? String(item.createdBy) : undefined,
+      updatedAt: item.updatedAt != null ? String(item.updatedAt) : undefined,
+      updatedBy: item.updatedBy != null ? String(item.updatedBy) : undefined,
+    });
+  });
+  return Array.from(map.values());
+}
+
 /**
  * Normaliza e enriquece os dados de um aluno, garantindo a integridade e
  * preservação irrestrita das propriedades customizadas (diasFrequencia, horariosSaida, statusMatricula, etc.),
@@ -471,6 +500,9 @@ export function normalizeStudent(
     valorExtras: s.valorExtras != null ? s.valorExtras : existingStudent?.valorExtras,
     diasExtrasAvulsos: sanitizeExtraDaysArray(
       Array.isArray(s.diasExtrasAvulsos) ? s.diasExtrasAvulsos : existingStudent?.diasExtrasAvulsos
+    ),
+    trocasDias: sanitizeDaySwapsArray(
+      Array.isArray(s.trocasDias) ? s.trocasDias : existingStudent?.trocasDias
     ),
     notes,
     ...(updatedAt ? { updatedAt } : {}),
@@ -695,6 +727,10 @@ export function mergeStudentData(
       incomingStudent.diasExtrasAvulsos !== undefined
         ? sanitizeExtraDaysArray(incomingStudent.diasExtrasAvulsos)
         : sanitizeExtraDaysArray(existingStudent.diasExtrasAvulsos),
+    trocasDias:
+      incomingStudent.trocasDias !== undefined
+        ? sanitizeDaySwapsArray(incomingStudent.trocasDias)
+        : sanitizeDaySwapsArray(existingStudent.trocasDias),
     notes: incomingStudent.notes != null ? incomingStudent.notes : existingStudent.notes,
     updatedAt:
       parseUpdatedAtMs(incomingStudent.updatedAt) >= parseUpdatedAtMs(existingStudent.updatedAt)

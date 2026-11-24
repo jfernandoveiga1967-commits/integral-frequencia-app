@@ -46,6 +46,10 @@
           "type": "array",
           "description": "Punctual single-day extra attendances booked without altering fixed weekly schedule or monthly plan"
         },
+        "trocasDias": {
+          "type": "array",
+          "description": "Punctual day swaps between a contracted weekday and another weekday without extra charges"
+        },
         "notes": { "type": "string", "maxLength": 1000 }
       },
       "required": ["id", "name", "turma", "activities"]
@@ -411,6 +415,28 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "studentId", "studentName", "turma", "anoLetivo", "monthKey", "date", "horarioSaida", "valorDiaria", "statusPagamento", "status", "createdAt"]
+    },
+    "DaySwapRecord": {
+      "title": "DaySwapRecord",
+      "description": "Punctual day swap between a student's contracted weekday and a substitute weekday without altering monthly billing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "turma": { "type": "string", "maxLength": 64 },
+        "anoLetivo": { "type": "number" },
+        "dataOrigem": { "type": "string", "maxLength": 10 },
+        "dataDestino": { "type": "string", "maxLength": 10 },
+        "horarioSaida": { "type": "string", "maxLength": 10 },
+        "observacao": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["ativo", "cancelado"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "studentId", "studentName", "turma", "anoLetivo", "dataOrigem", "dataDestino", "horarioSaida", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -501,6 +527,10 @@
     "/extraDays/{extraDayId}": {
       "schema": "ExtraDayRecord",
       "description": "Collection of punctual Dia Extra Avulso bookings and single-day financial charges"
+    },
+    "/daySwaps/{swapId}": {
+      "schema": "DaySwapRecord",
+      "description": "Collection of punctual day swaps (troca/permuta de dia) without financial charge"
     }
   }
 }

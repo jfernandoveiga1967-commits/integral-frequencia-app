@@ -109,6 +109,10 @@ import {
   isStudentActiveOnDate,
   isStudentExtraDayOnDate,
   getActiveExtraDayForDate,
+  isStudentSwappedInOnDate,
+  getActiveDaySwapForDestination,
+  isStudentSwappedOutOnDate,
+  getActiveDaySwapForOrigin,
   formatHorarioSaida,
 } from '../utils/dateUtils';
 import { canMarkAttendance, isCoordenador } from '../utils/authUtils';
@@ -1695,6 +1699,75 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                     );
                   })()}
 
+                  {/* Aviso discreto de Troca / Permuta de Dia na turma nesta data */}
+                  {(() => {
+                    const swappedInToday = (Array.isArray(yearStudents) ? yearStudents : []).filter(
+                      (s) =>
+                        s &&
+                        (s.turma || '').trim() === turmaName.trim() &&
+                        isStudentActiveOnDate(s, selectedDate) &&
+                        isStudentSwappedInOnDate(s, selectedDate)
+                    );
+                    const swappedOutToday = (Array.isArray(yearStudents) ? yearStudents : []).filter(
+                      (s) =>
+                        s &&
+                        (s.turma || '').trim() === turmaName.trim() &&
+                        isStudentActiveOnDate(s, selectedDate) &&
+                        isStudentSwappedOutOnDate(s, selectedDate)
+                    );
+                    if (swappedInToday.length === 0 && swappedOutToday.length === 0) return null;
+                    return (
+                      <div className="bg-sky-50 border border-sky-200 rounded-xl px-2.5 py-1.5 text-[10.5px] text-sky-950 space-y-1 shadow-2xs">
+                        {swappedInToday.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-black text-sky-800 uppercase tracking-wide">
+                              🔄 Troca de Dia hoje:
+                            </span>
+                            {swappedInToday.map((st) => {
+                              const swapInfo = getActiveDaySwapForDestination(st, selectedDate);
+                              return (
+                                <span
+                                  key={st.id}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-sky-300 font-bold text-sky-950 text-[10px]"
+                                >
+                                  <span>{st.name}</span>
+                                  {swapInfo && (
+                                    <span className="text-[9.5px] font-semibold text-sky-700">
+                                      (ref. {formatDateBR(swapInfo.dataOrigem).slice(0, 5)} • Saída {formatHorarioSaida(swapInfo.horarioSaida)})
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {swappedOutToday.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-bold text-slate-600">
+                              Permutados (ausentes hoje):
+                            </span>
+                            {swappedOutToday.map((st) => {
+                              const swapInfo = getActiveDaySwapForOrigin(st, selectedDate);
+                              return (
+                                <span
+                                  key={st.id}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/80 border border-sky-200 font-semibold text-slate-700 text-[10px]"
+                                >
+                                  <span>{st.name}</span>
+                                  {swapInfo && (
+                                    <span className="text-sky-700 font-bold">
+                                      (Permutado para {formatDateBR(swapInfo.dataDestino).slice(0, 5)})
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {isClassActive && activeBlock ? (
                     <div className="space-y-2.5">
                       {/* Activity Name & Icon */}
@@ -2549,6 +2622,18 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                                 <span>✨ Dia Extra Avulso</span>
                               </span>
                             )}
+                            {isStudentSwappedInOnDate(student, selectedDate) && (() => {
+                              const swapInfo = getActiveDaySwapForDestination(student, selectedDate);
+                              if (!swapInfo) return null;
+                              return (
+                                <span
+                                  className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-900 border border-sky-300 shadow-2xs"
+                                  title={`Troca de Dia (ref. ${formatDateBR(swapInfo.dataOrigem)})`}
+                                >
+                                  <span>🔄 Troca de Dia (ref. {formatDateBR(swapInfo.dataOrigem).slice(0, 5)})</span>
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="text-[10px] text-slate-500 font-semibold flex items-center space-x-2">
                             <span>Turma: {student.turma}</span>

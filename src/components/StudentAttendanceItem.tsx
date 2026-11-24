@@ -220,6 +220,7 @@ export interface StudentAttendanceItemProps {
   currentUser?: UserProfile | null;
   isReforcoStudent: boolean;
   isExtraDayToday?: boolean;
+  swapOriginDateToday?: string;
   departureTimeToday?: string;
   activitiesToDisplay: ActivityType[];
   recordSignature: string;
@@ -248,6 +249,7 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
     currentWeek,
     isReforcoStudent,
     isExtraDayToday,
+    swapOriginDateToday,
     departureTimeToday,
     activitiesToDisplay,
     recordsForStudent,
@@ -343,6 +345,14 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
                     <span>✨ Dia Extra Avulso</span>
                   </span>
                 )}
+                {swapOriginDateToday && (
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-900 border border-sky-300 shadow-2xs flex items-center space-x-1"
+                    title={`Troca / Permuta Pontual de Dia (em substituição ao dia ${formatDateBR(swapOriginDateToday)})`}
+                  >
+                    <span>🔄 Troca de Dia (ref. {formatDateBR(swapOriginDateToday).slice(0, 5)})</span>
+                  </span>
+                )}
                 {student.diasFrequencia && student.diasFrequencia.length < 5 && (
                   <span
                     className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
@@ -415,6 +425,7 @@ export const StudentAttendanceItem: React.FC<StudentAttendanceItemProps> = React
     if (prev.selectedActivity !== next.selectedActivity) return false;
     if (prev.isReforcoStudent !== next.isReforcoStudent) return false;
     if (prev.isExtraDayToday !== next.isExtraDayToday) return false;
+    if (prev.swapOriginDateToday !== next.swapOriginDateToday) return false;
     if (prev.departureTimeToday !== next.departureTimeToday) return false;
     if (prev.isCoordenador !== next.isCoordenador) return false;
     if (prev.currentUser?.id !== next.currentUser?.id) return false;

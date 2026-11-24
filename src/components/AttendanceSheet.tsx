@@ -5,7 +5,7 @@ import { ActivityBadge } from './ActivityBadge';
 import { StatusBadge } from './StatusBadge';
 import { EquipmentModal } from './EquipmentModal';
 import { RoutineMonitorBanner } from './RoutineMonitorBanner';
-import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, isStudentExtraDayOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
+import { getWeekDays, formatDateBR, isWeekend, isHolidayOrRecess, isStudentScheduledForDate, isStudentActiveOnDate, isStudentExtraDayOnDate, getActiveDaySwapForDestination, getActiveDaySwapForOrigin, isStudentSwappedInOnDate, isStudentSwappedOutOnDate, formatDiasFrequencia, getStudentDepartureTimeForDate, formatHorarioSaida, toISODateString } from '../utils/dateUtils';
 import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -563,6 +563,35 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
   }, [students, selectedDate, selectedActivity, selectedTurma, searchTerm, allowedActivityIds, allowedTurmas, isCoordenador]);
+
+  // Alunos cuja grade regular incluía esta data, mas que tiveram o dia permutado para outro dia (`dataOrigem === selectedDate`)
+  const swappedOutStudentsToday = useMemo(() => {
+    const targetAcademicYear = parseInt(selectedDate.split('-')[0], 10) || 2026;
+    return (students || [])
+      .filter((student) => {
+        if (!student) return false;
+        const studentYear = student.anoLetivo !== undefined ? Number(student.anoLetivo) : 2026;
+        if (studentYear !== targetAcademicYear) return false;
+        if (!isCoordenador && !allowedTurmas.includes(student.turma)) return false;
+        if (!isStudentActiveOnDate(student, selectedDate)) return false;
+        if (selectedTurma !== 'TODAS' && student.turma !== selectedTurma) return false;
+        if (searchTerm.trim() !== '') {
+          const term = searchTerm.toLowerCase();
+          if (
+            !(student.name || '').toLowerCase().includes(term) &&
+            !(student.turma || '').toLowerCase().includes(term)
+          ) {
+            return false;
+          }
+        }
+        return isStudentSwappedOutOnDate(student, selectedDate);
+      })
+      .map((student) => ({
+        student,
+        swap: getActiveDaySwapForOrigin(student, selectedDate)!,
+      }))
+      .filter((item) => Boolean(item.swap));
+  }, [students, selectedDate, selectedTurma, searchTerm, allowedTurmas, isCoordenador]);
 
   // Mapa de busca rápida integrando o estado global e o snapshot do Firestore da data selecionada
   // com ISOLAMENTO ESTRITO POR MODALIDADE (extracurriculares nunca herdam a presença da Rotina)
@@ -1861,6 +1890,26 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             </div>
           </div>
 
+          {swappedOutStudentsToday.length > 0 && (
+            <div className="bg-sky-50 border-b border-sky-200 px-5 py-2.5 flex flex-wrap items-center gap-2 text-xs text-sky-950">
+              <span className="font-extrabold text-sky-900">
+                🔄 Permuta de Dia ({swappedOutStudentsToday.length}) — não contabilizados como falta nesta data:
+              </span>
+              {swappedOutStudentsToday.map(({ student, swap }) => (
+                <span
+                  key={`${student.id}_${swap.id}`}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white border border-sky-300 text-[11px] font-bold text-sky-900 shadow-2xs"
+                  title={swap.observacao || `Dia ${formatDateBR(swap.dataOrigem)} permutado para ${formatDateBR(swap.dataDestino)}`}
+                >
+                  <span>{student.name}</span>
+                  <span className="px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 text-[10px] font-extrabold">
+                    Permutado para {formatDateBR(swap.dataDestino).slice(0, 5)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="divide-y divide-slate-100">
             {displayedStudents.length === 0 && filterStatus !== 'TODOS' ? (
               <div className="p-12 text-center text-slate-500 space-y-3">
@@ -1894,6 +1943,10 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
               displayedStudents.map((student) => {
                 const isReforcoStudent = isStudentInReforcoVigency(student, selectedDate);
                 const isExtraDayToday = isStudentExtraDayOnDate(student, selectedDate);
+                const activeSwapDest = isStudentSwappedInOnDate(student, selectedDate)
+                  ? getActiveDaySwapForDestination(student, selectedDate)
+                  : null;
+                const swapOriginDateToday = activeSwapDest?.dataOrigem;
 
                 // Determine activities to display for this student (ONLY allowed activities for Monitor/Professor)
                 const studentAllActs = [
@@ -1944,6 +1997,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
                     currentUser={currentUser}
                     isReforcoStudent={isReforcoStudent}
                     isExtraDayToday={isExtraDayToday}
+                    swapOriginDateToday={swapOriginDateToday}
                     departureTimeToday={departureTimeToday}
                     activitiesToDisplay={activitiesToDisplay}
                     recordSignature={recordSignature}

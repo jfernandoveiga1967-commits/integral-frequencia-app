@@ -1,4 +1,4 @@
-import { WeekInfo, HolidayItem, DayOfWeek, Student, ContractType, ExtraDayRecord } from '../types';
+import { WeekInfo, HolidayItem, DayOfWeek, Student, ContractType, ExtraDayRecord, DaySwapRecord } from '../types';
 
 export const ALL_DAYS_OF_WEEK: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta'];
 
@@ -158,6 +158,98 @@ export function isStudentExtraDayOnDate(
   return !isStudentScheduledForDay(student, dayOfWeek);
 }
 
+/**
+ * Retorna a Troca Pontual de Dia ativa quando a data informada é o novo dia (`dataDestino`).
+ */
+export function getActiveDaySwapForDestination(
+  student:
+    | (Partial<Student> & {
+        tipoContrato?: ContractType;
+        trocasDias?: DaySwapRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): DaySwapRecord | null {
+  if (!student || student.tipoContrato === 'avulso') return null;
+  if (!Array.isArray(student.trocasDias) || student.trocasDias.length === 0) {
+    return null;
+  }
+  const dateStr = typeof date === 'string' ? date : toISODateString(date);
+  if (!dateStr) return null;
+  const found = student.trocasDias.find(
+    (entry) => entry && entry.dataDestino === dateStr && entry.status !== 'cancelado'
+  );
+  return found || null;
+}
+
+/**
+ * Retorna a Troca Pontual de Dia ativa quando a data informada é o dia substituído (`dataOrigem`).
+ */
+export function getActiveDaySwapForOrigin(
+  student:
+    | (Partial<Student> & {
+        tipoContrato?: ContractType;
+        trocasDias?: DaySwapRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): DaySwapRecord | null {
+  if (!student || student.tipoContrato === 'avulso') return null;
+  if (!Array.isArray(student.trocasDias) || student.trocasDias.length === 0) {
+    return null;
+  }
+  const dateStr = typeof date === 'string' ? date : toISODateString(date);
+  if (!dateStr) return null;
+  const found = student.trocasDias.find(
+    (entry) => entry && entry.dataOrigem === dateStr && entry.status !== 'cancelado'
+  );
+  return found || null;
+}
+
+/**
+ * Indica se o aluno está frequentando na data especificada por meio de uma Troca de Dia (`dataDestino`).
+ */
+export function isStudentSwappedInOnDate(
+  student:
+    | (Partial<Student> & {
+        diasFrequencia?: (DayOfWeek | string)[];
+        tipoContrato?: ContractType;
+        trocasDias?: DaySwapRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): boolean {
+  const swap = getActiveDaySwapForDestination(student, date);
+  if (!swap) return false;
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  if (!dayOfWeek) return true;
+  return !isStudentScheduledForDay(student, dayOfWeek);
+}
+
+/**
+ * Indica se o dia regular do aluno na data especificada foi permutado para outro dia (`dataOrigem`).
+ */
+export function isStudentSwappedOutOnDate(
+  student:
+    | (Partial<Student> & {
+        diasFrequencia?: (DayOfWeek | string)[];
+        tipoContrato?: ContractType;
+        trocasDias?: DaySwapRecord[];
+      })
+    | null
+    | undefined,
+  date: Date | string
+): boolean {
+  const swap = getActiveDaySwapForOrigin(student, date);
+  if (!swap) return false;
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  if (!dayOfWeek) return false;
+  return isStudentScheduledForDay(student, dayOfWeek);
+}
+
 export function isStudentScheduledForDate(
   student:
     | (Partial<Student> & {
@@ -167,6 +259,7 @@ export function isStudentScheduledForDate(
         dataTerminoContrato?: string;
         diasContratados?: DayOfWeek[];
         diasExtrasAvulsos?: ExtraDayRecord[];
+        trocasDias?: DaySwapRecord[];
       })
     | null
     | undefined,
@@ -196,11 +289,16 @@ export function isStudentScheduledForDate(
 
   const dayOfWeek = getDayOfWeekFromDate(date);
   if (isStudentScheduledForDay(student, dayOfWeek)) {
+    // Se este dia contratado (`dataOrigem`) foi permutado para outra data,
+    // não deve contar como esperado/falta na chamada regular deste dia.
+    if (getActiveDaySwapForOrigin(student, dateStr)) {
+      return false;
+    }
     return true;
   }
 
-  // Inclusão pontual: aluno regular com < 5 dias que contratou um Dia Extra Avulso nesta data exata
-  return Boolean(getActiveExtraDayForDate(student, dateStr));
+  // Inclusão pontual: aluno regular com < 5 dias que contratou um Dia Extra Avulso ou Troca de Dia nesta data
+  return Boolean(getActiveExtraDayForDate(student, dateStr) || getActiveDaySwapForDestination(student, dateStr));
 }
 
 /**
@@ -233,10 +331,22 @@ export function getStudentDepartureTimeForDay(
  * Gets student departure time configured for a specific date (YYYY-MM-DD or Date object)
  */
 export function getStudentDepartureTimeForDate(
-  student: Student | { horariosSaida?: Partial<Record<DayOfWeek, string>>; diasExtrasAvulsos?: ExtraDayRecord[] } | null | undefined,
+  student:
+    | Student
+    | {
+        horariosSaida?: Partial<Record<DayOfWeek, string>>;
+        diasExtrasAvulsos?: ExtraDayRecord[];
+        trocasDias?: DaySwapRecord[];
+      }
+    | null
+    | undefined,
   date: Date | string
 ): string | undefined {
   if (!student) return undefined;
+  const swapDest = getActiveDaySwapForDestination(student, date);
+  if (swapDest?.horarioSaida) {
+    return swapDest.horarioSaida;
+  }
   const extraDay = getActiveExtraDayForDate(student, date);
   if (extraDay?.horarioSaida) {
     return extraDay.horarioSaida;

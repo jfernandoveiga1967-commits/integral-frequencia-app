@@ -129,6 +129,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /daySwaps/{swapId} {
+      allow read, write: if true;
+    }
+
     match /sofia_audit_logs/{logId} {
       allow read, write: if true;
     }

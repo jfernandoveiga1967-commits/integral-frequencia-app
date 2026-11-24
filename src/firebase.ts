@@ -375,6 +375,9 @@ function studentSyncStateDiffers(docA: any, docB: any): boolean {
   const exA = JSON.stringify(Array.isArray(docA.diasExtrasAvulsos) ? docA.diasExtrasAvulsos : []);
   const exB = JSON.stringify(Array.isArray(docB.diasExtrasAvulsos) ? docB.diasExtrasAvulsos : []);
   if (exA !== exB) return true;
+  const swA = JSON.stringify(Array.isArray(docA.trocasDias) ? docA.trocasDias : []);
+  const swB = JSON.stringify(Array.isArray(docB.trocasDias) ? docB.trocasDias : []);
+  if (swA !== swB) return true;
   return false;
 }
 
@@ -438,6 +441,7 @@ function scheduleDuplicateReconciliationInFirestore(
     inactivationDate: winnerStatus === 'ativo' ? '' : (winner.inactivationDate || ''),
     inactivationReason: winnerStatus === 'ativo' ? '' : (winner.inactivationReason || ''),
     diasExtrasAvulsos: Array.isArray(winner.diasExtrasAvulsos) ? winner.diasExtrasAvulsos : [],
+    trocasDias: Array.isArray(winner.trocasDias) ? winner.trocasDias : [],
     updatedAt: winnerUpdatedAt,
   };
 
@@ -1612,6 +1616,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       valorOficinas: normalized.valorOficinas !== undefined ? normalized.valorOficinas : null,
       valorExtras: normalized.valorExtras !== undefined ? normalized.valorExtras : null,
       diasExtrasAvulsos: Array.isArray(normalized.diasExtrasAvulsos) ? normalized.diasExtrasAvulsos : [],
+      trocasDias: Array.isArray(normalized.trocasDias) ? normalized.trocasDias : [],
       notes: normalized.notes || '',
       updatedAt: nowIso,
     };

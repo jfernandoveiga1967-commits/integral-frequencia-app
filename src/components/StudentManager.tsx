@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA, PLANOS_CONTRATUAIS_2026, PLANOS_CONTRATUAIS_2027, getTabelaPlanosPorAno, ScheduleBlock, SemanarioPlan } from '../types';
+import { Student, ActivityType, TurmaType, AttendanceRecord, WeekInfo, UserProfile, ActivityItem, DayOfWeek, StudentStatus, ContractType, PlanoContratualType, PLANOS_CONTRATUAIS_TABELA, PLANOS_CONTRATUAIS_2026, PLANOS_CONTRATUAIS_2027, getTabelaPlanosPorAno, ScheduleBlock, SemanarioPlan, DaySwapRecord } from '../types';
 import { TURMAS_LIST, ACTIVITIES_LIST, OFFICIAL_ROLL_CALL_MODALITIES } from '../data/initialData';
 import { ActivityBadge } from './ActivityBadge';
 import { generateStudentPDFReport, generateTurmaPDFReport, generateFichaMatriculaPDF, generateTermoSaidaAvulsaPDF } from '../utils/pdfGenerator';
@@ -8,9 +8,9 @@ import { RosterReportModal } from './RosterReportModal';
 import { SaidaAvulsaModal } from './SaidaAvulsaModal';
 import { canManageStudents, canManageTurmas } from '../utils/authUtils';
 import { sortTurmasPedagogical, getNextAcademicTurma } from '../utils/turmaUtils';
-import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay } from '../utils/dateUtils';
+import { formatDiasFrequencia, ALL_DAYS_OF_WEEK, toISODateString, formatDateBR, formatHorarioSaida, isStudentScheduledForDay, getDayOfWeekFromDate } from '../utils/dateUtils';
 import { formatCurrencyBR } from '../utils/pontoUtils';
-import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser, TrendingUp, Filter, GraduationCap, Zap } from 'lucide-react';
+import { Users, UserPlus, FileText, Trash2, Edit3, Check, X, Search, Sparkles, Download, Layers, Plus, Info, ArrowRightLeft, CheckCircle2, ShieldAlert, Loader2, Calendar, CalendarDays, CheckSquare, UserX, UserCheck, Power, AlertCircle, RotateCcw, Clock, BookMarked, Printer, Upload, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, School, FileCheck, Car, BadgeDollarSign, Eraser, TrendingUp, Filter, GraduationCap, Zap, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, batchDeleteStudentsFromFirestore } from '../firebase';
@@ -18,6 +18,7 @@ import { saveStudents, loadStudents, normalizeStudent, PROTECTED_MINI_MATERNAL_2
 import { broadcastSyncEvent } from '../services/syncService';
 import { OFFICIAL_2027_BATCH_COUNT, audit2027Students, purgeSurplus2027Students, isStudentActive, reclassifyKlausTo4thYear } from '../services/studentService';
 import { resolveOfficialPlanFromStudentSchedule, registerExtraDayAvulso, cancelExtraDayAvulso } from '../services/financialService';
+import { registerDaySwap, cancelDaySwap } from '../services/daySwapService';
 import {
   E1ExtractedStudent,
   readE1FileAsText,
@@ -710,6 +711,113 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
     } catch (err: any) {
       setExtraDayFeedback(err?.message || 'Não foi possível cancelar o Dia Extra Avulso.');
       setTimeout(() => setExtraDayFeedback(null), 5000);
+    }
+  };
+
+  // Estado para Registro de Troca / Permuta Pontual de Dia (alunos regulares com < 5 dias, sem impacto financeiro)
+  const [swapModalStudent, setSwapModalStudent] = useState<Student | null>(null);
+  const [swapOriginDate, setSwapOriginDate] = useState<string>('');
+  const [swapDestDate, setSwapDestDate] = useState<string>(() => toISODateString(new Date()));
+  const [swapExitTime, setSwapExitTime] = useState<string>('18:30');
+  const [swapObs, setSwapObs] = useState<string>('');
+  const [swapError, setSwapError] = useState<string | null>(null);
+  const [isSavingSwap, setIsSavingSwap] = useState<boolean>(false);
+  const [daySwapFeedback, setDaySwapFeedback] = useState<string | null>(null);
+
+  const getNextContractedDates = (targetStudent: Student, count: number = 4) => {
+    const activeOriginDates = new Set(
+      (targetStudent.trocasDias || [])
+        .filter((sw) => sw && sw.status !== 'cancelado')
+        .map((sw) => sw.dataOrigem)
+    );
+    const dayLabels: Record<DayOfWeek, string> = {
+      segunda: 'Seg',
+      terca: 'Ter',
+      quarta: 'Qua',
+      quinta: 'Qui',
+      sexta: 'Sex',
+    };
+    const results: { date: string; day: DayOfWeek; shortLabel: string }[] = [];
+    const base = new Date();
+    for (let offset = 0; offset <= 21 && results.length < count; offset++) {
+      const candidate = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+      const iso = toISODateString(candidate);
+      const day = getDayOfWeekFromDate(iso);
+      if (!day) continue;
+      if (!isStudentScheduledForDay(targetStudent, day)) continue;
+      if (activeOriginDates.has(iso)) continue;
+      results.push({
+        date: iso,
+        day,
+        shortLabel: `${dayLabels[day]} ${formatDateBR(iso).slice(0, 5)}`,
+      });
+    }
+    return results;
+  };
+
+  const handleOpenSwapModal = (targetStudent: Student) => {
+    const candidates = getNextContractedDates(targetStudent, 4);
+    const todayIso = toISODateString(new Date());
+    setSwapModalStudent(targetStudent);
+    setSwapOriginDate(candidates[0]?.date || '');
+    setSwapDestDate(todayIso);
+    setSwapExitTime('18:30');
+    setSwapObs('');
+    setSwapError(null);
+  };
+
+  const handleConfirmDaySwap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!swapModalStudent || isSavingSwap) return;
+
+    setSwapError(null);
+    setIsSavingSwap(true);
+    try {
+      const { record, updatedStudent } = await registerDaySwap({
+        student: swapModalStudent,
+        dataOrigem: swapOriginDate,
+        dataDestino: swapDestDate,
+        horarioSaida: swapExitTime,
+        observacao: swapObs,
+        createdBy: currentUser?.name || 'Coordenação',
+      });
+
+      setStudents((prev) =>
+        prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+      );
+      await Promise.resolve(onUpdateStudent(updatedStudent));
+
+      setSwapModalStudent(null);
+      setDaySwapFeedback(
+        `Troca de dia confirmada para ${updatedStudent.name}: ${formatDateBR(record.dataOrigem)} → ${formatDateBR(record.dataDestino)} (Saída ${formatHorarioSaida(record.horarioSaida)}) • Sem cobrança adicional (R$ 0,00).`
+      );
+      setTimeout(() => setDaySwapFeedback(null), 6000);
+    } catch (err: any) {
+      setSwapError(err?.message || 'Não foi possível registrar a Troca de Dia.');
+    } finally {
+      setIsSavingSwap(false);
+    }
+  };
+
+  const handleQuickCancelDaySwap = async (targetStudent: Student, swapRecord: DaySwapRecord) => {
+    try {
+      const { updatedStudent } = await cancelDaySwap(
+        swapRecord,
+        currentUser?.name || 'Coordenação'
+      );
+      if (updatedStudent) {
+        setStudents((prev) =>
+          prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+        );
+        await Promise.resolve(onUpdateStudent(updatedStudent));
+      }
+      setDaySwapFeedback(
+        `Troca de dia de ${targetStudent.name} (${formatDateBR(swapRecord.dataOrigem)} → ${formatDateBR(swapRecord.dataDestino)}) cancelada.`
+      );
+      setTimeout(() => setDaySwapFeedback(null), 5000);
+    } catch (err: any) {
+      setDaySwapFeedback(err?.message || 'Não foi possível cancelar a Troca de Dia.');
+      setTimeout(() => setDaySwapFeedback(null), 5000);
     }
   };
 
@@ -5011,6 +5119,22 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
         </div>
       )}
 
+      {daySwapFeedback && (
+        <div className="bg-sky-50 border border-sky-300 text-sky-950 rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <RefreshCw className="w-4 h-4 text-sky-700 shrink-0" />
+            <span>{daySwapFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDaySwapFeedback(null)}
+            className="text-sky-700 hover:text-sky-950 p-1 rounded-lg cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -5184,6 +5308,32 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           </span>
                         ))}
 
+                      {/* Badges de Trocas / Permutas Pontuais de Dia ativas */}
+                      {(student.trocasDias || [])
+                        .filter((sw) => sw && sw.status !== 'cancelado')
+                        .map((sw) => (
+                          <span
+                            key={sw.id}
+                            className="text-[10.5px] font-bold px-2 py-0.5 rounded-md border bg-sky-50 text-sky-900 border-sky-300 flex items-center space-x-1 shadow-2xs"
+                            title={`Troca de Dia (sem custo extra) • Substitui ${formatDateBR(sw.dataOrigem)} por ${formatDateBR(sw.dataDestino)} • Saída ${sw.horarioSaida}${sw.observacao ? ` • ${sw.observacao}` : ''}`}
+                          >
+                            <RefreshCw className="w-3 h-3 text-sky-600 shrink-0" />
+                            <span>
+                              🔄 {formatDateBR(sw.dataOrigem).slice(0, 5)} → {formatDateBR(sw.dataDestino).slice(0, 5)} ({formatHorarioSaida(sw.horarioSaida)})
+                            </span>
+                            {userCanManageStudents && (
+                              <button
+                                type="button"
+                                onClick={() => handleQuickCancelDaySwap(student, sw)}
+                                className="ml-1 text-sky-700 hover:text-rose-700 cursor-pointer"
+                                title="Cancelar esta Troca de Dia"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </span>
+                        ))}
+
                       {/* Departure Times Badges */}
                       {student.horariosSaida && Object.keys(student.horariosSaida).length > 0 && (() => {
                         const entries = (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[])
@@ -5335,15 +5485,27 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       Array.isArray(student.diasFrequencia) &&
                       student.diasFrequencia.length > 0 &&
                       student.diasFrequencia.length < 5 && (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenExtraDayModal(student)}
-                          className="p-2 rounded-lg text-orange-950 bg-orange-50 hover:bg-orange-100 border border-orange-300 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
-                          title="Registrar Dia Extra Avulso pontual sem alterar o plano mensal ou grade fixa"
-                        >
-                          <CalendarDays className="w-3.5 h-3.5 text-orange-600" />
-                          <span>+ Dia Extra Avulso</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenExtraDayModal(student)}
+                            className="p-2 rounded-lg text-orange-950 bg-orange-50 hover:bg-orange-100 border border-orange-300 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
+                            title="Registrar Dia Extra Avulso pontual sem alterar o plano mensal ou grade fixa"
+                          >
+                            <CalendarDays className="w-3.5 h-3.5 text-orange-600" />
+                            <span>+ Dia Extra Avulso</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSwapModal(student)}
+                            className="p-2 rounded-lg text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 transition-all cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-2xs"
+                            title="Permutar pontualmente um dia da grade contratada por outro dia útil sem cobrança adicional"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-sky-600" />
+                            <span>🔄 Trocar Dia</span>
+                          </button>
+                        </>
                       )}
 
                     {userCanManageStudents && (
@@ -6202,6 +6364,198 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                       <>
                         <CheckCircle2 className="w-4 h-4" />
                         <span>Confirmar Dia Extra Avulso</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal: Troca / Permuta Pontual de Dia */}
+      {swapModalStudent && (() => {
+        const studentYear = swapModalStudent.anoLetivo || selectedAnoLetivo || 2026;
+        const resolvedCurrentPlan =
+          swapModalStudent.planoContratual ||
+          resolveOfficialPlanFromStudentSchedule(swapModalStudent, studentYear).planoContratual;
+        const upcomingContractedDates = getNextContractedDates(swapModalStudent, 4);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-sky-200 w-full max-w-md max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center space-x-2.5 text-sky-900">
+                  <div className="p-2.5 bg-sky-100 rounded-xl border border-sky-200">
+                    <RefreshCw className="w-5 h-5 text-sky-700" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-base">
+                      Troca / Permuta Pontual de Dia
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Substitui 1 dia da grade por outro dia útil sem custo extra
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSwapModalStudent(null)}
+                  disabled={isSavingSwap}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Identificação do Aluno, Turma e Grade Fixa (Somente Leitura) */}
+              <div className="bg-sky-50/70 border border-sky-200 rounded-xl p-3.5 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-extrabold text-slate-900 text-sm truncate">
+                    {swapModalStudent.name}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-sky-200 font-bold text-indigo-700 text-[11px] shrink-0">
+                    {swapModalStudent.turma}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    Grade fixa: <strong className="text-slate-800">{formatDiasFrequencia(swapModalStudent.diasFrequencia)}</strong>
+                  </span>
+                </div>
+                <div className="pt-1 border-t border-sky-200/70 text-[11px] text-sky-950 flex items-center justify-between gap-2">
+                  <span>
+                    Plano: <strong>{resolvedCurrentPlan}</strong>
+                  </span>
+                  <span className="font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md shrink-0">
+                    Sem cobrança extra (R$ 0,00)
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleConfirmDaySwap} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Dia do contrato que será substituído (data de ausência) *
+                  </label>
+                  {upcomingContractedDates.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {upcomingContractedDates.map((item) => {
+                        const selected = swapOriginDate === item.date;
+                        return (
+                          <button
+                            key={item.date}
+                            type="button"
+                            onClick={() => {
+                              setSwapOriginDate(item.date);
+                              setSwapError(null);
+                            }}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                              selected
+                                ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-sky-50 hover:border-sky-300'
+                            }`}
+                          >
+                            {item.shortLabel}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <input
+                    type="date"
+                    required
+                    value={swapOriginDate}
+                    onChange={(e) => {
+                      setSwapOriginDate(e.target.value);
+                      setSwapError(null);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                  />
+                  <p className="text-[10.5px] text-slate-500 mt-1">
+                    Deve corresponder a um dia da grade contratada ({formatDiasFrequencia(swapModalStudent.diasFrequencia)}).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Novo dia em que o aluno virá *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={swapDestDate}
+                      onChange={(e) => {
+                        setSwapDestDate(e.target.value);
+                        setSwapError(null);
+                      }}
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Saída prevista no novo dia *
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={swapExitTime}
+                      onChange={(e) => setSwapExitTime(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Observação opcional
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={swapObs}
+                    onChange={(e) => setSwapObs(e.target.value)}
+                    placeholder="Ex: Permuta solicitada pelos pais devido a consulta médica"
+                    className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white resize-none"
+                  />
+                </div>
+
+                {swapError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-3 py-2 text-xs font-semibold flex items-start space-x-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{swapError}</span>
+                  </div>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] text-slate-600">
+                  Ao confirmar, o aluno será incluído na <strong>Chamada</strong>,{' '}
+                  <strong>Atividades do Momento</strong> e <strong>Alertas de Saída</strong> na nova data e removido da contagem de faltas na data substituída, sem alterar a grade fixa nem gerar cobrança no Financeiro.
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setSwapModalStudent(null)}
+                    disabled={isSavingSwap}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingSwap}
+                    className="px-4 py-2 text-xs font-extrabold text-white bg-sky-600 hover:bg-sky-700 rounded-xl cursor-pointer shadow-md shadow-sky-600/20 flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {isSavingSwap ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Registrando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Confirmar Troca de Dia</span>
                       </>
                     )}
                   </button>
