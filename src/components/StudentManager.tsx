@@ -2078,17 +2078,9 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
       {/* Top Banner and Quick Add Buttons */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-              Gestão de Matrículas
-            </span>
-          </div>
-          <h2 className="text-xl font-bold text-slate-900 mt-1">
+          <h2 className="text-xl font-bold text-slate-900">
             Relação de Alunos por Turma e Atividade
           </h2>
-          <p className="text-xs text-slate-500">
-            Cadastre os alunos por Turma do Integral e selecione em quais atividades extracurriculares cada aluno participa.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
@@ -2167,25 +2159,6 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               >
                 <FileText className="w-4 h-4 text-indigo-600" />
                 <span>+ Importar Lote (E1)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleOpenSanitizeModal(selectedAnoLetivo)}
-                title="Sanitizar e remover cadastros duplicados no Firestore"
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 border ${
-                  duplicateInfoCurrentYear.totalDuplicatesCount > 0
-                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md animate-pulse'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                }`}
-              >
-                <Eraser className="w-4 h-4 text-amber-500 hover:text-white" />
-                <span>🧹 Sanitizar / Remover Alunos Duplicados</span>
-                {duplicateInfoCurrentYear.totalDuplicatesCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-white text-amber-900 rounded-full text-[10px] font-black">
-                    {duplicateInfoCurrentYear.totalDuplicatesCount}
-                  </span>
-                )}
               </button>
             </>
           )}
