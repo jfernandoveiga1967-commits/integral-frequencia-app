@@ -14,6 +14,7 @@ import {
   removeStudentFromLocalStorage,
   pickMostRecentStudentRecord,
   isJoseRicardoManeghin,
+  normalizeStudent,
 } from '../utils/storageUtils';
 import { saveStudentToFirestore, batchDeleteStudentsFromFirestore, isFirestoreQuotaExceeded } from '../firebase';
 import { broadcastSyncEvent } from './syncService';
@@ -479,7 +480,7 @@ export async function restoreMiniMaternal2026(): Promise<{
 
   // 3. Consultar Firestore para verificar existência real antes de qualquer inserção
   const remoteExistingMap = new Map<string, Student>();
-  const checkedRemoteIds = new Set<string>();
+  let remoteScanSucceeded = false;
   const canQueryFirestore =
     !isFirestoreQuotaExceeded &&
     (typeof navigator === 'undefined' || navigator.onLine !== false);
@@ -487,58 +488,51 @@ export async function restoreMiniMaternal2026(): Promise<{
   if (canQueryFirestore) {
     try {
       const { db } = await import('../firebase');
-      const { doc, getDoc, collection, getDocs, query, where } = await import('firebase/firestore');
-      await Promise.all(
-        OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map(async (st) => {
-          try {
-            const [alunoSnap, studentSnap] = await Promise.all([
-              getDoc(doc(db, 'alunos', st.id)),
-              getDoc(doc(db, 'students', st.id)),
-            ]);
-            const alunoData = alunoSnap.exists() ? ({ ...alunoSnap.data(), id: st.id } as Student) : null;
-            const studentData = studentSnap.exists() ? ({ ...studentSnap.data(), id: st.id } as Student) : null;
-            let remoteData = pickMostRecentStudentRecord(alunoData, studentData);
+      const { collection, getDocs } = await import('firebase/firestore');
+      const [alunosSnapRes, studentsSnapRes] = await Promise.allSettled([
+        getDocs(collection(db, 'alunos')),
+        getDocs(collection(db, 'students')),
+      ]);
 
-            // Se não encontrou pelo ID canônico, busca pelo nome nas coleções antes de assumir que está ausente
-            if (!remoteData) {
-              const [alunosByName, studentsByName] = await Promise.all([
-                getDocs(query(collection(db, 'alunos'), where('name', '==', st.name))),
-                getDocs(query(collection(db, 'students'), where('name', '==', st.name))),
-              ]);
-              const nameMatches: Student[] = [];
-              const collectMatches = (snap: any) => {
-                snap.forEach((d: any) => {
-                  const data = d.data();
-                  if (!data) return;
-                  const ano = data.anoLetivo !== undefined ? Number(data.anoLetivo) : 2026;
-                  if (ano === 2026) {
-                    nameMatches.push({ ...data, id: d.id } as Student);
-                  }
-                });
-              };
-              collectMatches(alunosByName);
-              collectMatches(studentsByName);
-              for (const cand of nameMatches) {
-                remoteData = pickMostRecentStudentRecord(remoteData, cand);
-              }
-            }
+      const officialById = new Map<string, Student>();
+      const officialByNormName = new Map<string, Student>();
+      OFFICIAL_MINI_MATERNAL_2026_STUDENTS.forEach((st) => {
+        officialById.set(st.id, st);
+        officialByNormName.set(normalizeStudentNameForMatching(st.name), st);
+      });
 
-            checkedRemoteIds.add(st.id);
-            if (remoteData) {
-              remoteExistingMap.set(st.id, remoteData);
-            }
-          } catch {
-            // Erro pontual de leitura/rede: NÃO marca como verificado para evitar criar cópia com ['Rotina']
+      const collectSnap = (res: PromiseSettledResult<any>) => {
+        if (res.status !== 'fulfilled' || !res.value || typeof res.value.forEach !== 'function') return false;
+        res.value.forEach((d: any) => {
+          const data = d.data();
+          if (!data) return;
+          const ano = data.anoLetivo !== undefined ? Number(data.anoLetivo) : 2026;
+          if (ano !== 2026) return;
+          const rawName = String(data.name || data.nomeCompleto || data.nome || '').trim();
+          const normName = normalizeStudentNameForMatching(rawName);
+          const officialMatch = officialById.get(d.id) || (normName ? officialByNormName.get(normName) : undefined);
+          if (!officialMatch) return;
+
+          const candidate = normalizeStudent({ ...data, id: d.id });
+          const prev = remoteExistingMap.get(officialMatch.id);
+          const winner = pickMostRecentStudentRecord(candidate, prev);
+          if (winner) {
+            remoteExistingMap.set(officialMatch.id, winner);
           }
-        })
-      );
+        });
+        return true;
+      };
+
+      const okAlunos = collectSnap(alunosSnapRes);
+      const okStudents = collectSnap(studentsSnapRes);
+      remoteScanSucceeded = okAlunos || okStudents;
     } catch {
       // Fallback offline silencioso
     }
   }
 
   // Reler o cache local DEPOIS das chamadas assíncronas ao Firestore para não sobrescrever dados
-  // recém-chegados via onSnapshot (evita race condition entre dispositivos)
+  // recém-chegados via onSnapshot ou editados localmente (evita race condition)
   const freshLocalStudents = getStudents();
   const studentMap = new Map<string, Student>();
   freshLocalStudents.forEach((s) => {
@@ -552,8 +546,6 @@ export async function restoreMiniMaternal2026(): Promise<{
   const officialNames = new Set(OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => normalizeStudentNameForMatching(st.name)));
 
   // Identificar e expurgar alunos regulares indevidamente vinculados ao Mini Maternal 2026 fora dos oficiais
-  // Mantém sem interferência o histórico desligado/cancelado de José Ricardo Bijora Maneghin/Meneghin
-  // e preserva integralmente matrículas temporárias/avulsas cadastradas no Mini Maternal.
   const extraneousMiniMaternal2026Ids: string[] = [];
   studentMap.forEach((s, sId) => {
     const isMiniMaternal = (s.turma || '').toLowerCase().includes('mini') && (s.turma || '').toLowerCase().includes('maternal');
@@ -570,40 +562,42 @@ export async function restoreMiniMaternal2026(): Promise<{
   const nowIso = new Date().toISOString();
   const missingStudentsToCreate: Student[] = [];
   const restoredStudents: Student[] = OFFICIAL_MINI_MATERNAL_2026_STUDENTS.map((st) => {
-    // Prioridade ao registro mais recente pelo updatedAt entre Firestore ('alunos'/'students') e cache local atualizado
     const remoteExisting = remoteExistingMap.get(st.id);
+    const targetNormName = normalizeStudentNameForMatching(st.name);
     const localExisting =
       studentMap.get(st.id) ||
       Array.from(studentMap.values()).find(
         (cand) =>
           (cand.anoLetivo || 2026) === 2026 &&
-          normalizeStudentNameForMatching(cand.name) === normalizeStudentNameForMatching(st.name)
+          normalizeStudentNameForMatching(cand.name) === targetNormName
       );
     const existing = pickMostRecentStudentRecord(remoteExisting, localExisting);
 
     if (existing) {
-      // Preserva integralmente status, statusMatricula, activities, modalidadesEspeciais e demais customizações
-      const rawStatus = String(existing.status || existing.statusMatricula || st.status || 'ativo').trim().toLowerCase();
+      const normalizedExisting = normalizeStudent(existing);
+      const rawStatus = String(normalizedExisting.status || normalizedExisting.statusMatricula || st.status || 'ativo').trim().toLowerCase();
       const resolvedStatus: Student['status'] =
         rawStatus === 'cancelado' ? 'cancelado' : rawStatus === 'inativo' || rawStatus === 'trancado' ? 'inativo' : 'ativo';
       return {
         ...st,
-        ...existing,
-        id: existing.id || st.id,
-        anoLetivo: existing.anoLetivo !== undefined ? Number(existing.anoLetivo) : 2026,
-        turma: existing.turma || st.turma,
-        activities: Array.isArray(existing.activities) && existing.activities.length > 0 ? existing.activities : st.activities,
+        ...normalizedExisting,
+        id: normalizedExisting.id || st.id,
+        anoLetivo: normalizedExisting.anoLetivo !== undefined ? Number(normalizedExisting.anoLetivo) : 2026,
+        turma: normalizedExisting.turma || st.turma,
+        activities:
+          Array.isArray(normalizedExisting.activities) && normalizedExisting.activities.length > 0
+            ? normalizedExisting.activities
+            : st.activities,
         status: resolvedStatus,
         statusMatricula: resolvedStatus,
       };
     }
 
-    // Só cria o documento padrão se a leitura remota foi confirmada com sucesso e não encontrou nada
     const created: Student = {
       ...st,
       updatedAt: nowIso,
     };
-    if (checkedRemoteIds.has(st.id)) {
+    if (remoteScanSucceeded) {
       missingStudentsToCreate.push(created);
     }
     return created;
@@ -611,7 +605,10 @@ export async function restoreMiniMaternal2026(): Promise<{
 
   // Atualizar mapa local preservando as edições existentes (somente quando existia ou foi confirmado ausente)
   restoredStudents.forEach((st) => {
-    if (studentMap.has(st.id) || remoteExistingMap.has(st.id) || checkedRemoteIds.has(st.id)) {
+    const existingById = studentMap.get(st.id);
+    if (existingById) {
+      studentMap.set(st.id, pickMostRecentStudentRecord(existingById, st) || st);
+    } else if (remoteExistingMap.has(st.id) || remoteScanSucceeded) {
       studentMap.set(st.id, st);
     }
   });

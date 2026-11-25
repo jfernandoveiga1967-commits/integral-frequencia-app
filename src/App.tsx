@@ -34,6 +34,7 @@ import {
   pickMostRecentStudentRecord,
   deduplicateStudentsList,
   getStudentDeduplicationKey,
+  parseUpdatedAtMs,
 } from './utils/storageUtils';
 import { loadLocalQuadroAtribuicoes, saveLocalQuadroAtribuicoes, reconcileAtribuicoesWithTurmas, generateTurmaAtribuicaoId } from './utils/atribuicoesStorage';
 import { getISOWeekNumber, getWeekInfo, toISODateString, formatDateBR, formatDiasFrequencia } from './utils/dateUtils';
@@ -114,6 +115,7 @@ import {
   batchSaveQuadroAtribuicoesToFirestore,
   deleteTurmaAtribuicaoFromFirestore,
   saveStudentToFirestore,
+  registerRecentLocalStudentEdit,
   deleteStudentFromFirestore,
   saveRecordToFirestore,
   deleteAttendanceRecordFromFirestore,
@@ -175,6 +177,62 @@ export default function App() {
     const local = loadStudents().filter((s) => !isMockStudent(s));
     return local.length > 0 ? local : INITIAL_STUDENTS.map((s) => normalizeStudent(s));
   });
+  const recentStudentEditsRef = useRef<Map<string, { student: Student; updatedAtMs: number; expiresAtMs: number }>>(new Map());
+
+  const protectStudentsAgainstStaleIncoming = useCallback(
+    (prevStudents: Student[], incomingStudents: Student[]): Student[] => {
+      const nowMs = Date.now();
+      const prevById = new Map<string, Student>();
+      const prevByKey = new Map<string, Student>();
+      (prevStudents || []).forEach((st) => {
+        if (!st || !st.id) return;
+        prevById.set(st.id, st);
+        prevByKey.set(getStudentDeduplicationKey(st), st);
+      });
+
+      // Limpa entradas expiradas da guarda recente
+      recentStudentEditsRef.current.forEach((entry, key) => {
+        if (nowMs > entry.expiresAtMs) {
+          recentStudentEditsRef.current.delete(key);
+        }
+      });
+
+      const protectedList = (incomingStudents || []).map((inc) => {
+        if (!inc || !inc.id) return inc;
+        const incKey = getStudentDeduplicationKey(inc);
+        const incTs = parseUpdatedAtMs(inc.updatedAt);
+
+        const guard =
+          recentStudentEditsRef.current.get(inc.id) ||
+          recentStudentEditsRef.current.get(incKey);
+        if (guard && nowMs <= guard.expiresAtMs) {
+          if (incTs < guard.updatedAtMs) {
+            return { ...guard.student, id: inc.id };
+          }
+          // Se timestamp empatar ou snapshot parcial ainda vier com atividades antigas dentro da janela de proteção
+          if (incTs === guard.updatedAtMs) {
+            const incActs = (inc.activities || []).slice().sort().join('|');
+            const guardActs = (guard.student.activities || []).slice().sort().join('|');
+            if (incActs !== guardActs) {
+              return { ...guard.student, id: inc.id };
+            }
+          }
+        }
+
+        const prevMatch = prevById.get(inc.id) || prevByKey.get(incKey);
+        if (prevMatch) {
+          const prevTs = parseUpdatedAtMs(prevMatch.updatedAt);
+          if (prevTs > 0 && (incTs === 0 || prevTs > incTs)) {
+            return mergeStudentData(prevMatch, inc);
+          }
+        }
+        return inc;
+      });
+
+      return deduplicateStudentsList(protectedList);
+    },
+    []
+  );
   const [isInitialStudentsLoaded, setIsInitialStudentsLoaded] = useState<boolean>(() => {
     const local = loadStudents().filter((s) => !isMockStudent(s));
     return local.length > 0;
@@ -421,13 +479,7 @@ export default function App() {
         const restoredList = loadStudents().filter((s) => !isMockStudent(s));
         setStudents((prev) => {
           if (!prev || prev.length === 0) return deduplicateStudentsList(restoredList);
-          const mergedMap = new Map<string, Student>();
-          restoredList.forEach((st) => mergedMap.set(st.id, st));
-          prev.forEach((cur) => {
-            const existing = mergedMap.get(cur.id);
-            mergedMap.set(cur.id, pickMostRecentStudentRecord(existing, cur) || existing || cur);
-          });
-          return deduplicateStudentsList(Array.from(mergedMap.values()));
+          return protectStudentsAgainstStaleIncoming(prev, restoredList);
         });
       } catch {}
     });
@@ -473,8 +525,11 @@ export default function App() {
         case 'SYNC_STUDENTS': {
           const updatedStudents = message.payload as Student[];
           if (Array.isArray(updatedStudents)) {
-            setStudents(updatedStudents);
-            saveStudents(updatedStudents);
+            setStudents((prev) => {
+              const protectedList = protectStudentsAgainstStaleIncoming(prev, updatedStudents);
+              saveStudents(protectedList);
+              return protectedList;
+            });
           }
           break;
         }
@@ -552,7 +607,7 @@ export default function App() {
           }
           const freshStudents = deduplicateStudentsList(loadStudents().filter((s) => !isMockStudent(s)));
           if (freshStudents.length > 0) {
-            setStudents(freshStudents);
+            setStudents((prev) => protectStudentsAgainstStaleIncoming(prev, freshStudents));
           }
           break;
         }
@@ -603,8 +658,11 @@ export default function App() {
       const { updatedStudents: verifiedStudents, inactivatedStudents: syncInactivated } =
         checkAndInactivateExpiredTemporaryStudents(effectiveList);
 
-      setStudents(verifiedStudents);
-      saveStudents(verifiedStudents);
+      setStudents((prev) => {
+        const protectedList = protectStudentsAgainstStaleIncoming(prev, verifiedStudents);
+        saveStudents(protectedList);
+        return protectedList;
+      });
 
       if (realStudents.length > 0 && syncInactivated.length > 0) {
         syncInactivated.forEach((st) => {
@@ -1267,11 +1325,25 @@ export default function App() {
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
     const existingStudent = students.find((s) => s.id === updatedStudent.id);
+    const nowIso = new Date().toISOString();
     const stampedIncoming: Student = {
       ...updatedStudent,
-      updatedAt: updatedStudent.updatedAt || new Date().toISOString(),
+      updatedAt: nowIso,
     };
     const mergedStudent = mergeStudentData(existingStudent, stampedIncoming);
+    const editGuardKey = getStudentDeduplicationKey(mergedStudent);
+    const guardEntry = {
+      student: mergedStudent,
+      updatedAtMs: parseUpdatedAtMs(nowIso) || Date.now(),
+      expiresAtMs: Date.now() + 20_000,
+    };
+
+    // Registra guarda imediata antes da escrita assíncrona para impedir que onSnapshot intermediário reverta o estado local
+    recentStudentEditsRef.current.set(mergedStudent.id, guardEntry);
+    if (editGuardKey) {
+      recentStudentEditsRef.current.set(editGuardKey, guardEntry);
+    }
+    registerRecentLocalStudentEdit(mergedStudent);
 
     // Persiste primeiro no Firestore e propaga qualquer falha para a UI em vez de silenciar
     try {
@@ -1280,6 +1352,8 @@ export default function App() {
         console.warn('Aviso ao sincronizar perfil financeiro após edição:', finErr)
       );
     } catch (err) {
+      recentStudentEditsRef.current.delete(mergedStudent.id);
+      if (editGuardKey) recentStudentEditsRef.current.delete(editGuardKey);
       console.error('Error updating student in Firestore:', err);
       throw err;
     }
@@ -2397,9 +2471,12 @@ export default function App() {
       }
       if (directSync.students && directSync.students.length > 0) {
         const cleanDirectStudents = deduplicateStudentsList(directSync.students.filter((s) => !isMockStudent(s)));
-        saveStudents(cleanDirectStudents);
-        setStudents(cleanDirectStudents);
-        broadcastSyncEvent('SYNC_STUDENTS', cleanDirectStudents);
+        setStudents((prev) => {
+          const protectedList = protectStudentsAgainstStaleIncoming(prev, cleanDirectStudents);
+          saveStudents(protectedList);
+          broadcastSyncEvent('SYNC_STUDENTS', protectedList);
+          return protectedList;
+        });
         syncedFromServer = true;
       }
     } catch (e) {

@@ -288,6 +288,27 @@ function sanitizeDaySwapsArray(rawList: any): DaySwapRecord[] | undefined {
   return Array.from(map.values());
 }
 
+function extractExplicitActivitiesArray(student: any): string[] | undefined {
+  if (!student || typeof student !== 'object') return undefined;
+  const fromActivities = Array.isArray(student.activities)
+    ? student.activities.map((a: any) => String(a || '').trim()).filter(Boolean)
+    : undefined;
+  const fromAtividades = Array.isArray(student.atividades)
+    ? student.atividades.map((a: any) => String(a || '').trim()).filter(Boolean)
+    : undefined;
+  const fromModalidades = Array.isArray(student.modalidades)
+    ? student.modalidades.map((a: any) => String(a || '').trim()).filter(Boolean)
+    : undefined;
+
+  if (fromActivities && fromActivities.length > 0) return fromActivities;
+  if (fromAtividades && fromAtividades.length > 0) return fromAtividades;
+  if (fromModalidades && fromModalidades.length > 0) return fromModalidades;
+  if (fromActivities) return fromActivities;
+  if (fromAtividades) return fromAtividades;
+  if (fromModalidades) return fromModalidades;
+  return undefined;
+}
+
 /**
  * Normaliza e enriquece os dados de um aluno, garantindo a integridade e
  * preservação irrestrita das propriedades customizadas (diasFrequencia, horariosSaida, statusMatricula, etc.),
@@ -310,19 +331,27 @@ export function normalizeStudent(
     };
   }
 
-  const s = rawStudent || {};
-  const id = String(s.id || existingStudent?.id || `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`).trim();
-  const matricula = s.matricula !== undefined ? (s.matricula ? String(s.matricula).trim() : undefined) : existingStudent?.matricula;
-  const name = String(s.name !== undefined ? s.name : (existingStudent?.name || '')).trim();
-  const turma = String(s.turma !== undefined ? s.turma : (existingStudent?.turma || '')) as TurmaType;
+  const rawInput = rawStudent || {};
+  const rawTs = parseUpdatedAtMs(rawInput.updatedAt);
+  const existTs = parseUpdatedAtMs(existingStudent?.updatedAt);
+  const existingIsStrictlyNewer = Boolean(
+    existingStudent && ((existTs > 0 && rawTs > 0 && existTs > rawTs) || (existTs > 0 && rawTs === 0 && !rawInput.updatedAt))
+  );
 
-  // Atividades: Garantir array e presença obrigatória da 'Rotina'
-  let rawActs: string[] = [];
-  if (Array.isArray(s.activities)) {
-    rawActs = s.activities;
-  } else if (Array.isArray(existingStudent?.activities)) {
-    rawActs = existingStudent.activities;
-  }
+  const s = existingIsStrictlyNewer
+    ? { ...rawInput, ...existingStudent }
+    : rawInput;
+  const fallback = existingIsStrictlyNewer ? rawInput : existingStudent;
+
+  const id = String(s.id || fallback?.id || `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`).trim();
+  const matricula = s.matricula !== undefined ? (s.matricula ? String(s.matricula).trim() : undefined) : fallback?.matricula;
+  const name = String(s.name !== undefined ? s.name : (fallback?.name || '')).trim();
+  const turma = String(s.turma !== undefined ? s.turma : (fallback?.turma || '')) as TurmaType;
+
+  // Atividades: Suportar activities, atividades e modalidades, preservando escolhas explícitas do registro mais recente
+  const sActs = extractExplicitActivitiesArray(s);
+  const fallbackActs = extractExplicitActivitiesArray(fallback);
+  const rawActs = sActs !== undefined ? sActs : (fallbackActs || []);
   const uniqueActs = Array.from(new Set(rawActs.map((a: any) => String(a).trim()).filter(Boolean)));
   const activities = uniqueActs.includes('Rotina') ? uniqueActs : ['Rotina', ...uniqueActs];
 
@@ -569,23 +598,35 @@ export function pickMostRecentStudentRecord<T extends Record<string, any>>(
   if (tSecondary > tPrimary) {
     return secondary;
   }
-  if (tPrimary === tSecondary && tPrimary === 0) {
-    const isNonActive = (rec: Record<string, any>) => {
-      const st = String(rec.status || '').trim().toLowerCase();
-      const sm = String(rec.statusMatricula || '').trim().toLowerCase();
-      return st === 'cancelado' || st === 'inativo' || st === 'trancado' || sm === 'cancelado' || sm === 'inativo' || sm === 'trancado';
-    };
-    if (!isNonActive(primary) && isNonActive(secondary)) {
-      return secondary;
-    }
+  if (tPrimary > tSecondary) {
+    return primary;
+  }
+
+  // Empate exato (ou ambos sem updatedAt): prioriza status cancelado/inativo e quem possui mais modalidades explícitas
+  const isNonActive = (rec: Record<string, any>) => {
+    const st = String(rec.status || '').trim().toLowerCase();
+    const sm = String(rec.statusMatricula || '').trim().toLowerCase();
+    return st === 'cancelado' || st === 'inativo' || st === 'trancado' || sm === 'cancelado' || sm === 'inativo' || sm === 'trancado';
+  };
+  if (!isNonActive(primary) && isNonActive(secondary)) {
+    return secondary;
+  }
+  if (isNonActive(primary) && !isNonActive(secondary)) {
+    return primary;
+  }
+
+  const pActsCount = (extractExplicitActivitiesArray(primary) || []).length;
+  const sActsCount = (extractExplicitActivitiesArray(secondary) || []).length;
+  if (sActsCount > pActsCount) {
+    return secondary;
   }
   return primary;
 }
 
 /**
  * Fusão inteligente (Deep Merge) de dois registros de alunos,
- * preservando todas as customizações (diasFrequencia, horariosSaida, status)
- * sem redefinir para padrões default.
+ * comparando estritamente os timestamps `updatedAt` para que uma cópia antiga
+ * nunca sobrescreva modalidades ou alterações de uma cópia mais recente.
  */
 export function mergeStudentData(
   existingStudent: Student | undefined,
@@ -595,147 +636,161 @@ export function mergeStudentData(
     return normalizeStudent(incomingStudent);
   }
 
-  // Se o incoming tem diasFrequencia com valores válidos, usa; se não, preserva o do existing
-  const incomingDays = Array.isArray(incomingStudent.diasFrequencia) && incomingStudent.diasFrequencia.length > 0
-    ? incomingStudent.diasFrequencia
-    : existingStudent.diasFrequencia;
+  const existingMs = parseUpdatedAtMs(existingStudent.updatedAt);
+  const incomingMs = parseUpdatedAtMs(incomingStudent.updatedAt);
+  const existingIsStrictlyNewer =
+    (existingMs > 0 && incomingMs > 0 && existingMs > incomingMs) ||
+    (existingMs > 0 && incomingMs === 0);
 
-  // Merge de horários de saída: preserva os horários já definidos no existing
+  const newer: Partial<Student> = existingIsStrictlyNewer ? existingStudent : incomingStudent;
+  const older: Partial<Student> = existingIsStrictlyNewer ? incomingStudent : existingStudent;
+
+  // Dias de frequência: prioriza o registro mais recente
+  const newerDays = Array.isArray(newer.diasFrequencia) && newer.diasFrequencia.length > 0
+    ? newer.diasFrequencia
+    : undefined;
+  const olderDays = Array.isArray(older.diasFrequencia) && older.diasFrequencia.length > 0
+    ? older.diasFrequencia
+    : undefined;
+  const chosenDays = newerDays || olderDays || [...DEFAULT_DIAS_FREQUENCIA];
+
+  // Merge de horários de saída: valores do registro mais recente prevalecem
   const mergedHorarios: Partial<Record<DayOfWeek, string>> = {
-    ...(existingStudent.horariosSaida || {}),
-    ...(incomingStudent.horariosSaida || {}),
+    ...(older.horariosSaida || {}),
+    ...(newer.horariosSaida || {}),
   };
 
-  // Se incoming tem horarioSaida string único especificado
-  if (typeof (incomingStudent as any).horarioSaida === 'string' && (incomingStudent as any).horarioSaida.trim().length > 0) {
-    const fixedTime = (incomingStudent as any).horarioSaida.trim();
+  if (typeof (newer as any).horarioSaida === 'string' && (newer as any).horarioSaida.trim().length > 0) {
+    const fixedTime = (newer as any).horarioSaida.trim();
     (['segunda', 'terca', 'quarta', 'quinta', 'sexta'] as DayOfWeek[]).forEach((d) => {
       if (!mergedHorarios[d]) mergedHorarios[d] = fixedTime;
     });
   }
 
-  // Atividades
-  const incomingActs = Array.isArray(incomingStudent.activities) ? incomingStudent.activities : [];
-  const existingActs = Array.isArray(existingStudent.activities) ? existingStudent.activities : [];
-  const baseActs = incomingActs.length > 0 ? incomingActs : existingActs;
+  // Atividades/Modalidades: preserva SEMPRE o array explícito do registro com updatedAt mais recente
+  const newerActs = extractExplicitActivitiesArray(newer);
+  const olderActs = extractExplicitActivitiesArray(older);
+  const baseActs =
+    newerActs !== undefined && (newerActs.length > 0 || olderActs === undefined)
+      ? newerActs
+      : (olderActs || []);
   const mergedActivities = Array.from(new Set(['Rotina', ...baseActs]));
 
-  // Se incomingStudent tem status definido, prevalece o status do incoming
+  // Status: prevalece o do registro mais recente
   let status: StudentStatus = 'ativo';
-  if (incomingStudent.status) {
-    status = incomingStudent.status;
-  } else if ((incomingStudent as any).statusMatricula) {
-    status = (incomingStudent as any).statusMatricula;
-  } else if (existingStudent.status) {
-    status = existingStudent.status;
-  } else if (existingStudent.statusMatricula) {
-    status = existingStudent.statusMatricula;
-  } else {
-    status = 'ativo';
+  if (newer.status) {
+    status = newer.status;
+  } else if ((newer as any).statusMatricula) {
+    status = (newer as any).statusMatricula;
+  } else if (older.status) {
+    status = older.status;
+  } else if ((older as any).statusMatricula) {
+    status = (older as any).statusMatricula;
   }
 
-  // Quando o status resultante for 'ativo', garanta a limpeza estrita das propriedades de inativação como '' (string vazia)
   const inactivationDate = status === 'ativo'
     ? ''
-    : (incomingStudent.inactivationDate !== undefined ? incomingStudent.inactivationDate : (existingStudent.inactivationDate || ''));
+    : (newer.inactivationDate !== undefined ? newer.inactivationDate : (older.inactivationDate || ''));
   const inactivationReason = status === 'ativo'
     ? ''
-    : (incomingStudent.inactivationReason !== undefined ? incomingStudent.inactivationReason : (existingStudent.inactivationReason || ''));
+    : (newer.inactivationReason !== undefined ? newer.inactivationReason : (older.inactivationReason || ''));
 
-  const rawIncContract = typeof incomingStudent.tipoContrato === 'string' ? incomingStudent.tipoContrato.trim().toLowerCase() : '';
-  const rawExContract = typeof existingStudent.tipoContrato === 'string' ? existingStudent.tipoContrato.trim().toLowerCase() : '';
+  const rawNewContract = typeof newer.tipoContrato === 'string' ? newer.tipoContrato.trim().toLowerCase() : '';
+  const rawOldContract = typeof older.tipoContrato === 'string' ? older.tipoContrato.trim().toLowerCase() : '';
   const tipoContrato: ContractType =
-    rawIncContract === 'avulso' || rawIncContract === 'temporario' || rawIncContract === 'temporário'
+    rawNewContract === 'avulso' || rawNewContract === 'temporario' || rawNewContract === 'temporário'
       ? 'avulso'
-      : rawIncContract === 'regular'
+      : rawNewContract === 'regular'
       ? 'regular'
-      : rawExContract === 'avulso'
+      : rawOldContract === 'avulso' || rawOldContract === 'temporario' || rawOldContract === 'temporário'
       ? 'avulso'
       : 'regular';
   const dataInicioContrato =
     tipoContrato === 'avulso'
-      ? (incomingStudent.dataInicioContrato != null && String(incomingStudent.dataInicioContrato).trim() !== ''
-          ? String(incomingStudent.dataInicioContrato).trim()
-          : existingStudent.dataInicioContrato)
+      ? (newer.dataInicioContrato != null && String(newer.dataInicioContrato).trim() !== ''
+          ? String(newer.dataInicioContrato).trim()
+          : older.dataInicioContrato)
       : undefined;
   const dataTerminoContrato =
     tipoContrato === 'avulso'
-      ? (incomingStudent.dataTerminoContrato != null && String(incomingStudent.dataTerminoContrato).trim() !== ''
-          ? String(incomingStudent.dataTerminoContrato).trim()
-          : existingStudent.dataTerminoContrato)
+      ? (newer.dataTerminoContrato != null && String(newer.dataTerminoContrato).trim() !== ''
+          ? String(newer.dataTerminoContrato).trim()
+          : older.dataTerminoContrato)
       : undefined;
   const diasContratados =
     tipoContrato === 'avulso'
-      ? (Array.isArray(incomingStudent.diasContratados) && incomingStudent.diasContratados.length > 0
-          ? incomingStudent.diasContratados
-          : (existingStudent.diasContratados || incomingDays))
+      ? (Array.isArray(newer.diasContratados) && newer.diasContratados.length > 0
+          ? newer.diasContratados
+          : (older.diasContratados || chosenDays))
       : undefined;
 
+  const winningUpdatedAt =
+    existingMs >= incomingMs
+      ? (normalizeUpdatedAtIso(existingStudent.updatedAt) || normalizeUpdatedAtIso(incomingStudent.updatedAt))
+      : (normalizeUpdatedAtIso(incomingStudent.updatedAt) || normalizeUpdatedAtIso(existingStudent.updatedAt));
+
   return {
-    ...existingStudent,
-    ...incomingStudent,
-    id: incomingStudent.id || existingStudent.id,
-    name: incomingStudent.name ?? existingStudent.name,
-    turma: incomingStudent.turma ?? existingStudent.turma,
+    ...older,
+    ...newer,
+    id: newer.id || older.id || existingStudent.id,
+    name: newer.name ?? older.name ?? '',
+    turma: (newer.turma ?? older.turma ?? '') as TurmaType,
     activities: mergedActivities,
-    modalidadesEspeciais: incomingStudent.modalidadesEspeciais ?? existingStudent.modalidadesEspeciais,
-    specialties: incomingStudent.specialties ?? existingStudent.specialties,
-    reforcoStartDate: incomingStudent.reforcoStartDate != null ? incomingStudent.reforcoStartDate : existingStudent.reforcoStartDate,
-    reforcoEndDate: incomingStudent.reforcoEndDate != null ? incomingStudent.reforcoEndDate : existingStudent.reforcoEndDate,
+    modalidadesEspeciais: newer.modalidadesEspeciais ?? older.modalidadesEspeciais,
+    specialties: newer.specialties ?? older.specialties ?? newer.modalidadesEspeciais ?? older.modalidadesEspeciais,
+    reforcoStartDate: newer.reforcoStartDate != null ? newer.reforcoStartDate : older.reforcoStartDate,
+    reforcoEndDate: newer.reforcoEndDate != null ? newer.reforcoEndDate : older.reforcoEndDate,
     tipoContrato,
     dataInicioContrato,
     dataTerminoContrato,
     diasContratados,
     diasFrequencia: (tipoContrato === 'avulso' && diasContratados && diasContratados.length > 0)
       ? diasContratados
-      : (incomingDays && incomingDays.length > 0 ? incomingDays : (existingStudent.diasFrequencia || [...DEFAULT_DIAS_FREQUENCIA])),
+      : chosenDays,
     horariosSaida: mergedHorarios,
     status,
     statusMatricula:
       status === 'ativo'
         ? 'ativo'
-        : incomingStudent.statusMatricula === 'inativo' || incomingStudent.statusMatricula === 'cancelado'
-        ? incomingStudent.statusMatricula
-        : existingStudent.statusMatricula === 'inativo' || existingStudent.statusMatricula === 'cancelado'
-        ? existingStudent.statusMatricula
+        : newer.statusMatricula === 'inativo' || newer.statusMatricula === 'cancelado'
+        ? newer.statusMatricula
+        : older.statusMatricula === 'inativo' || older.statusMatricula === 'cancelado'
+        ? older.statusMatricula
         : status,
     inactivationDate,
     inactivationReason,
-    anoLetivo: incomingStudent.anoLetivo != null ? incomingStudent.anoLetivo : existingStudent.anoLetivo,
-    tipoSaida: incomingStudent.tipoSaida ?? existingStudent.tipoSaida,
-    nomeCondutor: incomingStudent.nomeCondutor != null ? incomingStudent.nomeCondutor : existingStudent.nomeCondutor,
-    planoContratual: incomingStudent.planoContratual ?? existingStudent.planoContratual,
-    horarioPermanenciaLimite: incomingStudent.horarioPermanenciaLimite ?? existingStudent.horarioPermanenciaLimite,
-    valorPlanoBase: incomingStudent.valorPlanoBase != null ? incomingStudent.valorPlanoBase : existingStudent.valorPlanoBase,
-    descontoBolsa: incomingStudent.descontoBolsa != null ? incomingStudent.descontoBolsa : existingStudent.descontoBolsa,
-    valorMensalidadeFinal: incomingStudent.valorMensalidadeFinal != null
-      ? incomingStudent.valorMensalidadeFinal
-      : existingStudent.valorMensalidadeFinal,
-    valorModalidadesExtras: incomingStudent.valorModalidadesExtras != null
-      ? incomingStudent.valorModalidadesExtras
-      : existingStudent.valorModalidadesExtras,
-    oficinasExtras: incomingStudent.oficinasExtras != null
-      ? incomingStudent.oficinasExtras
-      : existingStudent.oficinasExtras,
-    valorOficinas: incomingStudent.valorOficinas != null
-      ? incomingStudent.valorOficinas
-      : existingStudent.valorOficinas,
-    valorExtras: incomingStudent.valorExtras != null
-      ? incomingStudent.valorExtras
-      : existingStudent.valorExtras,
+    anoLetivo: newer.anoLetivo != null ? newer.anoLetivo : older.anoLetivo,
+    tipoSaida: newer.tipoSaida ?? older.tipoSaida,
+    nomeCondutor: newer.nomeCondutor != null ? newer.nomeCondutor : older.nomeCondutor,
+    planoContratual: newer.planoContratual ?? older.planoContratual,
+    horarioPermanenciaLimite: newer.horarioPermanenciaLimite ?? older.horarioPermanenciaLimite,
+    valorPlanoBase: newer.valorPlanoBase != null ? newer.valorPlanoBase : older.valorPlanoBase,
+    descontoBolsa: newer.descontoBolsa != null ? newer.descontoBolsa : older.descontoBolsa,
+    valorMensalidadeFinal: newer.valorMensalidadeFinal != null
+      ? newer.valorMensalidadeFinal
+      : older.valorMensalidadeFinal,
+    valorModalidadesExtras: newer.valorModalidadesExtras != null
+      ? newer.valorModalidadesExtras
+      : older.valorModalidadesExtras,
+    oficinasExtras: newer.oficinasExtras != null
+      ? newer.oficinasExtras
+      : older.oficinasExtras,
+    valorOficinas: newer.valorOficinas != null
+      ? newer.valorOficinas
+      : older.valorOficinas,
+    valorExtras: newer.valorExtras != null
+      ? newer.valorExtras
+      : older.valorExtras,
     diasExtrasAvulsos:
-      incomingStudent.diasExtrasAvulsos !== undefined
-        ? sanitizeExtraDaysArray(incomingStudent.diasExtrasAvulsos)
-        : sanitizeExtraDaysArray(existingStudent.diasExtrasAvulsos),
+      newer.diasExtrasAvulsos !== undefined
+        ? sanitizeExtraDaysArray(newer.diasExtrasAvulsos)
+        : sanitizeExtraDaysArray(older.diasExtrasAvulsos),
     trocasDias:
-      incomingStudent.trocasDias !== undefined
-        ? sanitizeDaySwapsArray(incomingStudent.trocasDias)
-        : sanitizeDaySwapsArray(existingStudent.trocasDias),
-    notes: incomingStudent.notes != null ? incomingStudent.notes : existingStudent.notes,
-    updatedAt:
-      parseUpdatedAtMs(incomingStudent.updatedAt) >= parseUpdatedAtMs(existingStudent.updatedAt)
-        ? (normalizeUpdatedAtIso(incomingStudent.updatedAt) || normalizeUpdatedAtIso(existingStudent.updatedAt))
-        : normalizeUpdatedAtIso(existingStudent.updatedAt),
+      newer.trocasDias !== undefined
+        ? sanitizeDaySwapsArray(newer.trocasDias)
+        : sanitizeDaySwapsArray(older.trocasDias),
+    notes: newer.notes != null ? newer.notes : older.notes,
+    ...(winningUpdatedAt ? { updatedAt: winningUpdatedAt } : {}),
   };
 }
 
@@ -896,8 +951,8 @@ export function deduplicateStudentsList(
       const bNonActive = isNonActiveRecord(b) ? 1 : 0;
       if (bNonActive !== aNonActive) return bNonActive - aNonActive;
 
-      const aActs = Array.isArray(a.activities) ? a.activities.length : 0;
-      const bActs = Array.isArray(b.activities) ? b.activities.length : 0;
+      const aActs = (extractExplicitActivitiesArray(a) || []).length;
+      const bActs = (extractExplicitActivitiesArray(b) || []).length;
       if (bActs !== aActs) return bActs - aActs;
 
       return (a.id || '').localeCompare(b.id || '');

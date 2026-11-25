@@ -269,6 +269,50 @@ const reconciledStudentDriftKeys = new Set<string>();
 const purgedZombieDocPaths = new Set<string>();
 const cloudDeletedStudentIds = new Set<string>();
 
+interface RecentSavedStudentGuard {
+  student: Student;
+  savedAtMs: number;
+  updatedAtMs: number;
+  expiresAtMs: number;
+}
+const recentSavedStudentsById = new Map<string, RecentSavedStudentGuard>();
+const recentSavedStudentsByDedupKey = new Map<string, RecentSavedStudentGuard>();
+const RECENT_SAVE_GUARD_WINDOW_MS = 20_000;
+
+export function registerRecentLocalStudentEdit(student: Student): void {
+  if (!student || !student.id) return;
+  const normalized = normalizeStudent(student);
+  const nowMs = Date.now();
+  const updatedAtMs = parseUpdatedAtMs(normalized.updatedAt) || nowMs;
+  const guard: RecentSavedStudentGuard = {
+    student: normalized,
+    savedAtMs: nowMs,
+    updatedAtMs,
+    expiresAtMs: nowMs + RECENT_SAVE_GUARD_WINDOW_MS,
+  };
+  recentSavedStudentsById.set(normalized.id, guard);
+  const dedupKey = getStudentDeduplicationKey(normalized);
+  if (dedupKey) {
+    recentSavedStudentsByDedupKey.set(dedupKey, guard);
+  }
+}
+
+function getActiveRecentGuardForStudent(student: Partial<Student>): RecentSavedStudentGuard | undefined {
+  const nowMs = Date.now();
+  const byId = student.id ? recentSavedStudentsById.get(student.id) : undefined;
+  if (byId) {
+    if (nowMs <= byId.expiresAtMs) return byId;
+    recentSavedStudentsById.delete(student.id!);
+  }
+  const dedupKey = getStudentDeduplicationKey(student);
+  const byKey = dedupKey ? recentSavedStudentsByDedupKey.get(dedupKey) : undefined;
+  if (byKey) {
+    if (nowMs <= byKey.expiresAtMs) return byKey;
+    recentSavedStudentsByDedupKey.delete(dedupKey);
+  }
+  return undefined;
+}
+
 function normalizeTextForMatch(val: unknown): string {
   return String(val || '')
     .normalize('NFD')
@@ -285,6 +329,15 @@ function normalizeTurmaForMatch(val: unknown): string {
     return 'mini maternal azul';
   }
   return norm;
+}
+
+function extractRawActivitiesList(docData: any): string[] {
+  if (!docData || typeof docData !== 'object') return [];
+  if (Array.isArray(docData.activities) && docData.activities.length > 0) return docData.activities;
+  if (Array.isArray(docData.atividades) && docData.atividades.length > 0) return docData.atividades;
+  if (Array.isArray(docData.modalidades) && docData.modalidades.length > 0) return docData.modalidades;
+  if (Array.isArray(docData.activities)) return docData.activities;
+  return [];
 }
 
 async function addCloudDeletedStudentIds(ids: string[]): Promise<void> {
@@ -367,8 +420,8 @@ function studentSyncStateDiffers(docA: any, docB: any): boolean {
   if (tcA !== tcB) return true;
   if (String(docA.dataInicioContrato || '') !== String(docB.dataInicioContrato || '')) return true;
   if (String(docA.dataTerminoContrato || '') !== String(docB.dataTerminoContrato || '')) return true;
-  const actsA = (Array.isArray(docA.activities) ? docA.activities : []).slice().sort().join('|');
-  const actsB = (Array.isArray(docB.activities) ? docB.activities : []).slice().sort().join('|');
+  const actsA = extractRawActivitiesList(docA).slice().sort().join('|');
+  const actsB = extractRawActivitiesList(docB).slice().sort().join('|');
   if (actsA !== actsB) return true;
   if (String(docA.turma || '').trim() !== String(docB.turma || '').trim()) return true;
   if (String(docA.inactivationDate || '') !== String(docB.inactivationDate || '')) return true;
@@ -391,15 +444,21 @@ function scheduleDuplicateReconciliationInFirestore(
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   if (!winner || targetIds.length === 0) return;
 
-  const winnerActs = Array.isArray(winner.activities) && winner.activities.length > 0 ? winner.activities : ['Rotina'];
-  const winnerStatus = winner.status || 'ativo';
-  const winnerMat = winner.statusMatricula || winnerStatus;
-  const winnerContrato = winner.tipoContrato || 'regular';
-  const winnerInicio = winnerContrato === 'avulso' ? (winner.dataInicioContrato || '') : '';
-  const winnerTermino = winnerContrato === 'avulso' ? (winner.dataTerminoContrato || '') : '';
-  const winnerTsMs = parseUpdatedAtMs(winner.updatedAt) || extractStudentTimestamp(winner);
-  const winnerUpdatedAt = winnerTsMs > 0 ? new Date(winnerTsMs).toISOString() : '1970-01-01T00:00:00.000Z';
-  const sigBase = `${winnerStatus}:${winnerMat}:${winnerContrato}:${winnerInicio}:${winnerTermino}:${winnerActs.slice().sort().join(',')}:${winner.turma || ''}:${winner.inactivationDate || ''}`;
+  const recentGuard = getActiveRecentGuardForStudent(winner);
+  const guardedWinner =
+    recentGuard && recentGuard.updatedAtMs >= (parseUpdatedAtMs(winner.updatedAt) || 0)
+      ? recentGuard.student
+      : winner;
+
+  const winnerActs = Array.isArray(guardedWinner.activities) && guardedWinner.activities.length > 0 ? guardedWinner.activities : ['Rotina'];
+  const winnerStatus = guardedWinner.status || 'ativo';
+  const winnerMat = guardedWinner.statusMatricula || winnerStatus;
+  const winnerContrato = guardedWinner.tipoContrato || 'regular';
+  const winnerInicio = winnerContrato === 'avulso' ? (guardedWinner.dataInicioContrato || '') : '';
+  const winnerTermino = winnerContrato === 'avulso' ? (guardedWinner.dataTerminoContrato || '') : '';
+  const winnerTsMs = parseUpdatedAtMs(guardedWinner.updatedAt) || extractStudentTimestamp(guardedWinner);
+  const winnerUpdatedAt = winnerTsMs > 0 ? new Date(winnerTsMs).toISOString() : new Date().toISOString();
+  const sigBase = `${winnerStatus}:${winnerMat}:${winnerContrato}:${winnerInicio}:${winnerTermino}:${winnerActs.slice().sort().join(',')}:${guardedWinner.turma || ''}:${guardedWinner.inactivationDate || ''}`;
 
   const writes: Array<{ col: 'alunos' | 'students'; id: string }> = [];
   for (const tid of targetIds) {
@@ -408,14 +467,14 @@ function scheduleDuplicateReconciliationInFirestore(
     const aDocMs = aDoc ? (parseUpdatedAtMs(aDoc.updatedAt) || extractStudentTimestamp(aDoc)) : 0;
     const sDocMs = sDoc ? (parseUpdatedAtMs(sDoc.updatedAt) || extractStudentTimestamp(sDoc)) : 0;
 
-    if (aDoc && studentSyncStateDiffers(aDoc, winner) && !(aDocMs > 0 && winnerTsMs > 0 && aDocMs > winnerTsMs)) {
+    if (aDoc && studentSyncStateDiffers(aDoc, guardedWinner) && !(aDocMs > 0 && winnerTsMs > 0 && aDocMs > winnerTsMs)) {
       const key = `alunos/${tid}:${sigBase}`;
       if (!reconciledStudentDriftKeys.has(key)) {
         reconciledStudentDriftKeys.add(key);
         writes.push({ col: 'alunos', id: tid });
       }
     }
-    if (sDoc && studentSyncStateDiffers(sDoc, winner) && !(sDocMs > 0 && winnerTsMs > 0 && sDocMs > winnerTsMs)) {
+    if (sDoc && studentSyncStateDiffers(sDoc, guardedWinner) && !(sDocMs > 0 && winnerTsMs > 0 && sDocMs > winnerTsMs)) {
       const key = `students/${tid}:${sigBase}`;
       if (!reconciledStudentDriftKeys.has(key)) {
         reconciledStudentDriftKeys.add(key);
@@ -427,21 +486,23 @@ function scheduleDuplicateReconciliationInFirestore(
   if (writes.length === 0) return;
 
   const syncPatch: Record<string, any> = {
-    turma: winner.turma,
+    turma: guardedWinner.turma,
     activities: winnerActs,
-    modalidadesEspeciais: winner.modalidadesEspeciais || [],
-    specialties: winner.specialties || winner.modalidadesEspeciais || [],
+    atividades: winnerActs,
+    modalidades: winnerActs,
+    modalidadesEspeciais: guardedWinner.modalidadesEspeciais || [],
+    specialties: guardedWinner.specialties || guardedWinner.modalidadesEspeciais || [],
     tipoContrato: winnerContrato,
     dataInicioContrato: winnerInicio,
     dataTerminoContrato: winnerTermino,
-    diasContratados: winnerContrato === 'avulso' ? (winner.diasContratados || winner.diasFrequencia || []) : [],
-    diasFrequencia: winner.diasFrequencia || [],
+    diasContratados: winnerContrato === 'avulso' ? (guardedWinner.diasContratados || guardedWinner.diasFrequencia || []) : [],
+    diasFrequencia: guardedWinner.diasFrequencia || [],
     status: winnerStatus,
     statusMatricula: winnerMat,
-    inactivationDate: winnerStatus === 'ativo' ? '' : (winner.inactivationDate || ''),
-    inactivationReason: winnerStatus === 'ativo' ? '' : (winner.inactivationReason || ''),
-    diasExtrasAvulsos: Array.isArray(winner.diasExtrasAvulsos) ? winner.diasExtrasAvulsos : [],
-    trocasDias: Array.isArray(winner.trocasDias) ? winner.trocasDias : [],
+    inactivationDate: winnerStatus === 'ativo' ? '' : (guardedWinner.inactivationDate || ''),
+    inactivationReason: winnerStatus === 'ativo' ? '' : (guardedWinner.inactivationReason || ''),
+    diasExtrasAvulsos: Array.isArray(guardedWinner.diasExtrasAvulsos) ? guardedWinner.diasExtrasAvulsos : [],
+    trocasDias: Array.isArray(guardedWinner.trocasDias) ? guardedWinner.trocasDias : [],
     updatedAt: winnerUpdatedAt,
   };
 
@@ -504,14 +565,37 @@ export function subscribeAlunos(
 
     combinedMap.forEach((data, id) => {
       if (!isMockStudent({ id, name: data.name }) && !deletedIds.has(id)) {
-        const normalized = normalizeStudent({ ...data, id });
+        let normalized = normalizeStudent({ ...data, id });
+        const recentGuard = getActiveRecentGuardForStudent(normalized);
+        if (recentGuard) {
+          const remoteTs = parseUpdatedAtMs(normalized.updatedAt);
+          if (remoteTs < recentGuard.updatedAtMs || (remoteTs === recentGuard.updatedAtMs && studentSyncStateDiffers(normalized, recentGuard.student))) {
+            normalized = { ...recentGuard.student, id: normalized.id };
+          }
+        }
         list.push(normalized);
         // Se 'alunos/{id}' e 'students/{id}' divergirem em status/modalidades, concilia a cópia obsoleta no Firestore
         const aDoc = alunosDocs.get(id);
         const sDoc = studentsDocs.get(id);
-        if (aDoc && sDoc && studentSyncStateDiffers(aDoc, sDoc)) {
+        if (
+          (aDoc && sDoc && studentSyncStateDiffers(aDoc, sDoc)) ||
+          (recentGuard && ((aDoc && studentSyncStateDiffers(aDoc, normalized)) || (sDoc && studentSyncStateDiffers(sDoc, normalized))))
+        ) {
           scheduleDuplicateReconciliationInFirestore(alunosDocs, studentsDocs, normalized, [id]);
         }
+      }
+    });
+
+    // Garante que qualquer edição local muito recente ainda não propagada no snapshot não desapareça
+    const nowMs = Date.now();
+    const presentIds = new Set(list.map((s) => s.id));
+    recentSavedStudentsById.forEach((guard, guardId) => {
+      if (nowMs > guard.expiresAtMs) {
+        recentSavedStudentsById.delete(guardId);
+        return;
+      }
+      if (!presentIds.has(guardId) && !deletedIds.has(guardId)) {
+        list.push(guard.student);
       }
     });
 
@@ -1574,7 +1658,10 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       throw new Error('Sem conexão com a internet. Não foi possível confirmar a gravação no Firestore.');
     }
 
-    const normalized = normalizeStudent(student);
+    const nowIso = normalizeUpdatedAtIso(student.updatedAt) || new Date().toISOString();
+    const normalized = normalizeStudent({ ...student, updatedAt: nowIso });
+    registerRecentLocalStudentEdit(normalized);
+
     unmarkStudentAsDeleted(normalized.id);
     if (cloudDeletedStudentIds.has(normalized.id)) {
       cloudDeletedStudentIds.delete(normalized.id);
@@ -1585,12 +1672,13 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
       ).catch(() => {});
     }
     const isAtivo = (normalized.status || 'ativo') === 'ativo';
-    const nowIso = normalizeUpdatedAtIso(normalized.updatedAt) || new Date().toISOString();
     const payload = {
       id: normalized.id,
       name: normalized.name,
       turma: normalized.turma,
       activities: normalized.activities,
+      atividades: normalized.activities,
+      modalidades: normalized.activities,
       modalidadesEspeciais: normalized.modalidadesEspeciais || [],
       specialties: normalized.modalidadesEspeciais || [],
       tipoContrato: normalized.tipoContrato || 'regular',
@@ -1622,7 +1710,7 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
     };
 
     // Descobre eventuais documentos paralelos/duplicados ANTES da escrita para gravar tudo em um único batch atômico
-    // e eliminar a janela de corrida em que um onSnapshot parcial enxerga a cópia antiga como divergente.
+    // nas coleções 'alunos' e 'students' (por id, nome + anoLetivo e chave de deduplicação).
     const allTargets = new Map<string, { ref: any; docId: string }>();
     allTargets.set(`alunos/${normalized.id}`, { ref: doc(db, 'alunos', normalized.id), docId: normalized.id });
     allTargets.set(`students/${normalized.id}`, { ref: doc(db, 'students', normalized.id), docId: normalized.id });
@@ -1630,7 +1718,6 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
     try {
       const targetDedupKey = getStudentDeduplicationKey(normalized);
       const normTargetName = normalizeTextForMatch(normalized.name);
-      const normTargetTurma = normalizeTurmaForMatch(normalized.turma);
       const isJose = isJoseRicardoManeghin(normalized);
       const targetAno = normalized.anoLetivo !== undefined ? Number(normalized.anoLetivo) : 2026;
       const isTargetAvulso = (normalized.tipoContrato || 'regular') === 'avulso';
@@ -1660,17 +1747,17 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
 
           const sameInternalId = data.id === normalized.id;
           const sameJose = isJose && isJoseRicardoManeghin({ id: docSnap.id, name: rawCandidateName });
-          const sameNormNameAndTurma =
+          const sameNormNameAndAno =
             Boolean(normTargetName) &&
             normalizeTextForMatch(rawCandidateName) === normTargetName &&
-            (!normTargetTurma || !data.turma || normalizeTurmaForMatch(data.turma) === normTargetTurma);
+            docAno === targetAno;
 
           // Isolamento de múltiplos contratos avulsos:
           // - Se o aluno salvo é avulso, só propaga para cópias do mesmo ID ou do mesmo período exato (targetDedupKey).
-          // - Nunca sobrescreve outras ocorrências avulsas de datas diferentes nem cadastros regulares.
+          // - Para contrato regular, propaga para todas as cópias correspondentes em 'alunos' e 'students' (id ou nome + anoLetivo).
           const shouldSyncShadow = isTargetAvulso
             ? sameInternalId || (isDocAvulso && docDedupKey === targetDedupKey)
-            : sameInternalId || (!isDocAvulso && (docDedupKey === targetDedupKey || sameJose || sameNormNameAndTurma));
+            : sameInternalId || (!isDocAvulso && (docDedupKey === targetDedupKey || sameJose || sameNormNameAndAno));
 
           if (shouldSyncShadow) {
             allTargets.set(pathKey, { ref: docSnap.ref, docId: docSnap.id });
@@ -4785,7 +4872,15 @@ export async function fetchStudentsDirectFromServer(): Promise<Student[]> {
 
     const list: Student[] = [];
     mergedDocsMap.forEach((data, id) => {
-      list.push(normalizeStudent({ ...data, id }));
+      let normalized = normalizeStudent({ ...data, id });
+      const recentGuard = getActiveRecentGuardForStudent(normalized);
+      if (recentGuard) {
+        const remoteTs = parseUpdatedAtMs(normalized.updatedAt);
+        if (remoteTs < recentGuard.updatedAtMs || (remoteTs === recentGuard.updatedAtMs && studentSyncStateDiffers(normalized, recentGuard.student))) {
+          normalized = { ...recentGuard.student, id: normalized.id };
+        }
+      }
+      list.push(normalized);
     });
     return deduplicateStudentsList(list, (winner, olderDuplicates) => {
       const duplicateIds = olderDuplicates.map((d) => d.id).filter(Boolean);
