@@ -349,35 +349,38 @@ export function formatAdiPrazoBR(prazoData?: string): string {
 
 export function buildAdiDemandWhatsAppMessage(demand: AdiDemandRecord): string {
   const firstName = (demand.adiName || '').trim().split(/\s+/)[0] || 'ADI';
-  const priorityTag = demand.prioridade === 'urgente' ? '🚨 *URGENTE* • ' : '📌 ';
+  const headerLine =
+    demand.prioridade === 'urgente'
+      ? '🚨 URGENTE • Lembrete / Demanda ADI — Programa Integral'
+      : '📌 Lembrete / Demanda ADI — Programa Integral';
+
+  const statusLabel =
+    demand.status === 'em_andamento'
+      ? 'Em Andamento'
+      : demand.status === 'concluido'
+      ? 'Concluído'
+      : 'Pendente';
+
   const lines: string[] = [
-    `Olá, *${firstName}*! 👋`,
+    `Olá, ${firstName}! 👋`,
+    headerLine,
     '',
-    `${priorityTag}*Lembrete / Demanda ADI — Programa Integral | Colégio Crescer*`,
-    '',
-    `📝 *Assunto:* ${demand.titulo}`,
+    `📝 Assunto: ${(demand.titulo || '').trim()}`,
   ];
 
-  if (demand.turma) {
-    lines.push(`🏫 *Turma:* ${demand.turma}`);
+  if (demand.turma && demand.turma.trim()) {
+    lines.push(`🏫 Turma: ${demand.turma.trim()}`);
   }
-  if (demand.studentName) {
-    lines.push(`🧒 *Aluno(a):* ${demand.studentName}`);
-  }
-  if (demand.descricao && demand.descricao.trim() !== demand.titulo.trim()) {
-    lines.push(`📋 *Detalhes:* ${demand.descricao.trim()}`);
+  if (demand.studentName && demand.studentName.trim()) {
+    lines.push(`🧒 Aluno(a): ${demand.studentName.trim()}`);
   }
 
-  lines.push(`📅 *Prazo:* ${formatAdiPrazoBR(demand.prazoData)}`);
-  lines.push(`📊 *Status:* ${demand.status === 'em_andamento' ? 'Em andamento' : demand.status === 'concluido' ? 'Concluído' : 'Pendente'}`);
-
-  if (demand.observacaoRetorno) {
-    lines.push(`💬 *Parecer / Retorno:* ${demand.observacaoRetorno}`);
-  }
-
+  lines.push(`📋 Detalhes: ${(demand.descricao || demand.titulo || '').trim()}`);
+  lines.push(`📅 Prazo: ${formatAdiPrazoBR(demand.prazoData)}`);
+  lines.push(`📊 Status: ${statusLabel}`);
   lines.push('');
-  lines.push('Por favor, nos dê um retorno assim que alinhado. Obrigado(a)!');
-  lines.push('Coordenação do Integral — Colégio Crescer');
+  lines.push('Por favor, nos dê um retorno assim que alinhado. Obrigado!');
+  lines.push('Coordenação do Integral');
 
   return lines.join('\n');
 }
