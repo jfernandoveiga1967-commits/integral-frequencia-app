@@ -57,7 +57,13 @@ import {
   TurmaAtribuicao,
   SemanarioPlan,
   DepartureAlertSettings,
+  AdiDemandRecord,
 } from '../types';
+import {
+  subscribeAdiDemands,
+  getPendingAdiDemandsForTurmaCard,
+  getPendingAdiDemandsForUser,
+} from '../services/adiDemandService';
 import { isBlockAttendanceConfirmed, confirmBlockAttendance } from '../services/frequencyService';
 import { getDepartureAlertSettings, subscribeDepartureAlertSettings } from '../firebase';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
@@ -326,8 +332,40 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
     }
   };
 
-  // Quadro de Atribuições modal
+  // Quadro de Atribuições modal & Demandas ADI
   const [isQuadroModalOpen, setIsQuadroModalOpen] = useState(false);
+  const [quadroInitialView, setQuadroInitialView] = useState<'atribuicoes' | 'demandas'>('atribuicoes');
+  const [quadroInitialAdiFilter, setQuadroInitialAdiFilter] = useState<string>('TODAS');
+  const [quadroInitialTurmaFilter, setQuadroInitialTurmaFilter] = useState<string>('TODAS');
+  const [adiDemands, setAdiDemands] = useState<AdiDemandRecord[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeAdiDemands((records) => {
+      setAdiDemands(records);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const openQuadroModal = (
+    view: 'atribuicoes' | 'demandas' = 'atribuicoes',
+    adiFilter: string = 'TODAS',
+    turmaFilter: string = 'TODAS'
+  ) => {
+    setQuadroInitialView(view);
+    setQuadroInitialAdiFilter(adiFilter || 'TODAS');
+    setQuadroInitialTurmaFilter(turmaFilter || 'TODAS');
+    setIsQuadroModalOpen(true);
+  };
+
+  const totalPendingAdiDemands = useMemo(
+    () => adiDemands.filter((d) => d.status !== 'concluido').length,
+    [adiDemands]
+  );
+
+  const userPendingAdiDemands = useMemo(
+    () => getPendingAdiDemandsForUser(adiDemands, currentUser),
+    [adiDemands, currentUser]
+  );
 
   // Departure Alert state & settings - Inicializa com localStorage de salvaguarda (se houver) e escuta em tempo real
   const [alertSettings, setAlertSettings] = useState<DepartureAlertSettings>(() => {
@@ -1337,6 +1375,42 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
         </div>
       )}
 
+      {/* Banner Discreto para ADI / Monitor logado com demandas pendentes */}
+      {userPendingAdiDemands.length > 0 && (
+        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 text-xs flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-base leading-none shrink-0" aria-hidden="true">
+              📌
+            </span>
+            <div className="min-w-0">
+              <span className="font-black">Lembretes ADI para você:</span>{' '}
+              Você possui{' '}
+              <strong>
+                {userPendingAdiDemands.length}{' '}
+                {userPendingAdiDemands.length === 1 ? 'demanda pendente' : 'demandas pendentes'}
+              </strong>
+              {userPendingAdiDemands[0]?.titulo ? (
+                <span className="text-amber-800 ml-1">
+                  — Ex.: &ldquo;{userPendingAdiDemands[0].titulo}&rdquo;
+                  {userPendingAdiDemands.length > 1
+                    ? ` (+${userPendingAdiDemands.length - 1})`
+                    : ''}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              openQuadroModal('demandas', currentUser?.name || 'TODAS', 'TODAS')
+            }
+            className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] shrink-0 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+          >
+            <span>Ver Minhas Demandas ({userPendingAdiDemands.length})</span>
+          </button>
+        </div>
+      )}
+
       {/* Filter, Search and Quadro de Atribuições Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2.5">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
@@ -1404,15 +1478,20 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
           {/* Button: Quadro Geral de Atribuições */}
           <button
             type="button"
-            onClick={() => setIsQuadroModalOpen(true)}
+            onClick={() => openQuadroModal('atribuicoes', 'TODAS', 'TODAS')}
             className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold flex items-center justify-center space-x-1.5 transition-all shadow-xs shrink-0 cursor-pointer"
-            title="Abrir Quadro Geral de Atribuições das Turmas e Apoio"
+            title="Abrir Quadro Geral de Atribuições das Turmas, Sua ADI e Demandas"
           >
             <Users className="w-3.5 h-3.5" />
             <span>Quadro de Atribuições</span>
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-800/60 text-amber-100 uppercase tracking-wider font-black">
               Sua ADI
             </span>
+            {totalPendingAdiDemands > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white text-amber-900 font-black">
+                📌 {totalPendingAdiDemands}
+              </span>
+            )}
           </button>
 
           {/* Button / Indicator: Configuração de Aviso de Saída */}
@@ -2384,6 +2463,42 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
                         </div>
                       </div>
 
+                      {/* Badge clicável de Lembretes/Demandas ADI pendentes */}
+                      {(() => {
+                        const cardPendingDemands = getPendingAdiDemandsForTurmaCard(
+                          adiDemands,
+                          turmaName,
+                          turmaAtribuicao.adiName
+                        );
+                        if (cardPendingDemands.length === 0) return null;
+                        return (
+                          <div className="flex items-center justify-between pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openQuadroModal(
+                                  'demandas',
+                                  turmaAtribuicao.adiName || 'TODAS',
+                                  turmaAtribuicao.adiName ? 'TODAS' : turmaName
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black shadow-2xs transition-colors cursor-pointer"
+                              title={`Ver ${cardPendingDemands.length} lembrete(s) pendente(s) para ${turmaAtribuicao.adiName || turmaName}`}
+                            >
+                              <span>
+                                📌 {cardPendingDemands.length}{' '}
+                                {cardPendingDemands.length === 1 ? 'Lembrete ADI' : 'Lembretes ADI'}
+                              </span>
+                            </button>
+                            {cardPendingDemands.some((d) => d.prioridade === 'urgente') && (
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-600 text-white">
+                                Urgente
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       {/* Monitora da Turma e Vice-Versa */}
                       <div className="flex items-center justify-between pt-1 border-t border-amber-200/60 text-[10px]">
                         <div className="flex items-center space-x-1 text-slate-600 truncate min-w-0 pr-1">
@@ -2806,12 +2921,22 @@ export const CurrentActivities: React.FC<CurrentActivitiesProps> = ({
       {/* Quadro Geral de Atribuições Modal */}
       <QuadroAtribuicoesModal
         isOpen={isQuadroModalOpen}
-        onClose={() => setIsQuadroModalOpen(false)}
+        onClose={() => {
+          setIsQuadroModalOpen(false);
+          setQuadroInitialView('atribuicoes');
+          setQuadroInitialAdiFilter('TODAS');
+          setQuadroInitialTurmaFilter('TODAS');
+        }}
         atribuicoes={atribuicoesList}
         users={users}
         currentUser={currentUser}
         onSaveAtribuicao={handleSaveAtribuicaoItem}
         onBatchSaveAtribuicoes={onBatchSaveAtribuicoes}
+        students={yearStudents}
+        demands={adiDemands}
+        initialViewMode={quadroInitialView}
+        initialAdiFilter={quadroInitialAdiFilter}
+        initialTurmaFilter={quadroInitialTurmaFilter}
       />
 
       {/* Configuração de Aviso de Saída Modal */}

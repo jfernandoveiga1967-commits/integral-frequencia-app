@@ -1128,3 +1128,27 @@ export interface SofiaAuditLogEntry {
   detail?: string;
 }
 
+export type AdiDemandStatus = 'pendente' | 'em_andamento' | 'concluido';
+
+export type AdiDemandPriority = 'normal' | 'urgente';
+
+export interface AdiDemandRecord {
+  id: string;
+  adiName: string;
+  adiPhone?: string;
+  turma?: string;
+  studentName?: string;
+  titulo: string;
+  descricao: string;
+  prazoData: string; // YYYY-MM-DD
+  prioridade: AdiDemandPriority;
+  status: AdiDemandStatus;
+  observacaoRetorno?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  resolvedAt?: string;
+}
+
+

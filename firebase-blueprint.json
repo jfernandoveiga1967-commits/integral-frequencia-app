@@ -437,6 +437,30 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "studentId", "studentName", "turma", "anoLetivo", "dataOrigem", "dataDestino", "horarioSaida", "status", "createdAt"]
+    },
+    "AdiDemandRecord": {
+      "title": "AdiDemandRecord",
+      "description": "Reminders and operational/pedagogical demands assigned to ADIs by school coordination",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "adiName": { "type": "string", "maxLength": 128 },
+        "adiPhone": { "type": "string", "maxLength": 32 },
+        "turma": { "type": "string", "maxLength": 64 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "titulo": { "type": "string", "maxLength": 200 },
+        "descricao": { "type": "string", "maxLength": 1500 },
+        "prazoData": { "type": "string", "maxLength": 10 },
+        "prioridade": { "type": "string", "enum": ["normal", "urgente"] },
+        "status": { "type": "string", "enum": ["pendente", "em_andamento", "concluido"] },
+        "observacaoRetorno": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 },
+        "resolvedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "adiName", "titulo", "descricao", "prazoData", "prioridade", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -531,6 +555,10 @@
     "/daySwaps/{swapId}": {
       "schema": "DaySwapRecord",
       "description": "Collection of punctual day swaps (troca/permuta de dia) without financial charge"
+    },
+    "/adiDemands/{demandId}": {
+      "schema": "AdiDemandRecord",
+      "description": "Collection of reminders and demands assigned to each ADI"
     }
   }
 }
