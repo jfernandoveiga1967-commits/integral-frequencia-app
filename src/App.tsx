@@ -28,6 +28,7 @@ import {
   savePontoClosings,
   loadSemanarioPlans,
   saveSemanarioPlans,
+  getSemanarioOutbox,
   resetAllData,
   isMockStudent,
   checkAndInactivateExpiredTemporaryStudents,
@@ -123,6 +124,7 @@ import {
   batchDeleteAttendanceRecordsFromFirestore,
   reconnectFirestore,
   processAttendanceOutbox,
+  processSemanarioOutbox,
   saveTurmaToFirestore,
   deleteTurmaFromFirestore,
   saveUserToFirestore,
@@ -162,6 +164,7 @@ import {
 import {
   deduplicateSemanarioPlans,
   upsertSemanarioPlans,
+  resolveCanonicalSemanarioPlan,
   deduplicateScheduleBlocks,
   upsertScheduleBlocks,
 } from './utils/scheduleDeduplication';
@@ -244,7 +247,19 @@ export default function App() {
   });
   const [pontoRecords, setPontoRecords] = useState<PontoRecord[]>(() => loadPontoRecords());
   const [pontoClosings, setPontoClosings] = useState<PontoMonthClosing[]>(() => loadPontoClosings());
-  const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => loadSemanarioPlans());
+  const [semanarioPlans, setSemanarioPlans] = useState<SemanarioPlan[]>(() => {
+    const base = loadSemanarioPlans();
+    const outbox = getSemanarioOutbox();
+    if (!outbox || outbox.length === 0) return base;
+    const deletedIds = new Set(outbox.filter((o) => o.type === 'DELETE').map((o) => o.planId));
+    const pendingSets = outbox.filter((o) => o.type === 'SET' && o.plan).map((o) => o.plan!);
+    const filtered = base.filter((p) => !deletedIds.has(p.id));
+    return pendingSets.length > 0 ? upsertSemanarioPlans(filtered, pendingSets) : filtered;
+  });
+  const semanarioPlansRef = useRef<SemanarioPlan[]>(semanarioPlans);
+  useEffect(() => {
+    semanarioPlansRef.current = semanarioPlans;
+  }, [semanarioPlans]);
   const [quadroAtribuicoes, setQuadroAtribuicoes] = useState<TurmaAtribuicao[]>(() => loadLocalQuadroAtribuicoes());
   const [activeTab, setActiveTab] = useState<TabType>('momento');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState<number>(2026);
@@ -472,6 +487,7 @@ export default function App() {
       setFirebaseConnected(connected);
       if (connected) {
         processAttendanceOutbox().catch(() => {});
+        processSemanarioOutbox().catch(() => {});
       }
       try {
         await restoreMiniMaternal2026();
@@ -631,7 +647,7 @@ export default function App() {
   const shouldSyncTurmas = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncUsers = isLogged; // Otimização ativa: a lista de 24 usuários só é sincronizada após o login; antes do login, a autenticação faz busca pontual por e-mail no Firestore
   const shouldSyncActivities = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('alunos', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser));
-  const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('usuarios', currentUser) || isTabAllowed('financeiro', currentUser));
+  const shouldSyncSchedules = isLogged && (isCoord || isTabAllowed('momento', currentUser) || isTabAllowed('frequencia', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('usuarios', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncHolidays = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('semanario', currentUser) || isTabAllowed('relatorio', currentUser) || isTabAllowed('usuarios', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncPonto = isLogged && (isCoord || isTabAllowed('ponto', currentUser) || isTabAllowed('financeiro', currentUser));
   const shouldSyncSemanario = isLogged && (isCoord || isTabAllowed('semanario', currentUser) || isTabAllowed('biblioteca', currentUser) || isTabAllowed('financeiro', currentUser));
@@ -827,9 +843,16 @@ export default function App() {
     if (!shouldSyncSchedules) return;
 
     const unsubSchedules = subscribeToSchedules((fsSchedules) => {
-      const cleanSchedules = deduplicateScheduleBlocks(fsSchedules);
-      setSchedules(cleanSchedules);
-      saveSchedules(cleanSchedules);
+      if (fsSchedules && fsSchedules.length > 0) {
+        const cleanSchedules = deduplicateScheduleBlocks(fsSchedules);
+        setSchedules(cleanSchedules);
+        saveSchedules(cleanSchedules);
+      } else {
+        const fallback = loadSchedules();
+        if (fallback.length > 0) {
+          setSchedules(fallback);
+        }
+      }
     });
 
     return () => {
@@ -922,8 +945,19 @@ export default function App() {
     if (!shouldSyncSemanario) return;
 
     const unsubSemanario = subscribeSemanarioPlans((fsPlans) => {
+      const outbox = getSemanarioOutbox();
+      const outboxDeletedIds = new Set(
+        outbox.filter((o) => o.type === 'DELETE').map((o) => o.planId)
+      );
+      const outboxPendingSets = outbox
+        .filter((o) => o.type === 'SET' && o.plan)
+        .map((o) => o.plan!);
+
       const fsFiltered = (fsPlans || []).filter(
-        (p) => p && !pendingSemanarioDeletesRef.current.has(p.id)
+        (p) =>
+          p &&
+          !pendingSemanarioDeletesRef.current.has(p.id) &&
+          !outboxDeletedIds.has(p.id)
       );
 
       // Limpa da lista de exclusões pendentes os IDs que já sumiram do Firestore
@@ -947,10 +981,12 @@ export default function App() {
         }
       });
 
-      if (fsFiltered.length > 0 || stillPendingWrites.length > 0) {
+      const combinedPending = [...stillPendingWrites, ...outboxPendingSets];
+
+      if (fsFiltered.length > 0 || combinedPending.length > 0) {
         const merged =
-          stillPendingWrites.length > 0
-            ? upsertSemanarioPlans(fsFiltered, stillPendingWrites)
+          combinedPending.length > 0
+            ? upsertSemanarioPlans(fsFiltered, combinedPending)
             : deduplicateSemanarioPlans(fsFiltered);
         setSemanarioPlans(merged);
         saveSemanarioPlans(merged);
@@ -2128,17 +2164,26 @@ export default function App() {
       ...plan,
       updatedAt: plan.updatedAt || new Date().toISOString(),
     };
-    pendingSemanarioDeletesRef.current.delete(stampedPlan.id);
-    pendingSemanarioWritesRef.current.set(stampedPlan.id, stampedPlan);
+    const { canonicalPlan } = resolveCanonicalSemanarioPlan(semanarioPlansRef.current, stampedPlan);
+    const firestorePlan: SemanarioPlan = {
+      ...canonicalPlan,
+      ...(Boolean((stampedPlan as any).statusOnlyUpdate) ? { statusOnlyUpdate: true } : {}),
+      ...(Boolean((stampedPlan as any).explicitModalEdit) ? { explicitModalEdit: true } : {}),
+      ...(Boolean((stampedPlan as any).allowClearDescription) ? { allowClearDescription: true } : {}),
+    } as any;
+
+    pendingSemanarioDeletesRef.current.delete(canonicalPlan.id);
+    pendingSemanarioWritesRef.current.set(canonicalPlan.id, canonicalPlan);
 
     setSemanarioPlans((prev) => {
       const next = upsertSemanarioPlans(prev, [stampedPlan]);
+      semanarioPlansRef.current = next;
       saveSemanarioPlans(next);
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
-    saveSemanarioPlanToFirestore(stampedPlan).catch((err) => {
-      console.error('Falha na gravação remota do Semanário (mantido em cache local):', err);
+    saveSemanarioPlanToFirestore(firestorePlan).catch((err) => {
+      console.error('Falha na gravação remota do Semanário (enfileirado na outbox local):', err);
     });
   }, []);
 
@@ -2148,32 +2193,55 @@ export default function App() {
 
     setSemanarioPlans((prev) => {
       const next = prev.filter((p) => p.id !== planId);
+      semanarioPlansRef.current = next;
       saveSemanarioPlans(next);
       broadcastSyncEvent('SYNC_SEMANARIO', next);
       return next;
     });
     deleteSemanarioPlanFromFirestore(planId).catch((err) => {
-      console.error('Falha na exclusão remota do Semanário:', err);
+      console.error('Falha na exclusão remota do Semanário (enfileirada na outbox local):', err);
     });
   }, []);
 
   const handleBatchSaveSemanarioPlans = useCallback((plansToSave: SemanarioPlan[]) => {
     const nowIso = new Date().toISOString();
-    const stampedList = (plansToSave || []).map((p) => {
-      const stamped = { ...p, updatedAt: p.updatedAt || nowIso };
-      pendingSemanarioDeletesRef.current.delete(stamped.id);
-      pendingSemanarioWritesRef.current.set(stamped.id, stamped);
-      return stamped;
+    const workingSnapshot = [...semanarioPlansRef.current];
+    const firestoreBatchList: SemanarioPlan[] = [];
+    const stampedInputList: SemanarioPlan[] = [];
+
+    (plansToSave || []).forEach((p) => {
+      if (!p) return;
+      const stamped: SemanarioPlan = { ...p, updatedAt: p.updatedAt || nowIso };
+      stampedInputList.push(stamped);
+      const { canonicalPlan } = resolveCanonicalSemanarioPlan(workingSnapshot, stamped);
+      const idx = workingSnapshot.findIndex((w) => w.id === canonicalPlan.id);
+      if (idx >= 0) {
+        workingSnapshot[idx] = canonicalPlan;
+      } else {
+        workingSnapshot.push(canonicalPlan);
+      }
+
+      const firestorePlan: SemanarioPlan = {
+        ...canonicalPlan,
+        ...(Boolean((stamped as any).statusOnlyUpdate) ? { statusOnlyUpdate: true } : {}),
+        ...(Boolean((stamped as any).explicitModalEdit) ? { explicitModalEdit: true } : {}),
+        ...(Boolean((stamped as any).allowClearDescription) ? { allowClearDescription: true } : {}),
+      } as any;
+
+      pendingSemanarioDeletesRef.current.delete(canonicalPlan.id);
+      pendingSemanarioWritesRef.current.set(canonicalPlan.id, canonicalPlan);
+      firestoreBatchList.push(firestorePlan);
     });
 
     setSemanarioPlans((prev) => {
-      const merged = upsertSemanarioPlans(prev, stampedList);
+      const merged = upsertSemanarioPlans(prev, stampedInputList);
+      semanarioPlansRef.current = merged;
       saveSemanarioPlans(merged);
       broadcastSyncEvent('SYNC_SEMANARIO', merged);
       return merged;
     });
-    batchSaveSemanarioPlansToFirestore(stampedList).catch((err) => {
-      console.error('Falha na gravação em lote do Semanário (mantido em cache local):', err);
+    batchSaveSemanarioPlansToFirestore(firestoreBatchList).catch((err) => {
+      console.error('Falha na gravação em lote do Semanário (enfileirado na outbox local):', err);
     });
   }, []);
 

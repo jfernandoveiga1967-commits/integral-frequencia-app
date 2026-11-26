@@ -81,29 +81,239 @@ export function getSemanarioPlanUniqueKey(plan: {
   return `${weekScope}_${turmaKey}_${dayKey}_${timeKey}_${modalidadeKey}`;
 }
 
-function hasPlanPedagogicalContent(plan: SemanarioPlan): boolean {
+const PLACEHOLDER_TEXT_PATTERNS = new Set([
+  'aguardando preenchimento',
+  'a preencher',
+  'sem proposta',
+  'pendente',
+  'aguardando',
+]);
+
+export function isMeaningfulPlanText(value?: string | null): boolean {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return !PLACEHOLDER_TEXT_PATTERNS.has(trimmed.toLowerCase());
+}
+
+export function getPlanDevelopmentText(plan?: SemanarioPlan | null): string {
+  if (!plan) return '';
+  const dev = typeof plan.development === 'string' ? plan.development.trim() : '';
+  if (isMeaningfulPlanText(dev)) return dev;
+  const desc = typeof (plan as any).descricao === 'string' ? (plan as any).descricao.trim() : '';
+  return isMeaningfulPlanText(desc) ? desc : '';
+}
+
+export function getPlanTitleText(plan?: SemanarioPlan | null): string {
+  if (!plan) return '';
+  const ttl = typeof plan.title === 'string' ? plan.title.trim() : '';
+  if (isMeaningfulPlanText(ttl)) return ttl;
+  const prop = typeof (plan as any).proposta === 'string' ? (plan as any).proposta.trim() : '';
+  return isMeaningfulPlanText(prop) ? prop : '';
+}
+
+export function getPlanObjectivesText(plan?: SemanarioPlan | null): string {
+  if (!plan) return '';
+  const obj = typeof plan.objectives === 'string' ? plan.objectives.trim() : '';
+  if (isMeaningfulPlanText(obj)) return obj;
+  const cont = typeof (plan as any).conteudo === 'string' ? (plan as any).conteudo.trim() : '';
+  return isMeaningfulPlanText(cont) ? cont : '';
+}
+
+export function hasPlanPedagogicalContent(plan: SemanarioPlan): boolean {
   if (!plan || (plan as any).isPlaceholder) return false;
-  const dev = (plan.development || (plan as any).descricao || '').trim();
-  const obj = (plan.objectives || (plan as any).conteudo || '').trim();
-  const title = (plan.title || (plan as any).proposta || '').trim();
-  if (!dev && !obj && !title) return false;
-  const combined = `${dev} ${obj} ${title}`.toLowerCase().trim();
-  if (
-    combined === 'aguardando preenchimento' ||
-    combined === 'a preencher' ||
-    combined === 'sem proposta' ||
-    combined === 'pendente'
-  ) {
-    return false;
+  const dev = getPlanDevelopmentText(plan);
+  const obj = getPlanObjectivesText(plan);
+  const title = getPlanTitleText(plan);
+  return Boolean(dev || obj || title);
+}
+
+/**
+ * Calcula um escore de completude pedagógica para desempate seguro.
+ * Planos com descrição/desenvolvimento preenchido têm peso dominante sobre rascunhos sem descrição.
+ */
+function getPlanRichnessScore(plan: SemanarioPlan): number {
+  if (!plan || (plan as any).isPlaceholder) return 0;
+  let score = 0;
+  if (getPlanDevelopmentText(plan)) score += 100;
+  if (getPlanObjectivesText(plan)) score += 25;
+  if (getPlanTitleText(plan)) score += 15;
+  if (isMeaningfulPlanText(plan.materials)) score += 5;
+  if (isMeaningfulPlanText(plan.adiResponsible) || isMeaningfulPlanText(plan.monitors)) score += 5;
+  if (Array.isArray(plan.photos) && plan.photos.length > 0) score += 3;
+  if ((plan as any).isSavedByUser) score += 2;
+  return score;
+}
+
+function parsePlanTimestampMs(ts?: string): number {
+  if (!ts) return 0;
+  const ms = new Date(ts).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Mescla dois registros do mesmo slot do Semanário sem jamais apagar descrições,
+ * títulos, objetivos, materiais ou responsáveis já preenchidos por atualizações parciais/vazias.
+ */
+export function mergeSemanarioPlanRecords(
+  existing: SemanarioPlan,
+  incoming: SemanarioPlan,
+  options?: { allowClearDescription?: boolean; explicitModalEdit?: boolean }
+): SemanarioPlan {
+  const existingMs = parsePlanTimestampMs(existing.updatedAt || existing.createdAt);
+  const incomingMs = parsePlanTimestampMs(incoming.updatedAt || incoming.createdAt);
+  const existingScore = getPlanRichnessScore(existing);
+  const incomingScore = getPlanRichnessScore(incoming);
+
+  // O registro primário define status, horário e metadados mais recentes;
+  // caso o incoming seja explicitamente uma edição do modal ou tenha timestamp >=, assume prioridade de metadados.
+  const incomingIsNewerOrEqual =
+    Boolean(options?.explicitModalEdit) ||
+    incomingMs > existingMs ||
+    (incomingMs === existingMs && incomingScore >= existingScore);
+
+  const primary = incomingIsNewerOrEqual ? incoming : existing;
+  const secondary = incomingIsNewerOrEqual ? existing : incoming;
+
+  const pickText = (pVal?: string, sVal?: string, allowPrimaryBlank = false): string => {
+    const pClean = typeof pVal === 'string' ? pVal.trim() : '';
+    const sClean = typeof sVal === 'string' ? sVal.trim() : '';
+    if (isMeaningfulPlanText(pClean)) return pClean;
+    if (allowPrimaryBlank) return pClean;
+    if (isMeaningfulPlanText(sClean)) return sClean;
+    return pClean || sClean || '';
+  };
+
+  const allowClearDesc = Boolean(options?.allowClearDescription);
+
+  const mergedDev = pickText(
+    getPlanDevelopmentText(primary) || primary.development || (primary as any).descricao,
+    getPlanDevelopmentText(secondary) || secondary.development || (secondary as any).descricao,
+    allowClearDesc && primary === incoming
+  );
+  const mergedTitle = pickText(
+    getPlanTitleText(primary) || primary.title || (primary as any).proposta,
+    getPlanTitleText(secondary) || secondary.title || (secondary as any).proposta
+  );
+  const mergedObjectives = pickText(
+    getPlanObjectivesText(primary) || primary.objectives || (primary as any).conteudo,
+    getPlanObjectivesText(secondary) || secondary.objectives || (secondary as any).conteudo
+  );
+  const mergedMaterials = pickText(primary.materials, secondary.materials, Boolean(options?.explicitModalEdit) && primary === incoming);
+  const mergedWeekTheme = pickText(primary.weekTheme, secondary.weekTheme, Boolean(options?.explicitModalEdit) && primary === incoming);
+  const mergedAdi = pickText(primary.adiResponsible, secondary.adiResponsible, Boolean(options?.explicitModalEdit) && primary === incoming);
+  const mergedMonitors = pickText(primary.monitors, secondary.monitors, Boolean(options?.explicitModalEdit) && primary === incoming);
+  const mergedNotes = pickText(primary.notes, secondary.notes, Boolean(options?.explicitModalEdit) && primary === incoming);
+
+  const pTeacher = (primary.teacherName || '').trim();
+  const sTeacher = (secondary.teacherName || '').trim();
+  const mergedTeacher =
+    pTeacher && pTeacher.toLowerCase() !== 'aguardando preenchimento'
+      ? pTeacher
+      : sTeacher && sTeacher.toLowerCase() !== 'aguardando preenchimento'
+      ? sTeacher
+      : pTeacher || sTeacher || '';
+
+  const mergedPhotos =
+    Array.isArray(primary.photos) && primary.photos.length > 0
+      ? primary.photos
+      : Array.isArray(secondary.photos) && secondary.photos.length > 0
+      ? secondary.photos
+      : undefined;
+
+  const hasContent = Boolean(
+    isMeaningfulPlanText(mergedDev) ||
+      isMeaningfulPlanText(mergedTitle) ||
+      isMeaningfulPlanText(mergedObjectives)
+  );
+
+  const mergedUpdatedAt =
+    incomingMs >= existingMs
+      ? incoming.updatedAt || existing.updatedAt || new Date().toISOString()
+      : existing.updatedAt || incoming.updatedAt || new Date().toISOString();
+
+  // Limpa flags transitórias de controle ao consolidar o objeto final
+  const cleanPrimary: any = { ...primary };
+  delete cleanPrimary.statusOnlyUpdate;
+  delete cleanPrimary.explicitModalEdit;
+  delete cleanPrimary.allowClearDescription;
+
+  return {
+    ...secondary,
+    ...cleanPrimary,
+    id: existing.id || incoming.id,
+    turma: primary.turma || secondary.turma,
+    weekNumber: Number(primary.weekNumber) || Number(secondary.weekNumber) || 0,
+    year: Number(primary.year) || Number(secondary.year) || new Date().getFullYear(),
+    date: primary.date || secondary.date,
+    dayOfWeek: primary.dayOfWeek || secondary.dayOfWeek,
+    timeSlot: (primary.timeSlot && primary.timeSlot.trim()) ? primary.timeSlot : secondary.timeSlot,
+    category: (primary.category && primary.category.trim()) ? primary.category : secondary.category,
+    weekTheme: mergedWeekTheme || undefined,
+    title: mergedTitle,
+    objectives: mergedObjectives || undefined,
+    development: mergedDev,
+    materials: mergedMaterials || undefined,
+    adiResponsible: mergedAdi || undefined,
+    monitors: mergedMonitors || undefined,
+    teacherName: mergedTeacher,
+    status: primary.status || secondary.status || 'pendente',
+    substitutionReason:
+      (primary.status || secondary.status) === 'substituida'
+        ? primary.substitutionReason || secondary.substitutionReason
+        : undefined,
+    photos: mergedPhotos,
+    notes: mergedNotes || undefined,
+    createdAt: existing.createdAt || incoming.createdAt || new Date().toISOString(),
+    updatedAt: mergedUpdatedAt,
+    updatedBy: primary.updatedBy || secondary.updatedBy,
+    ...({
+      descricao: mergedDev,
+      proposta: mergedTitle,
+      conteudo: mergedObjectives || mergedDev,
+      hasSavedContent: hasContent,
+      isSavedByUser: Boolean(
+        (existing as any).isSavedByUser || (incoming as any).isSavedByUser || hasContent
+      ),
+      isPlaceholder:
+        hasContent || (existing as any).isSavedByUser || (incoming as any).isSavedByUser
+          ? false
+          : Boolean((primary as any).isPlaceholder),
+    } as any),
+  };
+}
+
+/**
+ * Encontra o registro existente equivalente (por ID ou por chave única de slot)
+ * e retorna o plano já mesclado com o ID canônico preservado.
+ */
+export function resolveCanonicalSemanarioPlan(
+  currentPlans: SemanarioPlan[],
+  incoming: SemanarioPlan
+): { canonicalPlan: SemanarioPlan; replacedDuplicateId?: string } {
+  const incomingKey = getSemanarioPlanUniqueKey(incoming);
+  const existing = (currentPlans || []).find(
+    (p) => p && (p.id === incoming.id || getSemanarioPlanUniqueKey(p) === incomingKey)
+  );
+  if (!existing) {
+    return { canonicalPlan: incoming };
   }
-  return true;
+  const merged = mergeSemanarioPlanRecords(existing, incoming, {
+    explicitModalEdit: Boolean((incoming as any).explicitModalEdit),
+    allowClearDescription: Boolean((incoming as any).allowClearDescription),
+  });
+  return {
+    canonicalPlan: merged,
+    replacedDuplicateId: existing.id && incoming.id && existing.id !== incoming.id ? incoming.id : undefined,
+  };
 }
 
 /**
  * Sanitização automática de SemanarioPlan por chave única (semana_turma_dia_horario_modalidade).
  * Em caso de registros duplicados no banco/cache:
- * - Mantém o registro mais atualizado ou com conteúdo efetivamente preenchido
- * - Elimina duplicações garantindo exatamente 1 registro por modalidade no bloco daquela semana
+ * - Mescla campos pedagógicos preservando descrições, títulos, objetivos e materiais preenchidos
+ * - Nunca permite que um rascunho/status vazio sobrescreva uma descrição já salva
+ * - Elimina duplicações garantindo exatamente 1 registro consolidado por modalidade no bloco daquela semana
  */
 export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan[] {
   if (!Array.isArray(plans) || plans.length === 0) return [];
@@ -116,26 +326,7 @@ export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan
       map.set(key, plan);
     } else {
       const existing = map.get(key)!;
-      const existingHasContent = hasPlanPedagogicalContent(existing);
-      const currentHasContent = hasPlanPedagogicalContent(plan);
-
-      // Prioriza o plano que possui conteúdo pedagógico preenchido
-      if (currentHasContent && !existingHasContent) {
-        map.set(key, plan);
-        return;
-      }
-      if (!currentHasContent && existingHasContent) {
-        return;
-      }
-
-      // Se ambos tiverem ou não conteúdo, prioriza o atualizado mais recentemente
-      const existingDate = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-      const currentDate = plan.updatedAt ? new Date(plan.updatedAt).getTime() : 0;
-      if (currentDate > existingDate) {
-        map.set(key, plan);
-      } else if (currentDate === existingDate && (plan as any).isSavedByUser && !(existing as any).isSavedByUser) {
-        map.set(key, plan);
-      }
+      map.set(key, mergeSemanarioPlanRecords(existing, plan));
     }
   });
 
@@ -146,13 +337,13 @@ export function deduplicateSemanarioPlans(plans: SemanarioPlan[]): SemanarioPlan
  * Upsert inteligente para planos do semanário:
  * Antes de inserir novos planos (como em cópias/duplicações), verifica se já existe
  * um registro com a mesma semana, turma, dia, horário e modalidade/atividade.
- * Se existir, substitui/atualiza o registro em vez de concatenar (Append).
+ * Se existir, mescla preservando o ID original e os textos pedagógicos já preenchidos.
  */
 export function upsertSemanarioPlans(
   currentPlans: SemanarioPlan[],
   incomingPlans: SemanarioPlan[]
 ): SemanarioPlan[] {
-  const result = [...currentPlans];
+  const result = [...(currentPlans || [])];
   const incomingSafe = Array.isArray(incomingPlans) ? incomingPlans : [];
 
   incomingSafe.forEach((incoming) => {
@@ -161,18 +352,14 @@ export function upsertSemanarioPlans(
 
     // Procura por ID ou pela chave única semana_turma_dia_horario_modalidade
     const existingIndex = result.findIndex(
-      (p) => p.id === incoming.id || getSemanarioPlanUniqueKey(p) === incomingKey
+      (p) => p && (p.id === incoming.id || getSemanarioPlanUniqueKey(p) === incomingKey)
     );
 
     if (existingIndex >= 0) {
-      // Upsert: substitui preservando o ID original
-      const originalId = result[existingIndex].id;
-      result[existingIndex] = {
-        ...incoming,
-        id: originalId || incoming.id,
-        createdAt: result[existingIndex].createdAt || incoming.createdAt,
-        updatedAt: incoming.updatedAt || new Date().toISOString(),
-      };
+      result[existingIndex] = mergeSemanarioPlanRecords(result[existingIndex], incoming, {
+        explicitModalEdit: Boolean((incoming as any).explicitModalEdit),
+        allowClearDescription: Boolean((incoming as any).allowClearDescription),
+      });
     } else {
       result.push(incoming);
     }

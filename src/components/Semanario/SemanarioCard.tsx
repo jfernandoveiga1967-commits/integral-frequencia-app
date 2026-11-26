@@ -99,14 +99,14 @@ export const SemanarioCard: React.FC<SemanarioCardProps> = ({
         {/* Pedagogical Proposal / Development */}
         {isPlanContentFilled(plan) ? (
           <div className="space-y-1">
-            {plan.title && (
+            {(plan.title || (plan as any).proposta) && (
               <h4 className="text-xs font-bold text-slate-900 line-clamp-1">
-                {plan.title}
+                {plan.title || (plan as any).proposta}
               </h4>
             )}
-            {plan.development ? (
+            {(plan.development || (plan as any).descricao) ? (
               <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">
-                {plan.development}
+                {plan.development || (plan as any).descricao}
               </p>
             ) : null}
             {(plan.adiResponsible || plan.monitors) && (

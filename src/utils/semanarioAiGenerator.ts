@@ -93,13 +93,21 @@ export function buildPlanTemplatesForTurmas(
           objectives: curated.objectives,
           development: curated.development,
           materials: curated.materials,
-          teacherName: 'Aguardando preenchimento',
+          teacherName: 'Coordenação Pedagógica (IA)',
           status: 'pendente',
           substitutionReason: undefined,
           photos: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           updatedBy: 'Coordenação Pedagógica (IA)',
+          ...({
+            descricao: curated.development,
+            proposta: curated.title,
+            conteudo: curated.objectives,
+            isSavedByUser: true,
+            hasSavedContent: true,
+            isPlaceholder: false,
+          } as any),
         });
       });
     });
@@ -187,6 +195,12 @@ export async function populateTurmasWithAI(
           plan.objectives = result.proposal.objectives;
           plan.development = result.proposal.development;
           plan.materials = result.proposal.materials;
+          (plan as any).proposta = result.proposal.title;
+          (plan as any).conteudo = result.proposal.objectives;
+          (plan as any).descricao = result.proposal.development;
+          (plan as any).isSavedByUser = true;
+          (plan as any).hasSavedContent = true;
+          (plan as any).isPlaceholder = false;
           plan.updatedBy = 'Gemini 2.5 (IA Oficial)';
           plan.updatedAt = new Date().toISOString();
           successCount++;
@@ -197,6 +211,12 @@ export async function populateTurmasWithAI(
           plan.objectives = fallback.objectives;
           plan.development = fallback.development;
           plan.materials = fallback.materials;
+          (plan as any).proposta = fallback.title;
+          (plan as any).conteudo = fallback.objectives;
+          (plan as any).descricao = fallback.development;
+          (plan as any).isSavedByUser = true;
+          (plan as any).hasSavedContent = true;
+          (plan as any).isPlaceholder = false;
           plan.updatedBy = 'Coordenação (Fallback Curado)';
           plan.updatedAt = new Date().toISOString();
           failCount++;
@@ -212,6 +232,12 @@ export async function populateTurmasWithAI(
         plan.objectives = fallback.objectives;
         plan.development = fallback.development;
         plan.materials = fallback.materials;
+        (plan as any).proposta = fallback.title;
+        (plan as any).conteudo = fallback.objectives;
+        (plan as any).descricao = fallback.development;
+        (plan as any).isSavedByUser = true;
+        (plan as any).hasSavedContent = true;
+        (plan as any).isPlaceholder = false;
         failCount++;
         failedPlans.push(plan);
       } finally {

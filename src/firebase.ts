@@ -25,7 +25,7 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord, CustomExpenseCategory } from './types';
+import { Student, AttendanceRecord, AttendanceStatus, UserProfile, UserRole, ActivityItem, ScheduleBlock, HolidayItem, PontoRecord, PontoMonthClosing, MealReportConfig, MealReportGlobalSettings, TurmaAtribuicao, TabType, ALL_APP_TAB_IDS, DepartureAlertSettings, RelatorioConsolidadoDia, UserNotification, NormaReminderRecord, CustomExpenseCategory, SemanarioPlan } from './types';
 import { MonthlyMenu, CookingRecipe } from './types/cardapio';
 import { ManualNorma, NormaAceite } from './types/manualNormas';
 import { NORMAS_DATA } from './data/normasData';
@@ -35,6 +35,9 @@ import {
   addToAttendanceOutbox,
   removeFromAttendanceOutbox,
   getAttendanceOutbox,
+  addToSemanarioOutbox,
+  removeFromSemanarioOutbox,
+  getSemanarioOutbox,
   isMockStudent,
   getDeletedStudentIds,
   markStudentAsDeleted,
@@ -55,6 +58,12 @@ import {
   normalizeUpdatedAtIso,
   extractStudentTimestamp,
 } from './utils/storageUtils';
+import {
+  isMeaningfulPlanText,
+  getPlanDevelopmentText,
+  getPlanTitleText,
+  getPlanObjectivesText,
+} from './utils/scheduleDeduplication';
 import {
   normalizeAndDeduplicateUsers,
   ADMIN_EMAIL,
@@ -2324,14 +2333,24 @@ export async function processAttendanceOutbox(): Promise<number> {
 // Global online listener for automatic outbox flush
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    if (!isFirestoreQuotaExceeded && getAttendanceOutbox().length > 0) {
-      processAttendanceOutbox().catch(() => {});
+    if (!isFirestoreQuotaExceeded) {
+      if (getAttendanceOutbox().length > 0) {
+        processAttendanceOutbox().catch(() => {});
+      }
+      if (getSemanarioOutbox().length > 0) {
+        processSemanarioOutbox().catch(() => {});
+      }
     }
   });
   // Periodic background check every 20 seconds (only if pending items exist and quota is not exceeded)
   setInterval(() => {
-    if (navigator.onLine && !isFirestoreQuotaExceeded && getAttendanceOutbox().length > 0) {
-      processAttendanceOutbox().catch(() => {});
+    if (navigator.onLine && !isFirestoreQuotaExceeded) {
+      if (getAttendanceOutbox().length > 0) {
+        processAttendanceOutbox().catch(() => {});
+      }
+      if (getSemanarioOutbox().length > 0) {
+        processSemanarioOutbox().catch(() => {});
+      }
     }
   }, 20000);
 }
@@ -3101,8 +3120,6 @@ export async function savePontoClosingToFirestore(closing: PontoMonthClosing) {
 // SEMANÁRIO PEDAGÓGICO FIRESTORE OPERATIONS
 // ==========================================
 
-import { SemanarioPlan } from './types';
-
 function resolvePlanWeekAndYear(data: {
   weekNumber?: unknown;
   year?: unknown;
@@ -3136,6 +3153,13 @@ function mapFirestoreDocToSemanarioPlan(docId: string, data: any): SemanarioPlan
     (typeof data.date === 'string' ? getDayOfWeekFromDate(data.date) : null) ||
     'segunda';
 
+  const dev = data.development || data.descricao || '';
+  const ttl = data.title || data.proposta || '';
+  const obj = data.objectives || data.conteudo || '';
+  const hasContent = Boolean(
+    isMeaningfulPlanText(dev) || isMeaningfulPlanText(ttl) || isMeaningfulPlanText(obj)
+  );
+
   return {
     id: docId,
     turma: data.turma || '',
@@ -3148,9 +3172,9 @@ function mapFirestoreDocToSemanarioPlan(docId: string, data: any): SemanarioPlan
     ...(data.horaFim ? { horaFim: data.horaFim } : {}),
     weekTheme: data.weekTheme || '',
     category: data.category || '',
-    title: data.title || data.proposta || '',
-    objectives: data.objectives || data.conteudo || '',
-    development: data.development || data.descricao || '',
+    title: ttl,
+    objectives: obj,
+    development: dev,
     materials: data.materials || '',
     adiResponsible: data.adiResponsible || '',
     monitors: data.monitors || '',
@@ -3168,11 +3192,10 @@ function mapFirestoreDocToSemanarioPlan(docId: string, data: any): SemanarioPlan
       descricao: data.descricao || data.development || '',
       proposta: data.proposta || data.title || '',
       conteudo: data.conteudo || data.objectives || '',
-      isSavedByUser: data.isSavedByUser !== undefined ? Boolean(data.isSavedByUser) : true,
+      isSavedByUser:
+        data.isSavedByUser !== undefined ? Boolean(data.isSavedByUser) || hasContent : true,
       hasSavedContent:
-        data.hasSavedContent !== undefined
-          ? Boolean(data.hasSavedContent)
-          : Boolean((data.development || data.title || data.objectives || '').trim()),
+        data.hasSavedContent !== undefined ? Boolean(data.hasSavedContent) || hasContent : hasContent,
       isPlaceholder: false,
     } as any),
   };
@@ -3186,7 +3209,19 @@ function buildSemanarioFirestorePayload(plan: SemanarioPlan, includePhotos = tru
     'segunda';
   const nowIso = new Date().toISOString();
 
-  return {
+  const dev = getPlanDevelopmentText(plan) || (plan.development || (plan as any).descricao || '').trim();
+  const ttl = getPlanTitleText(plan) || (plan.title || (plan as any).proposta || '').trim();
+  const obj = getPlanObjectivesText(plan) || (plan.objectives || (plan as any).conteudo || '').trim();
+  const isStatusOnly = Boolean((plan as any).statusOnlyUpdate);
+  const explicitModalEdit = Boolean((plan as any).explicitModalEdit);
+  const allowClearDesc = Boolean((plan as any).allowClearDescription);
+
+  const hasTextContent = Boolean(
+    isMeaningfulPlanText(dev) || isMeaningfulPlanText(ttl) || isMeaningfulPlanText(obj)
+  );
+
+  // Metadados básicos sempre seguros para merge
+  const payload: Record<string, any> = {
     id: plan.id,
     turma: plan.turma || '',
     weekNumber,
@@ -3194,35 +3229,71 @@ function buildSemanarioFirestorePayload(plan: SemanarioPlan, includePhotos = tru
     date: plan.date || '',
     dayOfWeek: resolvedDay,
     timeSlot: plan.timeSlot || '',
-    horaInicio: plan.horaInicio || '',
-    horaFim: plan.horaFim || '',
-    weekTheme: plan.weekTheme || '',
     category: plan.category || '',
-    title: plan.title || '',
-    objectives: plan.objectives || '',
-    development: plan.development || '',
-    materials: plan.materials || '',
-    adiResponsible: plan.adiResponsible || '',
-    monitors: plan.monitors || '',
-    teacherName: plan.teacherName || '',
-    instructorId: plan.instructorId || '',
-    instructorName: plan.instructorName || '',
     status: plan.status || 'pendente',
     substitutionReason: plan.substitutionReason || '',
-    photos: includePhotos && Array.isArray(plan.photos) ? plan.photos : [],
-    notes: plan.notes || '',
-    descricao: (plan as any).descricao || plan.development || '',
-    proposta: (plan as any).proposta || plan.title || '',
-    conteudo: (plan as any).conteudo || plan.objectives || '',
-    isSavedByUser: true,
-    hasSavedContent: Boolean(
-      (plan.development || '').trim() || (plan.title || '').trim() || (plan.objectives || '').trim()
-    ),
+    instructorId: plan.instructorId || '',
+    instructorName: plan.instructorName || '',
     isPlaceholder: false,
     createdAt: plan.createdAt || nowIso,
     updatedAt: plan.updatedAt || nowIso,
     updatedBy: plan.updatedBy || '',
   };
+
+  if (plan.horaInicio) payload.horaInicio = plan.horaInicio;
+  if (plan.horaFim) payload.horaFim = plan.horaFim;
+
+  // Se for apenas troca de status em card sem texto carregado (ex.: placeholder/parcial),
+  // NUNCA grava strings vazias por cima dos campos pedagógicos já salvos no Firestore!
+  if (isStatusOnly || (!hasTextContent && !explicitModalEdit)) {
+    return payload;
+  }
+
+  payload.isSavedByUser = true;
+  payload.hasSavedContent = hasTextContent;
+
+  if (isMeaningfulPlanText(ttl) || explicitModalEdit) {
+    payload.title = ttl;
+    payload.proposta = ttl;
+  }
+
+  // Proteção crítica: jamais sobrescreve 'development'/'descricao' com string vazia,
+  // a menos que o usuário tenha limpado explicitamente no modal de edição.
+  if (isMeaningfulPlanText(dev) || allowClearDesc) {
+    payload.development = dev;
+    payload.descricao = dev;
+  }
+
+  if (isMeaningfulPlanText(obj) || explicitModalEdit) {
+    payload.objectives = obj;
+    payload.conteudo = obj;
+  }
+
+  if (isMeaningfulPlanText(plan.materials) || explicitModalEdit) {
+    payload.materials = (plan.materials || '').trim();
+  }
+  if (isMeaningfulPlanText(plan.weekTheme) || explicitModalEdit) {
+    payload.weekTheme = (plan.weekTheme || '').trim();
+  }
+  if (isMeaningfulPlanText(plan.adiResponsible) || explicitModalEdit) {
+    payload.adiResponsible = (plan.adiResponsible || '').trim();
+  }
+  if (isMeaningfulPlanText(plan.monitors) || explicitModalEdit) {
+    payload.monitors = (plan.monitors || '').trim();
+  }
+  if (plan.teacherName && plan.teacherName.trim().toLowerCase() !== 'aguardando preenchimento') {
+    payload.teacherName = plan.teacherName.trim();
+  } else if (explicitModalEdit && plan.teacherName) {
+    payload.teacherName = plan.teacherName.trim();
+  }
+  if (isMeaningfulPlanText(plan.notes) || explicitModalEdit) {
+    payload.notes = (plan.notes || '').trim();
+  }
+  if (includePhotos && Array.isArray(plan.photos) && (plan.photos.length > 0 || explicitModalEdit)) {
+    payload.photos = plan.photos;
+  }
+
+  return payload;
 }
 
 export function subscribeSemanarioPlans(
@@ -3276,9 +3347,15 @@ export function subscribeTodaySemanarioPlans(
 }
 
 export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
+  if (isFirestoreQuotaExceeded || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    addToSemanarioOutbox({ type: 'SET', planId: plan.id, plan });
+    return;
+  }
+
   const docRef = doc(db, 'semanarioPlans', plan.id);
   try {
     await setDoc(docRef, buildSemanarioFirestorePayload(plan, true), { merge: true });
+    removeFromSemanarioOutbox(plan.id);
   } catch (error: any) {
     const msg = String(error?.message || error || '').toLowerCase();
     const isSizeError =
@@ -3292,22 +3369,32 @@ export async function saveSemanarioPlanToFirestore(plan: SemanarioPlan) {
       try {
         console.warn('[Semanario] Documento excedeu limite de tamanho com fotos; salvando conteúdo sem anexos grandes:', plan.id);
         await setDoc(docRef, buildSemanarioFirestorePayload(plan, false), { merge: true });
+        removeFromSemanarioOutbox(plan.id);
         return;
       } catch (retryErr) {
+        addToSemanarioOutbox({ type: 'SET', planId: plan.id, plan: { ...plan, photos: [] } });
         handleFirestoreError(retryErr, OperationType.WRITE, `semanarioPlans/${plan.id}`);
         throw retryErr;
       }
     }
+
+    addToSemanarioOutbox({ type: 'SET', planId: plan.id, plan });
     handleFirestoreError(error, OperationType.WRITE, `semanarioPlans/${plan.id}`);
     throw error;
   }
 }
 
 export async function deleteSemanarioPlanFromFirestore(planId: string) {
+  if (isFirestoreQuotaExceeded || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    addToSemanarioOutbox({ type: 'DELETE', planId });
+    return;
+  }
   try {
     const docRef = doc(db, 'semanarioPlans', planId);
     await deleteDoc(docRef);
+    removeFromSemanarioOutbox(planId);
   } catch (error) {
+    addToSemanarioOutbox({ type: 'DELETE', planId });
     handleFirestoreError(error, OperationType.DELETE, `semanarioPlans/${planId}`);
     throw error;
   }
@@ -3315,6 +3402,12 @@ export async function deleteSemanarioPlanFromFirestore(planId: string) {
 
 export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[]) {
   if (!plans || plans.length === 0) return;
+
+  if (isFirestoreQuotaExceeded || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    plans.forEach((p) => addToSemanarioOutbox({ type: 'SET', planId: p.id, plan: p }));
+    return;
+  }
+
   try {
     const CHUNK_SIZE = 25;
     for (let i = 0; i < plans.length; i += CHUNK_SIZE) {
@@ -3326,18 +3419,66 @@ export async function batchSaveSemanarioPlansToFirestore(plans: SemanarioPlan[])
           batch.set(docRef, buildSemanarioFirestorePayload(p, true), { merge: true });
         }
         await batch.commit();
+        chunk.forEach((p) => removeFromSemanarioOutbox(p.id));
       } catch (chunkErr) {
-        // Fallback individual por documento para não abortar outros dias/turmas se um item tiver foto grande
+        // Fallback individual por documento para não abortar outros dias/turmas se um item tiver foto grande ou falha isolada
         console.warn('[Semanario] Falha em lote parcial; salvando individualmente para preservar todos os dias:', chunkErr);
         for (const p of chunk) {
-          await saveSemanarioPlanToFirestore(p);
+          try {
+            await saveSemanarioPlanToFirestore(p);
+          } catch {
+            // já enfileirado na outbox pelo saveSemanarioPlanToFirestore
+          }
         }
       }
     }
   } catch (error) {
+    plans.forEach((p) => addToSemanarioOutbox({ type: 'SET', planId: p.id, plan: p }));
     handleFirestoreError(error, OperationType.WRITE, 'semanarioPlans/batch');
     throw error;
   }
+}
+
+let isProcessingSemanarioOutbox = false;
+export async function processSemanarioOutbox(): Promise<number> {
+  if (isFirestoreQuotaExceeded) return 0;
+  if (isProcessingSemanarioOutbox) return 0;
+  const outboxItems = getSemanarioOutbox();
+  if (!outboxItems || outboxItems.length === 0) return 0;
+
+  isProcessingSemanarioOutbox = true;
+  let processedCount = 0;
+
+  try {
+    for (const item of outboxItems) {
+      if (item.type === 'SET' && item.plan) {
+        const docRef = doc(db, 'semanarioPlans', item.plan.id);
+        await setDoc(docRef, buildSemanarioFirestorePayload(item.plan, true), { merge: true });
+        removeFromSemanarioOutbox(item.plan.id);
+        processedCount++;
+      } else if (item.type === 'DELETE' && item.planId) {
+        const docRef = doc(db, 'semanarioPlans', item.planId);
+        await deleteDoc(docRef);
+        removeFromSemanarioOutbox(item.planId);
+        processedCount++;
+      }
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code = (e as { code?: string })?.code;
+    if (
+      code === 'resource-exhausted' ||
+      msg.toLowerCase().includes('quota') ||
+      msg.toLowerCase().includes('resource-exhausted')
+    ) {
+      setFirestoreQuotaExceeded();
+    }
+    console.warn('[Semanario] Erro ao processar outbox pendente (retentando depois):', e);
+  } finally {
+    isProcessingSemanarioOutbox = false;
+  }
+
+  return processedCount;
 }
 
 /**

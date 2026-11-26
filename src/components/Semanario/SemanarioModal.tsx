@@ -188,27 +188,47 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
     if (isOpen) {
       if (initialPlan) {
         const initTurma = initialPlan.turma || turmas[0] || '1º Ano Azul';
-        const initDay = initialPlan.dayOfWeek || defaultDayOfWeek;
+        const initDay = normalizeDayOfWeek(initialPlan.dayOfWeek) || defaultDayOfWeek;
         const validCats = getCategoriesForTurma(initTurma, schedules, activitiesList);
-        
-        // Mantém preenchidos apenas: Turma, Dia da Semana, Horário e Categoria
+        const initCat = initialPlan.category || validCats[0] || '';
+        const initTime = initialPlan.timeSlot || '13:30 - 14:30';
+
+        // Caso o card tenha vindo como placeholder/parcial, resgata o registro salvo equivalente se existir
+        const pool = existingPlans && existingPlans.length > 0 ? existingPlans : loadSemanarioPlans();
+        const savedFallback =
+          !((initialPlan.development || (initialPlan as any).descricao || '').trim())
+            ? deduplicateSemanarioPlans(pool).find((p) => {
+                if (initialPlan.id && p.id === initialPlan.id && !(p as any).isPlaceholder) return true;
+                if (Number(p.weekNumber) !== weekNumber || Number(p.year) !== year) return false;
+                if (normalizeKeyComponent(p.turma) !== normalizeKeyComponent(initTurma)) return false;
+                const pDay = normalizeDayOfWeek(p.dayOfWeek) || (p.date ? getDayOfWeekFromDate(p.date) : null);
+                if (pDay !== initDay) return false;
+                return normalizeKeyComponent(p.category) === normalizeKeyComponent(initCat);
+              })
+            : undefined;
+
+        const sourcePlan: Partial<SemanarioPlan> = savedFallback
+          ? { ...initialPlan, ...savedFallback }
+          : initialPlan;
+
+        // Mantém preenchidos: Turma, Dia da Semana, Horário e Categoria
         setTurma(initTurma);
         setDayOfWeek(initDay);
-        setTimeSlot(initialPlan.timeSlot || '13:30 - 14:30');
-        setCategory(initialPlan.category || validCats[0] || '');
-        setStatus(initialPlan.status || 'pendente');
+        setTimeSlot(sourcePlan.timeSlot || initTime);
+        setCategory(sourcePlan.category || initCat);
+        setStatus(sourcePlan.status || 'pendente');
 
         // Carrega conteúdo prévio existente se houver sido preenchido e salvo
-        setTitle(initialPlan.title || (initialPlan as any).proposta || '');
-        setDevelopment(initialPlan.development || (initialPlan as any).descricao || '');
-        setObjectives(initialPlan.objectives || (initialPlan as any).conteudo || '');
-        setMaterials(initialPlan.materials || '');
-        setWeekTheme(initialPlan.weekTheme || '');
-        setAdiResponsible(initialPlan.adiResponsible || '');
-        setMonitors(initialPlan.monitors || '');
-        setSubstitutionReason(initialPlan.substitutionReason || '');
-        setPhotos(initialPlan.photos || []);
-        setNotes(initialPlan.notes || '');
+        setTitle(sourcePlan.title || (sourcePlan as any).proposta || '');
+        setDevelopment(sourcePlan.development || (sourcePlan as any).descricao || '');
+        setObjectives(sourcePlan.objectives || (sourcePlan as any).conteudo || '');
+        setMaterials(sourcePlan.materials || '');
+        setWeekTheme(sourcePlan.weekTheme || '');
+        setAdiResponsible(sourcePlan.adiResponsible || '');
+        setMonitors(sourcePlan.monitors || '');
+        setSubstitutionReason(sourcePlan.substitutionReason || '');
+        setPhotos(sourcePlan.photos || []);
+        setNotes(sourcePlan.notes || '');
       } else {
         const initialTurma = turmas[0] || '1º Ano Azul';
         const cats = getCategoriesForTurma(initialTurma, schedules, activitiesList);
@@ -242,7 +262,14 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       setShowAiPanel(false);
       setAiError(null);
     }
-  }, [isOpen, initialPlan?.id]);
+  }, [
+    isOpen,
+    initialPlan?.id,
+    initialPlan?.turma,
+    initialPlan?.dayOfWeek,
+    initialPlan?.category,
+    initialPlan?.timeSlot,
+  ]);
 
   // Adjust category if turma changes and previously selected category is invalid
   const handleTurmaChange = (newTurma: TurmaType) => {
@@ -569,12 +596,14 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
       return `plan_sched_${safeTurmaId}_${targetDay}_${safeCatId}_${safeTime}_w${targetWeekNumber}_${targetYear}`;
     };
 
-    // Se era um ID de slot padrão e o usuário mudou turma/dia/categoria, não sobrescrever o ID do slot anterior
-    const slotChanged =
-      Boolean(initialPlan?.id?.startsWith('plan_sched_')) &&
-      ((initialPlan?.turma && normalizeKeyComponent(initialPlan.turma) !== normalizeKeyComponent(turma)) ||
-        (initialPlan?.dayOfWeek && initialPlan.dayOfWeek !== dayOfWeek) ||
-        (initialPlan?.category && normalizeKeyComponent(initialPlan.category) !== normalizeKeyComponent(resolvedCategory)));
+    // Se o usuário mudou turma, dia ou categoria em um registro existente, não reutilizar/sobrescrever o ID do slot anterior
+    const slotChanged = Boolean(
+      initialPlan?.id &&
+        ((initialPlan.turma && normalizeKeyComponent(initialPlan.turma) !== normalizeKeyComponent(turma)) ||
+          (initialPlan.dayOfWeek && normalizeDayOfWeek(initialPlan.dayOfWeek) !== dayOfWeek) ||
+          (initialPlan.category &&
+            normalizeKeyComponent(initialPlan.category) !== normalizeKeyComponent(resolvedCategory)))
+    );
 
     const existingPrimaryMatch = findExistingPlanForSlot(
       turma,
@@ -591,6 +620,11 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         : existingPrimaryMatch?.id ||
           buildDeterministicSlotId(turma, dayOfWeek, resolvedCategory, timeSlot) ||
           `plan_${Date.now()}_w${targetWeekNumber}_${targetYear}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const hadInitialDesc = Boolean(
+      !slotChanged &&
+        (initialPlan?.development || (initialPlan as any)?.descricao || '').trim()
+    );
 
     const primaryPlan: SemanarioPlan = {
       id: primaryId,
@@ -623,6 +657,8 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
         isSavedByUser: true,
         hasSavedContent: Boolean(savedDesc || savedTitle || savedObj),
         isPlaceholder: false,
+        explicitModalEdit: true,
+        allowClearDescription: hadInitialDesc && !savedDesc,
       } as any),
     };
 
@@ -642,7 +678,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
 
         const targetDate = getDateForDay(d);
 
-        // Para outras turmas/dias, tenta alinhar ao horário oficial da mesma categoria na grade daquela turma/dia
+        // Para outras turmas ou outros dias da semana, alinha ao horário oficial da mesma categoria na grade daquela turma/dia
         let targetTimeSlot = timeSlot;
         const targetBlocks = getScheduleBlocksForTurma(t, d, schedules);
         const normCat = normalizeKeyComponent(resolvedCategory);
@@ -654,7 +690,7 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
             (b) => normalizeTimeKey(`${b.startTime} - ${b.endTime}`) === normalizeTimeKey(timeSlot)
           );
           const chosenBlock = sameTimeBlock || matchingCategoryBlocks[0];
-          if (chosenBlock && (t !== turma || !targetTimeSlot)) {
+          if (chosenBlock && (t !== turma || d !== dayOfWeek || !targetTimeSlot)) {
             targetTimeSlot = `${chosenBlock.startTime} - ${chosenBlock.endTime}`;
           }
         }
@@ -696,6 +732,8 @@ export const SemanarioModal: React.FC<SemanarioModalProps> = ({
             isSavedByUser: true,
             hasSavedContent: Boolean(savedDesc || savedTitle || savedObj),
             isPlaceholder: false,
+            explicitModalEdit: true,
+            allowClearDescription: false,
           } as any),
         });
       }

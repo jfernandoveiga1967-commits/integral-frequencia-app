@@ -355,7 +355,14 @@ export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
       );
       localStorage.setItem(SEMANARIO_STORAGE_KEY, JSON.stringify(withoutPhotos));
     } catch (retryErr) {
-      console.error('Erro ao salvar planos do Semanário no localStorage:', retryErr);
+      try {
+        const subset = (Array.isArray(plans) ? plans : [])
+          .map((p) => (p && Array.isArray(p.photos) && p.photos.length > 0 ? { ...p, photos: [] } : p))
+          .slice(-300);
+        localStorage.setItem(SEMANARIO_STORAGE_KEY, JSON.stringify(subset));
+      } catch (finalErr) {
+        console.error('Erro ao salvar planos do Semanário no localStorage:', finalErr);
+      }
     }
   }
 }
@@ -372,15 +379,6 @@ export function isPlanContentFilled(plan: SemanarioPlan | null | undefined): boo
 
   // Bloco virtual / placeholder não salvo da grade
   if ((plan as any).isPlaceholder) {
-    return false;
-  }
-
-  // Se o responsável ainda estiver com o padrão de espera do sistema e não houver usuário que salvou
-  if (
-    plan.teacherName === 'Aguardando preenchimento' &&
-    (!plan.updatedBy || plan.updatedBy === 'Coordenação Pedagógica') &&
-    !(plan as any).isSavedByUser
-  ) {
     return false;
   }
 
@@ -404,6 +402,18 @@ export function isPlanContentFilled(plan: SemanarioPlan | null | undefined): boo
     combined === 'a preencher' ||
     combined === 'sem proposta' ||
     combined === 'pendente'
+  ) {
+    return false;
+  }
+
+  // Se for exclusivamente um esqueleto de currículo automático não salvo/sem descrição real do usuário/IA
+  if (
+    plan.teacherName === 'Aguardando preenchimento' &&
+    (!plan.updatedBy || plan.updatedBy === 'Coordenação Pedagógica') &&
+    !(plan as any).isSavedByUser &&
+    !(plan as any).hasSavedContent &&
+    !dev &&
+    !desc
   ) {
     return false;
   }

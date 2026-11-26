@@ -21,6 +21,7 @@ export const HOLIDAYS_KEY = 'integral_frequencia_holidays_v1';
 export const PONTO_RECORDS_KEY = 'integral_frequencia_ponto_records_v1';
 export const PONTO_CLOSINGS_KEY = 'integral_frequencia_ponto_closings_v1';
 export const SEMANARIO_KEY = 'integral_semanario_plans_v1';
+export const SEMANARIO_OUTBOX_KEY = 'integral_semanario_outbox_v1';
 export const ALL_USERS_KEY = 'frequencia_integral_all_users';
 
 export { normalizeAndDeduplicateUsers };
@@ -211,6 +212,70 @@ export function clearAttendanceOutbox(): void {
     localStorage.removeItem(ATTENDANCE_OUTBOX_KEY);
   } catch (e) {
     console.error('Erro ao limpar outbox:', e);
+  }
+}
+
+export interface SemanarioOutboxItem {
+  id: string;
+  type: 'SET' | 'DELETE';
+  plan?: SemanarioPlan;
+  planId: string;
+  timestamp: number;
+}
+
+export function getSemanarioOutbox(): SemanarioOutboxItem[] {
+  try {
+    const raw = localStorage.getItem(SEMANARIO_OUTBOX_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Erro ao ler outbox do Semanário:', e);
+  }
+  return [];
+}
+
+export function addToSemanarioOutbox(
+  item: Omit<SemanarioOutboxItem, 'id' | 'timestamp'> & { id?: string; timestamp?: number }
+): void {
+  try {
+    const current = getSemanarioOutbox();
+    const id = item.id || `sem_outbox_${item.planId}_${Date.now()}`;
+    const timestamp = item.timestamp || Date.now();
+    const filtered = current.filter((i) => i.planId !== item.planId);
+    const updated = [...filtered, { ...item, id, timestamp }];
+    try {
+      localStorage.setItem(SEMANARIO_OUTBOX_KEY, JSON.stringify(updated));
+    } catch {
+      // Se exceder a cota de armazenamento com fotos em base64, remove apenas fotos da fila para garantir os textos
+      const stripped = updated.map((entry) =>
+        entry.plan && Array.isArray(entry.plan.photos) && entry.plan.photos.length > 0
+          ? { ...entry, plan: { ...entry.plan, photos: [] } }
+          : entry
+      );
+      localStorage.setItem(SEMANARIO_OUTBOX_KEY, JSON.stringify(stripped));
+    }
+  } catch (e) {
+    console.error('Erro ao adicionar item na outbox do Semanário:', e);
+  }
+}
+
+export function removeFromSemanarioOutbox(planId: string): void {
+  try {
+    const current = getSemanarioOutbox();
+    const updated = current.filter((i) => i.planId !== planId && i.id !== planId);
+    localStorage.setItem(SEMANARIO_OUTBOX_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Erro ao remover item da outbox do Semanário:', e);
+  }
+}
+
+export function clearSemanarioOutbox(): void {
+  try {
+    localStorage.removeItem(SEMANARIO_OUTBOX_KEY);
+  } catch (e) {
+    console.error('Erro ao limpar outbox do Semanário:', e);
   }
 }
 
@@ -1443,13 +1508,36 @@ export function loadSemanarioPlans(): SemanarioPlan[] {
 
 export function saveSemanarioPlans(plans: SemanarioPlan[]): void {
   const clean = Array.isArray(plans) ? deduplicateSemanarioPlans(plans) : [];
-  safeLocalStorageSet(SEMANARIO_KEY, clean, (pls) => {
-    if (!Array.isArray(pls)) return [];
-    // Em caso de pressão de cota no localStorage, remove apenas fotos em base64 para preservar 100% dos textos de todos os dias e semanas
-    return pls.map((p) =>
+  try {
+    localStorage.setItem(SEMANARIO_KEY, JSON.stringify(clean));
+  } catch (err) {
+    console.warn('[LocalStorage] Cota excedida ao salvar Semanário; removendo fotos pesadas para preservar textos...', err);
+    const withoutPhotos = clean.map((p) =>
       p && Array.isArray(p.photos) && p.photos.length > 0 ? { ...p, photos: [] } : p
     );
-  });
+    try {
+      localStorage.setItem(SEMANARIO_KEY, JSON.stringify(withoutPhotos));
+    } catch (retryErr) {
+      // Segunda linha de defesa: mantém os 450 registros mais recentes (incluindo semana atual/futuras e itens da outbox)
+      console.warn('[LocalStorage] Aplicando poda de semanas antigas no cache do Semanário para preservar lançamentos recentes:', retryErr);
+      try {
+        const outboxIds = new Set(getSemanarioOutbox().map((o) => o.planId));
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 21);
+        const cutoffStr = toISODateString(cutoff);
+        const prioritized = withoutPhotos.filter(
+          (p) => outboxIds.has(p.id) || (p.date && p.date >= cutoffStr)
+        );
+        const finalSubset =
+          prioritized.length > 0
+            ? prioritized.slice(-450)
+            : withoutPhotos.slice(-300);
+        localStorage.setItem(SEMANARIO_KEY, JSON.stringify(finalSubset));
+      } catch (finalErr) {
+        console.warn('[LocalStorage] Não foi possível persistir cache do Semanário:', finalErr);
+      }
+    }
+  }
 }
 
 export function resetAllData(): void {

@@ -13,6 +13,7 @@ import {
   disconnectFirestore,
   testFirestoreConnection,
   processAttendanceOutbox,
+  processSemanarioOutbox,
   getIsFirestoreQuotaExceeded,
   subscribeQuotaState,
   clearFirestoreQuotaExceeded,
@@ -274,8 +275,11 @@ export async function runAutoReconnect(force = false): Promise<boolean> {
     // Check actual Firestore server ping (with caching/throttling)
     const isConnected = await testFirestoreConnection(force);
     if (isConnected) {
-      // Process pending outbox
-      const processed = await processAttendanceOutbox();
+      // Process pending outboxes
+      const [processed] = await Promise.all([
+        processAttendanceOutbox(),
+        processSemanarioOutbox().catch(() => 0),
+      ]);
       updateConnectionState({
         status: 'synced',
         isOnline: true,
@@ -358,6 +362,7 @@ export function initConnectivityMonitor(): () => void {
       } else if (currentConnectionState.pendingOutboxCount > 0) {
         // Quick silent check and outbox flush only if items exist
         processAttendanceOutbox().catch(() => {});
+        processSemanarioOutbox().catch(() => {});
       }
     } else {
       updateConnectionState({ isOnline: false, status: 'offline' });

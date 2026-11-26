@@ -51,6 +51,8 @@ import {
   getReforcoStudentsForCard,
   normalizeKeyComponent,
   normalizeTimeKey,
+  hasPlanPedagogicalContent,
+  getSemanarioPlanUniqueKey,
 } from '../../utils/semanarioUtils';
 import { sortTurmasPedagogical, getTurmaPedagogicalWeight } from '../../utils/turmaUtils';
 import { getISOWeekNumber, getWeekInfo, getWeekDays, normalizeDayOfWeek, getDayOfWeekFromDate } from '../../utils/dateUtils';
@@ -59,6 +61,7 @@ import { triggerPrint, safeWindowPrint } from '../../utils/printUtils';
 import { PdfViewerModal } from '../PdfViewerModal';
 import {
   populateTurmasWithAI,
+  buildPlanTemplatesForTurmas,
   SemanarioAiProgress,
   SemanarioAiBatchResult,
 } from '../../utils/semanarioAiGenerator';
@@ -346,47 +349,86 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       normalizeDayOfWeek(p.dayOfWeek) || (p.date ? getDayOfWeekFromDate(p.date) : null);
 
     const usedExistingPlanIds = new Set<string>();
+    const activeDayPlans = activeTurmaPlans.filter(
+      (p) => getResolvedDay(p) === selectedDay && !deletedActivityIds.has(p.id)
+    );
 
+    // Passo 1: correspondência estrita por ID ou categoria + horário exato
+    const firstPassMatches: Array<SemanarioPlan | null> = officialBlocks.map((block) => {
+      if (deletedActivityIds.has(block.id)) return null;
+      const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
+      const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
+      const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
+      const safeTime = (block.startTime || '').replace(':', '');
+      const generatedId = `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`;
+
+      if (deletedActivityIds.has(generatedId)) {
+        return null;
+      }
+
+      const normBlockCat = normalizeKeyComponent(block.activityId);
+      const normOfficialTime = normalizeTimeKey(officialTimeSlot);
+
+      const exactMatch = activeDayPlans.find((p) => {
+        if (usedExistingPlanIds.has(p.id)) return false;
+        if (p.id === generatedId || p.id === block.id) return true;
+        if (p.id && p.id.includes(block.id)) return true;
+
+        const sameCat = normalizeKeyComponent(p.category) === normBlockCat;
+        if (!sameCat) return false;
+
+        if (p.id && p.id.includes(safeCatId) && p.id.includes(safeTime)) return true;
+        if (p.timeSlot && normalizeTimeKey(p.timeSlot) === normOfficialTime) {
+          return true;
+        }
+        return false;
+      });
+
+      if (exactMatch) {
+        usedExistingPlanIds.add(exactMatch.id);
+        return exactMatch;
+      }
+      return null;
+    });
+
+    // Passo 2: para blocos ainda sem correspondência (ex.: ajuste de horário na grade),
+    // reaproveita plano já salvo da mesma categoria/dia ainda não utilizado
     const officialMappedPlans = officialBlocks
       .filter((block) => !deletedActivityIds.has(block.id))
-      .map((block) => {
+      .map((block, idx) => {
         const officialTimeSlot = `${block.startTime} - ${block.endTime}`;
         const safeTurmaId = activeTurma.replace(/\s+/g, '_').toLowerCase();
         const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
         const safeTime = (block.startTime || '').replace(':', '');
         const generatedId = `plan_sched_${safeTurmaId}_${selectedDay}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`;
 
-        // Se o plano gerado foi excluído pelo usuário, não re-cria o card
         if (deletedActivityIds.has(generatedId)) {
           return null;
         }
 
-        const normBlockCat = normalizeKeyComponent(block.activityId);
-        const normOfficialTime = normalizeTimeKey(officialTimeSlot);
-
-        // Procura plano já salvo que coincida rigorosamente por ID ou categoria + horário
-        const existingPlan = activeTurmaPlans.find((p) => {
-          if (getResolvedDay(p) !== selectedDay || usedExistingPlanIds.has(p.id)) return false;
-          if (deletedActivityIds.has(p.id)) return false;
-          if (p.id === generatedId || p.id === block.id) return true;
-          if (p.id && p.id.includes(block.id)) return true;
-
-          const sameCat = normalizeKeyComponent(p.category) === normBlockCat;
-          if (!sameCat) return false;
-
-          if (p.id && p.id.includes(safeCatId) && p.id.includes(safeTime)) return true;
-          if (p.timeSlot && normalizeTimeKey(p.timeSlot) === normOfficialTime) {
-            return true;
+        let existingPlan = firstPassMatches[idx] || undefined;
+        if (!existingPlan) {
+          const normBlockCat = normalizeKeyComponent(block.activityId);
+          const fallbackMatch = activeDayPlans.find(
+            (p) =>
+              !usedExistingPlanIds.has(p.id) &&
+              normalizeKeyComponent(p.category) === normBlockCat &&
+              hasPlanPedagogicalContent(p)
+          );
+          if (fallbackMatch) {
+            usedExistingPlanIds.add(fallbackMatch.id);
+            existingPlan = fallbackMatch;
           }
-          return false;
-        });
+        }
 
         if (existingPlan) {
-          usedExistingPlanIds.add(existingPlan.id);
           return {
             ...existingPlan,
             dayOfWeek: selectedDay,
             timeSlot: existingPlan.timeSlot || officialTimeSlot,
+            title: existingPlan.title || (existingPlan as any).proposta || '',
+            development: existingPlan.development || (existingPlan as any).descricao || '',
+            objectives: existingPlan.objectives || (existingPlan as any).conteudo || '',
             status: existingPlan.status || 'pendente',
           };
         }
@@ -425,11 +467,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       .filter((p): p is SemanarioPlan => p !== null);
 
     // Planos adicionais cadastrados pelo usuário para o dia que não coincidem com os blocos oficiais
-    const extraPlans = activeTurmaPlans.filter(
-      (p) =>
-        getResolvedDay(p) === selectedDay &&
-        !usedExistingPlanIds.has(p.id) &&
-        !deletedActivityIds.has(p.id)
+    const extraPlans = activeDayPlans.filter(
+      (p) => !usedExistingPlanIds.has(p.id)
     );
 
     return [...officialMappedPlans, ...extraPlans];
@@ -596,11 +635,19 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
   };
 
   const handleStatusChange = (planId: string, newStatus: SemanarioStatus, reason?: string) => {
-    let target = plans.find((p) => p.id === planId);
-    if (!target) {
-      target = activeTurmaDaySchedulePlans.find((p) => p.id === planId);
+    const cardPlan = activeTurmaDaySchedulePlans.find((p) => p.id === planId);
+    let target =
+      plans.find((p) => p.id === planId) ||
+      activities.find((p) => p.id === planId);
+    if (!target && cardPlan) {
+      const cardKey = getSemanarioPlanUniqueKey(cardPlan);
+      target =
+        plans.find((p) => getSemanarioPlanUniqueKey(p) === cardKey) ||
+        cardPlan;
     }
     if (!target) return;
+
+    const hasContent = hasPlanPedagogicalContent(target);
     const updated: SemanarioPlan = {
       ...target,
       status: newStatus,
@@ -609,6 +656,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       substitutionReason: newStatus === 'substituida' ? reason || target.substitutionReason : undefined,
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name,
+      // Garante que uma troca rápida de status sem texto carregado jamais apague descrições existentes na nuvem
+      ...(!hasContent ? ({ statusOnlyUpdate: true } as any) : {}),
     };
     onSavePlan(updated);
   };
@@ -618,7 +667,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     setIsModalOpen(true);
   };
 
-  // Batch AI Generator: Automatically fills official schedule slots with rich pedagogical proposals
+  // Batch AI Generator: Automatically fills unfilled official schedule slots without overwriting existing team descriptions
   const handleBatchGenerateAIWeek = (turmaOverride?: string) => {
     if (!isCoordenador(currentUser)) {
       alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
@@ -626,25 +675,20 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     }
 
     const targetTurma = turmaOverride || activeTurma || sortedTurmas[0] || '1º Ano Azul';
-    const confirmMsg = `Deseja gerar automaticamente sugestões pedagógicas com IA para a grade horária oficial da turma "${targetTurma}" na ${currentWeek.label}?`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setIsGeneratingBatchAI(true);
+    const filledKeys = new Set(
+      weekPlans.filter(isPlanContentFilled).map((p) => getSemanarioPlanUniqueKey(p))
+    );
 
     const weekDays = getWeekDays(currentWeek.startDate);
-    const newBatchPlans: SemanarioPlan[] = [];
+    const pendingSlots: SemanarioPlan[] = [];
 
     DAYS_OF_WEEK_CONFIG.forEach((day, dayIndex) => {
       const dayDate = weekDays[dayIndex]?.dateStr || currentWeek.startDate;
       const scheduledBlocks = getScheduleBlocksForTurma(targetTurma, day.id, schedules);
 
       scheduledBlocks.forEach((block) => {
-        const prop = generateCuratedProposal(targetTurma, block.activityId);
-        const safeTurmaId = targetTurma.replace(/\s+/g, '_').toLowerCase();
-        const safeCatId = (block.activityId || '').replace(/\s+/g, '_').toLowerCase();
-        const safeTime = (block.startTime || '').replace(':', '');
-        newBatchPlans.push({
-          id: `plan_sched_${safeTurmaId}_${day.id}_${safeCatId}_${safeTime}_w${currentWeek.weekNumber}_${currentWeek.year}`,
+        const candidate: SemanarioPlan = {
+          id: `plan_sched_${targetTurma.replace(/\s+/g, '_').toLowerCase()}_${day.id}_${(block.activityId || '').replace(/\s+/g, '_').toLowerCase()}_${(block.startTime || '').replace(':', '')}_w${currentWeek.weekNumber}_${currentWeek.year}`,
           turma: targetTurma,
           weekNumber: currentWeek.weekNumber,
           year: currentWeek.year,
@@ -652,25 +696,50 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           dayOfWeek: day.id,
           timeSlot: `${block.startTime} - ${block.endTime}`,
           category: block.activityId,
-          title: prop.title,
-          objectives: prop.objectives,
-          development: prop.development,
-          materials: prop.materials,
+          title: '',
+          development: '',
           teacherName: currentUser?.name || 'Monitora / ADI do Integral',
           status: 'pendente',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        };
+        if (!filledKeys.has(getSemanarioPlanUniqueKey(candidate))) {
+          const prop = generateCuratedProposal(targetTurma, block.activityId);
+          pendingSlots.push({
+            ...candidate,
+            title: prop.title,
+            objectives: prop.objectives,
+            development: prop.development,
+            materials: prop.materials,
+            ...({
+              descricao: prop.development,
+              proposta: prop.title,
+              conteudo: prop.objectives,
+              isSavedByUser: true,
+              hasSavedContent: true,
+              isPlaceholder: false,
+            } as any),
+          });
+        }
       });
     });
 
-    onBatchSavePlans(newBatchPlans);
+    if (pendingSlots.length === 0) {
+      alert(`Todas as atividades da turma "${targetTurma}" na ${currentWeek.label} já possuem propostas preenchidas e preservadas.`);
+      return;
+    }
+
+    const confirmMsg = `Deseja preencher automaticamente os ${pendingSlots.length} horários em aberto da turma "${targetTurma}" na ${currentWeek.label}? As propostas já preenchidas serão preservadas.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsGeneratingBatchAI(true);
+    onBatchSavePlans(pendingSlots);
     setTimeout(() => {
       setIsGeneratingBatchAI(false);
     }, 500);
   };
 
-  // Handler to populate all official turmas com IA real (Gemini 2.5) e concorrência controlada
+  // Handler to populate unfilled slots across official turmas com IA real (Gemini 2.5) preservando atividades já preenchidas
   const handlePopulateAllTurmasWeek = async () => {
     if (!isCoordenador(currentUser)) {
       alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
@@ -679,11 +748,25 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
 
     if (isGeneratingBatchAI) return;
 
-    const totalEstimatedCalls = sortedTurmas.length * 15;
+    const filledKeys = new Set(
+      weekPlans.filter(isPlanContentFilled).map((p) => getSemanarioPlanUniqueKey(p))
+    );
+    const allTemplates = buildPlanTemplatesForTurmas(sortedTurmas, currentWeek, schedules, activitiesList);
+    const pendingTemplates = allTemplates.filter(
+      (tpl) => !filledKeys.has(getSemanarioPlanUniqueKey(tpl))
+    );
+
+    if (pendingTemplates.length === 0) {
+      alert(`Todas as ${sortedTurmas.length} turmas na ${currentWeek.label} já estão com todas as atividades preenchidas e preservadas.`);
+      return;
+    }
+
+    const skippedCount = allTemplates.length - pendingTemplates.length;
     const confirmMsg =
       `ATENÇÃO - GERAÇÃO EM LOTE COM IA (GEMINI)\n\n` +
-      `Isso vai gerar até ${totalEstimatedCalls} propostas pedagógicas (para todas as ${sortedTurmas.length} turmas na ${currentWeek.label}).\n\n` +
-      `• Se a sua cota diária/por minuto de IA da chave configurada estiver esgotada (ou for do plano gratuito sem Cloud Billing), o sistema aplicará automaticamente o modelo pedagógico padrão curado para garantir que nenhuma turma fique em branco.\n` +
+      `Isso vai gerar ${pendingTemplates.length} propostas pedagógicas pendentes (para as turmas na ${currentWeek.label})` +
+      (skippedCount > 0 ? `, preservando intactas as ${skippedCount} atividades já preenchidas.` : '.') +
+      `\n\n• Se a cota de IA estiver esgotada, o sistema aplicará o modelo pedagógico padrão curado.\n` +
       `• Você poderá acompanhar o progresso em tempo real no painel.\n\n` +
       `Deseja iniciar o processo agora?`;
 
@@ -705,6 +788,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         activitiesList,
         {
           concurrency: 4,
+          plansToProcess: pendingTemplates,
           abortSignal: abortController.signal,
           currentUser,
           onProgress: (prog) => {
@@ -716,7 +800,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
       setLastGeneratedBatchPlans(result.plans);
       setLastFailedBatchPlans(result.failedPlans);
 
-      // Salva os planos no Firestore / estado principal
+      // Salva os planos no Firestore / estado principal sem sobrescrever o que já estava preenchido
       onBatchSavePlans(result.plans);
 
       if (result.wasAborted) {
@@ -725,11 +809,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         );
       } else if (result.failCount === 0) {
         setAiSummaryMessage(
-          `Parabéns! Todos os ${result.total} planos foram gerados com sucesso pelo Gemini, adaptados à faixa etária de cada turma.`
+          `Parabéns! Todos os ${result.total} planos em aberto foram gerados com sucesso pelo Gemini, preservando os lançamentos anteriores.`
         );
       } else {
         setAiSummaryMessage(
-          `Processo concluído: ${result.successCount} planos gerados com Gemini e ${result.failCount} preenchidos com o modelo curado de salvaguarda. Você pode clicar em "Tentar Novamente" para reprocessar apenas os que falharam.`
+          `Processo concluído: ${result.successCount} planos gerados com Gemini e ${result.failCount} preenchidos com o modelo curado de salvaguarda.`
         );
       }
     } catch (err: any) {
@@ -741,7 +825,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     }
   };
 
-  // Handler to populate a single turma com IA real (Gemini)
+  // Handler to populate unfilled slots of a single turma com IA real (Gemini) preservando atividades já preenchidas
   const handlePopulateSingleTurmaWeek = async (turmaName: string) => {
     if (!isCoordenador(currentUser)) {
       alert('Acesso restrito: Apenas a Coordenação pode gerar propostas com inteligência artificial.');
@@ -751,7 +835,20 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     const target = turmaName || activeTurma || sortedTurmas[0];
     if (isGeneratingBatchAI || !target) return;
 
-    const confirmMsg = `Deseja gerar as propostas pedagógicas com IA (Gemini) para a turma "${target}" na ${currentWeek.label}?`;
+    const filledKeys = new Set(
+      weekPlans.filter(isPlanContentFilled).map((p) => getSemanarioPlanUniqueKey(p))
+    );
+    const turmaTemplates = buildPlanTemplatesForTurmas([target], currentWeek, schedules, activitiesList);
+    const pendingTemplates = turmaTemplates.filter(
+      (tpl) => !filledKeys.has(getSemanarioPlanUniqueKey(tpl))
+    );
+
+    if (pendingTemplates.length === 0) {
+      alert(`Todas as atividades da turma "${target}" na ${currentWeek.label} já possuem conteúdo preenchido e preservado.`);
+      return;
+    }
+
+    const confirmMsg = `Deseja preencher os ${pendingTemplates.length} horários em aberto da turma "${target}" com IA (Gemini) na ${currentWeek.label}? As descrições já registradas serão mantidas.`;
     if (!window.confirm(confirmMsg)) return;
 
     const abortController = new AbortController();
@@ -770,6 +867,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         activitiesList,
         {
           concurrency: 3,
+          plansToProcess: pendingTemplates,
           abortSignal: abortController.signal,
           currentUser,
           onProgress: (prog) => {
@@ -786,7 +884,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
         setAiSummaryMessage(`Geração interrompida. Foram salvos ${result.plans.length} planos.`);
       } else if (result.failCount === 0) {
         setAiSummaryMessage(
-          `Sucesso! Todos os ${result.total} planos da turma "${target}" foram gerados com IA oficial.`
+          `Sucesso! Todos os ${result.total} planos em aberto da turma "${target}" foram gerados com IA oficial.`
         );
       } else {
         setAiSummaryMessage(
@@ -868,7 +966,7 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
     setPdfFilterDay(targetDay);
 
     const plansToExport = targetTurma && targetTurma !== 'all'
-      ? weekPlans.filter((p) => p.turma === targetTurma)
+      ? weekPlans.filter((p) => normalizeKeyComponent(p.turma) === normalizeKeyComponent(targetTurma))
       : weekPlans;
 
     const result = generateSemanarioPDFReport(
@@ -1262,7 +1360,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           {/* Grid of Class Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 print:hidden no-print">
             {displayedTurmas.map((t, tIdx) => {
-              const turmaPlans = weekPlans.filter((p) => p.turma === t);
+              const normT = normalizeKeyComponent(t);
+              const turmaPlans = weekPlans.filter((p) => normalizeKeyComponent(p.turma) === normT);
               // Atividades que possuem texto/conteúdo pedagógico salvo (descricao, conteudo ou proposta preenchidos)
               const filledTurmaPlans = turmaPlans.filter(isPlanContentFilled);
               const allowedCategories = getCategoriesForTurma(t, schedules, activitiesList);
@@ -1445,7 +1544,8 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
           {/* Relatório Consolidado de Impressão Geral por Turma (Visível apenas na impressão quando visão geral) */}
           <div className="print-only hidden print:block space-y-8">
             {sortedTurmas.map((turma, turmaIndex) => {
-              const turmaPlans = weekPlans.filter((p) => p.turma === turma);
+              const normTurma = normalizeKeyComponent(turma);
+              const turmaPlans = weekPlans.filter((p) => normalizeKeyComponent(p.turma) === normTurma);
               return (
                 <div
                   key={`${turma}-${turmaIndex}`}
@@ -1476,7 +1576,11 @@ export const SemanarioMain: React.FC<SemanarioMainProps> = ({
                   ) : (
                     <div className="space-y-4">
                       {DAYS_OF_WEEK_CONFIG.map((d) => {
-                        const dayPlans = turmaPlans.filter((p) => p.dayOfWeek === d.id);
+                        const dayPlans = turmaPlans.filter(
+                          (p) =>
+                            (normalizeDayOfWeek(p.dayOfWeek) ||
+                              (p.date ? getDayOfWeekFromDate(p.date) : null)) === d.id
+                        );
                         if (dayPlans.length === 0) return null;
                         return (
                           <div key={d.id} className="border border-slate-300 rounded-lg overflow-hidden">
