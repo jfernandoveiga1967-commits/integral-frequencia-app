@@ -10,10 +10,9 @@ import { isStudentInReforcoVigency } from '../utils/semanarioUtils';
 import { generateTurmaPDFReport, generateAttendanceDailyPDFReport } from '../utils/pdfGenerator';
 import { PdfViewerModal } from './PdfViewerModal';
 import { safeWindowPrint, triggerPrint, directPrint } from '../utils/printUtils';
-import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, ShieldCheck, GraduationCap, Clock, Calendar, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked, ClipboardCheck } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Shirt, Save, Check, RotateCcw, AlertTriangle, FileText, Download, UserCheck, GraduationCap, Clock, Calendar, CalendarOff, Palmtree, Coffee, Printer, Loader2, Users, BookMarked, ClipboardCheck } from 'lucide-react';
 import { getRoleBadgeStyle, canMarkAttendance } from '../utils/authUtils';
 import { sortTurmasPedagogical } from '../utils/turmaUtils';
-import { useConfirmedAction } from '../hooks/useConfirmedAction';
 import { SaveStatusBanner } from './SaveStatusBanner';
 import { playDepartureAlertSound } from '../utils/notificationUtils';
 import { StudentAttendanceItem } from './StudentAttendanceItem';
@@ -36,9 +35,6 @@ interface AttendanceSheetProps {
   onSelectTurma?: (turma: TurmaType | 'TODAS') => void;
   onSelectDate?: (date: string) => void;
   onSaveRecord: (record: Omit<AttendanceRecord, 'id' | 'createdAt'>) => Promise<void> | void;
-  onBatchMarkPresent: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
-  onClearRecords: (studentIds: string[], activity: ActivityType | 'TODAS', date: string) => Promise<void> | void;
-  onFinalizeCall?: (date: string) => Promise<void> | void;
 }
 
 export function normalizeActivityKey(act: string): string {
@@ -65,9 +61,6 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
   onSelectTurma,
   onSelectDate,
   onSaveRecord,
-  onBatchMarkPresent,
-  onClearRecords,
-  onFinalizeCall,
 }) => {
   const roleStyle = currentUser ? getRoleBadgeStyle(currentUser.role) : null;
   const userCanMarkAttendance = canMarkAttendance(currentUser);
@@ -435,9 +428,6 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       };
     }
   }, [modalState.isOpen, pdfPreviewState.isOpen]);
-
-  // Confirmed action for batch operations (Marcar Todos Presentes / Limpar Marcações)
-  const batchAction = useConfirmedAction();
 
   // Non-blocking batch sync tracker for individual rapid clicks
   const [individualSyncState, setIndividualSyncState] = useState<{
@@ -905,114 +895,6 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
       );
     }
     setModalState((prev) => ({ ...prev, isOpen: false }));
-  };
-
-  const areAllMarkedPresent = useMemo(() => {
-    const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
-    if (target.length === 0) return false;
-    return target.every((student) => {
-      const rec = getRecordForActivity(student.id, selectedActivity, selectedDate);
-      return rec?.status === 'presente';
-    });
-  }, [filterStatus, displayedStudents, filteredStudents, selectedActivity, selectedDate, getRecordForActivity]);
-
-  const handleBatchMarkAllPresent = async () => {
-    const target = filterStatus !== 'TODOS' ? displayedStudents : filteredStudents;
-    const studentIds = target.map((s) => s.id);
-    if (studentIds.length === 0) return;
-
-    if (areAllMarkedPresent) {
-      await batchAction.execute(
-        async () => {
-          await onClearRecords(studentIds, selectedActivity, selectedDate);
-        },
-        {
-          pendingMessage: `Desmarcando presença de ${studentIds.length} alunos no Firestore...`,
-          successMessage: `Presenças desmarcadas e sincronizadas no Firestore com sucesso!`,
-          errorMessage: 'Falha ao desmarcar chamada no servidor.',
-        }
-      );
-    } else {
-      await batchAction.execute(
-        async () => {
-          await onBatchMarkPresent(studentIds, selectedActivity, selectedDate);
-          setLastSavedTime(getCurrentHHMM());
-        },
-        {
-          pendingMessage: `Gravando chamada de ${studentIds.length} alunos no Firestore...`,
-          successMessage: `Chamada de ${studentIds.length} alunos gravada e confirmada no Firestore!`,
-          errorMessage: 'Falha ao gravar chamada em lote no servidor.',
-        }
-      );
-    }
-  };
-
-  const handleClearSelected = async () => {
-    // Identifica todos os alunos da turma selecionada respeitando o ano letivo ativo
-    const targetStudents =
-      searchTerm.trim() !== ''
-        ? filteredStudents
-        : selectedTurma === 'TODAS'
-        ? filteredStudents
-        : filteredStudents.filter((s) => s.turma === selectedTurma);
-
-    const studentIds = Array.from(new Set(targetStudents.map((s) => s.id)));
-    if (studentIds.length === 0) return;
-
-    const turmaLabel =
-      selectedTurma === 'TODAS'
-        ? 'todas as turmas'
-        : `turma "${selectedTurma}"`;
-
-    const confirmMsg = `Tem certeza que deseja limpar todas as marcações de frequência (presença, faltas, saídas antecipadas e sem equipamento) da ${turmaLabel} no dia ${formatDateBR(
-      selectedDate
-    )}?\n\nTodas as marcações da turma serão totalmente removidas e o status de cada aluno retornará para "Pendente".`;
-
-    if (window.confirm(confirmMsg)) {
-      await batchAction.execute(
-        async () => {
-          // Limpa integralmente no estado e no Firestore todas as modalidades ('TODAS')
-          await onClearRecords(studentIds, 'TODAS', selectedDate);
-        },
-        {
-          pendingMessage: `Removendo todas as marcações da ${turmaLabel} no Firestore...`,
-          successMessage: `Todas as marcações removidas com sucesso! Alunos retornados para Pendente.`,
-          errorMessage: 'Falha ao remover marcações no servidor.',
-          onSuccess: () => {
-            // Dispara evento global para recálculo instantâneo dos contadores no cabeçalho
-            window.dispatchEvent(
-              new CustomEvent('app_attendance_cleared', {
-                detail: { studentIds, selectedDate, selectedTurma },
-              })
-            );
-          },
-        }
-      );
-    }
-  };
-
-  const [isFinalizingCall, setIsFinalizingCall] = useState(false);
-
-  const handleFinalizeCurrentCall = async () => {
-    if (!onFinalizeCall) return;
-    if (stats.pendente > 0) {
-      const confirmed = window.confirm(
-        `Existem ${stats.pendente} alunos com chamada pendente nesta data. Deseja encerrar a chamada agora, convertendo as pendências em Falta e consolidando os relatórios no Firestore?`
-      );
-      if (!confirmed) return;
-    }
-    setIsFinalizingCall(true);
-    await batchAction.execute(
-      async () => {
-        await onFinalizeCall(selectedDate);
-      },
-      {
-        pendingMessage: 'Encerrando e consolidando chamada no Firestore...',
-        successMessage: 'Chamada finalizada e relatório consolidado com sucesso no Firestore!',
-        errorMessage: 'Falha ao consolidar chamada no Firestore.',
-      }
-    );
-    setIsFinalizingCall(false);
   };
 
   // Exporta relatório geral diário com TODOS os alunos cadastrados (botão do painel superior)
@@ -1636,93 +1518,12 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
               </button>
             )}
 
-            <button
-              onClick={handleBatchMarkAllPresent}
-              disabled={filteredStudents.length === 0 || batchAction.isPending}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs ${
-                areAllMarkedPresent
-                  ? 'bg-amber-600 hover:bg-amber-700'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={
-                areAllMarkedPresent
-                  ? 'Todos estão marcados como presentes. Clique para desmarcar todos.'
-                  : 'Marcar todos os alunos visíveis como presentes'
-              }
-            >
-              {batchAction.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Sincronizando...</span>
-                </>
-              ) : areAllMarkedPresent ? (
-                <>
-                  <XCircle className="w-4 h-4" />
-                  <span>Desmarcar Todos</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Marcar Todos Presentes</span>
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={handleClearSelected}
-              disabled={filteredStudents.length === 0 || batchAction.isPending}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center space-x-1 shadow-2xs hover:shadow-xs active:scale-95"
-              title="Limpar todas as marcações da turma e retornar alunos para Pendente"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              <span>Limpar</span>
-            </button>
-
-            {onFinalizeCall && userCanMarkAttendance && (
-              <button
-                type="button"
-                onClick={handleFinalizeCurrentCall}
-                disabled={filteredStudents.length === 0 || batchAction.isPending || isFinalizingCall}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs ${
-                  stats.pendente === 0 && stats.total > 0
-                    ? 'bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-600'
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-                title="Finalizar e consolidar chamada no Firestore e Relatórios Financeiros"
-              >
-                {isFinalizingCall ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Consolidando...</span>
-                  </>
-                ) : stats.pendente === 0 && stats.total > 0 ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
-                    <span>Chamada Consolidada</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Finalizar Chamada</span>
-                  </>
-                )}
-              </button>
-            )}
           </div>
         </div>
       </div>
 
       {/* Real-time Confirmation Feedback & Batch Sync Indicator */}
       <div className="space-y-2">
-        {/* Batch Action Banner (Marcar Todos / Limpar) */}
-        <SaveStatusBanner
-          isPending={batchAction.isPending}
-          pendingText={batchAction.pendingMessage}
-          successNotice={batchAction.successNotice}
-          error={batchAction.error}
-          onClearError={batchAction.clearError}
-        />
-
         {/* Individual Save Error Banner */}
         {individualSyncState.error && (
           <SaveStatusBanner

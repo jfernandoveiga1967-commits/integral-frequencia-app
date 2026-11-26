@@ -2724,9 +2724,6 @@ export default function App() {
             onSelectDate={handleSelectDate}
             isLoadingStudents={!isInitialStudentsLoaded && students.length === 0}
             onSaveRecord={handleSaveRecord}
-            onBatchMarkPresent={handleBatchMarkPresent}
-            onClearRecords={handleClearRecords}
-            onFinalizeCall={handleFinalizeAttendanceCall}
           />
         )}
 
